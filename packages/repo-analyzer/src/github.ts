@@ -22,7 +22,7 @@ export async function buildRepoSnapshotFromGitHub(
 ): Promise<RepoSnapshot> {
   const treePaths = await client.getTreePaths(owner, repo, ref);
   const interesting = treePaths.filter((p) =>
-    /^(package\.json|vite\.config\.|wrangler\.|next\.config\.|src\/app\/routes\.|app\/.*page\.|public\/(robots\.txt|sitemap)|scripts\/generate-sitemap|worker\/|src\/app\/seo\/)/.test(
+    /^(package\.json|vite\.config\.|astro\.config\.|nuxt\.config\.|wrangler\.|next\.config\.|vercel\.json|netlify\.toml|src\/app\/routes\.|(src\/)?app\/.*page\.|public\/(robots\.txt|sitemap|_redirects)|scripts\/generate-sitemap|worker\/|src\/app\/seo\/)/.test(
       p,
     ),
   );

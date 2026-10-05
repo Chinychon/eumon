@@ -1,5 +1,7 @@
 import type {
   CompetitorProfile,
+  CrawlCoverage,
+  CrawlPageResult,
   Finding,
   FrameworkFingerprint,
   GrowthPlan,
@@ -8,24 +10,10 @@ import type {
   SearchMetricRow,
   SiteRecord,
 } from "@organic-growth/core";
+import { chunks, nowIso, runStatements, type D1Like } from "./d1.js";
 
-export interface D1Like {
-  prepare(query: string): {
-    bind(...args: unknown[]): {
-      run(): Promise<unknown>;
-      first<T = unknown>(): Promise<T | null>;
-      all<T = unknown>(): Promise<{ results: T[] }>;
-    };
-    run(): Promise<unknown>;
-    first<T = unknown>(): Promise<T | null>;
-    all<T = unknown>(): Promise<{ results: T[] }>;
-  };
-  batch?(statements: unknown[]): Promise<unknown>;
-}
-
-export function nowIso(): string {
-  return new Date().toISOString();
-}
+export * from "./d1.js";
+export * from "./page-engine.js";
 
 export async function upsertSite(
   db: D1Like,
@@ -79,6 +67,36 @@ export async function getSite(
 export async function updateSiteGscProperty(db: D1Like, siteId: string, property: string): Promise<void> {
   await db.prepare("UPDATE sites SET gsc_property = ?, updated_at = ? WHERE id = ?")
     .bind(property, nowIso(), siteId).run();
+}
+
+export async function updateSiteFingerprint(db: D1Like, siteId: string, fingerprint: FrameworkFingerprint): Promise<void> {
+  await db.prepare("UPDATE sites SET fingerprint_json = ?, updated_at = ? WHERE id = ?")
+    .bind(JSON.stringify(fingerprint), nowIso(), siteId).run();
+}
+
+export async function deleteSite(db: D1Like, siteId: string): Promise<void> {
+  // Child tables without ON DELETE CASCADE are cleared explicitly first.
+  const tables = [
+    "page_metrics_daily", "page_sessions", "page_search_metrics", "cta_variants", "page_settings", "site_scopes",
+    "generated_pages", "page_templates", "data_records", "data_sources", "jobs", "datasets",
+    "findings", "pages", "crawl_snapshots", "search_metrics", "competitors", "opportunities", "growth_plans",
+    "changes", "conversion_events", "oauth_credentials", "site_competitor_domains", "analyses",
+  ];
+  await runStatements(db, [
+    db.prepare("DELETE FROM page_revisions WHERE page_id IN (SELECT id FROM generated_pages WHERE site_id = ?)").bind(siteId),
+    db.prepare("DELETE FROM scrape_queue WHERE job_id IN (SELECT id FROM jobs WHERE site_id = ?)").bind(siteId),
+    ...tables.map((table) => db.prepare(`DELETE FROM ${table} WHERE site_id = ?`).bind(siteId)),
+    db.prepare("DELETE FROM sites WHERE id = ?").bind(siteId),
+  ]);
+}
+
+/** Aggregated Search Console queries from the last synced snapshot, for scoping. */
+export async function listTopQueries(db: D1Like, siteId: string, limit = 50): Promise<Array<{ query: string; impressions: number; position: number }>> {
+  const { results } = await db.prepare(
+    `SELECT query, SUM(impressions) AS impressions, SUM(position * impressions) / MAX(SUM(impressions), 1) AS position
+     FROM search_metrics WHERE site_id = ? AND analysis_id IS NULL GROUP BY query ORDER BY impressions DESC LIMIT ?`,
+  ).bind(siteId, limit).all<{ query: string; impressions: number; position: number }>();
+  return results.map((row) => ({ query: row.query, impressions: Number(row.impressions), position: Number(row.position) }));
 }
 
 export async function listSites(db: D1Like): Promise<SiteRecord[]> {
@@ -246,6 +264,152 @@ export async function updateAnalysisStatus(
       id,
     )
     .run();
+}
+
+export async function enqueueAnalysisCrawlUrls(
+  db: D1Like,
+  input: { analysisId: string; siteId: string; urls: string[] },
+): Promise<number> {
+  const urls = [...new Set(input.urls)];
+  const createdAt = nowIso();
+  for (const group of chunks(urls, 100)) {
+    const statements = group.map((url) => db.prepare(
+      `INSERT OR IGNORE INTO pages (
+        id, site_id, analysis_id, url, status, is_empty_shell, result_json,
+        crawl_state, created_at
+      ) VALUES (?, ?, ?, ?, NULL, 0, '{}', 'pending', ?)`,
+    ).bind(`page_${crypto.randomUUID()}`, input.siteId, input.analysisId, url, createdAt));
+    await runStatements(db, statements);
+  }
+  return urls.length;
+}
+
+export async function listPendingCrawlUrls(
+  db: D1Like,
+  analysisId: string,
+  limit: number,
+): Promise<string[]> {
+  const { results } = await db.prepare(
+    `SELECT url FROM pages
+     WHERE analysis_id = ? AND crawl_state = 'pending'
+     ORDER BY url LIMIT ?`,
+  ).bind(analysisId, limit).all<{ url: string }>();
+  return results.map((row) => row.url);
+}
+
+export async function saveCrawlBatch(
+  db: D1Like,
+  input: {
+    analysisId: string;
+    outcomes: Array<{ url: string; page?: CrawlPageResult; error?: string }>;
+  },
+): Promise<void> {
+  const crawledAt = nowIso();
+  const statements = input.outcomes.map((outcome) => {
+    if (!outcome.page) {
+      return db.prepare(
+        `UPDATE pages SET crawl_state = 'failed', crawl_error = ?, crawled_at = ?, result_json = ?
+         WHERE analysis_id = ? AND url = ?`,
+      ).bind(
+        outcome.error ?? "The crawler could not fetch this URL.",
+        crawledAt,
+        JSON.stringify({ error: outcome.error ?? "The crawler could not fetch this URL." }),
+        input.analysisId,
+        outcome.url,
+      );
+    }
+    const page = outcome.page;
+    const result = {
+      finalUrl: page.finalUrl,
+      description: page.description,
+      canonical: page.canonical,
+      robots: page.robots,
+      hreflang: page.hreflang,
+      jsonLdCount: page.jsonLdCount,
+      contentLength: page.contentLength,
+      headingOutline: page.headingOutline,
+      internalLinkCount: page.internalLinkCount,
+      rawTextLength: page.rawTextLength,
+      renderedTextLength: page.renderedTextLength,
+      renderDelta: page.renderDelta,
+      fetchMode: page.fetchMode,
+    };
+    return db.prepare(
+      `UPDATE pages SET status = ?, title = ?, is_empty_shell = ?, result_json = ?,
+       crawl_state = 'complete', crawl_error = NULL, crawled_at = ?
+       WHERE analysis_id = ? AND url = ?`,
+    ).bind(
+      page.status,
+      page.title ?? null,
+      page.isEmptyShell ? 1 : 0,
+      JSON.stringify(result),
+      crawledAt,
+      input.analysisId,
+      outcome.url,
+    );
+  });
+  for (const group of chunks(statements, 100)) await runStatements(db, group);
+}
+
+export async function getCrawlCoverage(
+  db: D1Like,
+  analysisId: string,
+): Promise<CrawlCoverage> {
+  const row = await db.prepare(
+    `SELECT
+      COUNT(*) AS total_urls,
+      SUM(CASE WHEN crawl_state = 'complete' THEN 1 ELSE 0 END) AS completed_urls,
+      SUM(CASE WHEN crawl_state = 'failed' THEN 1 ELSE 0 END) AS failed_urls,
+      SUM(CASE WHEN crawl_state = 'pending' THEN 1 ELSE 0 END) AS pending_urls,
+      SUM(CASE WHEN crawl_state = 'complete' AND is_empty_shell = 1 THEN 1 ELSE 0 END) AS empty_shell_urls,
+      SUM(CASE WHEN crawl_state = 'complete' AND status >= 400 THEN 1 ELSE 0 END) AS http_error_urls,
+      SUM(CASE WHEN crawl_state = 'complete' AND (title IS NULL OR LENGTH(TRIM(title)) < 15) THEN 1 ELSE 0 END) AS missing_title_urls
+     FROM pages WHERE analysis_id = ?`,
+  ).bind(analysisId).first<Record<string, number | null>>();
+  return {
+    totalUrls: Number(row?.total_urls ?? 0),
+    completedUrls: Number(row?.completed_urls ?? 0),
+    failedUrls: Number(row?.failed_urls ?? 0),
+    pendingUrls: Number(row?.pending_urls ?? 0),
+    emptyShellUrls: Number(row?.empty_shell_urls ?? 0),
+    httpErrorUrls: Number(row?.http_error_urls ?? 0),
+    missingTitleUrls: Number(row?.missing_title_urls ?? 0),
+  };
+}
+
+export async function listCrawlPageResults(
+  db: D1Like,
+  analysisId: string,
+  limit = 100,
+): Promise<CrawlPageResult[]> {
+  const { results } = await db.prepare(
+    `SELECT url, status, title, is_empty_shell, result_json
+     FROM pages WHERE analysis_id = ? AND crawl_state = 'complete'
+     ORDER BY is_empty_shell DESC, status DESC, url LIMIT ?`,
+  ).bind(analysisId, limit).all<Record<string, unknown>>();
+  return results.map((row) => {
+    let details: Record<string, unknown> = {};
+    try { details = JSON.parse(String(row.result_json)) as Record<string, unknown>; } catch { /* malformed rows remain inspectable */ }
+    return {
+      url: String(row.url),
+      status: Number(row.status ?? 0),
+      finalUrl: typeof details.finalUrl === "string" ? details.finalUrl : undefined,
+      title: row.title ? String(row.title) : undefined,
+      description: typeof details.description === "string" ? details.description : undefined,
+      canonical: typeof details.canonical === "string" ? details.canonical : undefined,
+      robots: typeof details.robots === "string" ? details.robots : undefined,
+      hreflang: Array.isArray(details.hreflang) ? details.hreflang as CrawlPageResult["hreflang"] : [],
+      jsonLdCount: Number(details.jsonLdCount ?? 0),
+      contentLength: Number(details.contentLength ?? 0),
+      isEmptyShell: Number(row.is_empty_shell ?? 0) === 1,
+      headingOutline: Array.isArray(details.headingOutline) ? details.headingOutline.filter((item): item is string => typeof item === "string") : [],
+      internalLinkCount: Number(details.internalLinkCount ?? 0),
+      rawTextLength: Number(details.rawTextLength ?? 0),
+      renderedTextLength: Number(details.renderedTextLength ?? 0),
+      renderDelta: Number(details.renderDelta ?? 0),
+      fetchMode: "googlebot",
+    };
+  });
 }
 
 export async function insertFinding(db: D1Like, finding: Finding): Promise<void> {
@@ -596,17 +760,15 @@ export async function insertSearchMetrics(
   analysisId: string | null,
   rows: SearchMetricRow[],
 ): Promise<void> {
-  for (const row of rows) {
-    const id = `sm_${crypto.randomUUID()}`;
-    await db
-      .prepare(
+  const createdAt = nowIso();
+  for (const group of chunks(rows, 100)) {
+    const statements = group.map((row) => db.prepare(
         `INSERT INTO search_metrics (
           id, site_id, analysis_id, query, page, country, device,
-          impressions, clicks, ctr, position, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .bind(
-        id,
+          impressions, clicks, ctr, position, period_start, period_end, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).bind(
+        `sm_${crypto.randomUUID()}`,
         siteId,
         analysisId,
         row.query,
@@ -617,10 +779,23 @@ export async function insertSearchMetrics(
         row.clicks,
         row.ctr,
         row.position,
-        new Date().toISOString(),
-      )
-      .run();
+        row.periodStart ?? null,
+        row.periodEnd ?? null,
+        createdAt,
+      ));
+    await runStatements(db, statements);
   }
+}
+
+/** Replaces the latest synced Search Console snapshot for a site. */
+export async function replaceCurrentSearchMetrics(
+  db: D1Like,
+  siteId: string,
+  rows: SearchMetricRow[],
+): Promise<void> {
+  await db.prepare("DELETE FROM search_metrics WHERE site_id = ? AND analysis_id IS NULL")
+    .bind(siteId).run();
+  await insertSearchMetrics(db, siteId, null, rows);
 }
 
 export async function listSearchMetrics(
@@ -629,7 +804,7 @@ export async function listSearchMetrics(
 ): Promise<SearchMetricRow[]> {
   const { results } = await db
     .prepare(
-      `SELECT query, page, country, device, impressions, clicks, ctr, position
+      `SELECT query, page, country, device, impressions, clicks, ctr, position, period_start AS periodStart, period_end AS periodEnd
        FROM search_metrics WHERE site_id = ?
        ORDER BY clicks DESC LIMIT 500`,
     )
@@ -693,4 +868,3 @@ export async function countConversionEvents(
   return Object.fromEntries(results.map((r) => [r.event, Number(r.count)]));
 }
 
-export * from "./memory-store.js";

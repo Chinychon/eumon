@@ -34,7 +34,7 @@ function pkcs1ToPkcs8(pkcs1: Uint8Array): Uint8Array {
 }
 
 function pemBytes(pem: string): Uint8Array {
-  const content = pem.replace(/-----BEGIN [^-]+-----|-----END [^-]+-----|\s/g, "");
+  const content = pem.replace(/\\n/g, "\n").replace(/-----BEGIN [^-]+-----|-----END [^-]+-----|\s/g, "");
   const binary = atob(content);
   return Uint8Array.from(binary, (char) => char.charCodeAt(0));
 }

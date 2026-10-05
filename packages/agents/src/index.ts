@@ -23,6 +23,8 @@ export interface AnalysisBundle {
   findings: Finding[];
   searchMetrics: SearchMetricRow[];
   competitors: CompetitorProfile[];
+  /** Brand words (site and repo name) used to separate branded from discovery demand. */
+  brandTerms?: string[];
 }
 
 export function discoverCompetitors(input: {
@@ -43,67 +45,58 @@ export function discoverCompetitors(input: {
   }));
 }
 
-function shareForCountry(rows: SearchMetricRow[], country: string): number {
-  const total = rows.reduce((s, r) => s + r.impressions, 0) || 1;
-  const countryImpr = rows
-    .filter((r) => r.country.toLowerCase() === country.toLowerCase())
-    .reduce((s, r) => s + r.impressions, 0);
-  return countryImpr / total;
-}
+/** Query wording that usually signals purchase or booking intent, across common markets. */
+export const COMMERCIAL_QUERY_PATTERN =
+  /\b(cost|costs|price|prices|pricing|cheap|cheapest|affordable|quote|book|booking|appointment|buy|hire|near me|best|top|review|reviews|vs|compare|comparison|service|services|clinic|package|biaya|harga|terbaik|murah)\b/i;
 
-export function analyzeSearchTraffic(rows: SearchMetricRow[]): {
+export function analyzeSearchTraffic(rows: SearchMetricRow[], brandTerms: string[] = []): {
   totalClicks: number;
   totalImpressions: number;
   countryShare: Record<string, number>;
-  brandedNameSkew: number;
+  brandedShare: number;
   commercialGapQueries: SearchMetricRow[];
   narrative: string;
 } {
   const totalClicks = rows.reduce((s, r) => s + r.clicks, 0);
-  const totalImpressions = rows.reduce((s, r) => s + r.impressions, 0) || 1;
+  const totalImpressions = rows.reduce((s, r) => s + r.impressions, 0);
   const countryShare: Record<string, number> = {};
   for (const r of rows) {
     countryShare[r.country] = (countryShare[r.country] ?? 0) + r.impressions;
   }
   for (const k of Object.keys(countryShare)) {
-    countryShare[k] = countryShare[k] / totalImpressions;
+    countryShare[k] = countryShare[k] / Math.max(totalImpressions, 1);
   }
 
-  const nameLike = rows.filter((r) =>
-    /dr\.|dokter|doctor|prof\./i.test(r.query) || /^[a-z]+\s+[a-z]+$/i.test(r.query),
-  );
-  const nameClicks = nameLike.reduce((s, r) => s + r.clicks, 0);
-  const brandedNameSkew = totalClicks ? nameClicks / totalClicks : 0;
+  const brands = brandTerms.map((term) => term.toLowerCase()).filter((term) => term.length >= 3);
+  const brandedClicks = rows
+    .filter((r) => brands.some((brand) => r.query.toLowerCase().includes(brand)))
+    .reduce((s, r) => s + r.clicks, 0);
+  const brandedShare = totalClicks ? brandedClicks / totalClicks : 0;
 
   const commercialGapQueries = rows
-    .filter(
-      (r) =>
-        /biaya|cost|harga|ivf|iui|fertility|terbaik|best|city|penang|jakarta|kl|kuala/i.test(
-          r.query,
-        ) && r.position > 10,
-    )
+    .filter((r) => COMMERCIAL_QUERY_PATTERN.test(r.query) && r.position > 10)
     .sort((a, b) => b.impressions - a.impressions)
     .slice(0, 25);
 
-  const idShare = countryShare.idn ?? countryShare.id ?? 0;
+  const [topCountry, topShare] = Object.entries(countryShare).sort((a, b) => b[1] - a[1])[0] ?? ["", 0];
   const narrative = [
-    `Organic search shows ~${totalClicks} clicks and ~${totalImpressions} impressions in the synced window.`,
-    brandedNameSkew > 0.6
-      ? `Roughly ${Math.round(brandedNameSkew * 100)}% of clicks look like doctor-name / branded navigational demand — low commercial intent.`
-      : `Click mix is more diversified than pure name search, but commercial capture should still be validated against conversions.`,
-    idShare < 0.1
-      ? `Target Indonesian market share of impressions is low (~${Math.round(idShare * 100)}%), so increasing indexed pages alone will not create ID lead volume.`
-      : `Indonesian impression share is ~${Math.round(idShare * 100)}%.`,
+    `Organic search shows ~${totalClicks.toLocaleString()} clicks and ~${totalImpressions.toLocaleString()} impressions in the synced window.`,
+    topCountry ? `${Math.round(topShare * 100)}% of impressions come from ${topCountry.toUpperCase()}; confirm that matches the market you sell to.` : "",
+    brands.length
+      ? brandedShare > 0.5
+        ? `About ${Math.round(brandedShare * 100)}% of clicks are branded searches, so non-brand discovery is still small.`
+        : `Branded searches account for about ${Math.round(brandedShare * 100)}% of clicks.`
+      : "",
     commercialGapQueries.length
-      ? `${commercialGapQueries.length} commercial/fertility/cost queries appear with weak average positions.`
-      : `Few clear commercial-gap queries in the current sample.`,
-  ].join(" ");
+      ? `${commercialGapQueries.length} commercial-intent queries rank beyond position 10 — demand exists that current pages are not capturing.`
+      : "Few commercial-intent queries appear beyond page one in the current sample.",
+  ].filter(Boolean).join(" ");
 
   return {
     totalClicks,
     totalImpressions,
     countryShare,
-    brandedNameSkew,
+    brandedShare,
     commercialGapQueries,
     narrative,
   };
@@ -142,7 +135,7 @@ export function buildOpportunities(bundle: AnalysisBundle): Opportunity[] {
     const impressions = rows.reduce((sum, row) => sum + row.impressions, 0);
     const clicks = rows.reduce((sum, row) => sum + row.clicks, 0);
     const position = rows.reduce((sum, row) => sum + row.position * row.impressions, 0) / Math.max(impressions, 1);
-    const commercial = /cost|price|pricing|cost|biaya|harga|book|booking|near me|best|terbaik|treatment|treatment|clinic|hospital/i.test(sample.query);
+    const commercial = COMMERCIAL_QUERY_PATTERN.test(sample.query);
     const effort = 2;
     const score = (impressions * (commercial ? 1.5 : 1) * Math.min(1, Math.max(0, 0.1 - clicks / Math.max(impressions, 1)))) / effort;
     return {
@@ -159,7 +152,7 @@ export function buildOpportunities(bundle: AnalysisBundle): Opportunity[] {
 }
 
 export function synthesizeGrowthPlan(bundle: AnalysisBundle): GrowthPlan {
-  const search = analyzeSearchTraffic(bundle.searchMetrics);
+  const search = analyzeSearchTraffic(bundle.searchMetrics, bundle.brandTerms);
   const opportunities = buildOpportunities(bundle);
   const topFindings = [...bundle.findings].sort(
     (a, b) => b.organicImpactScore - a.organicImpactScore,
@@ -177,21 +170,26 @@ export function synthesizeGrowthPlan(bundle: AnalysisBundle): GrowthPlan {
       : "No competitor domains or SERP data have been supplied.",
   ];
 
+  const stack = bundle.fingerprint && bundle.fingerprint.framework !== "unknown"
+    ? `runs ${bundle.fingerprint.framework}${bundle.fingerprint.deployment ? ` on ${bundle.fingerprint.deployment}` : ""}`
+    : "was analyzed from the outside (no repository connected)";
+  const sitemapTotal = bundle.sitemap?.totalUrls ?? 0;
   const situation = [
-    `Website at ${bundle.baseUrl} has ${bundle.fingerprint?.framework ?? "an undetected"} framework architecture`,
-    bundle.fingerprint?.deployment
-      ? `deployed on ${bundle.fingerprint.deployment}`
-      : "with a code-native deployment pipeline",
-    bundle.sitemap
-      ? `and a sitemap declaring ~${bundle.sitemap.totalUrls} URLs.`
-      : ".",
+    `Website at ${bundle.baseUrl} ${stack}${bundle.sitemap ? `, with a sitemap declaring ~${sitemapTotal.toLocaleString()} URLs` : ""}.`,
     bundle.searchMetrics.length ? search.narrative : "No first-party search performance data is connected yet.",
     `The crawl sampled ${bundle.pages?.length ?? 0} pages and found ${topFindings.length} technical issues.`,
   ].join(" ");
 
+  // Route families with many URLs are the raw material for landing pages.
+  const families = Object.entries(bundle.sitemap?.urlTypes ?? {})
+    .filter(([type]) => type !== "home" && type !== "page")
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3);
   const competitiveAdvantage = bundle.repo
     ? `The repository exposes ${bundle.repo.routes.length} detected routes and uses ${bundle.fingerprint?.framework ?? "an unknown framework"}; these code-level signals support targeted implementation recommendations.`
-    : "Connect a repository to identify reusable templates, routes, and content assets before proposing code changes.";
+    : families.length
+      ? `The site already publishes structured page families (${families.map(([type, count]) => `/${type}/: ${count.toLocaleString()} pages`).join(", ")}). Each family is a ready-made dataset for focused landing pages.`
+      : "The site's offering can be broken into specific products, services, or locations, each worth its own landing page — scope them in the Data step.";
 
   const highestImpactOpportunity =
     opportunities[0]?.title ??

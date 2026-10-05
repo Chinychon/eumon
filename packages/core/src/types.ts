@@ -1,3 +1,15 @@
+/** Values that survive JSON and Workflow step serialization unchanged. */
+export type JsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | undefined
+  | JsonValue[]
+  | { [key: string]: JsonValue };
+
+export type JsonObject = { [key: string]: JsonValue };
+
 export type Severity = "CRITICAL" | "HIGH" | "MEDIUM" | "LOW" | "INFORMATIONAL";
 
 export type FindingCategory =
@@ -48,7 +60,7 @@ export type ConversionEventName =
   | "lead_qualified"
   | "customer_created";
 
-export interface FrameworkFingerprint {
+export type FrameworkFingerprint = {
   framework: string;
   language: string;
   packageManager: string;
@@ -63,7 +75,7 @@ export interface FrameworkFingerprint {
   hasSitemap: boolean;
   hasRobots: boolean;
   hasStructuredData: boolean;
-  details: Record<string, unknown>;
+  details: JsonObject;
 }
 
 export interface SiteRecord {
@@ -88,14 +100,14 @@ export interface Finding {
   severity: Severity;
   title: string;
   summary: string;
-  evidence: Record<string, unknown>;
+  evidence: JsonObject;
   organicImpactScore: number;
   recommendation?: string;
   pagesAffected?: string[];
   createdAt: string;
 }
 
-export interface CrawlPageResult {
+export type CrawlPageResult = {
   url: string;
   status: number;
   finalUrl?: string;
@@ -117,7 +129,7 @@ export interface CrawlPageResult {
   fetchMode: "raw" | "googlebot" | "browser";
 }
 
-export interface SitemapAudit {
+export type SitemapAudit = {
   totalUrls: number;
   sampledUrls: number;
   indexFiles: string[];
@@ -127,7 +139,18 @@ export interface SitemapAudit {
   freshness?: string;
 }
 
-export interface SearchMetricRow {
+/** Aggregate coverage for a sitemap-driven crawl. Individual page records live in storage. */
+export type CrawlCoverage = {
+  totalUrls: number;
+  completedUrls: number;
+  failedUrls: number;
+  pendingUrls: number;
+  emptyShellUrls: number;
+  httpErrorUrls: number;
+  missingTitleUrls: number;
+}
+
+export type SearchMetricRow = {
   query: string;
   page: string;
   country: string;
@@ -136,6 +159,8 @@ export interface SearchMetricRow {
   clicks: number;
   ctr: number;
   position: number;
+  periodStart?: string;
+  periodEnd?: string;
 }
 
 export interface CompetitorProfile {
@@ -149,7 +174,7 @@ export interface CompetitorProfile {
   contentNotes?: string;
   conversionNotes?: string;
   technicalNotes?: string;
-  evidence: Record<string, unknown>;
+  evidence: JsonObject;
 }
 
 export interface Opportunity {
@@ -213,7 +238,7 @@ export interface ProposedChange {
   findingId?: string;
   title: string;
   reason: string;
-  evidence: Record<string, unknown>;
+  evidence: JsonObject;
   filesChanged: string[];
   pagesAffected: string[];
   patch: string;
@@ -233,7 +258,7 @@ export interface ConversionEvent {
   destination?: string;
   pageUrl?: string;
   sessionId?: string;
-  properties?: Record<string, unknown>;
+  properties?: JsonObject;
   occurredAt: string;
 }
 
@@ -272,3 +297,192 @@ export function rankSeverityByOrganicImpact(
     return order[a.severity] - order[b.severity];
   });
 }
+
+// ---------------------------------------------------------------------------
+// Programmatic page engine: scoped datasets → sources → records → pages.
+// ---------------------------------------------------------------------------
+
+export type DatasetFieldType = "text" | "number" | "list" | "url" | "boolean";
+
+export type DatasetField = {
+  key: string;
+  label: string;
+  type: DatasetFieldType;
+  description?: string;
+  required?: boolean;
+};
+
+/** A page family the scoping agent believes the dataset can support. */
+export type PageIdea = {
+  name: string;
+  /** Dataset fields that define one page; empty means one page per record. */
+  groupBy: string[];
+  exampleTitle: string;
+  exampleQueries: string[];
+  intent: string;
+  rationale: string;
+};
+
+export type DatasetStatus = "proposed" | "active" | "archived";
+
+export type Dataset = {
+  id: string;
+  siteId: string;
+  name: string;
+  entityType: string;
+  description: string;
+  fields: DatasetField[];
+  /** Field whose slug identifies a record and deduplicates scrapes. */
+  keyField: string;
+  pageIdeas: PageIdea[];
+  status: DatasetStatus;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type DataSourceKind = "sitemap" | "listing" | "page" | "own_site";
+export type DataSourceOrigin = "ai" | "user" | "own_site";
+export type DataSourceStatus = "proposed" | "approved" | "rejected" | "blocked";
+
+export type DataSource = {
+  id: string;
+  siteId: string;
+  datasetId: string;
+  url: string;
+  kind: DataSourceKind;
+  /** Path glob for detail pages, e.g. `/doctors/*`; `**` crosses segments. */
+  urlPattern?: string;
+  maxPages: number;
+  origin: DataSourceOrigin;
+  rationale?: string;
+  status: DataSourceStatus;
+  robotsAllowed?: boolean;
+  recordCount: number;
+  lastRunAt?: string;
+  error?: string;
+  createdAt: string;
+};
+
+export type DataRecord = {
+  id: string;
+  siteId: string;
+  datasetId: string;
+  key: string;
+  data: JsonObject;
+  sourceId?: string;
+  sourceUrl?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type FaqPattern = { question: string; answer: string };
+
+export type TemplateStatus = "draft" | "active";
+
+export type PageTemplate = {
+  id: string;
+  siteId: string;
+  datasetId: string;
+  name: string;
+  /** Empty → one page per record. Otherwise one page per unique combination. */
+  groupBy: string[];
+  pathPattern: string;
+  titlePattern: string;
+  descriptionPattern: string;
+  h1Pattern: string;
+  introPattern: string;
+  itemTitleField: string;
+  itemFields: string[];
+  sortBy?: string;
+  sortDir: "asc" | "desc";
+  minRecords: number;
+  faq: FaqPattern[];
+  status: TemplateStatus;
+  createdAt: string;
+  updatedAt: string;
+};
+
+/**
+ * `unpublished`: taken offline by the owner. `retired`: its records no longer
+ * exist. Both are served as 410 Gone; only unpublished pages can be republished.
+ */
+export type GeneratedPageStatus = "draft" | "published" | "thin" | "duplicate" | "unpublished" | "retired";
+
+export type PageLink = { path: string; title: string };
+
+/** A display-ready snapshot of one record on a page, so serving needs no joins. */
+export type PageItem = {
+  title: string;
+  fields: Array<{ label: string; value: string; href?: string }>;
+};
+
+export type GeneratedPage = {
+  id: string;
+  siteId: string;
+  templateId: string;
+  path: string;
+  groupKey: string;
+  groupValues: Record<string, string>;
+  title: string;
+  description: string;
+  h1: string;
+  intro: string;
+  faq: FaqPattern[];
+  recordIds: string[];
+  items: PageItem[];
+  facts: JsonObject;
+  related: PageLink[];
+  /** Fields edited by the owner or applied from an optimization; regeneration keeps them. */
+  overrides?: Partial<Record<"title" | "description" | "h1" | "intro", string>>;
+  qualityScore: number;
+  qualityIssues: string[];
+  status: GeneratedPageStatus;
+  publishedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type PageSettings = {
+  siteId: string;
+  /**
+   * Origin the pages are served from: the main site for a subdirectory proxy
+   * (`https://example.com`) or a subdomain (`https://guides.example.com`).
+   * Canonical URLs, sitemaps, and Search Console joins all use it.
+   */
+  publicOrigin: string;
+  /** Path prefix the proxy forwards to Eumon, e.g. `/guides`; `` for a whole subdomain. */
+  mountPath: string;
+  siteName: string;
+  brandColor: string;
+  ctaLabel: string;
+  ctaUrl: string;
+  ctaCopy: string;
+  updatedAt: string;
+};
+
+export type CtaVariant = {
+  id: string;
+  siteId: string;
+  label: string;
+  copy: string;
+  url: string;
+  impressions: number;
+  clicks: number;
+  active: boolean;
+  createdAt: string;
+};
+
+export type JobKind = "scrape";
+export type JobStatus = "queued" | "running" | "completed" | "failed";
+
+export type Job = {
+  id: string;
+  siteId: string;
+  kind: JobKind;
+  status: JobStatus;
+  subjectId: string;
+  progress?: { message: string; done: number; total: number };
+  error?: string;
+  createdAt: string;
+  completedAt?: string;
+};

@@ -47,7 +47,8 @@ export function analyzeRepository(snapshot: RepoSnapshot): RepoAnalysisResult {
   const isVite = paths.some((p) => p === "vite.config.ts" || p === "vite.config.js");
   const isNext =
     Boolean(deps.next) ||
-    paths.some((p) => p.startsWith("app/") || p.startsWith("pages/"));
+    (!deps.astro && !deps.nuxt && !deps.nuxt3 &&
+      paths.some((p) => /^(src\/)?app\/(.*\/)?page\.(t|j)sx?$/.test(p) || /^next\.config\./.test(p)));
   const hasReactRouter =
     Boolean(deps["react-router"] || deps["react-router-dom"]) ||
     paths.some((p) => p.includes("routes.tsx") || p.includes("routes.ts"));
@@ -97,14 +98,18 @@ export function analyzeRepository(snapshot: RepoSnapshot): RepoAnalysisResult {
       : "CSR SPA";
   } else if (isNext) {
     framework = deps.next ? `Next.js` : "Next.js-like";
-    router = paths.some((p) => /(?:^|\/)app\//.test(p))
+    router = paths.some((p) => /^(src\/)?app\/(.*\/)?page\.(t|j)sx?$/.test(p))
       ? "App Router"
       : "Pages Router";
     rendering = "SSR / SSG / RSC";
   } else if (deps.astro) {
     framework = "Astro";
+    router = "File-based (src/pages)";
+    rendering = paths.some((p) => /^astro\.config\./.test(p)) ? "SSG / SSR (per astro.config output)" : "SSG";
   } else if (deps.nuxt || deps["nuxt3"]) {
     framework = "Nuxt";
+    router = "File-based (pages)";
+    rendering = "SSR / SSG (universal)";
   }
 
   const language = paths.some((p) => p.endsWith(".ts") || p.endsWith(".tsx"))
@@ -127,7 +132,13 @@ export function analyzeRepository(snapshot: RepoSnapshot): RepoAnalysisResult {
     packageManager,
     router,
     rendering,
-    deployment: hasWrangler ? "Cloudflare Workers" : undefined,
+    deployment: hasWrangler
+      ? "Cloudflare Workers"
+      : paths.includes("vercel.json") || Boolean(deps.vercel)
+        ? "Vercel"
+        : paths.includes("netlify.toml") || paths.includes("public/_redirects")
+          ? "Netlify"
+          : undefined,
     cms: hasDecap ? "Decap CMS" : "none",
     database: hasSupabase ? "Supabase" : undefined,
     analytics,
@@ -171,9 +182,6 @@ export function analyzeRepository(snapshot: RepoSnapshot): RepoAnalysisResult {
   if (sitemapScripts.length) {
     notes.push(`Sitemap generation scripts: ${sitemapScripts.join(", ")}`);
   }
-  if (seoModules.includes("src/app/seo/doctorIndexability.mjs")) {
-    notes.push("Doctor indexability rules live in shared SEO module.");
-  }
 
   return {
     fingerprint,
@@ -213,6 +221,17 @@ function extractRoutes(
     if (routesFile?.content) {
       return parseReactRouterRoutes(routesFile.content, routesFile.path);
     }
+  }
+  if (router?.startsWith("File-based") || router === "Pages Router") {
+    const root = router === "File-based (src/pages)" ? "src/pages/" : router === "File-based (pages)" ? "pages/" : null;
+    return snapshot.treePaths
+      .filter((p) => (root ? p.startsWith(root) : /^(src\/)?pages\//.test(p)))
+      .filter((p) => /\.(astro|vue|md|mdx|tsx?|jsx?)$/.test(p) && !/\/(_|api\/)/.test(p))
+      .map((p) => ({
+        pathPattern: fileRouteToPattern(p),
+        source: p,
+        dynamic: p.includes("["),
+      }));
   }
   if (router === "App Router") {
     return snapshot.treePaths
@@ -267,4 +286,17 @@ function appRouterPathToPattern(filePath: string): string {
       .map((seg) => seg.replace(/^\[(?:\.\.\.)?(.+)\]$/, ":$1"))
       .join("/")
   );
+}
+
+/** `src/pages/blog/[slug].astro` → `/blog/:slug`; `pages/index.vue` → `/`. */
+function fileRouteToPattern(filePath: string): string {
+  const relative = filePath
+    .replace(/^(src\/)?pages\//, "")
+    .replace(/\.(astro|vue|md|mdx|tsx?|jsx?)$/, "")
+    .replace(/(^|\/)index$/, "");
+  if (!relative) return "/";
+  return "/" + relative
+    .split("/")
+    .map((seg) => seg.replace(/^\[(?:\.\.\.)?(.+)\]$/, ":$1"))
+    .join("/");
 }

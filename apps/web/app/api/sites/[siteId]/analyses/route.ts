@@ -19,8 +19,10 @@ export async function POST(_request: Request, context: { params: Promise<{ siteI
   const { siteId } = await context.params;
   const site = await getSite(env.DB, siteId);
   if (!site) return Response.json({ error: "Site not found." }, { status: 404 });
-  if (!site.githubOwner || !site.githubRepo || !site.githubInstallationId) {
-    return Response.json({ error: "Connect a GitHub repository before starting an analysis." }, { status: 409 });
+  const running = await getLatestAnalysisForSite(env.DB, siteId);
+  // A run that has not finished in 3 hours is treated as abandoned (e.g. a restarted dev server).
+  if (running && (running.status === "queued" || running.status === "running") && Date.now() - Date.parse(running.createdAt) < 3 * 3_600_000) {
+    return Response.json({ error: "An analysis is already running for this site." }, { status: 409 });
   }
 
   const analysisId = createId("analysis");

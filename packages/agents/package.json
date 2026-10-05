@@ -16,6 +16,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@organic-growth/ai": "*",
     "@organic-growth/core": "*",
     "@organic-growth/crawler": "*",
     "@organic-growth/db": "*",

@@ -1,5 +1,6 @@
 import type { CrawlPageResult, Finding, SitemapAudit } from "@organic-growth/core";
 import { createId, organicImpactScore, severityFromImpact } from "@organic-growth/core";
+import { classifyLanguage, isSameSite } from "./urls.js";
 
 /**
  * Technical SEO audit rules ranked by expected organic impact.
@@ -52,10 +53,11 @@ export function runTechnicalSeoAudit(input: {
     });
   }
 
-  const missingHreflang = pages.filter(
-    (p) =>
-      /\/(id|zh)\//.test(p.url) || p.url.includes("/doctors/") || p.url.includes("/procedures/"),
-  ).filter((p) => p.hreflang.length === 0 && !p.isEmptyShell);
+  // Only meaningful when the site actually publishes locale-prefixed URLs.
+  const locales = new Set(pages.map((p) => classifyLanguage(p.url)));
+  const missingHreflang = locales.size > 1
+    ? pages.filter((p) => p.hreflang.length === 0 && !p.isEmptyShell)
+    : [];
   if (missingHreflang.length >= 3) {
     const impact = organicImpactScore({
       category: "metadata",
@@ -69,11 +71,11 @@ export function runTechnicalSeoAudit(input: {
       category: "metadata",
       severity: severityFromImpact(impact),
       title: "Multilingual pages missing hreflang in HTML",
-      summary: `${missingHreflang.length} multilingual/entity pages lacked hreflang alternates in crawler HTML.`,
+      summary: `The site serves ${locales.size} locale variants, but ${missingHreflang.length} sampled pages lacked hreflang alternates in crawler HTML.`,
       evidence: { urls: missingHreflang.slice(0, 10).map((p) => p.url) },
       organicImpactScore: impact,
       recommendation:
-        "Emit hreflang for en-MY / id / zh-CN / x-default in initial HTML for all localized entity pages.",
+        "Emit reciprocal hreflang alternates (plus x-default) in the initial HTML for every localized page.",
       pagesAffected: missingHreflang.map((p) => p.url),
       createdAt: new Date().toISOString(),
     });
@@ -122,6 +124,31 @@ export function runTechnicalSeoAudit(input: {
       evidence: { robotsTxt: input.robotsTxt.slice(0, 2000) },
       organicImpactScore: impact,
       recommendation: "Remove sitewide Disallow and keep only intentional private path blocks.",
+      pagesAffected: [],
+      createdAt: new Date().toISOString(),
+    });
+  }
+
+  const declaredSitemaps = [...(input.robotsTxt ?? "").matchAll(/^\s*Sitemap:\s*(\S+)/gim)].map((match) => match[1]!);
+  const foreignSitemaps = declaredSitemaps.filter((entry) => !isSameSite(entry, input.baseUrl));
+  if (foreignSitemaps.length) {
+    const noOwnSitemap = declaredSitemaps.length === foreignSitemaps.length;
+    const impact = organicImpactScore({
+      category: "sitemap",
+      pagesAffected: Math.max(sitemap.totalUrls, 1),
+      isBlockingCrawl: noOwnSitemap,
+    });
+    findings.push({
+      id: createId("finding"),
+      siteId,
+      analysisId,
+      category: "sitemap",
+      severity: severityFromImpact(impact),
+      title: "robots.txt points search engines to a sitemap on another domain",
+      summary: `robots.txt lists ${foreignSitemaps.join(", ")}${noOwnSitemap ? " and no sitemap on this site" : ""}. Search engines discover pages through the sitemap robots.txt declares, so a foreign or stale sitemap can hide the site's real pages.`,
+      evidence: { declaredSitemaps, foreignSitemaps, sitemapUrlsFound: sitemap.totalUrls },
+      organicImpactScore: impact,
+      recommendation: `Replace the Sitemap line in robots.txt with ${new URL(input.baseUrl).origin}/sitemap.xml and submit that sitemap in Search Console.`,
       pagesAffected: [],
       createdAt: new Date().toISOString(),
     });

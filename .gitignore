@@ -13,3 +13,4 @@ dist
 coverage
 tmp
 .turbo
+dist-test

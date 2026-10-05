@@ -1,5 +1,6 @@
-import type { CrawlPageResult, Finding, SitemapAudit } from "@organic-growth/core";
+import type { CrawlCoverage, CrawlPageResult, Finding, SitemapAudit } from "@organic-growth/core";
 import { createId, organicImpactScore, severityFromImpact } from "@organic-growth/core";
+import { classifyLanguage, classifyUrlType, isSameSite } from "./urls.js";
 
 export const GOOGLEBOT_UA =
   "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)";
@@ -17,7 +18,7 @@ export interface FetchResult {
 
 export type Fetcher = (
   url: string,
-  init?: { userAgent?: string; headers?: Record<string, string> },
+  init?: { userAgent?: string; headers?: Record<string, string>; maxBytes?: number },
 ) => Promise<FetchResult>;
 
 export function isSafePublicUrl(value: string, expectedOrigin?: string): boolean {
@@ -63,7 +64,6 @@ async function boundedText(response: Response, maxBytes = 2_000_000): Promise<st
 
 export const defaultFetcher: Fetcher = async (url, init) => {
   if (!isSafePublicUrl(url)) throw new Error("Crawler only accepts public HTTP(S) website URLs.");
-  const origin = new URL(url).origin;
   let target = url;
   for (let redirects = 0; redirects <= 5; redirects++) {
     const res = await fetch(target, {
@@ -79,11 +79,11 @@ export const defaultFetcher: Fetcher = async (url, init) => {
       const location = res.headers.get("location");
       if (!location) break;
       const next = new URL(location, target).toString();
-      if (!isSafePublicUrl(next, origin)) throw new Error("Crawler blocked a redirect outside the connected website.");
+      if (!isSafePublicUrl(next) || !isSameSite(next, url)) throw new Error("Crawler blocked a redirect outside the connected website.");
       target = next;
       continue;
     }
-    const body = await boundedText(res);
+    const body = await boundedText(res, init?.maxBytes);
     const headers: Record<string, string> = {};
     res.headers.forEach((v, k) => { headers[k.toLowerCase()] = v; });
     return { url, status: res.status, finalUrl: target, headers, body };
@@ -220,6 +220,50 @@ export async function fetchPageAudit(
   };
 }
 
+/**
+ * The full crawl uses the Googlebot request profile for every sitemap URL.
+ * Raw-vs-Googlebot and browser comparisons remain a representative sample,
+ * where they provide much more signal per request.
+ */
+export async function fetchGooglebotPage(
+  url: string,
+  fetcher: Fetcher = defaultFetcher,
+): Promise<CrawlPageResult> {
+  const response = await fetcher(url, { userAgent: GOOGLEBOT_UA });
+  return toCrawlResult(url, response, "googlebot");
+}
+
+export type GooglebotCrawlOutcome =
+  | { url: string; page: CrawlPageResult }
+  | { url: string; error: string };
+
+/** Crawls a bounded batch without overwhelming the connected website. */
+export async function crawlGooglebotBatch(
+  urls: string[],
+  fetcher: Fetcher = defaultFetcher,
+  concurrency = 6,
+): Promise<GooglebotCrawlOutcome[]> {
+  const outcomes: GooglebotCrawlOutcome[] = new Array(urls.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(Math.max(concurrency, 1), urls.length) }, async () => {
+    while (true) {
+      const index = next++;
+      if (index >= urls.length) return;
+      const url = urls[index]!;
+      try {
+        outcomes[index] = { url, page: await fetchGooglebotPage(url, fetcher) };
+      } catch (error) {
+        outcomes[index] = {
+          url,
+          error: error instanceof Error ? error.message : "The crawler could not fetch this URL.",
+        };
+      }
+    }
+  });
+  await Promise.all(workers);
+  return outcomes;
+}
+
 function toCrawlResult(
   url: string,
   fetchResult: FetchResult,
@@ -251,8 +295,8 @@ function toCrawlResult(
 export async function auditSitemap(
   baseUrl: string,
   fetcher: Fetcher = defaultFetcher,
-  options?: { maxUrls?: number },
-): Promise<{ audit: SitemapAudit; sampleUrls: string[] }> {
+  options?: { maxUrls?: number; maxSitemapFiles?: number },
+): Promise<{ audit: SitemapAudit; sampleUrls: string[]; urls: string[] }> {
   const maxUrls = options?.maxUrls ?? 200;
   const origin = new URL(baseUrl).origin;
   const sitemapUrl = `${origin}/sitemap.xml`;
@@ -264,10 +308,24 @@ export async function auditSitemap(
 
   try {
     const robots = await fetcher(robotsUrl);
-    const sitemapFromRobots = robots.body.match(/Sitemap:\s*(\S+)/i)?.[1];
-    const entry = sitemapFromRobots ?? sitemapUrl;
-    const collected = await collectSitemapUrls(entry, fetcher, indexFiles, errors, 0, origin);
-    urls = collected;
+    const declared = robots.status < 400
+      ? [...robots.body.matchAll(/^\s*Sitemap:\s*(\S+)/gim)].map((match) => match[1]!)
+      : [];
+    const ownSitemaps = declared.filter((entry) => isSameSite(entry, origin));
+    for (const entry of declared.filter((value) => !isSameSite(value, origin))) {
+      errors.push(`robots.txt declares a sitemap on another domain (${entry}); it was skipped.`);
+    }
+    // Fall back to the conventional location when robots.txt names no sitemap on this site.
+    const entries = ownSitemaps.length ? ownSitemaps : [sitemapUrl];
+    const state: SitemapCollectionState = {
+      visited: new Set<string>(),
+      maxFiles: options?.maxSitemapFiles ?? 500,
+    };
+    const collected: string[] = [];
+    for (const entry of entries) {
+      collected.push(...await collectSitemapUrls(entry, fetcher, indexFiles, errors, 0, origin, state));
+    }
+    urls = [...new Set(collected)];
   } catch (err) {
     errors.push(`Sitemap audit failed: ${String(err)}`);
   }
@@ -292,24 +350,41 @@ export async function auditSitemap(
       errors,
     },
     sampleUrls,
+    urls,
   };
 }
 
-async function collectSitemapUrls(
+interface SitemapCollectionState {
+  visited: Set<string>;
+  maxFiles: number;
+}
+
+/** Recursively collects page URLs from a sitemap or sitemap index on one origin. */
+export async function collectSitemapUrls(
   sitemapUrl: string,
   fetcher: Fetcher,
   indexFiles: string[],
   errors: string[],
   depth = 0,
   origin?: string,
+  state?: SitemapCollectionState,
 ): Promise<string[]> {
   if (depth > 3) return [];
+  const collection = state ?? { visited: new Set<string>(), maxFiles: 500 };
+  if (collection.visited.has(sitemapUrl)) return [];
+  if (collection.visited.size >= collection.maxFiles) {
+    errors.push(`Stopped after ${collection.maxFiles} sitemap files; increase the sitemap-file budget to continue.`);
+    return [];
+  }
+  collection.visited.add(sitemapUrl);
   const allowedOrigin = origin ?? new URL(sitemapUrl).origin;
-  if (!isSafePublicUrl(sitemapUrl, allowedOrigin)) {
+  if (!isSafePublicUrl(sitemapUrl) || !isSameSite(sitemapUrl, allowedOrigin)) {
     errors.push(`Blocked sitemap outside the connected website: ${sitemapUrl}`);
     return [];
   }
-  const res = await fetcher(sitemapUrl);
+  // Sitemaps can be much larger than ordinary HTML pages. Keep the normal
+  // page-response cap, while allowing a bounded 10 MB for XML sitemap files.
+  const res = await fetcher(sitemapUrl, { maxBytes: 25_000_000 });
   if (res.status >= 400) {
     errors.push(`${sitemapUrl} returned ${res.status}`);
     return [];
@@ -321,33 +396,19 @@ async function collectSitemapUrls(
       m[1].trim(),
     );
     const nested: string[] = [];
-    for (const loc of locs.slice(0, 20)) {
+    for (const loc of locs) {
+      if (collection.visited.size >= collection.maxFiles) {
+        errors.push(`Stopped after ${collection.maxFiles} sitemap files; increase the sitemap-file budget to continue.`);
+        break;
+      }
       nested.push(
-        ...(await collectSitemapUrls(loc, fetcher, indexFiles, errors, depth + 1, allowedOrigin)),
+        ...(await collectSitemapUrls(loc, fetcher, indexFiles, errors, depth + 1, allowedOrigin, collection)),
       );
     }
     return nested;
   }
   return [...body.matchAll(/<loc>\s*([^<]+)\s*<\/loc>/gi)].map((m) => m[1].trim())
-    .filter((loc) => isSafePublicUrl(loc, allowedOrigin));
-}
-
-export function classifyUrlType(url: string): string {
-  const path = new URL(url).pathname;
-  if (/\/doctors\//.test(path)) return "doctor";
-  if (/\/hospitals\//.test(path)) return "hospital";
-  if (/\/procedures\//.test(path)) return "procedure";
-  if (/\/blog\//.test(path)) return "blog";
-  if (/\/doctors\/[^/]+\/[^/]+/.test(path)) return "specialty_area";
-  if (path === "/" || path === "/id" || path === "/zh") return "home";
-  return "other";
-}
-
-export function classifyLanguage(url: string): string {
-  const path = new URL(url).pathname;
-  if (path === "/id" || path.startsWith("/id/")) return "id";
-  if (path === "/zh" || path.startsWith("/zh/")) return "zh";
-  return "en";
+    .filter((loc) => isSafePublicUrl(loc) && isSameSite(loc, allowedOrigin));
 }
 
 export function selectRepresentativeSample(
@@ -372,6 +433,8 @@ export function selectRepresentativeSample(
   return sample;
 }
 
+const COMMERCIAL_URL_PATTERN = /price|pricing|cost|book|buy|quote|services?|products?|plans?|compare|treatments?|clinic/i;
+
 export function findingsFromCrawl(input: {
   siteId: string;
   analysisId: string;
@@ -393,9 +456,7 @@ export function findingsFromCrawl(input: {
         emptyPages.length,
       isEmptyShellAtScale: emptyRatio >= 0.3 || emptyPages.length >= 5,
       isBlockingCrawl: emptyRatio >= 0.5,
-      commercialIntent: emptyPages.some((p) =>
-        /procedure|hospital|ivf|fertility|cost/i.test(p.url),
-      ),
+      commercialIntent: emptyPages.some((p) => COMMERCIAL_URL_PATTERN.test(p.url)),
     });
     findings.push({
       id: createId("finding"),
@@ -478,8 +539,9 @@ export function findingsFromCrawl(input: {
     });
   }
 
+  // Detail pages (two or more path segments) are where structured data earns rich results.
   const missingJsonLd = input.pageResults.filter(
-    (p) => !p.isEmptyShell && p.jsonLdCount === 0 && /doctor|hospital|procedure|blog/i.test(p.url),
+    (p) => !p.isEmptyShell && p.jsonLdCount === 0 && !["home", "page"].includes(classifyUrlType(p.url)),
   );
   if (missingJsonLd.length >= 3) {
     const impact = organicImpactScore({
@@ -492,11 +554,11 @@ export function findingsFromCrawl(input: {
       analysisId: input.analysisId,
       category: "structured_data",
       severity: severityFromImpact(impact),
-      title: "Entity pages missing JSON-LD in crawler HTML",
-      summary: `${missingJsonLd.length} content pages had no JSON-LD in the fetched HTML.`,
+      title: "Detail pages missing JSON-LD in crawler HTML",
+      summary: `${missingJsonLd.length} sampled detail pages had no JSON-LD in the fetched HTML.`,
       evidence: { urls: missingJsonLd.slice(0, 10).map((p) => p.url) },
       organicImpactScore: impact,
-      recommendation: "Emit Medical/Physician/Hospital/Article schema in initial HTML.",
+      recommendation: "Emit schema.org markup that matches each template (e.g. Product, LocalBusiness, Person, Article) in the initial HTML.",
       pagesAffected: missingJsonLd.map((p) => p.url),
       createdAt: new Date().toISOString(),
     });
@@ -505,4 +567,95 @@ export function findingsFromCrawl(input: {
   return findings;
 }
 
+/** Findings based on every sitemap URL, rather than extrapolating from a sample. */
+export function findingsFromCrawlCoverage(input: {
+  siteId: string;
+  analysisId: string;
+  coverage: CrawlCoverage;
+  examples?: CrawlPageResult[];
+}): Finding[] {
+  const { coverage } = input;
+  const findings: Finding[] = [];
+  const crawled = Math.max(coverage.completedUrls, 1);
+  const shellRatio = coverage.emptyShellUrls / crawled;
+
+  if (coverage.emptyShellUrls > 0) {
+    const impact = organicImpactScore({
+      category: "rendering",
+      pagesAffected: coverage.emptyShellUrls,
+      isEmptyShellAtScale: shellRatio >= 0.1 || coverage.emptyShellUrls >= 25,
+      isBlockingCrawl: shellRatio >= 0.3,
+    });
+    findings.push({
+      id: createId("finding"),
+      siteId: input.siteId,
+      analysisId: input.analysisId,
+      category: "rendering",
+      severity: severityFromImpact(impact),
+      title: "Googlebot receives empty or thin HTML on sitemap URLs",
+      summary: `${coverage.emptyShellUrls.toLocaleString()} of ${coverage.completedUrls.toLocaleString()} crawled sitemap URLs returned an empty or thin HTML shell (${Math.round(shellRatio * 100)}%).`,
+      evidence: {
+        coverage,
+        examples: (input.examples ?? []).filter((page) => page.isEmptyShell).slice(0, 20).map((page) => ({
+          url: page.url,
+          status: page.status,
+          title: page.title,
+          textLength: page.rawTextLength,
+        })),
+      },
+      organicImpactScore: impact,
+      recommendation: "Ensure indexable routes return meaningful server or edge HTML before client hydration, then validate the affected template across its sitemap URLs.",
+      pagesAffected: (input.examples ?? []).filter((page) => page.isEmptyShell).slice(0, 20).map((page) => page.url),
+      createdAt: new Date().toISOString(),
+    });
+  }
+
+  if (coverage.httpErrorUrls > 0 || coverage.failedUrls > 0) {
+    const affected = coverage.httpErrorUrls + coverage.failedUrls;
+    const impact = organicImpactScore({
+      category: "indexing",
+      pagesAffected: affected,
+      isBlockingCrawl: affected / Math.max(coverage.totalUrls, 1) >= 0.05,
+    });
+    findings.push({
+      id: createId("finding"),
+      siteId: input.siteId,
+      analysisId: input.analysisId,
+      category: "indexing",
+      severity: severityFromImpact(impact),
+      title: "Sitemap URLs fail or return error responses",
+      summary: `${coverage.httpErrorUrls.toLocaleString()} URLs returned HTTP errors and ${coverage.failedUrls.toLocaleString()} could not be fetched during the crawl.`,
+      evidence: { coverage },
+      organicImpactScore: impact,
+      recommendation: "Review recurring response failures by route template and remove invalid URLs from the sitemap after correcting the underlying route or data issue.",
+      pagesAffected: [],
+      createdAt: new Date().toISOString(),
+    });
+  }
+
+  if (coverage.missingTitleUrls > 0) {
+    const impact = organicImpactScore({
+      category: "metadata",
+      pagesAffected: coverage.missingTitleUrls,
+    });
+    findings.push({
+      id: createId("finding"),
+      siteId: input.siteId,
+      analysisId: input.analysisId,
+      category: "metadata",
+      severity: severityFromImpact(Math.min(impact, 65)),
+      title: "Sitemap URLs are missing useful title tags",
+      summary: `${coverage.missingTitleUrls.toLocaleString()} crawled sitemap URLs had no title or a title shorter than 15 characters.`,
+      evidence: { coverage },
+      organicImpactScore: Math.min(impact, 65),
+      recommendation: "Trace the affected URLs to their page template and generate unique titles from page-specific entities and search intent.",
+      pagesAffected: [],
+      createdAt: new Date().toISOString(),
+    });
+  }
+
+  return findings;
+}
+
 export * from "./tech-seo.js";
+export * from "./urls.js";

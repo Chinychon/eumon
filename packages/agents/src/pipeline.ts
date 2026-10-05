@@ -1,9 +1,16 @@
-import { createId, rankSeverityByOrganicImpact, type SiteRecord } from "@organic-growth/core";
+import {
+  createId,
+  rankSeverityByOrganicImpact,
+  type CrawlCoverage,
+  type CrawlPageResult,
+  type SiteRecord,
+} from "@organic-growth/core";
 import {
   auditSitemap,
   defaultFetcher,
   fetchPageAudit,
   findingsFromCrawl,
+  findingsFromCrawlCoverage,
   parseHtmlSignals,
   runTechnicalSeoAudit,
   type Fetcher,
@@ -16,12 +23,13 @@ import {
   analyzeSearchTraffic,
   buildOpportunities,
   discoverCompetitors,
-  proposeSafeTechnicalChange,
   synthesizeGrowthPlan,
   type AnalysisBundle,
 } from "./index.js";
 
 export interface RunAnalysisInput {
+  /** The persisted analysis this run belongs to, so findings link back to it. */
+  analysisId: string;
   siteId: string;
   name: string;
   baseUrl: string;
@@ -35,10 +43,12 @@ export interface RunAnalysisInput {
   gscProperty?: string;
   competitorDomains?: string[];
   renderPages?: (urls: string[]) => Promise<Record<string, string>>;
+  /** Results of crawling every sitemap URL, when a full crawl ran first. */
+  crawlCoverage?: { coverage: CrawlCoverage; examples: CrawlPageResult[] };
 }
 
 export async function runFullAnalysis(input: RunAnalysisInput) {
-  const analysisId = createId("analysis");
+  const { analysisId } = input;
   const fetcher = input.fetcher ?? defaultFetcher;
   const now = new Date().toISOString();
 
@@ -107,14 +117,24 @@ export async function runFullAnalysis(input: RunAnalysisInput) {
     }
   }
 
-  findings.push(
-    ...findingsFromCrawl({
+  const sampleFindings = findingsFromCrawl({
+    siteId: input.siteId,
+    analysisId,
+    sitemap,
+    pageResults,
+  });
+  if (input.crawlCoverage?.coverage.completedUrls) {
+    // Evidence from every sitemap URL supersedes extrapolation from the sample.
+    findings.push(...sampleFindings.filter((finding) => finding.category !== "rendering" && finding.category !== "sitemap"));
+    findings.push(...findingsFromCrawlCoverage({
       siteId: input.siteId,
       analysisId,
-      sitemap,
-      pageResults,
-    }),
-  );
+      coverage: input.crawlCoverage.coverage,
+      examples: input.crawlCoverage.examples,
+    }));
+  } else {
+    findings.push(...sampleFindings);
+  }
 
   let robotsTxt: string | undefined;
   try {
@@ -154,7 +174,14 @@ export async function runFullAnalysis(input: RunAnalysisInput) {
 
   const rankedFindings = rankSeverityByOrganicImpact(findings);
 
+  const brandTerms = [
+    input.name,
+    input.githubRepo,
+    new URL(input.baseUrl).hostname.replace(/^www\./, "").split(".")[0],
+  ].filter((term): term is string => Boolean(term));
+
   const bundle: AnalysisBundle = {
+    brandTerms,
     siteId: input.siteId,
     analysisId,
     baseUrl: input.baseUrl,
@@ -169,28 +196,29 @@ export async function runFullAnalysis(input: RunAnalysisInput) {
 
   const opportunities = buildOpportunities(bundle);
   const plan = synthesizeGrowthPlan(bundle);
-  const change = proposeSafeTechnicalChange({
-    siteId: input.siteId,
-    analysisId,
-    finding: rankedFindings.find((f) => f.category === "rendering"),
-    opportunity: opportunities[0],
-  });
-
-  const searchNarrative = analyzeSearchTraffic(searchMetrics);
+  const searchNarrative = analyzeSearchTraffic(searchMetrics, brandTerms);
 
   return {
     site,
     analysisId,
     repo,
     sitemap,
+    coverage: input.crawlCoverage?.coverage ?? null,
     pages: pageResults,
     findings: rankedFindings,
     competitors,
     opportunities,
     plan,
-    change,
-    searchNarrative,
-    searchMetrics,
+    // Raw Search Console rows are persisted separately; the report keeps the
+    // synthesis so it stays well under Workflow step and D1 row limits.
+    searchNarrative: {
+      totalClicks: searchNarrative.totalClicks,
+      totalImpressions: searchNarrative.totalImpressions,
+      countryShare: searchNarrative.countryShare,
+      brandedShare: searchNarrative.brandedShare,
+      commercialGapQueries: searchNarrative.commercialGapQueries.slice(0, 10),
+      narrative: searchNarrative.narrative,
+    },
   };
 }
 

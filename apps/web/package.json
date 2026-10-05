@@ -4,12 +4,16 @@
   "private": true,
   "packageManager": "npm@10.9.7",
   "dependencies": {
+    "@cloudflare/puppeteer": "^1.4.0",
     "@organic-growth/agents": "*",
+    "@organic-growth/ai": "*",
     "@organic-growth/core": "*",
     "@organic-growth/crawler": "*",
     "@organic-growth/db": "*",
+    "@organic-growth/pages": "*",
     "@organic-growth/repo-analyzer": "*",
-    "@cloudflare/puppeteer": "^1.4.0",
+    "@organic-growth/scraper": "*",
+    "@organic-growth/sdk": "*",
     "@vinext/cloudflare": "^1.0.1",
     "react": "latest",
     "react-dom": "latest",
@@ -32,10 +36,12 @@
   },
   "type": "module",
   "scripts": {
-    "dev": "vite dev",
+    "dev": "vite dev --port 5174 --strictPort",
     "build": "vite build",
     "start": "vite preview",
-    "db:migrate:local": "cf d1 migrations apply 00000000-0000-4000-8000-000000000001 --local --dir ../../packages/db/migrations",
-    "deploy": "vinext-cloudflare deploy"
+    "db:migrate:local": "cf d1 migrations apply 591e4045-cbff-4ef4-a894-cbe4ece424ec --local --persist-to ./.cloudflare/state --dir ../../packages/db/migrations",
+    "db:migrate:remote": "cf d1 migrations apply 591e4045-cbff-4ef4-a894-cbe4ece424ec --dir ../../packages/db/migrations",
+    "deploy": "vinext-cloudflare deploy",
+    "typecheck": "tsc --noEmit -p ."
   }
 }

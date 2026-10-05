@@ -1,24 +1,38 @@
 import { env } from "cloudflare:workers";
 import { createId, type ConversionEventName } from "@organic-growth/core";
-import { getSite, insertConversionEvent } from "@organic-growth/db";
+import { isSameSite } from "@organic-growth/crawler";
+import { getPageSettings, getSite, insertConversionEvent } from "@organic-growth/db";
 
 const events = new Set<ConversionEventName>([
   "page_view", "cta_click", "whatsapp_click", "phone_click", "email_click", "form_start", "form_submit",
   "booking_start", "booking_complete", "lead_created", "lead_qualified", "customer_created",
 ]);
 
+/**
+ * Accepts events from the connected site and its landing-page origin, treating
+ * www/apex variants as the same site (sites are often entered as one and
+ * served from the other). Returns the site and the exact origin to echo.
+ */
 async function allowedSite(siteId: string, origin: string | null) {
   const site = await getSite(env.DB, siteId);
   if (!site || !origin) return null;
-  try { return new URL(site.baseUrl).origin === new URL(origin).origin ? site : null; } catch { return null; }
+  try {
+    const requestOrigin = new URL(origin);
+    if (requestOrigin.protocol !== "https:" && requestOrigin.protocol !== "http:") return null;
+    const settings = await getPageSettings(env.DB, siteId);
+    const allowed = isSameSite(origin, site.baseUrl) || (settings ? isSameSite(origin, settings.publicOrigin) : false);
+    return allowed ? { site, origin: requestOrigin.origin } : null;
+  } catch {
+    return null;
+  }
 }
 
 export async function OPTIONS(request: Request, context: { params: Promise<{ siteId: string }> }) {
   const { siteId } = await context.params;
-  const site = await allowedSite(siteId, request.headers.get("Origin"));
-  if (!site) return new Response(null, { status: 403 });
+  const allowed = await allowedSite(siteId, request.headers.get("Origin"));
+  if (!allowed) return new Response(null, { status: 403 });
   return new Response(null, { status: 204, headers: {
-    "Access-Control-Allow-Origin": new URL(site.baseUrl).origin,
+    "Access-Control-Allow-Origin": allowed.origin,
     "Access-Control-Allow-Methods": "POST, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type",
     "Access-Control-Max-Age": "86400",
@@ -28,8 +42,9 @@ export async function OPTIONS(request: Request, context: { params: Promise<{ sit
 
 export async function POST(request: Request, context: { params: Promise<{ siteId: string }> }) {
   const { siteId } = await context.params;
-  const site = await allowedSite(siteId, request.headers.get("Origin"));
-  if (!site) return Response.json({ error: "Event origin does not match the connected website." }, { status: 403 });
+  const allowed = await allowedSite(siteId, request.headers.get("Origin"));
+  if (!allowed) return Response.json({ error: "Event origin does not match the connected website." }, { status: 403 });
+  const { site } = allowed;
   let body: Record<string, unknown>;
   try {
     const reader = request.body?.getReader();
@@ -53,12 +68,12 @@ export async function POST(request: Request, context: { params: Promise<{ siteId
   if (typeof body.pageUrl === "string") {
     try {
       const parsed = new URL(body.pageUrl);
-      if (parsed.origin !== new URL(site.baseUrl).origin) return Response.json({ error: "Page URL must belong to the connected site." }, { status: 400 });
+      if (parsed.origin !== allowed.origin) return Response.json({ error: "Page URL must belong to the connected site." }, { status: 400 });
       pageUrl = `${parsed.origin}${parsed.pathname}`.slice(0, 2048);
     } catch { return Response.json({ error: "Page URL is invalid." }, { status: 400 }); }
   }
   const destination = typeof body.destination === "string" ? body.destination.slice(0, 120) : undefined;
   const sessionId = typeof body.sessionId === "string" && /^[a-zA-Z0-9_-]{16,64}$/.test(body.sessionId) ? body.sessionId : undefined;
   await insertConversionEvent(env.DB, { id: createId("event"), siteId, event: body.event, destination, pageUrl, sessionId, occurredAt: new Date().toISOString() });
-  return Response.json({ accepted: true }, { status: 202, headers: { "Access-Control-Allow-Origin": new URL(site.baseUrl).origin, "Vary": "Origin" } });
+  return Response.json({ accepted: true }, { status: 202, headers: { "Access-Control-Allow-Origin": allowed.origin, "Vary": "Origin" } });
 }

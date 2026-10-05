@@ -11,8 +11,14 @@ function getCookie(request: Request): string | null {
 }
 
 export async function GET(request: Request) {
-  const installationId = await verifySignedInstallationCookie(getCookie(request) ?? "", env.SESSION_SECRET);
-  if (!installationId) return Response.json({ error: "Install the GitHub App to choose a repository." }, { status: 401 });
+  const installationCookie = getCookie(request);
+  if (!installationCookie) {
+    return Response.json({ error: "No GitHub installation cookie reached Eumon. The GitHub Setup URL must point to this app's callback, then the install flow must finish in this same browser." }, { status: 401, headers: { "Cache-Control": "no-store" } });
+  }
+  const installationId = await verifySignedInstallationCookie(installationCookie, env.SESSION_SECRET);
+  if (!installationId) {
+    return Response.json({ error: "Eumon received the installation cookie but could not verify it. Restart the dev server after changing SESSION_SECRET, and use one consistent SESSION_SECRET for the callback and app." }, { status: 401, headers: { "Cache-Control": "no-store" } });
+  }
   try {
     const token = await createInstallationToken(env.GITHUB_APP_ID, env.GITHUB_APP_PRIVATE_KEY, installationId);
     const repositories = await listInstallationRepositories(token);

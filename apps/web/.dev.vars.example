@@ -1,6 +1,14 @@
 GITHUB_APP_ID=replace-with-github-app-id
+GITHUB_APP_SLUG=replace-with-github-app-slug
 GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\nreplace-with-pem-content\n-----END RSA PRIVATE KEY-----"
 SESSION_SECRET=replace-with-at-least-32-random-characters
 GOOGLE_CLIENT_ID=replace-with-google-oauth-client-id
 GOOGLE_CLIENT_SECRET=replace-with-google-oauth-client-secret
 OAUTH_ENCRYPTION_KEY=replace-with-base64url-encoded-32-byte-key
+# Optional language model for scoping, extraction, and page copy. The first key that is set wins:
+# DEEPSEEK_API_KEY (default model deepseek-flash), then ANTHROPIC_API_KEY (claude-opus-5-5), then Workers AI.
+# Workers AI needs Cloudflare credentials in local development, so set one of these keys to use the AI steps locally.
+DEEPSEEK_API_KEY=
+ANTHROPIC_API_KEY=
+# Optional model override for the active provider, e.g. deepseek-v4-pro for higher-quality scoping and copy.
+LLM_MODEL=

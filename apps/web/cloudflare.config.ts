@@ -7,14 +7,17 @@ export const worker = defineWorker({
     compatibilityFlags: ["nodejs_compat"],
     exports: {
       SiteAnalysisWorkflow: exports.workflow({ name: "site-analysis" }),
+      ScrapeWorkflow: exports.workflow({ name: "dataset-scrape" }),
+      // Daily Search Console import for generated pages (closes the measurement loop).
+      SearchSyncWorkflow: exports.workflow({ name: "search-sync", schedules: "15 4 * * *" }),
     },
     assets: { notFoundHandling: "none" },
     env: {
       ASSETS: bindings.assets(),
       IMAGES: bindings.images(),
       DB: bindings.d1({
-        id: process.env.CF_D1_DATABASE_ID ?? "00000000-0000-4000-8000-000000000001",
-        name: "organic-growth",
+        id: process.env.CF_D1_DATABASE_ID ?? "591e4045-cbff-4ef4-a894-cbe4ece424ec",
+        name: "eumon-prod",
       }),
       AI: bindings.ai(),
       BROWSER: bindings.browser(),
@@ -23,13 +26,28 @@ export const worker = defineWorker({
         worker: "organic-growth",
         exportName: "SiteAnalysisWorkflow",
       }),
+      SCRAPE_WORKFLOW: bindings.workflow({
+        name: "dataset-scrape",
+        worker: "organic-growth",
+        exportName: "ScrapeWorkflow",
+      }),
+      SEARCH_SYNC_WORKFLOW: bindings.workflow({
+        name: "search-sync",
+        worker: "organic-growth",
+        exportName: "SearchSyncWorkflow",
+      }),
       GITHUB_APP_ID: bindings.secret(),
-      GITHUB_APP_SLUG: bindings.text(process.env.GITHUB_APP_SLUG ?? "organic-growth-engine"),
+      GITHUB_APP_SLUG: bindings.secret(),
       GITHUB_APP_PRIVATE_KEY: bindings.secret(),
       SESSION_SECRET: bindings.secret(),
       GOOGLE_CLIENT_ID: bindings.secret(),
       GOOGLE_CLIENT_SECRET: bindings.secret(),
       OAUTH_ENCRYPTION_KEY: bindings.secret(),
+      // Optional language model keys, used in this order: DeepSeek, Claude, then Workers AI.
+      DEEPSEEK_API_KEY: bindings.secret(),
+      ANTHROPIC_API_KEY: bindings.secret(),
+      // Optional model override for the active provider, e.g. "deepseek-v4-pro".
+      LLM_MODEL: bindings.secret(),
     },
   });
 

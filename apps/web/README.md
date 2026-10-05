@@ -1,39 +1,55 @@
-# Organic Growth Engine MVP
+# Eumon — web app and Worker
 
-The pilot supports a single workspace with GitHub App repository access, repository analysis, a bounded public-site crawl with browser rendering, an evidence-based growth plan, optional Google Search Console metrics, owner-selected competitor homepage checks, a small conversion event SDK, and persistent analysis jobs in Cloudflare D1/Workflows. The app is designed to sit behind Cloudflare Access; configure Access for the app hostname before connecting private repositories.
+The dashboard, API, public landing pages, and background Workflows, deployed as one Cloudflare Worker (vinext + D1 + Workflows + Browser Rendering). AI steps use DeepSeek, Claude, or Workers AI.
 
 ## Local setup
 
-1. Install dependencies from the repository root with `npm install`.
-2. Create a GitHub App with callback URL `http://localhost:5173/api/github/callback` and selected repository permissions for Metadata read, Contents read/write, and Pull requests read/write. Write access is used only after an explicit action to open a draft PR.
-3. Configure a local D1 database, set `CF_D1_DATABASE_ID`, and apply migrations from `packages/db/migrations`.
-4. Set `SESSION_SECRET` to a random value of at least 32 characters.
-5. To enable Google Search Console, configure a Google OAuth web client. Add `http://localhost:5173/api/google/callback` as an authorized redirect URI. Enable the Search Console API, then provide `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `OAUTH_ENCRYPTION_KEY`. The encryption key must be base64url for exactly 32 random bytes.
-6. Run `npm run dev -w @organic-growth/web`.
+1. Install dependencies from the repository root: `npm install`, then `npm run build:packages`.
+2. Copy `apps/web/.dev.vars.example` to `apps/web/.dev.vars` and fill in:
+   - `SESSION_SECRET` — at least 32 random characters (`openssl rand -hex 32`). Signs the GitHub install cookie and Google OAuth state.
+   - `OAUTH_ENCRYPTION_KEY` — base64url of exactly 32 random bytes (`node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"`). Search Console tokens are encrypted with it.
+   - `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` — a Google OAuth web client with redirect URI `http://localhost:5174/api/google/callback` and the Search Console API enabled.
+   - `GITHUB_APP_ID` / `GITHUB_APP_SLUG` / `GITHUB_APP_PRIVATE_KEY` — **optional**. A GitHub App (Setup URL `http://localhost:5174/api/github/callback`; Metadata read, Contents read/write, Pull requests read/write) enables repository analysis and draft fix PRs. Sites without a repository (WordPress, Drupal, Webflow, …) work without it.
+   - `DEEPSEEK_API_KEY` or `ANTHROPIC_API_KEY` — **optional** language model for scoping, extraction, and page copy. The first one set wins: DeepSeek (`deepseek-flash` by default), then Claude (`claude-opus-5-5`), then Workers AI. `LLM_MODEL` overrides the model for the active provider (e.g. `deepseek-v4-pro`). Workers AI needs Cloudflare credentials in local development (`remoteBindings` is off in `vite.config.ts`), so set one of the keys to use the AI steps locally. Every other step works without a model.
+3. Apply migrations: `npm run db:migrate:local -w @organic-growth/web`.
+4. Start: `npm run dev -w @organic-growth/web` (port 5174, fails rather than switching ports). Restart it after changing `cloudflare.config.ts` or `.dev.vars`.
 
-The Worker needs D1, Workers AI, Browser Rendering, and the `site-analysis` Workflow binding. Cloudflare deployment also requires a real D1 database ID and the corresponding GitHub/Google secrets. Apply migrations before starting the app.
+Deploy with `npm run deploy -w @organic-growth/web` after `npm run db:migrate:remote -w @organic-growth/web` and setting the secrets above on the deployed Worker. To deploy your own copy, set `CF_D1_DATABASE_ID` to your D1 database (and update the ID in the `db:migrate:*` scripts).
 
-## Conversion SDK
+## The landing page engine
 
-Build `@organic-growth/sdk`, then initialize it in a website with the site ID and the deployed API base URL:
+| Step | Where | Notes |
+|---|---|---|
+| 1. Scope | `POST /api/sites/:id/scope` | Reads the homepage, linked pages, sitemap route families, and Search Console queries; proposes datasets (fields, page ideas, sources). |
+| 2. Sources | `/api/datasets/:id/sources`, `POST /api/sources/:id/preview` | Own-site sitemap sections, directory/listing pages, sitemaps, or single pages. Preview shows matches, robots.txt status, and a sample extraction. |
+| 3. Collect | `POST /api/datasets/:id/scrape` → `ScrapeWorkflow` | Durable, resumable batches. Identifies as EumonBot, obeys robots.txt and crawl-delay, paces requests per host. CSV import: `POST /api/datasets/:id/records/import`. |
+| 4. Generate | `POST /api/datasets/:id/templates`, `/api/templates/:id/generate` | One page per record (or per group of records). AI writes the copy *patterns* once per template; pages are filled from data, so cost doesn't grow with page count. Thin and duplicate pages are never published. |
+| 5. Serve | `GET /p/:siteId/<path>` | Complete server-rendered HTML with canonical, JSON-LD, sitemap, hub page, and related links. Published URLs never change on regeneration; removed pages return 410. |
+| 6. Measure | `GET /api/sites/:id/performance`, `SearchSyncWorkflow` (daily) | Views and CTA clicks (in-page beacon), Googlebot fetches (server-side), Search Console per page and query, and conversions attributed through a first-party session cookie. |
+| 7. Optimize | Suggestions, `POST /api/pages/:id/snippets`, CTA variants | Low-CTR snippets, near-miss queries, uncrawled or invisible pages, weak CTAs, winning templates. CTA variants are allocated by Thompson sampling. Every page edit is logged with before/after metrics. |
 
-```ts
-import { createOrganicGrowthTracker } from "@organic-growth/sdk";
+### Putting pages on the customer's domain
 
-const tracker = createOrganicGrowthTracker({
-  siteId: "site_…",
-  endpoint: "https://YOUR-APP-HOST/api/sites",
-});
+The customer's site forwards one path (default `/guides`) — or a whole subdomain — to `https://<app-host>/p/<siteId>/…`. **Setup** in the dashboard generates the rule for Cloudflare Workers, Vercel, Next.js, Netlify, nginx, and Apache (it detects the host from response headers), and **Run check** verifies the result as Googlebot.
 
-tracker.track("whatsapp_click", { destination: "sales" });
-```
+Proxies must send `X-Eumon-Proxy: 1` (or an `X-Forwarded-Host` matching the public origin). Requests that arrive any other way get `X-Robots-Tag: noindex`, so the copy on the app host never competes with the customer's URL.
 
-The SDK sends event name, destination label, page path (query string removed by the server), and a random anonymous session ID. It does not collect form values or arbitrary properties. Event ingestion only accepts requests from the connected website origin.
+### Conversion tracking
+
+Setup → *Track conversions* provides a dependency-free script for the customer's main site. It auto-tracks WhatsApp, phone, email, and form submissions (never form contents) and exposes `eumonTrack(event)`. It reuses the landing pages' `eumon_sid` cookie, so conversions are credited to the page a visitor first landed on. JavaScript apps can use `@organic-growth/sdk` instead, which reads the same cookie.
+
+## Access control
+
+The app has no built-in user accounts: put the hostname behind **Cloudflare Access**, but exclude the public paths, or landing pages and tracking stop working:
+
+- `/p/*` — landing pages, sitemap, and the analytics beacon
+- `/api/sites/*/events` — conversion events from customer sites
 
 ## Current boundaries
 
-- Search Console imports a bounded finalized 28-day query/page/country/device sample. Search Console's reporting API can omit rows under its own privacy and data limits.
-- Competitor entries are domains supplied by the workspace owner. The current report records one homepage fetch per domain; it does not claim to know competitor rankings, traffic, or full-site architecture.
-- Conversion events are stored, but lead qualification and revenue attribution are not yet implemented.
-- Automated patches are limited to existing `robots.txt` and sitemap configuration files. The user inspects the generated full-file diff and explicitly opens a draft PR; the app does not merge or deploy it.
-- Protect the hosted workspace with Cloudflare Access. The MVP does not implement multi-user membership or tenant roles itself.
+- One workspace; no multi-user membership or roles (see Access control).
+- Competitor entries are owner-supplied domains with one homepage fetch each; no SERP data.
+- The scraper reads server-rendered HTML; sources that only render client-side, require logins, or block robots are skipped.
+- Collected facts are shown to the owner before anything is published, but extraction is model output — review records and page previews before publishing.
+- The analytics beacon is unauthenticated (as with any web analytics); counts can be inflated by deliberate abuse.
+- Search Console data lags 2–3 days; the "changes and their effect" windows fill in as data arrives.

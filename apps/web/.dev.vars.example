@@ -1,0 +1,6 @@
+GITHUB_APP_ID=replace-with-github-app-id
+GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\nreplace-with-pem-content\n-----END RSA PRIVATE KEY-----"
+SESSION_SECRET=replace-with-at-least-32-random-characters
+GOOGLE_CLIENT_ID=replace-with-google-oauth-client-id
+GOOGLE_CLIENT_SECRET=replace-with-google-oauth-client-secret
+OAUTH_ENCRYPTION_KEY=replace-with-base64url-encoded-32-byte-key

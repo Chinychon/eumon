@@ -1,0 +1,21 @@
+{
+  "name": "organic-growth",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AI-powered organic growth engine for modern websites",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w @organic-growth/web",
+    "build": "npm run build -w @organic-growth/core && npm run build -w @organic-growth/db && npm run build -w @organic-growth/repo-analyzer && npm run build -w @organic-growth/crawler && npm run build -w @organic-growth/agents && npm run build -w @organic-growth/sdk && npm run build -w @organic-growth/web",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "db:migrate:local": "npm run db:migrate:local -w @organic-growth/web",
+    "test": "npm run test --workspaces --if-present"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT"
+}

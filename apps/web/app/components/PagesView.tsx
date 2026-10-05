@@ -12,6 +12,12 @@ type Generation = { created: number; updated: number; retired: number; draft: nu
 
 const STATUS_TABS: Array<GeneratedPageStatus | "all"> = ["all", "published", "draft", "thin", "duplicate", "unpublished", "retired"];
 
+/** "published" means approved by the owner; it is only "live" once the domain check passed. */
+function statusLabel(status: GeneratedPageStatus | "all", live: boolean): string {
+  if (status === "published") return live ? "live" : "approved";
+  return status === "draft" ? "ready" : status;
+}
+
 function summarize(generation: Generation): string {
   const parts = [`${formatNumber(generation.draft)} ready`];
   if (generation.thin) parts.push(`${formatNumber(generation.thin)} held back as thin`);
@@ -51,7 +57,9 @@ export function PagesView({ site, onNavigate }: { site: SiteRecord; onNavigate: 
     } catch (cause) { setError(errorMessage(cause)); } finally { setBusy(""); }
   }
 
-  const live = templates.reduce((sum, template) => sum + (template.pageCounts.published ?? 0), 0);
+  const approved = templates.reduce((sum, template) => sum + (template.pageCounts.published ?? 0), 0);
+  const verified = Boolean(settings?.verifiedAt);
+  const host = settings ? new URL(settings.publicOrigin).host : new URL(site.baseUrl).host;
   const usable = datasets.filter((dataset) => dataset.recordCount > 0);
 
   return (
@@ -60,10 +68,16 @@ export function PagesView({ site, onNavigate }: { site: SiteRecord; onNavigate: 
         eyebrow="STEPS 4–5 · GENERATE & PUBLISH"
         title="Landing pages"
         description="Each template turns records into landing pages: what the searcher is looking for, the facts that answer it, and a clear call to action. Thin or duplicate pages are never published."
-        actions={<><Badge tone="green">{`${formatNumber(live)} live`}</Badge><Button variant="secondary" onClick={() => onNavigate("setup")}>Serving setup</Button></>}
+        actions={<><Badge tone={verified ? "green" : "amber"}>{`${formatNumber(approved)} ${verified ? "live" : "approved"}`}</Badge><Button variant="secondary" onClick={() => onNavigate("setup")}>Serving setup</Button></>}
       />
       {error && <div className="callout error" role="alert" style={{ marginBottom: 14 }}>{error}</div>}
       {message && <div className="callout" style={{ marginBottom: 14 }}>{message}</div>}
+      {!verified && approved > 0 && (
+        <div className="callout warn" style={{ marginBottom: 14 }}>
+          {formatNumber(approved)} approved pages are not on {host} yet: nobody, including Google, can see them until the proxy rule is added and verified.{" "}
+          <Button small variant="ghost" onClick={() => onNavigate("setup")}>Finish setup →</Button>
+        </div>
+      )}
       {loading ? <div className="empty">Loading…</div> : usable.length === 0 ? (
         <div className="empty">No records yet. <Button small variant="ghost" onClick={() => onNavigate("data")}>Collect data first →</Button></div>
       ) : usable.map((dataset) => {
@@ -78,7 +92,7 @@ export function PagesView({ site, onNavigate }: { site: SiteRecord; onNavigate: 
               ))}
             </div>
             {datasetTemplates.map((template) => (
-              <TemplateCard key={template.id} template={template} dataset={dataset} site={site} settings={settings} onChanged={reload} onMessage={setMessage} />
+              <TemplateCard key={template.id} template={template} dataset={dataset} site={site} settings={settings} verified={verified} onChanged={reload} onMessage={setMessage} />
             ))}
           </Card>
         );
@@ -87,8 +101,8 @@ export function PagesView({ site, onNavigate }: { site: SiteRecord; onNavigate: 
   );
 }
 
-function TemplateCard({ template, dataset, site, settings, onChanged, onMessage }: {
-  template: TemplateWithCounts; dataset: DatasetSummary; site: SiteRecord; settings: PageSettings | null;
+function TemplateCard({ template, dataset, site, settings, verified, onChanged, onMessage }: {
+  template: TemplateWithCounts; dataset: DatasetSummary; site: SiteRecord; settings: PageSettings | null; verified: boolean;
   onChanged: () => Promise<void>; onMessage: (message: string) => void;
 }) {
   const [busy, setBusy] = useState("");
@@ -113,16 +127,18 @@ function TemplateCard({ template, dataset, site, settings, onChanged, onMessage 
         </div>
         <div className="row">
           {(["published", "draft", "thin", "duplicate", "unpublished", "retired"] as const).filter((status) => counts[status]).map((status) => (
-            <Badge key={status} tone={toneFor(status)}>{`${formatNumber(counts[status] ?? 0)} ${status === "draft" ? "ready" : status}`}</Badge>
+            <Badge key={status} tone={status === "published" && !verified ? "amber" : toneFor(status)}>{`${formatNumber(counts[status] ?? 0)} ${statusLabel(status, verified)}`}</Badge>
           ))}
         </div>
       </div>
       <div className="row" style={{ marginTop: 10 }}>
         {ready > 0 && <Button small busy={busy === "publish"} onClick={() => act("publish", async () => {
           const result = await api<{ changed: number }>(`/api/templates/${template.id}/publish`, { method: "POST", json: { publish: true } });
-          onMessage(`Published ${formatNumber(result.changed)} pages. They go live on your domain once the proxy is set up (Setup).`);
-        })}>Publish {formatNumber(ready)} ready pages</Button>}
-        {(counts.published ?? 0) > 0 && <Button small variant="secondary" busy={busy === "unpublish"} onClick={() => act("unpublish", () => api(`/api/templates/${template.id}/publish`, { method: "POST", json: { publish: false } }))}>Take offline</Button>}
+          onMessage(verified
+            ? `Approved ${formatNumber(result.changed)} pages; they are live on your domain now.`
+            : `Approved ${formatNumber(result.changed)} pages. They go live once the proxy rule in Setup is added and verified.`);
+        })}>Approve {formatNumber(ready)} ready pages</Button>}
+        {(counts.published ?? 0) > 0 && <Button small variant="secondary" busy={busy === "unpublish"} onClick={() => act("unpublish", () => api(`/api/templates/${template.id}/publish`, { method: "POST", json: { publish: false } }))}>Withdraw approval</Button>}
         <Button small variant="secondary" busy={busy === "generate"} onClick={() => act("generate", async () => {
           const result = await api<{ generation: Generation }>(`/api/templates/${template.id}/generate`, { method: "POST" });
           onMessage(summarize(result.generation));
@@ -140,7 +156,7 @@ function TemplateCard({ template, dataset, site, settings, onChanged, onMessage 
         setEditing(false);
         await onChanged();
       }} />}
-      {showPages && <PagesList template={template} site={site} settings={settings} onChanged={onChanged} />}
+      {showPages && <PagesList template={template} site={site} settings={settings} verified={verified} onChanged={onChanged} />}
     </div>
   );
 }
@@ -222,7 +238,7 @@ function TemplateEditor({ template, dataset, onSaved }: { template: PageTemplate
   );
 }
 
-function PagesList({ template, site, settings, onChanged }: { template: PageTemplate; site: SiteRecord; settings: PageSettings | null; onChanged: () => Promise<void> }) {
+function PagesList({ template, site, settings, verified, onChanged }: { template: PageTemplate; site: SiteRecord; settings: PageSettings | null; verified: boolean; onChanged: () => Promise<void> }) {
   const [tab, setTab] = useState<GeneratedPageStatus | "all">("all");
   const [pages, setPages] = useState<PageRow[]>([]);
   const [total, setTotal] = useState(0);
@@ -246,7 +262,7 @@ function PagesList({ template, site, settings, onChanged }: { template: PageTemp
   const origin = settings?.publicOrigin ?? site.baseUrl;
   return (
     <div style={{ marginTop: 12 }}>
-      <div className="tabs">{STATUS_TABS.map((status) => <button key={status} className={tab === status ? "active" : ""} onClick={() => { setTab(status); setOffset(0); }}>{status === "draft" ? "ready" : status}</button>)}</div>
+      <div className="tabs">{STATUS_TABS.map((status) => <button key={status} className={tab === status ? "active" : ""} onClick={() => { setTab(status); setOffset(0); }}>{statusLabel(status, verified)}</button>)}</div>
       {pages.length === 0 ? <div className="empty">No pages in this view.</div> : (
         <div className="table-wrap">
           <table className="table">
@@ -258,15 +274,15 @@ function PagesList({ template, site, settings, onChanged }: { template: PageTemp
                     <strong style={{ fontSize: 13 }}>{page.title}</strong>
                     <div className="row small" style={{ marginTop: 3 }}>
                       <a className="mono" href={`/p/${site.id}${page.path}?preview=1`} target="_blank" rel="noreferrer">{page.path}</a>
-                      {page.status === "published" && <a href={`${origin}${page.path}`} target="_blank" rel="noreferrer">live ↗</a>}
+                      {page.status === "published" && verified && <a href={`${origin}${page.path}`} target="_blank" rel="noreferrer">live ↗</a>}
                     </div>
                   </td>
-                  <td><Badge tone={toneFor(page.status)}>{page.status === "draft" ? "ready" : page.status}</Badge></td>
+                  <td><Badge tone={page.status === "published" && !verified ? "amber" : toneFor(page.status)}>{statusLabel(page.status, verified)}</Badge></td>
                   <td className="num">{Math.round(page.qualityScore * 100)}</td>
                   <td className="small muted">{page.qualityIssues.join(" ")}</td>
                   <td>
-                    {page.status === "published" && <Button small variant="ghost" busy={busy === page.id} onClick={() => setStatus(page, "unpublished")}>Unpublish</Button>}
-                    {(page.status === "draft" || page.status === "unpublished") && <Button small variant="secondary" busy={busy === page.id} onClick={() => setStatus(page, "published")}>Publish</Button>}
+                    {page.status === "published" && <Button small variant="ghost" busy={busy === page.id} onClick={() => setStatus(page, "unpublished")}>Withdraw</Button>}
+                    {(page.status === "draft" || page.status === "unpublished") && <Button small variant="secondary" busy={busy === page.id} onClick={() => setStatus(page, "published")}>Approve</Button>}
                   </td>
                 </tr>
               ))}

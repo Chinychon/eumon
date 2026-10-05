@@ -24,5 +24,10 @@ export async function GET(request: Request, context: { params: Promise<{ siteId:
     pages, queries, publicOrigin: origin, variants,
     templates: templates.map((template) => ({ id: template.id, name: template.name })),
   });
-  return json({ days, report, daily, revisions, variants, searchConnected: Boolean(site.gscProperty) });
+  return json({
+    days, report, daily, revisions, variants,
+    searchConnected: Boolean(site.gscProperty),
+    live: Boolean(settings.verifiedAt),
+    publicHost: new URL(settings.publicOrigin).host,
+  });
 }

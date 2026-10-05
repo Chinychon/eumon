@@ -8,36 +8,47 @@ const narrativeSchema = schema.object({
   highestImpactOpportunity: schema.string(),
 });
 
-/** Adds concise synthesis while preserving the deterministic, evidence-derived priorities. */
+/** Answers that say nothing; when the model gives one, the drafted text is kept. */
+const NON_ANSWER = /\b(not (established|available|provided|known|determined|specified)|unknown|insufficient (data|information)|no information)\b/i;
+
+/**
+ * Rewrites the deterministic plan's headline text for a business owner while
+ * keeping its facts. The evidence-derived priorities are never changed.
+ */
 export async function synthesizePlanNarrative(
   llm: JsonLlm,
   plan: GrowthPlan,
   findings: Finding[],
 ): Promise<GrowthPlan> {
-  const facts = {
-    site: plan.situation,
-    findings: findings.slice(0, 8).map((f) => ({ id: f.id, title: f.title, summary: f.summary })),
-    priorities: plan.priorities.map((p) => ({ rank: p.rank, title: p.title })),
+  const draft = {
+    situation: plan.situation,
+    competitiveAdvantage: plan.competitiveAdvantage,
+    highestImpactOpportunity: plan.highestImpactOpportunity,
   };
   try {
     const parsed = await llm.json<Record<string, unknown>>({
-      system: "Summarize only the supplied facts for a website owner. Do not infer search demand, competitors, traffic, revenue, or causes. Keep each field under 400 characters.",
-      user: JSON.stringify(facts),
+      system: "Rewrite each draft field for a website owner in plain, specific language. Keep every fact in the draft and use only the supplied facts: do not infer search demand, competitors, traffic, revenue, or causes. If you cannot improve a field, return the draft text unchanged — never answer that something is unknown or not established. Keep each field under 400 characters.",
+      user: JSON.stringify({
+        draft,
+        findings: findings.slice(0, 8).map((f) => ({ title: f.title, summary: f.summary })),
+        priorities: plan.priorities.map((p) => ({ rank: p.rank, title: p.title })),
+      }),
       schema: narrativeSchema,
       maxTokens: 2000,
       effort: "low",
     });
-    const valid = (value: unknown): value is string => typeof value === "string" && value.trim().length > 0 && value.length <= 400;
-    if (!valid(parsed.situation) || !valid(parsed.competitiveAdvantage) || !valid(parsed.highestImpactOpportunity)) return plan;
+    const pick = (field: keyof typeof draft): string => {
+      const value = parsed[field];
+      return typeof value === "string" && value.trim().length > 0 && value.length <= 400 && !NON_ANSWER.test(value) ? value.trim() : draft[field];
+    };
+    const next = { situation: pick("situation"), competitiveAdvantage: pick("competitiveAdvantage"), highestImpactOpportunity: pick("highestImpactOpportunity") };
     return {
       ...plan,
-      situation: parsed.situation,
-      competitiveAdvantage: parsed.competitiveAdvantage,
-      highestImpactOpportunity: parsed.highestImpactOpportunity,
+      ...next,
       markdown: plan.markdown
-        .replace(plan.situation, parsed.situation)
-        .replace(plan.competitiveAdvantage, parsed.competitiveAdvantage)
-        .replace(plan.highestImpactOpportunity, parsed.highestImpactOpportunity),
+        .replace(plan.situation, next.situation)
+        .replace(plan.competitiveAdvantage, next.competitiveAdvantage)
+        .replace(plan.highestImpactOpportunity, next.highestImpactOpportunity),
     };
   } catch {
     return plan;

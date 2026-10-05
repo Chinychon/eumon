@@ -5,3 +5,4 @@ export * from "./fetch.js";
 export * from "./discover.js";
 export * from "./extract.js";
 export * from "./scope.js";
+export * from "./resolve.js";

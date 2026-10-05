@@ -1,9 +1,9 @@
 import { env } from "cloudflare:workers";
 import { createId } from "@organic-growth/core";
-import { deleteUnusedProposedDatasets, getSiteScope, saveSiteScope, upsertDataset, upsertSource } from "@organic-growth/db";
+import { deleteUnusedProposedDatasets, getPageSettings, getSiteScope, saveSiteScope, upsertDataset, upsertPageSettings, upsertSource } from "@organic-growth/db";
 import { proposeScope } from "@organic-growth/scraper";
 import { gatherSiteEvidence } from "../../../../../src/page-engine";
-import { appLlm, fail, findSite, json, llmFailure, readJson } from "../../../../../src/server";
+import { appLlm, fail, findSite, json, llmFailure, readJson, settingsFor } from "../../../../../src/server";
 
 export async function GET(_request: Request, context: { params: Promise<{ siteId: string }> }) {
   const { siteId } = await context.params;
@@ -36,6 +36,10 @@ export async function POST(request: Request, context: { params: Promise<{ siteId
   }
   if (!proposal.datasets.length) return fail("The model did not return a usable scope. Try again, or describe your goal in more detail.", 502);
 
+  // Until the owner customizes settings, use the brand name the business uses itself, not one guessed from the domain.
+  if (proposal.businessName && !(await getPageSettings(env.DB, siteId))) {
+    await upsertPageSettings(env.DB, { ...(await settingsFor(site)), siteName: proposal.businessName, updatedAt: new Date().toISOString() });
+  }
   await deleteUnusedProposedDatasets(env.DB, siteId);
   await saveSiteScope(env.DB, siteId, { goal, businessSummary: proposal.businessSummary, conversionGoal: proposal.conversionGoal });
   const now = new Date().toISOString();
@@ -49,7 +53,7 @@ export async function POST(request: Request, context: { params: Promise<{ siteId
     for (const source of proposed.sources) {
       await upsertSource(env.DB, {
         id: createId("src"), siteId, datasetId, url: source.url, kind: source.kind, urlPattern: source.urlPattern,
-        maxPages: source.kind === "page" ? 1 : source.kind === "own_site" ? 2000 : 300,
+        maxPages: source.kind === "page" ? 50 : source.kind === "own_site" ? 2000 : 300,
         origin: source.kind === "own_site" ? "own_site" : "ai", rationale: source.rationale,
         status: "proposed", recordCount: 0, createdAt: now,
       });

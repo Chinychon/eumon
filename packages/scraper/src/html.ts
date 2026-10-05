@@ -121,15 +121,60 @@ export function extractLinks(html: string, pageUrl: string): string[] {
   return [...links];
 }
 
-/** The next page of a paginated listing, from `rel="next"` when present. */
-export function findNextPage(html: string, pageUrl: string): string | null {
-  const href = html.match(/<(?:a|link)\b[^>]*rel=["']next["'][^>]*href=["']([^"']+)["']/i)?.[1]
-    ?? html.match(/<(?:a|link)\b[^>]*href=["']([^"']+)["'][^>]*rel=["']next["']/i)?.[1];
-  if (!href) return null;
-  try {
-    const next = new URL(decodeEntities(href), pageUrl);
-    return next.origin === new URL(pageUrl).origin ? next.toString() : null;
-  } catch {
-    return null;
+const PAGE_PARAMS = ["page", "p", "pg", "paged", "pagenum", "offset"];
+
+function pageNumber(url: URL): { param: string; value: number } | null {
+  for (const param of PAGE_PARAMS) {
+    const raw = url.searchParams.get(param);
+    if (raw !== null && /^\d+$/.test(raw)) return { param, value: Number(raw) };
   }
+  const path = url.pathname.match(/\/page\/(\d+)\/?$/);
+  return path ? { param: "/page/", value: Number(path[1]) } : null;
+}
+
+const basePath = (url: URL) => url.pathname.replace(/\/page\/\d+\/?$/, "/").replace(/\/+$/, "") || "/";
+
+/**
+ * The next page of a paginated list. Understands `rel="next"`, links labelled
+ * "next", and numbered pagers (`?page=2`, `?page=1` in zero-based Drupal
+ * views, WordPress `/page/2/`), so lists are read past their first page.
+ */
+export function findNextPage(html: string, pageUrl: string): string | null {
+  const here = new URL(pageUrl);
+  const sameSite = (href: string): URL | null => {
+    try {
+      const url = new URL(decodeEntities(href), pageUrl);
+      return url.origin === here.origin ? url : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const relNext = html.match(/<(?:a|link)\b[^>]*rel=["']next["'][^>]*href=["']([^"']+)["']/i)?.[1]
+    ?? html.match(/<(?:a|link)\b[^>]*href=["']([^"']+)["'][^>]*rel=["']next["']/i)?.[1];
+  const fromRel = relNext ? sameSite(relNext) : null;
+  if (fromRel) return fromRel.toString();
+
+  const anchors = [...html.matchAll(/<a\b([^>]*)>([\s\S]*?)<\/a>/gi)].flatMap((match) => {
+    const href = match[1]!.match(/href=["']([^"'#]+)["']/i)?.[1];
+    const url = href ? sameSite(href) : null;
+    return url ? [{ url, attrs: match[1]!, text: match[2]!.replace(/<[^>]+>/g, " ").trim() }] : [];
+  });
+
+  const labelled = anchors.find((anchor) =>
+    /(title|aria-label)=["'][^"']*\bnext\b/i.test(anchor.attrs) || /^(next(\s+page)?|›|»|→|next\s*[›»→])$/i.test(anchor.text));
+  if (labelled && labelled.url.toString() !== here.toString()) return labelled.url.toString();
+
+  // Numbered pager: the smallest page number above the current one, on the same list.
+  const pager = anchors.flatMap((anchor) => {
+    const number = pageNumber(anchor.url);
+    return number && basePath(anchor.url) === basePath(here) ? [{ ...anchor, number }] : [];
+  });
+  if (!pager.length) return null;
+  const marked = pager.find((anchor) => /aria-current=["']page["']/i.test(anchor.attrs));
+  const current = pageNumber(here)?.value ?? marked?.number.value ?? Math.min(...pager.map((anchor) => anchor.number.value)) - 1;
+  const next = pager
+    .filter((anchor) => anchor.number.value > current)
+    .sort((a, b) => a.number.value - b.number.value)[0];
+  return next ? next.url.toString() : null;
 }

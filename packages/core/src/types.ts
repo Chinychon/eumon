@@ -457,6 +457,8 @@ export type PageSettings = {
   ctaLabel: string;
   ctaUrl: string;
   ctaCopy: string;
+  /** Set when the live check confirmed the proxy serves these pages on the public origin. */
+  verifiedAt?: string;
   updatedAt: string;
 };
 

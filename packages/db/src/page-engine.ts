@@ -1,6 +1,8 @@
+import { mergeRecordData } from "@organic-growth/core";
 import type {
   CtaVariant,
   DataRecord,
+  DatasetField,
   DataSource,
   Dataset,
   GeneratedPage,
@@ -190,22 +192,40 @@ function mapRecord(row: Row): DataRecord {
 }
 
 /**
- * Inserts records, merging into an existing record with the same key. Later
- * sources fill gaps rather than erasing values: null fields are dropped
- * before the JSON merge, because JSON merge-patch treats null as "delete".
+ * Inserts records, merging into an existing record with the same key: new
+ * single values win, gaps are filled, and list values accumulate, so facts
+ * spread across many pages (e.g. one mall's brands) all end up on the record.
  */
 export async function upsertRecords(
   db: D1Like,
   records: Array<Pick<DataRecord, "siteId" | "datasetId" | "key" | "data" | "sourceId" | "sourceUrl">>,
+  fields: DatasetField[],
 ): Promise<void> {
+  if (!records.length) return;
   const now = nowIso();
-  const statements = records.map((record) => {
-    const data = Object.fromEntries(Object.entries(record.data).filter(([, value]) => value != null && value !== ""));
+  // Several rows in one batch can share a key (a list page naming the same entity twice).
+  const incoming = new Map<string, (typeof records)[number]>();
+  for (const record of records) {
+    const prior = incoming.get(record.key);
+    incoming.set(record.key, prior ? { ...prior, data: mergeRecordData(fields, record.data, [prior.data]) } : record);
+  }
+  const datasetId = records[0]!.datasetId;
+  const existing = new Map<string, JsonObject>();
+  for (const group of chunks([...incoming.keys()], 90)) {
+    const { results } = await db.prepare(
+      `SELECT record_key, data_json FROM data_records WHERE dataset_id = ? AND record_key IN (${group.map(() => "?").join(",")})`,
+    ).bind(datasetId, ...group).all<{ record_key: string; data_json: string }>();
+    for (const row of results) existing.set(row.record_key, parseJson<JsonObject>(row.data_json, {}));
+  }
+  const statements = [...incoming.values()].map((record) => {
+    const prior = existing.get(record.key);
+    const merged = prior ? mergeRecordData(fields, record.data, [prior]) : record.data;
+    const data = Object.fromEntries(Object.entries(merged).filter(([, value]) => value != null && value !== ""));
     return db.prepare(
       `INSERT INTO data_records (id, site_id, dataset_id, record_key, data_json, source_id, source_url, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(dataset_id, record_key) DO UPDATE SET
-         data_json = json_patch(data_records.data_json, excluded.data_json),
+         data_json = excluded.data_json,
          source_id = COALESCE(data_records.source_id, excluded.source_id),
          source_url = COALESCE(data_records.source_url, excluded.source_url),
          updated_at = excluded.updated_at`,
@@ -256,6 +276,15 @@ export async function getRecordsByIds(db: D1Like, ids: string[]): Promise<DataRe
   }
   const order = new Map(ids.map((id, index) => [id, index]));
   return output.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
+}
+
+/** Folds duplicate records into a canonical one in a single batch. */
+export async function mergeRecords(db: D1Like, input: { canonicalId: string; duplicateIds: string[]; data: JsonObject }): Promise<void> {
+  const now = nowIso();
+  await runStatements(db, [
+    db.prepare("UPDATE data_records SET data_json = ?, updated_at = ? WHERE id = ?").bind(JSON.stringify(input.data), now, input.canonicalId),
+    ...input.duplicateIds.map((id) => db.prepare("DELETE FROM data_records WHERE id = ?").bind(id)),
+  ]);
 }
 
 export async function deleteRecord(db: D1Like, id: string): Promise<void> {
@@ -731,20 +760,21 @@ export async function getPageSettings(db: D1Like, siteId: string): Promise<PageS
     ctaLabel: String(row.cta_label),
     ctaUrl: String(row.cta_url),
     ctaCopy: String(row.cta_copy),
+    verifiedAt: optional(row.verified_at),
     updatedAt: String(row.updated_at),
   };
 }
 
 export async function upsertPageSettings(db: D1Like, settings: PageSettings): Promise<void> {
   await db.prepare(
-    `INSERT INTO page_settings (site_id, public_origin, mount_path, site_name, brand_color, cta_label, cta_url, cta_copy, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(site_id) DO UPDATE SET public_origin = excluded.public_origin, mount_path = excluded.mount_path, site_name = excluded.site_name,
+    `INSERT INTO page_settings (site_id, public_origin, mount_path, site_name, brand_color, cta_label, cta_url, cta_copy, verified_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(site_id) DO UPDATE SET public_origin = excluded.public_origin, mount_path = excluded.mount_path, verified_at = excluded.verified_at, site_name = excluded.site_name,
        brand_color = excluded.brand_color, cta_label = excluded.cta_label, cta_url = excluded.cta_url,
        cta_copy = excluded.cta_copy, updated_at = excluded.updated_at`,
   ).bind(
     settings.siteId, settings.publicOrigin, settings.mountPath, settings.siteName, settings.brandColor,
-    settings.ctaLabel, settings.ctaUrl, settings.ctaCopy, settings.updatedAt,
+    settings.ctaLabel, settings.ctaUrl, settings.ctaCopy, settings.verifiedAt ?? null, settings.updatedAt,
   ).run();
 }
 

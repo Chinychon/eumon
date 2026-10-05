@@ -1,5 +1,5 @@
 import { schema, type JsonLlm, type JsonSchema } from "@organic-growth/ai";
-import type { Dataset, DatasetField, JsonObject, JsonValue } from "@organic-growth/core";
+import { mergeRecordData, type Dataset, type DatasetField, type JsonObject, type JsonValue } from "@organic-growth/core";
 import { extractJsonLd, extractMeta, htmlToText } from "./html.js";
 
 export function slugify(value: string): string {
@@ -62,7 +62,11 @@ export function coerceField(field: DatasetField, value: unknown): JsonValue {
 
 export type ExtractedRecord = { key: string; data: JsonObject };
 
-/** Normalizes raw rows against the dataset; drops rows without a usable key. */
+/**
+ * Normalizes raw rows against the dataset; drops only rows without a usable
+ * key. Missing details make a page thinner, which the page quality gate
+ * handles — they are not a reason to lose the record.
+ */
 export function normalizeRecords(dataset: Pick<Dataset, "fields" | "keyField">, rows: unknown[]): ExtractedRecord[] {
   const output = new Map<string, ExtractedRecord>();
   for (const row of rows) {
@@ -73,9 +77,19 @@ export function normalizeRecords(dataset: Pick<Dataset, "fields" | "keyField">, 
     const keyValue = data[dataset.keyField];
     const key = typeof keyValue === "string" ? slugify(keyValue) : typeof keyValue === "number" ? String(keyValue) : "";
     if (!key) continue;
-    const missingRequired = dataset.fields.some((field) => field.required && data[field.key] == null);
-    if (missingRequired) continue;
-    output.set(key, { key, data });
+    // A record never lists itself (e.g. "Sunway Carnival" among Sunway Carnival Mall's clients).
+    for (const field of dataset.fields) {
+      const value = data[field.key];
+      if (field.type !== "list" || !Array.isArray(value)) continue;
+      const kept = value.filter((item) => {
+        const slug = slugify(String(item));
+        return !slug || !(slug === key || key.startsWith(`${slug}-`));
+      });
+      data[field.key] = kept.length ? kept : null;
+    }
+    // One page can list the same entity several times (e.g. five projects at one mall); combine them.
+    const prior = output.get(key);
+    output.set(key, { key, data: prior ? mergeRecordData(dataset.fields, prior.data, [data]) : data });
   }
   return [...output.values()];
 }
@@ -84,9 +98,11 @@ const EXTRACTION_SYSTEM = `You extract structured records from one web page for 
 Rules:
 - Use only facts stated on the page or in its JSON-LD. Never guess, infer, or use outside knowledge.
 - Use null for any field the page does not state.
-- A detail page usually describes exactly one record. A listing, table, or directory page may contain many; return each one.
-- Return an empty list when the page does not describe the dataset's entity type (e.g. an error page, login wall, or unrelated article).
-- Keep text fields concise and factual; copy names exactly as written.
+- Only create a record for something that is itself the dataset's entity type. Other names on the page (brands, people, products, events, captions) may fill a record's fields but must never become records themselves.
+- A detail page usually describes exactly one record. A listing, table, directory, or bullet list may name many; return one record for every entity it names, even when every field except the name is unknown.
+- Fill fields from context the page states for the whole list (e.g. a section heading naming the group, or a location in parentheses after a name).
+- Return an empty list only when the page names no entities of this type (e.g. an error page, login wall, or unrelated article).
+- Keep text fields concise and factual. Write each name in its usual official form and put locations in location fields rather than in the name (e.g. "Queensbay Mall (Penang)" → name "Queensbay Mall", city "Penang").
 - For "sourceSummary", write one neutral sentence describing what the page is.`;
 
 /**

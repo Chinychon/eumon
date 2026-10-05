@@ -6,6 +6,7 @@ import { createLlm, describeModelError, LlmError } from "@organic-growth/ai";
 import {
   enqueueScrapeUrls,
   getDataset,
+  listRecords,
   listSources,
   markScrapeResults,
   nextScrapeBatch,
@@ -17,6 +18,7 @@ import {
   upsertSource,
 } from "@organic-growth/db";
 import { expandSource, extractRecordsFromHtml, PoliteFetcher, RobotsBlockedError, sleep } from "@organic-growth/scraper";
+import { mergeDuplicateRecords } from "./dedupe";
 
 export interface ScrapePayload {
   jobId: string;
@@ -128,14 +130,14 @@ export class ScrapeWorkflow extends WorkflowEntrypoint<AppEnv, ScrapePayload> {
               data: record.data,
               sourceId: item.sourceId,
               sourceUrl: response.finalUrl,
-            })));
+            })), setup.dataset.fields);
             results.push({ url: item.url, state: "done", recordsFound: records.length });
           }
           await markScrapeResults(db, jobId, results);
           const counts = await scrapeQueueCounts(db, jobId);
           await updateJob(db, jobId, {
             progress: {
-              message: `Collected ${counts.records.toLocaleString()} records from ${(counts.total - counts.pending).toLocaleString()} of ${counts.total.toLocaleString()} pages`,
+              message: `Read ${(counts.total - counts.pending).toLocaleString()} of ${counts.total.toLocaleString()} pages (${counts.records.toLocaleString()} entries found)`,
               done: counts.total - counts.pending,
               total: counts.total,
             },
@@ -145,14 +147,27 @@ export class ScrapeWorkflow extends WorkflowEntrypoint<AppEnv, ScrapePayload> {
         if (processed === 0) break;
       }
 
+      const mergedCount = await step.do("merge-duplicates", async () => {
+        await updateJob(db, jobId, { progress: { message: "Merging records that name the same thing", done: 1, total: 1 } });
+        try {
+          const merges = await mergeDuplicateRecords(db, createLlm(this.env), setup.dataset);
+          return merges.reduce((sum, merge) => sum + merge.merged.length, 0);
+        } catch {
+          return 0; // Collection still succeeded; duplicates can be merged later from the dashboard.
+        }
+      });
+
       await step.do("finish", async () => {
         for (const source of setup.sources) await refreshSourceRecordCount(db, source.id);
         const counts = await scrapeQueueCounts(db, jobId);
-        const failedNote = counts.failed ? ` ${counts.failed.toLocaleString()} pages could not be read.` : "";
+        const { total: uniqueRecords } = await listRecords(db, datasetId, { limit: 1 });
+        const failedNote = (mergedCount ? ` Merged ${mergedCount.toLocaleString()} duplicate names.` : "")
+          + (counts.failed ? ` ${counts.failed.toLocaleString()} pages could not be read.` : "");
         await updateJob(db, jobId, {
           status: "completed",
           progress: {
-            message: `Collected ${counts.records.toLocaleString()} records from ${counts.total.toLocaleString()} pages.${failedNote}`,
+            // Entries repeat across pages (e.g. one mall in many projects); records are merged by name.
+            message: `Read ${counts.total.toLocaleString()} pages and found ${counts.records.toLocaleString()} entries; the dataset now has ${uniqueRecords.toLocaleString()} records.${failedNote}`,
             done: counts.total,
             total: counts.total,
           },

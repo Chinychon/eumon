@@ -66,7 +66,10 @@ Built on Cloudflare Workers ([vinext](https://www.npmjs.com/package/vinext) + Re
 npm test            # unit tests (ai, crawler, scraper, pages)
 npm run typecheck   # every workspace
 npm run build       # packages + production Worker bundle
+npm run eval        # end-to-end collection quality on a real site (calls the model; a few cents)
 ```
+
+`npm run eval` runs the real collection pipeline (pagination, extraction, merging, duplicate resolution) against a live website and grades it against an answer key parsed from the same pages without AI: how many collected records are real, how many published facts the site actually states, and how many of the site's facts were captured. Run it before and after changing prompts or merge logic.
 
 ## Principles
 

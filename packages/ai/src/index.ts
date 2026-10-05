@@ -90,7 +90,8 @@ class DeepSeekJsonLlm implements JsonLlm {
           response_format: { type: "json_object" },
           thinking: { type: thinking ? "enabled" : "disabled" },
           // With thinking on, the default budget (64K) leaves room for reasoning before the answer.
-          ...(thinking ? {} : { max_tokens: request.maxTokens ?? 8000 }),
+          // Temperature only applies without thinking; extraction should be repeatable.
+          ...(thinking ? {} : { max_tokens: request.maxTokens ?? 8000, temperature: 0 }),
           stream: false,
         }),
         signal: AbortSignal.timeout(300_000),

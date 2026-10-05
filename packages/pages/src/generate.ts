@@ -38,6 +38,8 @@ type Group = { key: string; values: Record<string, string>; records: DataRecord[
 
 const MAX_ITEMS_PER_PAGE = 100;
 const MIN_ENTITY_FILL_RATIO = 0.4;
+/** A field counts toward page quality only if this share of records has it. */
+const MIN_FIELD_COVERAGE = 0.2;
 const MIN_ENTITY_TEXT = 250;
 
 /** Normalizes a mount path to `/segment` form, or `` for the site root. */
@@ -59,6 +61,11 @@ export function generatePages(input: GenerationInput): GeneratedPage[] {
   const createId = input.createId ?? (() => `page_${crypto.randomUUID()}`);
   const mount = normalizeMountPath(input.mountPath);
   const groups = groupRecords(input.records, template.groupBy, fields);
+  // Judge each page against fields the dataset actually has: a field no source
+  // provides says nothing about whether one record is thin.
+  const coverage = fieldCoverage(input.records, template.itemFields);
+  const coveredFields = template.itemFields.filter((key) => (coverage.get(key) ?? 0) >= MIN_FIELD_COVERAGE);
+  const expectedFields = coveredFields.length ? coveredFields : template.itemFields.filter((key) => (coverage.get(key) ?? 0) > 0);
   const stablePaths = input.stablePaths ?? new Map<string, string>();
   const usedPaths = new Set<string>(stablePaths.values());
 
@@ -86,7 +93,7 @@ export function generatePages(input: GenerationInput): GeneratedPage[] {
       usedPaths.add(path);
     }
 
-    const quality = assessQuality({ isEntity, template, records, items, intro, faq, title: titleResult.text, issues, fields });
+    const quality = assessQuality({ isEntity, template, records, items, intro, faq, title: titleResult.text, issues, fields, expectedFields });
     return {
       id: createId(),
       siteId: input.siteId,
@@ -114,6 +121,16 @@ export function generatePages(input: GenerationInput): GeneratedPage[] {
   markDuplicates(pages);
   attachRelatedLinks(pages, template, fields);
   return pages;
+}
+
+/** Share of records with a value, per field. */
+export function fieldCoverage(records: DataRecord[], keys: string[]): Map<string, number> {
+  const coverage = new Map<string, number>();
+  for (const key of keys) {
+    const filled = records.filter((record) => valuesOf(record.data[key]).length > 0).length;
+    coverage.set(key, records.length ? filled / records.length : 0);
+  }
+  return coverage;
 }
 
 function valuesOf(value: JsonValue | undefined): string[] {
@@ -262,13 +279,14 @@ function assessQuality(input: {
   title: string;
   issues: string[];
   fields: Map<string, DatasetField>;
+  expectedFields: string[];
 }): { passes: boolean; score: number; issues: string[] } {
   const issues = [...input.issues];
   let passes = Boolean(input.title);
   let score: number;
   if (input.isEntity) {
     const record = input.records[0]!;
-    const expected = input.template.itemFields.filter((key) => input.fields.has(key));
+    const expected = input.expectedFields.filter((key) => input.fields.has(key));
     const filled = expected.filter((key) => valuesOf(record.data[key]).length > 0).length;
     const ratio = expected.length ? filled / expected.length : 0;
     const textLength = input.intro.length + input.items.flatMap((item) => item.fields).reduce((sum, field) => sum + field.value.length, 0)

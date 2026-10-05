@@ -59,7 +59,9 @@ export function SetupView({ site }: { site: SiteRecord }) {
   async function check() {
     setBusy("check"); setError("");
     try {
-      setChecks((await api<{ checks: Check[] }>(`/api/sites/${site.id}/integration`, { method: "POST" })).checks);
+      const result = await api<{ checks: Check[]; ok: boolean }>(`/api/sites/${site.id}/integration`, { method: "POST" });
+      setChecks(result.checks);
+      setMessage(result.ok ? "Verified: approved pages are now live on your domain." : "");
     } catch (cause) { setError(errorMessage(cause)); } finally { setBusy(""); }
   }
 

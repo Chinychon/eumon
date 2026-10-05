@@ -1,6 +1,6 @@
 import { schema, type JsonLlm } from "@organic-growth/ai";
 import type { DataRecord, Dataset, FaqPattern, PageIdea, PageTemplate } from "@organic-growth/core";
-import { normalizeMountPath } from "./generate.js";
+import { fieldCoverage, normalizeMountPath } from "./generate.js";
 import { placeholders, slugify } from "./patterns.js";
 
 type TemplateDraft = Omit<PageTemplate, "id" | "siteId" | "datasetId" | "status" | "createdAt" | "updatedAt">;
@@ -77,8 +77,8 @@ Rules:
 - h1Pattern: the page's main heading.
 - introPattern: 2–4 sentences, factual, built from placeholders. A sentence whose placeholder is empty is dropped automatically, so make each sentence independent. Never state facts that are not in the data.
 - pathPattern must start with the mount path and contain placeholders that make every page unique (for grouped pages: every group-by field; for entity pages: the key field).
-- itemFields: the fields to display for each record, most persuasive first (6–10).
-- faq: 3–5 questions searchers actually ask, answered only from placeholders (no outside facts, no medical/legal/financial advice).
+- itemFields: the fields to display for each record, most persuasive first (6–10). Prefer fields with high coverage (see fieldCoverage); a field almost no record has will rarely show.
+- faq: 3–5 questions searchers actually ask, answered only from placeholders (no outside facts, no medical/legal/financial advice). Build answers on fields with good coverage; an answer whose placeholder is empty is dropped from that page.
 - Do not invent fields. Do not add marketing claims the data cannot support.`;
 
 const templateSchema = schema.object({
@@ -104,6 +104,8 @@ export async function proposeTemplate(input: {
   dataset: Pick<Dataset, "name" | "entityType" | "description" | "fields" | "keyField">;
   idea: PageIdea;
   sampleRecords: DataRecord[];
+  /** All records (or a large sample), to tell the model which fields are actually filled. */
+  coverageRecords?: DataRecord[];
   siteName: string;
   businessContext?: string;
   mountPath: string;
@@ -117,6 +119,8 @@ export async function proposeTemplate(input: {
       dataset: { name: input.dataset.name, entityType: input.dataset.entityType, description: input.dataset.description, keyField: input.dataset.keyField, fields: input.dataset.fields },
       pageIdea: input.idea,
       sampleRecords: input.sampleRecords.slice(0, 5).map((record) => record.data),
+      fieldCoverage: Object.fromEntries([...fieldCoverage(input.coverageRecords ?? input.sampleRecords, input.dataset.fields.map((field) => field.key))]
+        .map(([key, share]) => [key, `${Math.round(share * 100)}% of records`])),
     }),
     schema: templateSchema,
     maxTokens: 8000,

@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { GOOGLEBOT_UA, defaultFetcher, isEmptyShell, parseHtmlSignals } from "@organic-growth/crawler";
-import { listPublishedPaths } from "@organic-growth/db";
+import { listPublishedPaths, upsertPageSettings } from "@organic-growth/db";
 import { fail, findSite, json, settingsFor } from "../../../../../src/server";
 
 type Snippet = { id: string; label: string; when: string; language: string; code: string };
@@ -239,7 +239,7 @@ export async function POST(_request: Request, context: { params: Promise<{ siteI
           : `${url} returned HTTP ${response.status}${fromEumon ? "" : " without Eumon's page"}.`,
       });
       // Indexing and canonical checks only mean something once the page is Eumon's.
-      if (!fromEumon) return json({ checks, ok: false });
+      if (!fromEumon) return json(await recordVerification(settings, checks));
       checks.push({
         name: "Indexable",
         ok: !/noindex/i.test(robotsHeader) && !/noindex/i.test(signals.robots ?? ""),
@@ -256,5 +256,13 @@ export async function POST(_request: Request, context: { params: Promise<{ siteI
       checks.push({ name: "A published page renders for Googlebot", ok: false, detail: error instanceof Error ? error.message : "The request failed." });
     }
   }
-  return json({ checks, ok: checks.every((check) => check.ok) });
+  return json(await recordVerification(settings, checks));
+}
+
+/** Remembers whether the setup is verified, so pages can be shown as live rather than merely approved. */
+async function recordVerification(settings: Awaited<ReturnType<typeof settingsFor>>, checks: Array<{ ok: boolean }>) {
+  const ok = checks.length > 0 && checks.every((check) => check.ok);
+  const verifiedAt = ok ? new Date().toISOString() : undefined;
+  if (verifiedAt !== settings.verifiedAt) await upsertPageSettings(env.DB, { ...settings, verifiedAt });
+  return { checks, ok, verifiedAt: verifiedAt ?? null };
 }

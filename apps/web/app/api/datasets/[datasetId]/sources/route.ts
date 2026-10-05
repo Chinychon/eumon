@@ -17,7 +17,10 @@ export async function POST(request: Request, context: { params: Promise<{ datase
   const urlPattern = validateUrlPattern(body?.urlPattern);
   if (typeof urlPattern === "object") return fail(urlPattern.error);
   if (kind !== "page" && !urlPattern && kind !== "listing") return fail("Sitemap sources need a URL pattern, e.g. /malls/*, so only detail pages are collected.");
-  const maxPages = kind === "page" ? 1 : Math.min(Math.max(Math.round(Number(body?.maxPages) || 300), 1), 5000);
+  // For a single list page, maxPages is how many pages of its pager to read.
+  const maxPages = kind === "page"
+    ? Math.min(Math.max(Math.round(Number(body?.maxPages) || 50), 1), 50)
+    : Math.min(Math.max(Math.round(Number(body?.maxPages) || 300), 1), 5000);
   const source = {
     id: createId("src"), siteId: dataset.siteId, datasetId, url, kind, urlPattern, maxPages,
     origin: kind === "own_site" ? "own_site" as const : "user" as const,

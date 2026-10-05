@@ -7,6 +7,7 @@ import { coerceField, extractRecordsFromHtml, mapCsvRows, normalizeRecords, pars
 import { PoliteFetcher } from "./fetch.js";
 import { extractJsonLd, extractLinks, extractMeta, findNextPage, htmlToText } from "./html.js";
 import { parseRobots } from "./robots.js";
+import { findDuplicateRecords, mergeRecordData } from "./resolve.js";
 import { proposeScope, validateProposal } from "./scope.js";
 import { compilePathPattern, summarizeRoutePatterns } from "./url-pattern.js";
 
@@ -92,6 +93,25 @@ describe("html helpers", () => {
   });
 });
 
+describe("findNextPage", () => {
+  it("follows a zero-based numbered pager (Drupal views)", () => {
+    const pager = `<a href="?page=0" title="Current page" aria-current="page">1</a><a href="?page=1" title="Go to page 2">2</a><a href="?page=2">3</a>`;
+    assert.equal(findNextPage(pager, "https://x.com/project-highlights"), "https://x.com/project-highlights?page=1");
+    assert.equal(findNextPage(pager.replace('aria-current="page"', ""), "https://x.com/project-highlights?page=1"), "https://x.com/project-highlights?page=2");
+    assert.equal(findNextPage(pager, "https://x.com/project-highlights?page=2"), null);
+  });
+
+  it("follows WordPress-style /page/N/ paths and labelled next links", () => {
+    assert.equal(findNextPage(`<a href="/blog/page/2/">2</a><a href="/blog/page/3/">3</a>`, "https://x.com/blog/"), "https://x.com/blog/page/2/");
+    assert.equal(findNextPage(`<a href="/blog/page/3/">3</a>`, "https://x.com/blog/page/2/"), "https://x.com/blog/page/3/");
+    assert.equal(findNextPage(`<a class="nav" href="/list?start=20">Next ›</a>`, "https://x.com/list"), "https://x.com/list?start=20");
+  });
+
+  it("ignores pagers of other lists and other sites", () => {
+    assert.equal(findNextPage(`<a href="/other?page=2">2</a><a href="https://y.com/list?page=2">2</a>`, "https://x.com/list"), null);
+  });
+});
+
 describe("url patterns", () => {
   it("matches one segment with * and many with **", () => {
     const single = compilePathPattern("/doctors/*");
@@ -132,6 +152,27 @@ describe("record normalization", () => {
     assert.equal(coerceField(dataset.fields[4]!, "Yes"), true);
   });
 
+  it("combines repeated mentions of one entity on a page instead of keeping only the last", () => {
+    const records = normalizeRecords(dataset, [
+      { name: "Sunway Carnival Mall", languages: "Box Hunt" },
+      { name: "Sunway Carnival Mall", languages: "OGAWA", price: "120" },
+      { name: "Sunway Carnival Mall", languages: "TEVA" },
+    ]);
+    assert.equal(records.length, 1);
+    assert.deepEqual(records[0]!.data.languages, ["Box Hunt", "OGAWA", "TEVA"], "in page order");
+    assert.equal(records[0]!.data.price, 120);
+  });
+
+  it("drops a record's own name from its list fields", () => {
+    const [record] = normalizeRecords(dataset, [{ name: "Sunway Carnival Mall", languages: ["Sunway Carnival", "Paris Baguette", "sunway carnival mall"] }]);
+    assert.deepEqual(record!.data.languages, ["Paris Baguette"]);
+  });
+
+  it("keeps records that only have a name, so list pages are not lost", () => {
+    const records = normalizeRecords({ ...dataset, fields: dataset.fields.map((field) => ({ ...field, required: true })) }, [{ name: "Sunway Pyramid" }]);
+    assert.deepEqual(records.map((record) => record.key), ["sunway-pyramid"]);
+  });
+
   it("drops rows without a key and merges rows that share one", () => {
     const records = normalizeRecords(dataset, [
       { name: "Dr. Amy Tan", price: "150" },
@@ -140,7 +181,7 @@ describe("record normalization", () => {
     ]);
     assert.equal(records.length, 1);
     assert.equal(records[0]!.key, "dr-amy-tan");
-    assert.equal(records[0]!.data.price, 160);
+    assert.equal(records[0]!.data.price, 150, "within a page, the first mention wins single values");
   });
 
   it("slugifies accents and symbols", () => {
@@ -213,6 +254,18 @@ describe("expandSource", () => {
     assert.equal(result.matched, 3);
   });
 
+  it("reads every page of a paginated list source", async () => {
+    const pages: Record<string, string> = {
+      "https://dir.example/robots.txt": "User-agent: *\nAllow: /",
+      "https://dir.example/malls": `<ul><li>A</li></ul><a href="?page=1">2</a>`,
+      "https://dir.example/malls?page=1": `<ul><li>B</li></ul><a href="?page=0">1</a><a href="?page=2">3</a>`,
+      "https://dir.example/malls?page=2": `<ul><li>C</li></ul><a href="?page=1">2</a>`,
+    };
+    const listFetcher: Fetcher = async (url) => ({ url, finalUrl: url, headers: {}, status: pages[url] ? 200 : 404, body: pages[url] ?? "" });
+    const result = await expandSource({ url: "https://dir.example/malls", kind: "page", maxPages: 25 }, new PoliteFetcher(listFetcher));
+    assert.deepEqual(result.urls, ["https://dir.example/malls", "https://dir.example/malls?page=1", "https://dir.example/malls?page=2"]);
+  });
+
   it("caps pages at the source budget", async () => {
     const result = await expandSource(
       { url: "https://shop.example", kind: "own_site", urlPattern: "/products/*", maxPages: 1 },
@@ -283,5 +336,41 @@ describe("model-backed steps (stubbed model)", () => {
     assert.equal(proposal.datasets[0]!.sources[0]!.url, "https://edeadesign.com.my");
     assert.equal(proposal.datasets[0]!.pageIdeas[0]!.groupBy.length, 0);
     assert.equal(llm.requests[0]!.effort, "high", "strategy runs at high effort");
+  });
+});
+
+describe("duplicate resolution", () => {
+  const record = (id: string, name: string, data: Record<string, unknown> = {}) =>
+    ({ id, siteId: "s", datasetId: "d", key: id, data: { name, ...data }, createdAt: "", updatedAt: "" }) as never;
+  const dataset = { name: "Malls", entityType: "shopping mall", keyField: "name" };
+
+  it("accepts only groups of existing names, each name in one group", async () => {
+    const llm = stubLlm({ groups: [
+      { canonical: "Gurney Paragon Mall", members: ["Gurney Paragon", "Gurney Paragon Mall", "Gurney Paragon Mall Penang"] },
+      { canonical: "Invented Mall", members: ["Invented Mall", "Nowhere Plaza"] },
+      { canonical: "Gurney Paragon", members: ["Gurney Paragon", "Sunway Pyramid"] },
+    ] });
+    const clusters = await findDuplicateRecords({ llm, dataset, records: [
+      record("a", "Gurney Paragon"), record("b", "Gurney Paragon Mall"), record("c", "Gurney Paragon Mall Penang"), record("d", "Sunway Pyramid"),
+    ] });
+    assert.deepEqual(clusters, [{ canonicalId: "b", duplicateIds: ["a", "c"], names: ["Gurney Paragon", "Gurney Paragon Mall", "Gurney Paragon Mall Penang"] }]);
+  });
+
+  it("never lets an empty value erase a known one", () => {
+    const fields = [{ key: "name", label: "Name", type: "text" as const }, { key: "city", label: "City", type: "text" as const }, { key: "clients", label: "Clients", type: "list" as const }];
+    const merged = mergeRecordData(fields, { name: "Gurney Paragon Mall", city: null, clients: ["Guardian"] }, [{ name: "Gurney Paragon Mall", city: "George Town", clients: ["Hanam BBQ"] }]);
+    assert.deepEqual(merged, { name: "Gurney Paragon Mall", city: "George Town", clients: ["Guardian", "Hanam BBQ"] });
+  });
+
+  it("keeps canonical values, fills gaps, and unions lists", () => {
+    const fields = [
+      { key: "name", label: "Name", type: "text" as const },
+      { key: "city", label: "City", type: "text" as const },
+      { key: "clients", label: "Clients", type: "list" as const },
+    ];
+    const merged = mergeRecordData(fields, { name: "1st Avenue", city: null, clients: ["Hanzo"] }, [
+      { name: "1st Avenue Mall Penang", city: "George Town", clients: ["Pepper Lunch", "hanzo"] },
+    ]);
+    assert.deepEqual(merged, { name: "1st Avenue", city: "George Town", clients: ["Hanzo", "Pepper Lunch"] });
   });
 });

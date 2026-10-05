@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { createId, type PageIdea, type PageTemplate } from "@organic-growth/core";
-import { getDataset, getSite, getSiteScope, listRecords, upsertTemplate } from "@organic-growth/db";
+import { getDataset, getSite, getSiteScope, listAllRecords, listRecords, upsertTemplate } from "@organic-growth/db";
 import { defaultTemplate, proposeTemplate } from "@organic-growth/pages";
 import { regenerateTemplate } from "../../../../../src/page-engine";
 import { describeModelError } from "@organic-growth/ai";
@@ -26,8 +26,11 @@ export async function POST(request: Request, context: { params: Promise<{ datase
       : dataset.pageIdeas.find((entry) => entry.groupBy.length === 0);
   if (!idea) return fail("Choose a page idea or the fields to group pages by.");
 
-  const { records, total } = await listRecords(env.DB, datasetId, { limit: 5 });
+  const { records: firstRecords, total } = await listRecords(env.DB, datasetId, { limit: 200 });
   if (!total) return fail("Collect or import some records before designing pages.", 409);
+  // Show the model the most complete records, so its copy reflects the best pages.
+  const filled = (record: (typeof firstRecords)[number]) => Object.values(record.data).filter((value) => value != null && value !== "" && !(Array.isArray(value) && !value.length)).length;
+  const records = [...firstRecords].sort((a, b) => filled(b) - filled(a)).slice(0, 5);
   const settings = await settingsFor(site);
   let draft = defaultTemplate(dataset, idea, settings.mountPath);
   let model: string | null = null;
@@ -40,7 +43,8 @@ export async function POST(request: Request, context: { params: Promise<{ datase
       try {
         const scope = await getSiteScope(env.DB, site.id);
         draft = await proposeTemplate({
-          llm, dataset, idea, sampleRecords: records, siteName: settings.siteName, mountPath: settings.mountPath,
+          llm, dataset, idea, sampleRecords: records, coverageRecords: await listAllRecords(env.DB, datasetId, 5000),
+          siteName: settings.siteName, mountPath: settings.mountPath,
           businessContext: scope ? `${scope.businessSummary} Conversion: ${scope.conversionGoal}` : undefined,
         });
         model = llm.model;

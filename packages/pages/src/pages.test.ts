@@ -67,6 +67,11 @@ describe("patterns", () => {
     assert.deepEqual(result.missing, ["city"]);
   });
 
+  it("collapses a value repeated by adjacent placeholders", () => {
+    assert.equal(fillPattern("The mall is in {city}, {state}.", () => "Penang").text, "The mall is in Penang.");
+    assert.equal(fillPattern("{city}, {state}", (token) => (token === "city" ? "George Town" : "Penang")).text, "George Town, Penang");
+  });
+
   it("drops only the sentences whose placeholders are empty", () => {
     const text = fillProse("{name} is a doctor. Fees start at RM {fee}. Book today.", (token) => (token === "name" ? "Dr Amy" : ""));
     assert.equal(text, "Dr Amy is a doctor. Book today.");
@@ -105,6 +110,16 @@ describe("generatePages (entity templates)", () => {
     });
     const hospital = linked[0]!.items[0]!.fields.find((field) => field.label === "Hospital");
     assert.equal(hospital?.href, "/guides/hospitals/pantai-hospital");
+  });
+
+  it("judges pages only against fields the dataset actually has", () => {
+    const sparse = template({ itemFields: ["specialty", "city", "hospital", "consultation_fee", "languages", "bio", "never_collected"] });
+    const pages = generatePages({
+      siteId: "site_1", siteName: "MedBay", dataset: { ...dataset, fields: [...dataset.fields, { key: "never_collected", label: "Never collected", type: "text" }] },
+      records, mountPath: "/guides", template: sparse,
+    });
+    assert.equal(pages.find((page) => page.groupKey === "dr-amy-tan")?.status, "draft", "an always-empty field does not make pages thin");
+    assert.equal(pages.find((page) => page.groupKey === "dr-dan-ho")?.status, "thin");
   });
 
   it("de-duplicates colliding paths", () => {

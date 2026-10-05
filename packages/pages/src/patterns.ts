@@ -55,6 +55,8 @@ export function fillProse(pattern: string, resolve: Resolver): string {
 
 function tidy(text: string): string {
   return text
+    // "Penang, Penang" (city and state with the same value) reads as a glitch.
+    .replace(/\b([^,.;:!?]{2,40}), \1\b/g, "$1")
     .replace(/\(\s*\)/g, "")
     .replace(/\s+([,.;:!?])/g, "$1")
     .replace(/([,;:])\1+/g, "$1")

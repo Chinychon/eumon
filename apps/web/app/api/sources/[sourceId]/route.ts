@@ -17,8 +17,8 @@ export async function PATCH(request: Request, context: { params: Promise<{ sourc
     if (typeof pattern === "object") return fail(pattern.error);
     next.urlPattern = pattern;
   }
-  if (body.maxPages !== undefined && source.kind !== "page") {
-    next.maxPages = Math.min(Math.max(Math.round(Number(body.maxPages) || 1), 1), 5000);
+  if (body.maxPages !== undefined) {
+    next.maxPages = Math.min(Math.max(Math.round(Number(body.maxPages) || 1), 1), source.kind === "page" ? 50 : 5000);
   }
   await upsertSource(env.DB, next);
   return json({ source: next });

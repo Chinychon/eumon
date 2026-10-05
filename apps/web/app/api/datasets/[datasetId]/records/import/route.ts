@@ -17,7 +17,7 @@ export async function POST(request: Request, context: { params: Promise<{ datase
     const headers = Object.keys(rows[0] ?? {}).join(", ");
     return fail(`No rows could be matched. CSV headers (${headers}) must include the key field “${dataset.fields.find((field) => field.key === dataset.keyField)?.label ?? dataset.keyField}”.`);
   }
-  await upsertRecords(env.DB, records.map((record) => ({ siteId: dataset.siteId, datasetId, key: record.key, data: record.data, sourceUrl: "csv-import" })));
+  await upsertRecords(env.DB, records.map((record) => ({ siteId: dataset.siteId, datasetId, key: record.key, data: record.data, sourceUrl: "csv-import" })), dataset.fields);
   if (dataset.status === "proposed") await upsertDataset(env.DB, { ...dataset, status: "active", updatedAt: new Date().toISOString() });
   return json({ imported: records.length, skipped: rows.length - records.length });
 }

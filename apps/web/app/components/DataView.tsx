@@ -188,7 +188,7 @@ function DatasetCard({ dataset, siteBaseUrl, onChanged }: { dataset: DatasetWith
           ))}
         </div>
       )}
-      {error && <div className={`callout ${error.startsWith("Imported") ? "" : "error"}`} style={{ marginBottom: 10 }}>{error}</div>}
+      {error && <div className={`callout ${/^(Imported|Merged|No duplicates)/.test(error) ? "" : "error"}`} style={{ marginBottom: 10 }}>{error}</div>}
 
       <div className="section-title">Fields</div>
       {editingFields
@@ -226,6 +226,16 @@ function DatasetCard({ dataset, siteBaseUrl, onChanged }: { dataset: DatasetWith
           <input type="file" accept=".csv,text/csv" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) void importCsv(file); event.target.value = ""; }} />
         </label>
         {dataset.recordCount > 0 && <Button variant="ghost" onClick={() => setShowRecords((value) => !value)}>{showRecords ? "Hide records" : `Browse ${formatNumber(dataset.recordCount)} records`}</Button>}
+        {dataset.recordCount > 1 && <Button variant="ghost" busy={busy === "dedupe"} onClick={async () => {
+          setBusy("dedupe"); setError("");
+          try {
+            const { merges } = await api<{ merges: Array<{ canonical: string; merged: string[] }> }>(`/api/datasets/${dataset.id}/dedupe`, { method: "POST" });
+            setError(merges.length
+              ? `Merged ${merges.reduce((sum, merge) => sum + merge.merged.length, 0)} duplicates: ${merges.slice(0, 6).map((merge) => `${merge.merged.join(", ")} → ${merge.canonical}`).join("; ")}${merges.length > 6 ? "…" : ""}`
+              : "No duplicates found.");
+            await onChanged();
+          } catch (cause) { setError(errorMessage(cause)); } finally { setBusy(""); }
+        }}>Merge duplicates</Button>}
       </div>
       {showRecords && <RecordsTable dataset={dataset} onChanged={onChanged} />}
     </Card>
@@ -354,7 +364,7 @@ function AddSourceForm({ datasetId, siteBaseUrl, onAdded }: { datasetId: string;
             <option value="own_site">Pages on your own site (via sitemap)</option>
             <option value="listing">A directory or listing page</option>
             <option value="sitemap">A sitemap.xml</option>
-            <option value="page">One page with a table or list</option>
+            <option value="page">A page that lists records (table or list, follows pagination)</option>
           </select>
         </Field>
         {kind === "own_site"
@@ -365,9 +375,9 @@ function AddSourceForm({ datasetId, siteBaseUrl, onAdded }: { datasetId: string;
             <input className="input mono" value={pattern} placeholder="/malls/*" onChange={(event) => setPattern(event.target.value)} />
           </Field>
         )}
-        {kind !== "page" && (
-          <Field label="Max pages per run"><input className="input" type="number" min={1} max={5000} value={maxPages} onChange={(event) => setMaxPages(event.target.value)} /></Field>
-        )}
+        <Field label={kind === "page" ? "List pages to read" : "Max pages per run"} hint={kind === "page" ? "Follows the list's pager (up to 50 pages)." : undefined}>
+          <input className="input" type="number" min={1} max={kind === "page" ? 50 : 5000} value={maxPages} onChange={(event) => setMaxPages(event.target.value)} />
+        </Field>
       </div>
       {error && <p className="small" style={{ color: "#9f3e31" }}>{error}</p>}
       <div className="row" style={{ marginTop: 10 }}><Button small busy={busy} onClick={add}>Add source</Button><Button small variant="ghost" onClick={() => setOpen(false)}>Cancel</Button></div>

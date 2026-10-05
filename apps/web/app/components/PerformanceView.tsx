@@ -8,7 +8,7 @@ import { Badge, Button, Card, Field, Kpi, ViewHeader } from "./ui";
 
 type WindowMetrics = { views: number; ctaClicks: number; searchClicks: number; searchImpressions: number };
 type Revision = { id: string; pageId: string; path: string; field: string; before: string; after: string; reason: string; createdAt: string; windowDays: number; metricsBefore: WindowMetrics; metricsAfter: WindowMetrics };
-type PerformanceData = { days: number; report: PerformanceReport; revisions: Revision[]; variants: CtaVariant[]; searchConnected: boolean };
+type PerformanceData = { days: number; report: PerformanceReport; revisions: Revision[]; variants: CtaVariant[]; searchConnected: boolean; live: boolean; publicHost: string };
 type SnippetOption = { title: string; description: string; rationale: string };
 
 const KIND_LABEL: Record<Suggestion["kind"], string> = {
@@ -69,11 +69,16 @@ export function PerformanceView({ site, onNavigate }: { site: SiteRecord; onNavi
       {error && <div className="callout error" role="alert" style={{ marginBottom: 14 }}>{error}</div>}
       {message && <div className="callout" style={{ marginBottom: 14 }}>{message}</div>}
       {!report || !totals ? <div className="empty">Loading…</div> : totals.pages === 0 ? (
-        <div className="empty">No live pages yet. <Button small variant="ghost" onClick={() => onNavigate("pages")}>Publish pages →</Button></div>
+        <div className="empty">No approved pages yet. <Button small variant="ghost" onClick={() => onNavigate("pages")}>Approve pages →</Button></div>
       ) : (
         <>
+          {!data?.live && (
+            <div className="callout warn" style={{ marginBottom: 14 }}>
+              These pages are approved but not live on {data?.publicHost} yet, so there is no real traffic to measure. Numbers start once the proxy rule in Setup is verified.
+            </div>
+          )}
           <div className="kpi-grid">
-            <Kpi label="Live pages" value={formatNumber(totals.pages)} caption={`${formatNumber(report.templates.reduce((sum, template) => sum + template.pagesWithImpressions, 0))} seen in search`} />
+            <Kpi label={data?.live ? "Live pages" : "Approved pages"} value={formatNumber(totals.pages)} caption={data?.live ? `${formatNumber(report.templates.reduce((sum, template) => sum + template.pagesWithImpressions, 0))} seen in search` : "Not on your domain yet"} />
             <Kpi label="Search impressions" value={formatNumber(totals.impressions)} caption="Last synced 28 days" />
             <Kpi label="Search clicks" value={formatNumber(totals.clicks)} caption={`CTR ${percent(ctr)}`} />
             <Kpi label="Page views" value={formatNumber(totals.views)} caption={`${formatNumber(totals.googlebotHits)} Googlebot fetches`} />

@@ -31,6 +31,8 @@ export type ProposedDataset = {
 };
 
 export type ScopeProposal = {
+  /** The brand name the business uses for itself (e.g. "Edea Design"). */
+  businessName: string;
   businessSummary: string;
   conversionGoal: string;
   datasets: ProposedDataset[];
@@ -44,7 +46,7 @@ Your job:
 1. From the site evidence, state what the business sells and what a conversion is.
 2. Break the general offering into its granular units — the specific things people search for by name. For a medical tourism site that means individual doctors, individual procedures/treatments, individual hospitals; for a SaaS it might be integrations, use cases, or templates; for a marketplace it is listings, categories, and locations.
 3. Each unit type becomes one dataset. Propose 2–4 datasets, highest commercial value first. Each record in a dataset will become its own landing page, so choose units with real, distinct search demand and enough facts to make each page genuinely useful. Do not propose units that would produce thin or near-identical pages.
-4. For each dataset define the fields a strong landing page needs (facts that answer the searcher's questions and support the conversion: names, location, prices or price ranges, qualifications, features, availability, languages, ratings, etc.). Use snake_case keys. Field types: text, number, list, url, boolean. Mark only truly essential fields as required. keyField must be the field that names one record (usually "name").
+4. For each dataset define the fields a strong landing page needs (facts that answer the searcher's questions and support the conversion: names, location, prices or price ranges, qualifications, features, availability, languages, ratings, etc.). Use snake_case keys. Field types: text, number, list, url, boolean. keyField must be the field that names one record (usually "name").
 5. Page ideas: always include one entity page idea (groupBy: []) — one page per record. Optionally add a grouped page idea (groupBy: one or two fields, e.g. ["specialty", "city"]) when combinations have clear search demand.
 6. Sources: where the records can be collected.
    - If the site's own route groups already contain these entities, propose kind "own_site" with url = the site origin and urlPattern = the route glob (e.g. "/doctors/*"). This is the most reliable source; prefer it.
@@ -57,6 +59,7 @@ const fieldTypes: DatasetFieldType[] = ["text", "number", "list", "url", "boolea
 const sourceKinds: DataSourceKind[] = ["own_site", "listing", "sitemap", "page"];
 
 const proposalSchema = schema.object({
+  businessName: schema.string("the brand name the business uses on its own site"),
   businessSummary: schema.string(),
   conversionGoal: schema.string(),
   datasets: schema.array(schema.object({
@@ -127,7 +130,8 @@ export function validateProposal(raw: Record<string, unknown>, baseUrl: string):
     let keyField = slugify(String(value.keyField ?? "")).replace(/-/g, "_");
     if (!seen.has(keyField)) keyField = seen.has("name") ? "name" : fields[0]?.key ?? "";
     if (!keyField || fields.length < 2) return [];
-    for (const field of fields) if (field.key === keyField) field.required = true;
+    // Only the key is required: records missing other details still become (thinner) pages.
+    for (const field of fields) field.required = field.key === keyField;
 
     const pageIdeas = (Array.isArray(value.pageIdeas) ? value.pageIdeas : []).slice(0, 4).map((item): PageIdea => {
       const idea = item as Record<string, unknown>;
@@ -172,6 +176,7 @@ export function validateProposal(raw: Record<string, unknown>, baseUrl: string):
     }];
   });
   return {
+    businessName: String(raw.businessName ?? "").trim().slice(0, 80),
     businessSummary: String(raw.businessSummary ?? "").slice(0, 800),
     conversionGoal: String(raw.conversionGoal ?? "").slice(0, 300),
     datasets,

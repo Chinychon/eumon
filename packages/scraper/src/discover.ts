@@ -14,7 +14,8 @@ export type ExpandedSource = {
   notes: string[];
 };
 
-const MAX_LISTING_PAGES = 25;
+/** Pages of one list followed through its pager. */
+export const MAX_LIST_PAGES = 50;
 
 /**
  * Turns a source definition into the list of pages to extract from:
@@ -31,7 +32,15 @@ export async function expandSource(
   let candidates: string[] = [];
 
   if (source.kind === "page") {
-    candidates = [source.url];
+    // A page that lists records itself: read it and the rest of its pager.
+    let pageUrl: string | null = source.url;
+    const limit = Math.min(Math.max(source.maxPages, 1), MAX_LIST_PAGES);
+    while (pageUrl && candidates.length < limit && !candidates.includes(pageUrl)) {
+      candidates.push(pageUrl);
+      const response = await fetcher.fetch(pageUrl);
+      if (response.status >= 400) break;
+      pageUrl = findNextPage(response.body, response.finalUrl);
+    }
   } else if (source.kind === "sitemap" || source.kind === "own_site") {
     const sitemapUrls = await sitemapEntryPoints(source.url, fetcher);
     const errors: string[] = [];
@@ -47,7 +56,7 @@ export async function expandSource(
   } else {
     let pageUrl: string | null = source.url;
     const seen = new Set<string>();
-    for (let page = 0; pageUrl && page < MAX_LISTING_PAGES && candidates.length < source.maxPages * 2; page++) {
+    for (let page = 0; pageUrl && page < MAX_LIST_PAGES && candidates.length < source.maxPages * 2; page++) {
       if (seen.has(pageUrl)) break;
       seen.add(pageUrl);
       const response = await fetcher.fetch(pageUrl);

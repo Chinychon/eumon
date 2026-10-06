@@ -1,7 +1,7 @@
 import type { CrawlPageResult, Finding, SitemapAudit } from "@organic-growth/core";
 import { createId, organicImpactScore, severityFromImpact } from "@organic-growth/core";
 import { contentMarkup, elementSpans, findTags, hasToken, innerText, parseAttributes, visibleText } from "./html.js";
-import { GOOGLEBOT_TOKEN } from "./robots.js";
+import { GOOGLEBOT_TOKEN, parseRobots, type RobotsPolicy } from "./robots.js";
 import { classifyLanguage, classifyUrlType, isSameSite, sameDocument } from "./urls.js";
 
 export const GOOGLEBOT_UA =
@@ -42,7 +42,8 @@ export function isSafePublicUrl(value: string, expectedOrigin?: string): boolean
 async function boundedText(response: Response, maxBytes = 2_000_000): Promise<string> {
   if (!response.body) return "";
   const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
+  const decoder = new TextDecoder();
+  let text = "";
   let total = 0;
   try {
     while (true) {
@@ -53,15 +54,12 @@ async function boundedText(response: Response, maxBytes = 2_000_000): Promise<st
         await reader.cancel("response body limit exceeded");
         throw new Error(`Response exceeded the ${maxBytes} byte crawl limit.`);
       }
-      chunks.push(value);
+      text += decoder.decode(value, { stream: true });
     }
   } finally {
     reader.releaseLock();
   }
-  const bytes = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
-  return new TextDecoder().decode(bytes);
+  return text + decoder.decode();
 }
 
 export const defaultFetcher: Fetcher = async (url, init) => {
@@ -92,6 +90,12 @@ export const defaultFetcher: Fetcher = async (url, init) => {
   }
   throw new Error("Crawler stopped after an unsafe or excessive redirect chain.");
 };
+
+/** robots.txt as it applies to `token`, or null when the site has none (4xx/5xx). Throws when the site is unreachable. */
+export async function fetchRobots(baseUrl: string, token: string, userAgent: string, fetcher: Fetcher = defaultFetcher): Promise<RobotsPolicy | null> {
+  const response = await fetcher(new URL("/robots.txt", baseUrl).toString(), { userAgent, maxBytes: 500_000 });
+  return response.status < 400 ? parseRobots(response.body, token) : null;
+}
 
 export type HtmlSignals = {
   title?: string;

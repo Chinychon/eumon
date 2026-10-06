@@ -1,19 +1,19 @@
 import { env } from "cloudflare:workers";
 import type { PageSettings } from "@organic-growth/core";
-import { upsertPageSettings } from "@organic-growth/db";
+import { getSite, upsertPageSettings } from "@organic-growth/db";
 import { normalizeMountPath } from "@organic-growth/pages";
-import { fail, findSite, isPublicHttpUrl, json, readJson, settingsFor } from "../../../../../src/server";
+import { fail, isPublicHttpUrl, json, readJson, settingsFor } from "../../../../../src/server";
 
 export async function GET(_request: Request, context: { params: Promise<{ siteId: string }> }) {
   const { siteId } = await context.params;
-  const site = await findSite(siteId);
+  const site = await getSite(env.DB, siteId);
   if (!site) return fail("Site not found.", 404);
   return json({ settings: await settingsFor(site) });
 }
 
 export async function PUT(request: Request, context: { params: Promise<{ siteId: string }> }) {
   const { siteId } = await context.params;
-  const site = await findSite(siteId);
+  const site = await getSite(env.DB, siteId);
   if (!site) return fail("Site not found.", 404);
   const body = await readJson<Partial<PageSettings>>(request);
   if (!body) return fail("Send the page settings as JSON.");

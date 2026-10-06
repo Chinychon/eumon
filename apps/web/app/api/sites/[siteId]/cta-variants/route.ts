@@ -1,11 +1,11 @@
 import { env } from "cloudflare:workers";
 import { createId } from "@organic-growth/core";
-import { insertCtaVariant, listCtaVariants } from "@organic-growth/db";
-import { fail, findSite, json, readJson, settingsFor } from "../../../../../src/server";
+import { getSite, insertCtaVariant, listCtaVariants } from "@organic-growth/db";
+import { fail, json, readJson, settingsFor } from "../../../../../src/server";
 
 export async function GET(_request: Request, context: { params: Promise<{ siteId: string }> }) {
   const { siteId } = await context.params;
-  if (!(await findSite(siteId))) return fail("Site not found.", 404);
+  if (!(await getSite(env.DB, siteId))) return fail("Site not found.", 404);
   return json({ variants: await listCtaVariants(env.DB, siteId) });
 }
 
@@ -15,7 +15,7 @@ export async function GET(_request: Request, context: { params: Promise<{ siteId
  */
 export async function POST(request: Request, context: { params: Promise<{ siteId: string }> }) {
   const { siteId } = await context.params;
-  const site = await findSite(siteId);
+  const site = await getSite(env.DB, siteId);
   if (!site) return fail("Site not found.", 404);
   const body = await readJson<{ label?: unknown; copy?: unknown; url?: unknown }>(request);
   const label = typeof body?.label === "string" ? body.label.trim() : "";

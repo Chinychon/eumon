@@ -6,7 +6,6 @@ import {
   type FrameworkFingerprint,
   type GrowthPlan,
   type Opportunity,
-  type ProposedChange,
   type SearchMetricRow,
   type SitemapAudit,
   type CrawlPageResult,
@@ -341,45 +340,6 @@ function renderGrowthPlanMarkdown(input: {
     lines.push("");
   }
   return lines.join("\n");
-}
-
-export function proposeSafeTechnicalChange(input: {
-  siteId: string;
-  analysisId: string;
-  finding?: Finding;
-  opportunity?: Opportunity;
-}): ProposedChange {
-  const finding = input.finding;
-  const title = finding ? `Review recommended fix for: ${finding.title}` : "No code change generated from this sample";
-
-  return {
-    id: createId("change"),
-    siteId: input.siteId,
-    analysisId: input.analysisId,
-    opportunityId: input.opportunity?.id,
-    findingId: finding?.id,
-    title,
-    reason: finding
-      ? `${finding.summary} This is an evidence-backed review item; no repository patch has been generated yet.`
-      : "The sampled crawl did not identify a specific code change that can be proposed safely.",
-    evidence: {
-      finding: finding
-        ? {
-            id: finding.id,
-            severity: finding.severity,
-            organicImpactScore: finding.organicImpactScore,
-            evidence: finding.evidence,
-          }
-        : undefined,
-      opportunityId: input.opportunity?.id,
-    },
-    filesChanged: [],
-    pagesAffected: finding?.pagesAffected?.slice(0, 20) ?? [],
-    patch: "",
-    status: "proposed",
-    author: "organic-growth-rules-v1",
-    createdAt: new Date().toISOString(),
-  };
 }
 
 export * from "./pipeline.js";

@@ -287,18 +287,6 @@ export async function listAllRecords(db: D1Like, datasetId: string, max = 50_000
   return output;
 }
 
-export async function getRecordsByIds(db: D1Like, ids: string[]): Promise<DataRecord[]> {
-  const output: DataRecord[] = [];
-  for (const group of chunks(ids, 90)) {
-    const { results } = await db.prepare(
-      `SELECT * FROM data_records WHERE id IN (${group.map(() => "?").join(",")})`,
-    ).bind(...group).all<Row>();
-    output.push(...results.map(mapRecord));
-  }
-  const order = new Map(ids.map((id, index) => [id, index]));
-  return output.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
-}
-
 /** Folds duplicate records into a canonical one in a single batch. */
 export async function mergeRecords(db: D1Like, input: { canonicalId: string; duplicateIds: string[]; data: JsonObject }): Promise<void> {
   const now = nowIso();

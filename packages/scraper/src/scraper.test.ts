@@ -1,15 +1,17 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { Fetcher } from "@organic-growth/crawler";
+import { RESEARCH_TOKEN, parseRobots as parseRobotsFor, type Fetcher } from "@organic-growth/crawler";
 import { expandSource } from "./discover.js";
 import type { JsonLlm, JsonRequest } from "@organic-growth/ai";
-import { coerceField, extractRecordsFromHtml, mapCsvRows, normalizeRecords, parseCsv, slugify } from "./extract.js";
+import { coerceField, extractRecordsFromHtml, mapCsvRows, normalizeRecords, parseCsv } from "./extract.js";
+import { slugify } from "@organic-growth/core";
 import { PoliteFetcher } from "./fetch.js";
 import { extractJsonLd, extractLinks, extractMeta, findNextPage, htmlToText } from "./html.js";
-import { parseRobots } from "./robots.js";
 import { findDuplicateRecords, mergeRecordData } from "./resolve.js";
 import { proposeScope, validateProposal } from "./scope.js";
 import { compilePathPattern, summarizeRoutePatterns } from "./url-pattern.js";
+
+const parseRobots = (body: string) => parseRobotsFor(body, RESEARCH_TOKEN);
 
 describe("parseRobots", () => {
   const robots = parseRobots(`

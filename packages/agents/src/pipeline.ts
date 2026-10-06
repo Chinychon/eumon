@@ -6,10 +6,14 @@ import {
   type SiteRecord,
 } from "@organic-growth/core";
 import {
+  GOOGLEBOT_TOKEN,
+  GOOGLEBOT_UA,
   auditSitemap,
+  classifyUrlType,
   compareRendering,
   defaultFetcher,
   fetchPageAudit,
+  fetchRobots,
   findingsFromCrawl,
   findingsFromCrawlCoverage,
   findingsFromRendering,
@@ -24,6 +28,7 @@ import {
   type SiteResearch,
 } from "@organic-growth/crawler";
 import type { JsonLlm } from "@organic-growth/ai";
+import { enqueueAnalysisCrawlUrls, type D1Like } from "@organic-growth/db";
 import {
   analyzeRepository,
   type RepoSnapshot,
@@ -45,6 +50,24 @@ import {
   type CompetitionReport,
   type OwnContent,
 } from "./competition.js";
+
+/**
+ * Queues every sitemap URL (up to `maxUrls`) for the Googlebot crawl. URLs
+ * robots.txt blocks for Googlebot are recorded but will not be fetched.
+ */
+export async function queueFullCrawl(
+  db: D1Like,
+  input: { analysisId: string; siteId: string; baseUrl: string; maxUrls: number },
+): Promise<{ declared: number; queued: number }> {
+  const { urls } = await auditSitemap(input.baseUrl, undefined, { maxUrls: 1 });
+  const robots = await fetchRobots(input.baseUrl, GOOGLEBOT_TOKEN, GOOGLEBOT_UA).catch(() => null);
+  const entries = urls.slice(0, input.maxUrls).map((url) => {
+    const { pathname, search } = new URL(url);
+    return { url, routeFamily: classifyUrlType(url), blocked: robots ? !robots.isAllowed(`${pathname}${search}`) : false };
+  });
+  await enqueueAnalysisCrawlUrls(db, { analysisId: input.analysisId, siteId: input.siteId, urls: entries });
+  return { declared: urls.length, queued: entries.filter((entry) => !entry.blocked).length };
+}
 
 export interface RunAnalysisInput {
   /** The persisted analysis this run belongs to, so findings link back to it. */

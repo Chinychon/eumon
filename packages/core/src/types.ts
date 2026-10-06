@@ -31,13 +31,6 @@ export type CompetitorCategory =
   | "serp"
   | "authority";
 
-export type AnalysisStatus =
-  | "queued"
-  | "pending"
-  | "running"
-  | "completed"
-  | "failed";
-
 export type ChangeStatus =
   | "proposed"
   | "approved"
@@ -303,35 +296,6 @@ export interface ProposedChange {
   aiModel?: string;
   createdAt: string;
   result?: string;
-}
-
-export interface ConversionEvent {
-  id: string;
-  siteId: string;
-  event: ConversionEventName;
-  destination?: string;
-  pageUrl?: string;
-  sessionId?: string;
-  properties?: JsonObject;
-  occurredAt: string;
-}
-
-/** Prioritization model — not a traffic prediction. */
-export function computePriorityScore(input: {
-  searchDemand: number;
-  businessValue: number;
-  conversionPotential: number;
-  competitiveGap: number;
-  implementationEffort: number;
-}): number {
-  const effort = Math.max(input.implementationEffort, 0.1);
-  return (
-    (input.searchDemand *
-      input.businessValue *
-      input.conversionPotential *
-      input.competitiveGap) /
-    effort
-  );
 }
 
 export function rankSeverityByOrganicImpact(

@@ -1,8 +1,8 @@
 import { schema, type JsonLlm } from "@organic-growth/ai";
-import type { DataRecord, Dataset, FaqPattern, PageIdea, PageTemplate } from "@organic-growth/core";
+import { slugify, type DataRecord, type Dataset, type FaqPattern, type PageIdea, type PageTemplate } from "@organic-growth/core";
 import { fieldCoverage, normalizeMountPath } from "./generate.js";
 import { languageName } from "./labels.js";
-import { placeholders, slugify } from "./patterns.js";
+import { placeholders } from "./patterns.js";
 
 type TemplateDraft = Omit<PageTemplate, "id" | "siteId" | "datasetId" | "status" | "createdAt" | "updatedAt">;
 

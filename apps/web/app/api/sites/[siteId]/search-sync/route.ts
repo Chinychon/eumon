@@ -1,10 +1,11 @@
 import { env } from "cloudflare:workers";
+import { getSite } from "@organic-growth/db";
 import { syncGeneratedPageSearch } from "../../../../../src/search-sync";
-import { fail, findSite, json } from "../../../../../src/server";
+import { fail, json } from "../../../../../src/server";
 
 export async function POST(_request: Request, context: { params: Promise<{ siteId: string }> }) {
   const { siteId } = await context.params;
-  const site = await findSite(siteId);
+  const site = await getSite(env.DB, siteId);
   if (!site) return fail("Site not found.", 404);
   if (!site.gscProperty) return fail("Connect Google Search Console and choose a property first.", 409);
   try {

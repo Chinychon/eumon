@@ -1,5 +1,7 @@
-import { defaultFetcher, type Fetcher, type FetchResult } from "@organic-growth/crawler";
-import { ALLOW_ALL, DISALLOW_ALL, parseRobots, SCRAPER_USER_AGENT, type RobotsPolicy } from "./robots.js";
+import {
+  ALLOW_ALL, DISALLOW_ALL, RESEARCH_TOKEN, RESEARCH_USER_AGENT, defaultFetcher, parseRobots,
+  type Fetcher, type FetchResult, type RobotsPolicy,
+} from "@organic-growth/crawler";
 
 /**
  * Fetches pages as EumonBot with robots.txt enforced per origin. One instance
@@ -14,11 +16,11 @@ export class PoliteFetcher {
     const origin = new URL(url).origin;
     let policy = this.robots.get(origin);
     if (!policy) {
-      policy = this.fetcher(`${origin}/robots.txt`, { userAgent: SCRAPER_USER_AGENT, maxBytes: 500_000 })
+      policy = this.fetcher(`${origin}/robots.txt`, { userAgent: RESEARCH_USER_AGENT, maxBytes: 500_000 })
         .then((response) => {
           if (response.status >= 500) return DISALLOW_ALL;
           if (response.status >= 400) return ALLOW_ALL;
-          return parseRobots(response.body);
+          return parseRobots(response.body, RESEARCH_TOKEN);
         })
         .catch(() => DISALLOW_ALL);
       this.robots.set(origin, policy);
@@ -34,7 +36,7 @@ export class PoliteFetcher {
   /** Fetches a URL, throwing `RobotsBlockedError` when robots.txt disallows it. */
   async fetch(url: string, maxBytes?: number): Promise<FetchResult> {
     if (!(await this.isAllowed(url))) throw new RobotsBlockedError(url);
-    return this.fetcher(url, { userAgent: SCRAPER_USER_AGENT, maxBytes });
+    return this.fetcher(url, { userAgent: RESEARCH_USER_AGENT, maxBytes });
   }
 }
 

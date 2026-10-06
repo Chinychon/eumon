@@ -6,7 +6,6 @@ import type { AppEnv } from "../cloudflare.config";
 import { createLlm, type JsonLlm } from "@organic-growth/ai";
 import {
   datasetCoverage,
-  enqueueAnalysisCrawlUrls,
   getCrawlCoverage,
   getSite,
   listCrawlPageResults,
@@ -24,6 +23,7 @@ import {
 import {
   MAX_COMPETITORS,
   fetchSearchConsoleMetrics,
+  queueFullCrawl,
   runFullAnalysis,
   synthesizePlanNarrative,
 } from "@organic-growth/agents";
@@ -33,14 +33,8 @@ import {
   createInstallationToken,
 } from "@organic-growth/repo-analyzer";
 import {
-  GOOGLEBOT_TOKEN,
-  GOOGLEBOT_UA,
-  auditSitemap,
-  classifyUrlType,
   crawlGooglebotBatch,
-  defaultFetcher,
   isSafePublicUrl,
-  parseRobots,
   researchSite,
   type SiteResearch,
 } from "@organic-growth/crawler";
@@ -80,21 +74,8 @@ export class SiteAnalysisWorkflow extends WorkflowEntrypoint<AppEnv, AnalysisPay
 
       // Crawl every sitemap URL (as Googlebot) in resumable batches before
       // analysis, so findings describe the whole site rather than a sample.
-      // URLs robots.txt blocks for Googlebot are recorded but not fetched.
-      const queued = await step.do("enqueue-full-crawl", async () => {
-        const { urls } = await auditSitemap(site.baseUrl, undefined, { maxUrls: 1 });
-        const capped = urls.slice(0, MAX_FULL_CRAWL_URLS);
-        const robots = await defaultFetcher(new URL("/robots.txt", site.baseUrl).toString(), { userAgent: GOOGLEBOT_UA, maxBytes: 500_000 })
-          .then((response) => (response.status < 400 ? parseRobots(response.body, GOOGLEBOT_TOKEN) : null))
-          .catch(() => null);
-        const entries = capped.map((url) => {
-          const parsed = new URL(url);
-          return { url, routeFamily: classifyUrlType(url), blocked: robots ? !robots.isAllowed(`${parsed.pathname}${parsed.search}`) : false };
-        });
-        await enqueueAnalysisCrawlUrls(db, { analysisId, siteId, urls: entries });
-        const blocked = entries.filter((entry) => entry.blocked).length;
-        return { queued: capped.length - blocked, declared: urls.length };
-      });
+      const queued = await step.do("enqueue-full-crawl", () =>
+        queueFullCrawl(db, { analysisId, siteId, baseUrl: site.baseUrl, maxUrls: MAX_FULL_CRAWL_URLS }));
 
       for (let batch = 0; batch * CRAWL_BATCH_SIZE < queued.queued + CRAWL_BATCH_SIZE; batch++) {
         const crawled = await step.do(`crawl-batch-${batch}`, { retries: { limit: 2, delay: "10 seconds", backoff: "exponential" } }, async () => {

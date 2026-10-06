@@ -1,17 +1,6 @@
 import { schema, type JsonLlm, type JsonSchema } from "@organic-growth/ai";
-import { mergeRecordData, type Dataset, type DatasetField, type JsonObject, type JsonValue } from "@organic-growth/core";
+import { mergeRecordData, slugify, type Dataset, type DatasetField, type JsonObject, type JsonValue } from "@organic-growth/core";
 import { extractJsonLd, extractMeta, htmlToText } from "./html.js";
-
-export function slugify(value: string): string {
-  return value
-    .normalize("NFKD")
-    .replace(/[̀-ͯ]/g, "")
-    .toLowerCase()
-    .replace(/&/g, " and ")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 80);
-}
 
 function fieldSchema(field: DatasetField): JsonSchema {
   const description = field.description ? `${field.label}: ${field.description}` : field.label;

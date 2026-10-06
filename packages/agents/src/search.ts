@@ -1,5 +1,5 @@
-import { countryName, createId, severityFromImpact, type Finding, type Opportunity, type SearchMetricRow } from "@organic-growth/core";
-import { expectedCtr, slugify } from "@organic-growth/pages";
+import { countryName, createId, severityFromImpact, slugify, type Finding, type Opportunity, type SearchMetricRow } from "@organic-growth/core";
+import { expectedCtr } from "@organic-growth/pages";
 
 /** Query wording that usually signals purchase or booking intent, across common markets. */
 export const COMMERCIAL_QUERY_PATTERN =

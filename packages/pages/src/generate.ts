@@ -10,7 +10,8 @@ import type {
   PageLink,
   PageTemplate,
 } from "@organic-growth/core";
-import { fillPattern, fillProse, formatValue, slugify, truncateAtWord, type Resolver } from "./patterns.js";
+import { slugify } from "@organic-growth/core";
+import { fillPattern, fillProse, formatValue, truncateAtWord, type Resolver } from "./patterns.js";
 
 export type GenerationInput = {
   siteId: string;

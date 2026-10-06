@@ -8,14 +8,12 @@
 // Fetches go to the live site; keep --max modest on sites you don't own.
 
 import { createId } from "@organic-growth/core";
+import { crawlGooglebotBatch } from "@organic-growth/crawler";
 import {
-  GOOGLEBOT_TOKEN, GOOGLEBOT_UA, auditSitemap, classifyUrlType, crawlGooglebotBatch, defaultFetcher, parseRobots,
-} from "@organic-growth/crawler";
-import {
-  createAnalysis, enqueueAnalysisCrawlUrls, getCrawlCoverage, listCrawlPageResults, listPendingCrawlUrls, saveCrawlBatch, upsertSite,
+  createAnalysis, getCrawlCoverage, listCrawlPageResults, listPendingCrawlUrls, saveCrawlBatch, upsertSite,
 } from "@organic-growth/db";
 import { openSqliteD1 } from "@organic-growth/db/sqlite";
-import { runFullAnalysis, synthesizePlanNarrative } from "@organic-growth/agents";
+import { queueFullCrawl, runFullAnalysis, synthesizePlanNarrative } from "@organic-growth/agents";
 import { createLlm } from "@organic-growth/ai";
 
 const args = process.argv.slice(2);
@@ -41,20 +39,8 @@ await upsertSite(db, { id: siteId, name: new URL(baseUrl).hostname, baseUrl, cre
 await createAnalysis(db, { id: analysisId, siteId, status: "running", createdAt: now });
 
 log(`Reading the sitemap of ${baseUrl}…`);
-const { urls } = await auditSitemap(baseUrl, undefined, { maxUrls: 1 });
-const robots = await defaultFetcher(`${baseUrl}/robots.txt`, { userAgent: GOOGLEBOT_UA, maxBytes: 500_000 })
-  .then((response) => (response.status < 400 ? parseRobots(response.body, GOOGLEBOT_TOKEN) : null))
-  .catch(() => null);
-const capped = urls.slice(0, maxUrls);
-await enqueueAnalysisCrawlUrls(db, {
-  analysisId,
-  siteId,
-  urls: capped.map((url) => {
-    const parsed = new URL(url);
-    return { url, routeFamily: classifyUrlType(url), blocked: robots ? !robots.isAllowed(`${parsed.pathname}${parsed.search}`) : false };
-  }),
-});
-log(`${urls.length.toLocaleString()} sitemap URLs; crawling ${capped.length.toLocaleString()} as Googlebot…`);
+const { declared, queued } = await queueFullCrawl(db, { analysisId, siteId, baseUrl, maxUrls });
+log(`${declared.toLocaleString()} sitemap URLs; crawling ${queued.toLocaleString()} as Googlebot…`);
 
 for (;;) {
   const batch = await listPendingCrawlUrls(db, analysisId, 50);

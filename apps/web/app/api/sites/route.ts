@@ -1,11 +1,8 @@
 import { env } from "cloudflare:workers";
-import { createId, type SiteRecord } from "@organic-growth/core";
+import { createId, verifyToken, type SiteRecord } from "@organic-growth/core";
+import { isSafePublicUrl } from "@organic-growth/crawler";
 import { listSites, upsertSite } from "@organic-growth/db";
-import {
-  createInstallationToken,
-  listInstallationRepositories,
-  verifySignedInstallationCookie,
-} from "@organic-growth/repo-analyzer";
+import { createInstallationToken, listInstallationRepositories } from "@organic-growth/repo-analyzer";
 import { fail, json, readJson } from "../../../src/server";
 
 function installationCookie(request: Request): string | null {
@@ -15,16 +12,8 @@ function installationCookie(request: Request): string | null {
 
 function publicWebsiteOrigin(value: unknown): string | null {
   if (typeof value !== "string" || value.length > 2048) return null;
-  try {
-    const url = new URL(value.match(/^https?:\/\//i) ? value : `https://${value}`);
-    const host = url.hostname.toLowerCase();
-    if (!/^https?:$/.test(url.protocol) || !host.includes(".") || host.endsWith(".local") || host.endsWith(".localhost") || host === "localhost") return null;
-    if (url.username || url.password || (url.port && !["80", "443"].includes(url.port))) return null;
-    if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host.startsWith("[") || host.includes(":")) return null;
-    return url.origin;
-  } catch {
-    return null;
-  }
+  const candidate = /^https?:\/\//i.test(value) ? value : `https://${value}`;
+  return isSafePublicUrl(candidate) ? new URL(candidate).origin : null;
 }
 
 export async function GET() {
@@ -60,7 +49,7 @@ export async function POST(request: Request) {
   if (typeof body.repositoryId !== "number" || !Number.isSafeInteger(body.repositoryId)) {
     return fail("Choose an installed repository.");
   }
-  const installationId = await verifySignedInstallationCookie(installationCookie(request) ?? "", env.SESSION_SECRET);
+  const installationId = (await verifyToken<{ id: string }>(installationCookie(request) ?? "", env.SESSION_SECRET))?.id;
   if (!installationId) return fail("Install the GitHub App before connecting a repository.", 401);
 
   try {

@@ -1,14 +1,10 @@
 import type {
-  CompetitorProfile,
   CrawlCoverage,
   CrawlFamilyStats,
   CrawlIssue,
   CrawlIssueExample,
   CrawlPageResult,
-  Finding,
   FrameworkFingerprint,
-  GrowthPlan,
-  Opportunity,
   ProposedChange,
   SearchMetricRow,
   SiteRecord,
@@ -82,8 +78,7 @@ export async function deleteSite(db: D1Like, siteId: string): Promise<void> {
   const tables = [
     "page_metrics_daily", "page_sessions", "page_search_metrics", "cta_variants", "page_settings", "site_scopes",
     "generated_pages", "page_templates", "data_records", "data_sources", "jobs", "datasets",
-    "findings", "pages", "crawl_snapshots", "search_metrics", "competitors", "opportunities", "growth_plans",
-    "changes", "conversion_events", "oauth_credentials", "site_competitor_domains", "site_markets", "analyses",
+    "pages", "search_metrics", "changes", "conversion_events", "oauth_credentials", "site_competitor_domains", "site_markets", "analyses",
   ];
   await runStatements(db, [
     db.prepare("DELETE FROM page_revisions WHERE page_id IN (SELECT id FROM generated_pages WHERE site_id = ?)").bind(siteId),
@@ -586,242 +581,6 @@ export async function listCrawlPageResults(
   });
 }
 
-export async function insertFinding(db: D1Like, finding: Finding): Promise<void> {
-  await db
-    .prepare(
-      `INSERT INTO findings (
-        id, site_id, analysis_id, category, severity, title, summary,
-        evidence_json, organic_impact_score, recommendation, pages_affected_json, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .bind(
-      finding.id,
-      finding.siteId,
-      finding.analysisId,
-      finding.category,
-      finding.severity,
-      finding.title,
-      finding.summary,
-      JSON.stringify(finding.evidence),
-      finding.organicImpactScore,
-      finding.recommendation ?? null,
-      JSON.stringify(finding.pagesAffected ?? []),
-      finding.createdAt,
-    )
-    .run();
-}
-
-export async function listFindings(
-  db: D1Like,
-  siteId: string,
-): Promise<Finding[]> {
-  const { results } = await db
-    .prepare(
-      `SELECT * FROM findings WHERE site_id = ? ORDER BY organic_impact_score DESC`,
-    )
-    .bind(siteId)
-    .all<Record<string, unknown>>();
-  return results.map((row) => ({
-    id: String(row.id),
-    siteId: String(row.site_id),
-    analysisId: String(row.analysis_id),
-    category: row.category as Finding["category"],
-    severity: row.severity as Finding["severity"],
-    title: String(row.title),
-    summary: String(row.summary),
-    evidence: JSON.parse(String(row.evidence_json)),
-    organicImpactScore: Number(row.organic_impact_score),
-    recommendation: row.recommendation
-      ? String(row.recommendation)
-      : undefined,
-    pagesAffected: row.pages_affected_json
-      ? (JSON.parse(String(row.pages_affected_json)) as string[])
-      : [],
-    createdAt: String(row.created_at),
-  }));
-}
-
-export async function insertGrowthPlan(
-  db: D1Like,
-  plan: GrowthPlan,
-): Promise<void> {
-  await db
-    .prepare(
-      `INSERT INTO growth_plans (
-        id, site_id, analysis_id, situation, constraints_json,
-        competitive_advantage, highest_impact_opportunity,
-        priorities_json, sections_json, markdown, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .bind(
-      plan.id,
-      plan.siteId,
-      plan.analysisId,
-      plan.situation,
-      JSON.stringify(plan.constraints),
-      plan.competitiveAdvantage,
-      plan.highestImpactOpportunity,
-      JSON.stringify(plan.priorities),
-      JSON.stringify(plan.sections),
-      plan.markdown,
-      plan.createdAt,
-    )
-    .run();
-}
-
-export async function getLatestGrowthPlan(
-  db: D1Like,
-  siteId: string,
-): Promise<GrowthPlan | null> {
-  const row = await db
-    .prepare(
-      `SELECT * FROM growth_plans WHERE site_id = ? ORDER BY created_at DESC LIMIT 1`,
-    )
-    .bind(siteId)
-    .first<Record<string, unknown>>();
-  if (!row) return null;
-  return {
-    id: String(row.id),
-    siteId: String(row.site_id),
-    analysisId: String(row.analysis_id),
-    situation: String(row.situation),
-    constraints: JSON.parse(String(row.constraints_json)) as string[],
-    competitiveAdvantage: String(row.competitive_advantage),
-    highestImpactOpportunity: String(row.highest_impact_opportunity),
-    priorities: JSON.parse(String(row.priorities_json)),
-    sections: JSON.parse(String(row.sections_json)),
-    markdown: String(row.markdown),
-    createdAt: String(row.created_at),
-  };
-}
-
-export async function insertOpportunity(
-  db: D1Like,
-  opportunity: Opportunity,
-): Promise<void> {
-  await db
-    .prepare(
-      `INSERT INTO opportunities (
-        id, site_id, analysis_id, title, search_demand, intent, current_rank,
-        competitor_strength, current_page, potential_page, estimated_difficulty,
-        business_value, conversion_potential, technical_effort, content_effort,
-        priority_score, rationale, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .bind(
-      opportunity.id,
-      opportunity.siteId,
-      opportunity.analysisId,
-      opportunity.title,
-      opportunity.searchDemand,
-      opportunity.intent,
-      opportunity.currentRank ?? null,
-      opportunity.competitorStrength,
-      opportunity.currentPage ?? null,
-      opportunity.potentialPage ?? null,
-      opportunity.estimatedDifficulty,
-      opportunity.businessValue,
-      opportunity.conversionPotential,
-      opportunity.technicalEffort,
-      opportunity.contentEffort,
-      opportunity.priorityScore,
-      opportunity.rationale,
-      new Date().toISOString(),
-    )
-    .run();
-}
-
-export async function listOpportunities(
-  db: D1Like,
-  siteId: string,
-): Promise<Opportunity[]> {
-  const { results } = await db
-    .prepare(
-      `SELECT * FROM opportunities WHERE site_id = ? ORDER BY priority_score DESC`,
-    )
-    .bind(siteId)
-    .all<Record<string, unknown>>();
-  return results.map((row) => ({
-    id: String(row.id),
-    siteId: String(row.site_id),
-    analysisId: String(row.analysis_id),
-    title: String(row.title),
-    searchDemand: Number(row.search_demand),
-    intent: String(row.intent),
-    currentRank: row.current_rank != null ? Number(row.current_rank) : undefined,
-    competitorStrength: Number(row.competitor_strength),
-    currentPage: row.current_page ? String(row.current_page) : undefined,
-    potentialPage: row.potential_page ? String(row.potential_page) : undefined,
-    estimatedDifficulty: Number(row.estimated_difficulty),
-    businessValue: Number(row.business_value),
-    conversionPotential: Number(row.conversion_potential),
-    technicalEffort: Number(row.technical_effort),
-    contentEffort: Number(row.content_effort),
-    priorityScore: Number(row.priority_score),
-    rationale: String(row.rationale),
-  }));
-}
-
-export async function insertCompetitor(
-  db: D1Like,
-  competitor: CompetitorProfile,
-): Promise<void> {
-  await db
-    .prepare(
-      `INSERT INTO competitors (
-        id, site_id, domain, category, relevance_score, summary,
-        architecture_notes, content_notes, conversion_notes, technical_notes,
-        evidence_json, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .bind(
-      competitor.id,
-      competitor.siteId,
-      competitor.domain,
-      competitor.category,
-      competitor.relevanceScore,
-      competitor.summary,
-      competitor.architectureNotes ?? null,
-      competitor.contentNotes ?? null,
-      competitor.conversionNotes ?? null,
-      competitor.technicalNotes ?? null,
-      JSON.stringify(competitor.evidence),
-      new Date().toISOString(),
-    )
-    .run();
-}
-
-export async function listCompetitors(
-  db: D1Like,
-  siteId: string,
-): Promise<CompetitorProfile[]> {
-  const { results } = await db
-    .prepare(
-      `SELECT * FROM competitors WHERE site_id = ? ORDER BY relevance_score DESC`,
-    )
-    .bind(siteId)
-    .all<Record<string, unknown>>();
-  return results.map((row) => ({
-    id: String(row.id),
-    siteId: String(row.site_id),
-    domain: String(row.domain),
-    category: row.category as CompetitorProfile["category"],
-    relevanceScore: Number(row.relevance_score),
-    summary: String(row.summary),
-    architectureNotes: row.architecture_notes
-      ? String(row.architecture_notes)
-      : undefined,
-    contentNotes: row.content_notes ? String(row.content_notes) : undefined,
-    conversionNotes: row.conversion_notes
-      ? String(row.conversion_notes)
-      : undefined,
-    technicalNotes: row.technical_notes
-      ? String(row.technical_notes)
-      : undefined,
-    evidence: JSON.parse(String(row.evidence_json)),
-  }));
-}
-
 export async function insertChange(
   db: D1Like,
   change: ProposedChange,
@@ -928,12 +687,14 @@ export async function listChanges(
   }));
 }
 
-export async function insertSearchMetrics(
+/** Replaces the latest synced Search Console snapshot for a site. */
+export async function replaceCurrentSearchMetrics(
   db: D1Like,
   siteId: string,
-  analysisId: string | null,
   rows: SearchMetricRow[],
 ): Promise<void> {
+  await db.prepare("DELETE FROM search_metrics WHERE site_id = ? AND analysis_id IS NULL")
+    .bind(siteId).run();
   const createdAt = nowIso();
   for (const group of chunks(rows, 100)) {
     const statements = group.map((row) => db.prepare(
@@ -944,7 +705,7 @@ export async function insertSearchMetrics(
       ).bind(
         `sm_${crypto.randomUUID()}`,
         siteId,
-        analysisId,
+        null,
         row.query,
         row.page,
         row.country,
@@ -959,32 +720,6 @@ export async function insertSearchMetrics(
       ));
     await runStatements(db, statements);
   }
-}
-
-/** Replaces the latest synced Search Console snapshot for a site. */
-export async function replaceCurrentSearchMetrics(
-  db: D1Like,
-  siteId: string,
-  rows: SearchMetricRow[],
-): Promise<void> {
-  await db.prepare("DELETE FROM search_metrics WHERE site_id = ? AND analysis_id IS NULL")
-    .bind(siteId).run();
-  await insertSearchMetrics(db, siteId, null, rows);
-}
-
-export async function listSearchMetrics(
-  db: D1Like,
-  siteId: string,
-): Promise<SearchMetricRow[]> {
-  const { results } = await db
-    .prepare(
-      `SELECT query, page, country, device, impressions, clicks, ctr, position, period_start AS periodStart, period_end AS periodEnd
-       FROM search_metrics WHERE site_id = ?
-       ORDER BY clicks DESC LIMIT 500`,
-    )
-    .bind(siteId)
-    .all<SearchMetricRow>();
-  return results;
 }
 
 export async function insertConversionEvent(
@@ -1026,19 +761,5 @@ export async function getConversionSummary(db: D1Like, siteId: string): Promise<
     FROM conversion_events WHERE site_id = ?`).bind(new Date(Date.now() - 28 * 86400_000).toISOString(), siteId)
     .first<{ total_events: number; leads: number | null; last_28_days: number }>();
   return { totalEvents: Number(row?.total_events ?? 0), leads: Number(row?.leads ?? 0), last28Days: Number(row?.last_28_days ?? 0) };
-}
-
-export async function countConversionEvents(
-  db: D1Like,
-  siteId: string,
-): Promise<Record<string, number>> {
-  const { results } = await db
-    .prepare(
-      `SELECT event, COUNT(*) as count FROM conversion_events
-       WHERE site_id = ? GROUP BY event`,
-    )
-    .bind(siteId)
-    .all<{ event: string; count: number }>();
-  return Object.fromEntries(results.map((r) => [r.event, Number(r.count)]));
 }
 

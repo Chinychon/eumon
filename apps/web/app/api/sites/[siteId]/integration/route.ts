@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import { GOOGLEBOT_UA, defaultFetcher, headerNoindex, isEmptyShell, parseHtmlSignals } from "@organic-growth/crawler";
-import { listPublishedPaths, upsertPageSettings } from "@organic-growth/db";
-import { fail, findSite, json, settingsFor } from "../../../../../src/server";
+import { getSite, listPublishedPaths, upsertPageSettings } from "@organic-growth/db";
+import { fail, json, settingsFor } from "../../../../../src/server";
 
 type Snippet = { id: string; label: string; when: string; language: string; code: string };
 
@@ -165,7 +165,7 @@ async function detectHosting(baseUrl: string): Promise<{ provider: string | null
 
 export async function GET(request: Request, context: { params: Promise<{ siteId: string }> }) {
   const { siteId } = await context.params;
-  const site = await findSite(siteId);
+  const site = await getSite(env.DB, siteId);
   if (!site) return fail("Site not found.", 404);
   const settings = await settingsFor(site);
   const target = `${new URL(request.url).origin}/p/${site.id}`;
@@ -191,7 +191,7 @@ export async function GET(request: Request, context: { params: Promise<{ siteId:
  */
 export async function POST(_request: Request, context: { params: Promise<{ siteId: string }> }) {
   const { siteId } = await context.params;
-  const site = await findSite(siteId);
+  const site = await getSite(env.DB, siteId);
   if (!site) return fail("Site not found.", 404);
   const settings = await settingsFor(site);
   const origin = settings.publicOrigin.replace(/\/$/, "");

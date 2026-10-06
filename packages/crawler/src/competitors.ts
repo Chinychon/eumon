@@ -1,6 +1,6 @@
-import { defaultFetcher, isEmptyShell, isSafePublicUrl, parseHtmlSignals, type Fetcher, type FetchResult } from "./index.js";
+import { defaultFetcher, fetchRobots, isEmptyShell, isSafePublicUrl, parseHtmlSignals, type Fetcher, type FetchResult } from "./index.js";
 import { elementSpans, findTags, visibleText } from "./html.js";
-import { parseRobots, type RobotsPolicy } from "./robots.js";
+import type { RobotsPolicy } from "./robots.js";
 import { classifyLanguage, classifyUrlType, isSameSite } from "./urls.js";
 
 /** How Eumon identifies itself on third-party sites. Competitor research never impersonates a search engine. */
@@ -281,10 +281,9 @@ export async function researchSite(
   const origin = `https://${domain}`;
   const empty: SitemapProfile = { origin, filesRead: 0, filesListed: 0, urlsSeen: 0, estimatedUrls: 0, partial: false, families: [], languages: {}, notes: [] };
   const fetchAs = (url: string) => fetcher(url, { userAgent: RESEARCH_USER_AGENT });
-  let robots: RobotsPolicy | null = null;
+  let robots: RobotsPolicy | null;
   try {
-    const response = await fetcher(`${origin}/robots.txt`, { userAgent: RESEARCH_USER_AGENT, maxBytes: 500_000 });
-    if (response.status < 400) robots = parseRobots(response.body, RESEARCH_TOKEN);
+    robots = await fetchRobots(origin, RESEARCH_TOKEN, RESEARCH_USER_AGENT, fetcher);
   } catch (error) {
     return { domain, origin, allowed: false, sitemap: empty, pages: [], error: `The site could not be reached (${error instanceof Error ? error.message : "error"}).` };
   }

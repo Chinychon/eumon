@@ -1,11 +1,5 @@
 import type { JsonObject, JsonValue } from "@organic-growth/core";
-import { decodeEntities, elementSpans, findTags, hasToken, parseAttributes, stripElements } from "@organic-growth/crawler";
-
-export { decodeEntities } from "@organic-growth/crawler";
-
-function stripTags(value: string): string {
-  return decodeEntities(value.replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim();
-}
+import { contentMarkup, decodeEntities, elementSpans, findTags, hasToken, innerText, parseAttributes, stripElements } from "@organic-growth/crawler";
 
 /** Every JSON-LD object on the page, with `@graph` containers flattened. */
 export function extractJsonLd(html: string): JsonObject[] {
@@ -41,7 +35,7 @@ export type PageMeta = {
 };
 
 export function extractMeta(html: string): PageMeta {
-  const head = stripElements(html, ["script", "style", "noscript", "template", "svg"]);
+  const head = contentMarkup(html);
   const metas = findTags(head, "meta");
   const meta = (key: "name" | "property", value: string) =>
     metas.find((tag) => tag[key]?.toLowerCase() === value)?.content?.trim() || undefined;
@@ -52,8 +46,8 @@ export function extractMeta(html: string): PageMeta {
   const title = inner("title");
   const h1 = inner("h1");
   return {
-    title: title ? stripTags(title) : undefined,
-    h1: h1 ? stripTags(h1) : undefined,
+    title: title ? innerText(title) : undefined,
+    h1: h1 ? innerText(h1) : undefined,
     description: meta("name", "description"),
     image: meta("property", "og:image"),
     themeColor: meta("name", "theme-color"),
@@ -73,7 +67,7 @@ export function htmlToText(html: string, maxChars = 15_000): string {
   let body = stripElements(html, ["script", "style", "noscript", "svg", "template", "iframe", "form"]);
   const container = elementSpans(body, ["main"])[0] ?? elementSpans(body, ["article"])[0];
   const main = container ? body.slice(container.contentStart, container.contentEnd) : undefined;
-  if (main && stripTags(main).length > 200) body = main;
+  if (main && innerText(main).length > 200) body = main;
   else body = stripElements(body, ["nav", "footer", "header", "aside"]);
 
   const text = flattenBlocks(body)
@@ -113,11 +107,11 @@ function flattenBlocks(html: string): string {
       position = span.contentStart;
       continue;
     }
-    if (heading) output += `\n${heading} ${stripTags(inner)}\n`;
-    else if (span.tag === "li") output += `\n- ${stripTags(inner)}\n`;
+    if (heading) output += `\n${heading} ${innerText(inner)}\n`;
+    else if (span.tag === "li") output += `\n- ${innerText(inner)}\n`;
     else {
-      const cells = inner.split(/<t[hd]\b[^>]{0,500}>/i).slice(1).map(stripTags);
-      output += cells.length ? `\n| ${cells.join(" | ")} |\n` : `\n${stripTags(inner)}\n`;
+      const cells = inner.split(/<t[hd]\b[^>]{0,500}>/i).slice(1).map((cell) => innerText(cell));
+      output += cells.length ? `\n| ${cells.join(" | ")} |\n` : `\n${innerText(inner)}\n`;
     }
     position = span.end;
   }

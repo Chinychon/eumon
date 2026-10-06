@@ -11,6 +11,8 @@ import {
   getSite,
   listCrawlPageResults,
   listPendingCrawlUrls,
+  listRecordKeys,
+  listSiteMarkets,
   listSiteCompetitorDomains,
   replaceCurrentSearchMetrics,
   saveAnalysisReport,
@@ -152,10 +154,12 @@ export class SiteAnalysisWorkflow extends WorkflowEntrypoint<AppEnv, AnalysisPay
             searchMetrics = await fetchSearchConsoleMetrics(accessToken, site.gscProperty);
             await replaceCurrentSearchMetrics(db, siteId, searchMetrics);
           }
-          const [coverage, examples, datasets] = await Promise.all([
+          const [coverage, examples, datasets, targetMarkets, entityKeys] = await Promise.all([
             getCrawlCoverage(db, analysisId),
             listCrawlPageResults(db, analysisId, 50),
             datasetCoverage(db, siteId),
+            listSiteMarkets(db, siteId),
+            listRecordKeys(db, siteId),
           ]);
           const raw = await runFullAnalysis({
             analysisId,
@@ -169,6 +173,8 @@ export class SiteAnalysisWorkflow extends WorkflowEntrypoint<AppEnv, AnalysisPay
             searchMetrics,
             competitorResearch,
             datasets,
+            targetMarkets,
+            entityKeys,
             llm,
             repoSnapshot,
             maxPages: 25,

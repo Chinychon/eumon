@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { GeneratedPage, PageTemplate } from "@organic-growth/core";
-import { upsertSite } from "./index.js";
+import { listRecordKeys, listSiteMarkets, setSiteMarkets, upsertSite } from "./index.js";
 import { datasetCoverage, defaultPageSettings, getPageSettings, setTemplatePublication, syncTemplatePages, upsertDataset, upsertPageSettings, upsertRecords, upsertTemplate } from "./page-engine.js";
 import { openSqliteD1 } from "./sqlite.js";
 
@@ -43,5 +43,21 @@ describe("page settings", () => {
     assert.equal(defaults.language, "en");
     await upsertPageSettings(db, { ...defaults, language: "id" });
     assert.equal((await getPageSettings(db, "site"))?.language, "id");
+  });
+});
+
+describe("markets and record keys", () => {
+  it("stores target countries and lists record keys with their entity type", async () => {
+    const db = openSqliteD1();
+    const now = new Date().toISOString();
+    await upsertSite(db, { id: "site", name: "x.com", baseUrl: "https://x.com", createdAt: now, updatedAt: now });
+    await setSiteMarkets(db, "site", ["idn", "mys", "idn"]);
+    assert.deepEqual(await listSiteMarkets(db, "site"), ["idn", "mys"]);
+    await setSiteMarkets(db, "site", ["idn"]);
+    assert.deepEqual(await listSiteMarkets(db, "site"), ["idn"]);
+    const fields = [{ key: "name", label: "Name", type: "text" as const }];
+    await upsertDataset(db, { id: "ds", siteId: "site", name: "Doctors", entityType: "doctor", description: "", fields, keyField: "name", pageIdeas: [], status: "active", createdAt: now, updatedAt: now });
+    await upsertRecords(db, [{ siteId: "site", datasetId: "ds", key: "amy-tan", data: { name: "Amy Tan" } }], fields);
+    assert.deepEqual(await listRecordKeys(db, "site"), [{ key: "amy-tan", entityType: "doctor" }]);
   });
 });

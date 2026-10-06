@@ -3,7 +3,7 @@
 // sampled checks, findings, growth plan), with an in-memory SQLite database
 // in place of D1. Useful for checking analyzer changes against real sites.
 //
-//   npm run audit -- https://example.com [--max 500] [--competitor other.com] [--json]
+//   npm run audit -- https://example.com [--max 500] [--competitor other.com] [--market idn] [--json]
 //
 // Fetches go to the live site; keep --max modest on sites you don't own.
 
@@ -26,7 +26,7 @@ const option = (name, fallback) => {
 const options = (name) => args.flatMap((value, index) => (args[index - 1] === `--${name}` ? [value] : []));
 const target = args.find((value) => /^https?:\/\//.test(value));
 if (!target) {
-  console.error("Usage: npm run audit -- https://example.com [--max 500] [--competitor other.com] [--json]");
+  console.error("Usage: npm run audit -- https://example.com [--max 500] [--competitor other.com] [--market idn] [--json]");
   process.exit(1);
 }
 const maxUrls = Number(option("max", "500"));
@@ -103,6 +103,7 @@ log("Running sampled checks, rendering comparison, repeatability test, and synth
 const report = await runFullAnalysis({
   analysisId, siteId, name: new URL(baseUrl).hostname, baseUrl, maxPages: 25,
   competitorDomains: options("competitor"),
+  targetMarkets: options("market"),
   crawlCoverage: { coverage, examples },
   renderPages: playwright ? renderPages : undefined,
   llm,

@@ -21,7 +21,8 @@
     "@organic-growth/core": "*",
     "@organic-growth/crawler": "*",
     "@organic-growth/db": "*",
-    "@organic-growth/repo-analyzer": "*"
+    "@organic-growth/repo-analyzer": "*",
+    "@organic-growth/pages": "*"
   },
   "devDependencies": {
     "typescript": "^5.9.2",

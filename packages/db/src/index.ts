@@ -83,7 +83,7 @@ export async function deleteSite(db: D1Like, siteId: string): Promise<void> {
     "page_metrics_daily", "page_sessions", "page_search_metrics", "cta_variants", "page_settings", "site_scopes",
     "generated_pages", "page_templates", "data_records", "data_sources", "jobs", "datasets",
     "findings", "pages", "crawl_snapshots", "search_metrics", "competitors", "opportunities", "growth_plans",
-    "changes", "conversion_events", "oauth_credentials", "site_competitor_domains", "analyses",
+    "changes", "conversion_events", "oauth_credentials", "site_competitor_domains", "site_markets", "analyses",
   ];
   await runStatements(db, [
     db.prepare("DELETE FROM page_revisions WHERE page_id IN (SELECT id FROM generated_pages WHERE site_id = ?)").bind(siteId),
@@ -276,6 +276,31 @@ export async function listSiteCompetitorDomains(db: D1Like, siteId: string): Pro
   const { results } = await db.prepare("SELECT domain FROM site_competitor_domains WHERE site_id = ? ORDER BY domain")
     .bind(siteId).all<{ domain: string }>();
   return results.map((row) => row.domain);
+}
+
+/** Countries the business targets (Search Console alpha-3 codes). */
+export async function setSiteMarkets(db: D1Like, siteId: string, countries: string[]): Promise<void> {
+  await runStatements(db, [
+    db.prepare("DELETE FROM site_markets WHERE site_id = ?").bind(siteId),
+    ...[...new Set(countries)].map((country) => db.prepare("INSERT INTO site_markets (site_id, country) VALUES (?, ?)").bind(siteId, country)),
+  ]);
+}
+
+export async function listSiteMarkets(db: D1Like, siteId: string): Promise<string[]> {
+  const { results } = await db.prepare("SELECT country FROM site_markets WHERE site_id = ? ORDER BY country").bind(siteId).all<{ country: string }>();
+  return results.map((row) => row.country);
+}
+
+/**
+ * Record keys (slugs of entity names) with their entity type, so search
+ * analysis can recognize queries that name a specific doctor, product, or place.
+ */
+export async function listRecordKeys(db: D1Like, siteId: string, limit = 50_000): Promise<Array<{ key: string; entityType: string }>> {
+  const { results } = await db.prepare(
+    `SELECT r.record_key AS key, d.entity_type AS entity_type FROM data_records r JOIN datasets d ON d.id = r.dataset_id
+     WHERE r.site_id = ? AND d.status != 'archived' LIMIT ?`,
+  ).bind(siteId, limit).all<{ key: string; entity_type: string }>();
+  return results.map((row) => ({ key: row.key, entityType: row.entity_type }));
 }
 
 export async function updateAnalysisStatus(

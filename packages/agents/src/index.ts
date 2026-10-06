@@ -1,4 +1,5 @@
 import {
+  countryName,
   createId,
   type CompetitorProfile,
   type Finding,
@@ -12,6 +13,7 @@ import {
 } from "@organic-growth/core";
 import type { RepoAnalysisResult } from "@organic-growth/repo-analyzer";
 import { competitionOpportunities, type CompetitionReport } from "./competition.js";
+import { analyzeSearch, searchOpportunities, type SearchInsights } from "./search.js";
 
 export interface AnalysisBundle {
   siteId: string;
@@ -30,62 +32,26 @@ export interface AnalysisBundle {
   competition?: CompetitionReport;
   /** Collected datasets: records held versus entity pages published. */
   datasets?: Array<{ name: string; entityType: string; records: number; livePages: number }>;
+  /** Search Console analysis (market alignment, intent mix, striking distance). */
+  search?: SearchInsights;
 }
 
-/** Query wording that usually signals purchase or booking intent, across common markets. */
-export const COMMERCIAL_QUERY_PATTERN =
-  /\b(cost|costs|price|prices|pricing|cheap|cheapest|affordable|quote|book|booking|appointment|buy|hire|near me|best|top|review|reviews|vs|compare|comparison|service|services|clinic|package|biaya|harga|terbaik|murah)\b/i;
-
-export function analyzeSearchTraffic(rows: SearchMetricRow[], brandTerms: string[] = []): {
+/** The legacy search summary shape stored in reports as `searchNarrative`. */
+export function analyzeSearchTraffic(rows: SearchMetricRow[], brandTerms: string[] = [], insights = analyzeSearch(rows, { brandTerms })): {
   totalClicks: number;
   totalImpressions: number;
   countryShare: Record<string, number>;
   brandedShare: number;
-  commercialGapQueries: SearchMetricRow[];
+  commercialGapQueries: Array<{ query: string; page: string; clicks: number; impressions: number; position: number }>;
   narrative: string;
 } {
-  const totalClicks = rows.reduce((s, r) => s + r.clicks, 0);
-  const totalImpressions = rows.reduce((s, r) => s + r.impressions, 0);
-  const countryShare: Record<string, number> = {};
-  for (const r of rows) {
-    countryShare[r.country] = (countryShare[r.country] ?? 0) + r.impressions;
-  }
-  for (const k of Object.keys(countryShare)) {
-    countryShare[k] = countryShare[k] / Math.max(totalImpressions, 1);
-  }
-
-  const brands = brandTerms.map((term) => term.toLowerCase()).filter((term) => term.length >= 3);
-  const brandedClicks = rows
-    .filter((r) => brands.some((brand) => r.query.toLowerCase().includes(brand)))
-    .reduce((s, r) => s + r.clicks, 0);
-  const brandedShare = totalClicks ? brandedClicks / totalClicks : 0;
-
-  const commercialGapQueries = rows
-    .filter((r) => COMMERCIAL_QUERY_PATTERN.test(r.query) && r.position > 10)
-    .sort((a, b) => b.impressions - a.impressions)
-    .slice(0, 25);
-
-  const [topCountry, topShare] = Object.entries(countryShare).sort((a, b) => b[1] - a[1])[0] ?? ["", 0];
-  const narrative = [
-    `Organic search shows ~${totalClicks.toLocaleString()} clicks and ~${totalImpressions.toLocaleString()} impressions in the synced window.`,
-    topCountry ? `${Math.round(topShare * 100)}% of impressions come from ${topCountry.toUpperCase()}; confirm that matches the market you sell to.` : "",
-    brands.length
-      ? brandedShare > 0.5
-        ? `About ${Math.round(brandedShare * 100)}% of clicks are branded searches, so non-brand discovery is still small.`
-        : `Branded searches account for about ${Math.round(brandedShare * 100)}% of clicks.`
-      : "",
-    commercialGapQueries.length
-      ? `${commercialGapQueries.length} commercial-intent queries rank beyond position 10 — demand exists that current pages are not capturing.`
-      : "Few commercial-intent queries appear beyond page one in the current sample.",
-  ].filter(Boolean).join(" ");
-
   return {
-    totalClicks,
-    totalImpressions,
-    countryShare,
-    brandedShare,
-    commercialGapQueries,
-    narrative,
+    totalClicks: insights.totals.clicks,
+    totalImpressions: insights.totals.impressions,
+    countryShare: Object.fromEntries(insights.countries.map((country) => [country.country, country.impressionShare])),
+    brandedShare: insights.brandedShare,
+    commercialGapQueries: insights.commercialGaps,
+    narrative: insights.narrative,
   };
 }
 
@@ -114,30 +80,8 @@ export function buildOpportunities(bundle: AnalysisBundle): Opportunity[] {
       currentPage: finding.pagesAffected?.[0],
     };
   });
-  const queryGroups = new Map<string, SearchMetricRow[]>();
-  for (const row of bundle.searchMetrics) {
-    if (row.impressions < 20 || row.position < 4) continue;
-    const key = `${row.query}\n${row.page}`;
-    queryGroups.set(key, [...(queryGroups.get(key) ?? []), row]);
-  }
-  const searchOpportunities = [...queryGroups.values()].map((rows) => {
-    const sample = rows[0]!;
-    const impressions = rows.reduce((sum, row) => sum + row.impressions, 0);
-    const clicks = rows.reduce((sum, row) => sum + row.clicks, 0);
-    const position = rows.reduce((sum, row) => sum + row.position * row.impressions, 0) / Math.max(impressions, 1);
-    const commercial = COMMERCIAL_QUERY_PATTERN.test(sample.query);
-    const effort = 2;
-    const score = (impressions * (commercial ? 1.5 : 1) * Math.min(1, Math.max(0, 0.1 - clicks / Math.max(impressions, 1)))) / effort;
-    return {
-      id: createId("opp"), siteId: bundle.siteId, analysisId: bundle.analysisId,
-      title: `Improve page visibility for “${sample.query}”`, searchDemand: impressions,
-      intent: commercial ? "commercial (query-pattern heuristic)" : "informational or mixed (verify manually)",
-      currentRank: position, competitorStrength: 0, estimatedDifficulty: Math.min(100, position * 4),
-      currentPage: sample.page, businessValue: commercial ? 1.5 : 1, conversionPotential: commercial ? 1 : 0.5,
-      technicalEffort: effort, contentEffort: effort, priorityScore: score,
-      rationale: `${impressions} impressions and ${clicks} clicks across imported rows; average position ${position.toFixed(1)}. Query intent is a text-pattern heuristic. Score is for prioritization, not a traffic forecast.`,
-    };
-  }).sort((a, b) => b.priorityScore - a.priorityScore).slice(0, 10);
+  const search = bundle.search ?? analyzeSearch(bundle.searchMetrics, { brandTerms: bundle.brandTerms });
+  const fromSearch = searchOpportunities(search, bundle.siteId, bundle.analysisId);
   const contentGaps = bundle.competition ? competitionOpportunities(bundle.competition, bundle.siteId, bundle.analysisId) : [];
   // Data already collected but not published: the cheapest landing pages to add.
   const coveredByGap = new Set(bundle.competition?.rows.filter((row) => row.status === "gap" && row.data).map((row) => row.data!.dataset));
@@ -162,15 +106,15 @@ export function buildOpportunities(bundle: AnalysisBundle): Opportunity[] {
         rationale: `“${dataset.name}” holds ${dataset.records.toLocaleString()} ${dataset.entityType} records and ${dataset.livePages.toLocaleString()} published pages. Each record with enough facts can become a landing page for searches that name it; the Data step shows how many pass the quality gate.`,
       };
     });
-  return [...technical, ...searchOpportunities, ...contentGaps, ...unpublishedData].sort((a, b) => b.priorityScore - a.priorityScore);
+  return [...technical, ...fromSearch, ...contentGaps, ...unpublishedData].sort((a, b) => b.priorityScore - a.priorityScore);
 }
 
 /** Below this priority, the top opportunity is housekeeping rather than growth. */
 const MINOR_PRIORITY = 8;
 
 export function synthesizeGrowthPlan(bundle: AnalysisBundle): GrowthPlan {
-  const search = analyzeSearchTraffic(bundle.searchMetrics, bundle.brandTerms);
-  const opportunities = buildOpportunities(bundle);
+  const search = bundle.search ?? analyzeSearch(bundle.searchMetrics, { brandTerms: bundle.brandTerms });
+  const opportunities = buildOpportunities({ ...bundle, search });
   const topFindings = [...bundle.findings].sort(
     (a, b) => b.organicImpactScore - a.organicImpactScore,
   );
@@ -181,9 +125,7 @@ export function synthesizeGrowthPlan(bundle: AnalysisBundle): GrowthPlan {
     ...(blocking.length
       ? blocking.slice(0, 3).map((finding) => finding.title)
       : ["No serious technical issue was found; remaining findings are minor."]),
-    bundle.searchMetrics.length
-      ? `Search data covers ${search.totalClicks} clicks and ${search.totalImpressions} impressions in the supplied sample.`
-      : "Google Search Console is not connected; search demand, rankings, and market fit are unknown.",
+    searchConstraint(bundle, search),
     competitionConstraint(bundle),
   ];
 
@@ -311,6 +253,18 @@ export function synthesizeGrowthPlan(bundle: AnalysisBundle): GrowthPlan {
   };
 }
 
+function searchConstraint(bundle: AnalysisBundle, search: SearchInsights): string {
+  if (!bundle.searchMetrics.length) return "Google Search Console is not connected; search demand, rankings, and market fit are unknown.";
+  if (search.targetShare && search.targetShare.impressions < 0.3) {
+    return `Market fit: only ${Math.round(search.targetShare.impressions * 100)}% of search impressions come from your target market${search.targetMarkets.length > 1 ? "s" : ""} (${search.targetMarkets.map(countryName).join(", ")}).`;
+  }
+  const entity = search.entityQueries?.byType[0];
+  if (search.entityQueries && search.entityQueries.share >= 0.5 && entity) {
+    return `Intent: ${Math.round(search.entityQueries.share * 100)}% of clicks come from people looking up a specific ${entity.entityType} by name; commercial searches bring ${Math.round(search.commercialShare * 100)}%.`;
+  }
+  return `Search data covers ${search.totals.clicks.toLocaleString()} clicks and ${search.totals.impressions.toLocaleString()} impressions in the last 28 days.`;
+}
+
 function competitionConstraint(bundle: AnalysisBundle): string {
   const gap = bundle.competition?.rows.find((row) => row.status === "gap");
   if (gap) {
@@ -328,7 +282,10 @@ function strategySequence(bundle: AnalysisBundle, findings: Finding[]): string[]
   if (rows.some((row) => row.status === "gap" && row.data)) steps.push("Publish landing pages from data you already hold");
   if (rows.some((row) => row.status === "gap" && !row.data)) steps.push("Close the largest content gaps against competitors with data-backed landing pages");
   if (!bundle.searchMetrics.length) steps.push("Connect Search Console to see which queries and pages have demand");
-  else steps.push("Improve pages ranking just off page one for commercial queries");
+  else {
+    if (bundle.search?.targetShare && bundle.search.targetShare.impressions < 0.3) steps.push("Publish pages in your target market's language, built around what that market searches for");
+    steps.push("Improve pages ranking just off page one for commercial queries");
+  }
   if (!bundle.competition?.competitors.length) steps.push("Add two or three competitor domains to find content gaps");
   steps.push("Track conversions on landing pages and double down on the page types that produce customers");
   return steps;
@@ -432,3 +389,4 @@ export * from "./google-search-console.js";
 export * from "./change-generator.js";
 export * from "./competition.js";
 export * from "./code-findings.js";
+export * from "./search.js";

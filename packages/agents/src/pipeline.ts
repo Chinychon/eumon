@@ -28,6 +28,7 @@ import {
   analyzeRepository,
   type RepoSnapshot,
 } from "@organic-growth/repo-analyzer";
+import { analyzeSearch, findingsFromSearch } from "./search.js";
 import {
   analyzeSearchTraffic,
   buildOpportunities,
@@ -70,6 +71,10 @@ export interface RunAnalysisInput {
   datasets?: OwnContent["datasets"];
   /** Language model for matching content types across sites; names are compared without it. */
   llm?: JsonLlm;
+  /** Countries the business sells to (Search Console alpha-3 codes). */
+  targetMarkets?: string[];
+  /** Record keys of collected datasets, to recognize searches that name one entity. */
+  entityKeys?: Array<{ key: string; entityType: string }>;
 }
 
 /** Competitors researched per analysis; each costs a sitemap profile and a handful of page fetches. */
@@ -225,6 +230,13 @@ export async function runFullAnalysis(input: RunAnalysisInput) {
   );
 
   const searchMetrics = input.searchMetrics ?? [];
+  const brandTerms = [
+    input.name,
+    input.githubRepo,
+    new URL(input.baseUrl).hostname.replace(/^www\./, "").split(".")[0],
+  ].filter((term): term is string => Boolean(term));
+  const search = analyzeSearch(searchMetrics, { brandTerms, targetMarkets: input.targetMarkets, entityKeys: input.entityKeys });
+  if (searchMetrics.length) findings.push(...findingsFromSearch(search, input.siteId, analysisId));
 
   // Competitors: sitemaps and sample pages, compared with this site's content and data.
   const research = input.competitorResearch
@@ -251,12 +263,6 @@ export async function runFullAnalysis(input: RunAnalysisInput) {
 
   const rankedFindings = rankSeverityByOrganicImpact(findings);
 
-  const brandTerms = [
-    input.name,
-    input.githubRepo,
-    new URL(input.baseUrl).hostname.replace(/^www\./, "").split(".")[0],
-  ].filter((term): term is string => Boolean(term));
-
   const bundle: AnalysisBundle = {
     brandTerms,
     siteId: input.siteId,
@@ -271,11 +277,12 @@ export async function runFullAnalysis(input: RunAnalysisInput) {
     competitors,
     competition,
     datasets: input.datasets,
+    search,
   };
 
   const opportunities = buildOpportunities(bundle);
   const plan = synthesizeGrowthPlan(bundle);
-  const searchNarrative = analyzeSearchTraffic(searchMetrics, brandTerms);
+  const searchNarrative = analyzeSearchTraffic(searchMetrics, brandTerms, search);
 
   return {
     site,
@@ -294,6 +301,7 @@ export async function runFullAnalysis(input: RunAnalysisInput) {
       repeatability: summarizeRepeatability(repeatability),
     },
     competition: competition ?? null,
+    search: searchMetrics.length ? search : null,
     // Raw Search Console rows are persisted separately; the report keeps the
     // synthesis so it stays well under Workflow step and D1 row limits.
     searchNarrative: {

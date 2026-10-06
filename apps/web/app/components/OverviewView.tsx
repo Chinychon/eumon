@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import type { SiteRecord } from "@organic-growth/core";
+import { COUNTRIES, countryName, type SiteRecord } from "@organic-growth/core";
 import { api, errorMessage, formatNumber } from "./api";
 import { Badge, Button, Card, Kpi, usePolling, ViewHeader } from "./ui";
 
@@ -39,6 +39,19 @@ type Report = {
     insights: string[];
     aiLabels: boolean;
   } | null;
+  search?: {
+    totals: { clicks: number; impressions: number; ctr: number };
+    targetMarkets: string[];
+    targetShare: { clicks: number; impressions: number } | null;
+    countries: Array<{ country: string; name: string; impressionShare: number }>;
+    brandedShare: number;
+    commercialShare: number;
+    entityQueries: { share: number; byType: Array<{ entityType: string; clicks: number; examples: string[] }> } | null;
+    strikingDistance: Array<{ query: string; page: string; position: number; impressions: number; clicks: number }>;
+    lowCtrPages: Array<{ page: string; impressions: number; ctr: number; expectedCtr: number; position: number; queries: string[] }>;
+    cannibalized: Array<{ query: string; impressions: number; pages: Array<{ page: string; position: number }> }>;
+    narrative: string;
+  } | null;
   repo?: { fingerprint: Fingerprint; routeInspections?: RouteInspection[]; sitemapCode?: { source: string; splitsSitemaps: boolean } } | null;
   rendering?: {
     comparisons: Array<{ url: string; family: string; verdict: string; rawTextLength: number; renderedTextLength: number; rawTitle?: string; renderedTitle?: string }>;
@@ -73,6 +86,7 @@ export function OverviewView({ site, repositories, githubInstalled, onSiteChange
   const [repositoryId, setRepositoryId] = useState("");
   const [conversions, setConversions] = useState<{ totalEvents: number; last28Days: number; leads: number } | null>(null);
   const [allFindings, setAllFindings] = useState(false);
+  const [markets, setMarkets] = useState<string[]>([]);
 
   const loadChanges = useCallback(async (analysisId: string) => {
     const data = await api<{ changes: Change[] }>(`/api/analyses/${analysisId}/changes`).catch(() => ({ changes: [] }));
@@ -95,6 +109,7 @@ export function OverviewView({ site, repositories, githubInstalled, onSiteChange
       } catch (cause) { setError(errorMessage(cause)); }
     })();
     api<{ domains: string[] }>(`/api/sites/${site.id}/competitors`).then((data) => setCompetitors(data.domains.join("\n"))).catch(() => undefined);
+    api<{ countries: string[] }>(`/api/sites/${site.id}/markets`).then((data) => setMarkets(data.countries)).catch(() => setMarkets([]));
     api<{ properties: Array<{ siteUrl: string }>; selected: string | null }>(`/api/sites/${site.id}/gsc/properties`)
       .then((data) => { setGscProperties(data.properties); if (data.selected) setGscSelected(data.selected); })
       .catch(() => setGscProperties([]));
@@ -125,6 +140,13 @@ export function OverviewView({ site, repositories, githubInstalled, onSiteChange
       setProgress("Queued");
       setPendingId(queued.analysisId);
     } catch (cause) { setError(errorMessage(cause)); } finally { setBusy(""); }
+  }
+
+  async function saveMarkets(next: string[]) {
+    setMarkets(next);
+    try {
+      await api(`/api/sites/${site.id}/markets`, { method: "PUT", json: { countries: next } });
+    } catch (cause) { setError(errorMessage(cause)); }
   }
 
   async function attachRepository() {
@@ -215,6 +237,20 @@ export function OverviewView({ site, repositories, githubInstalled, onSiteChange
             </div>
           </div>
           <div className="list-row">
+            <Badge tone={markets.length ? "green" : "gray"}>{markets.length ? "Markets" : "Recommended"}</Badge>
+            <div className="grow">
+              <h4>Target markets</h4>
+              <p>The countries you sell to. Search traffic is checked against them, so visibility in the wrong market shows up as a problem.</p>
+              <div className="row" style={{ marginTop: 8 }}>
+                {markets.map((code) => <span className="chip" key={code}>{countryName(code)} <button className="chip-remove" aria-label={`Remove ${countryName(code)}`} onClick={() => void saveMarkets(markets.filter((entry) => entry !== code))}>×</button></span>)}
+                <select className="select" style={{ maxWidth: 220 }} value="" onChange={(event) => event.target.value && void saveMarkets([...markets, event.target.value])}>
+                  <option value="">Add a country…</option>
+                  {COUNTRIES.filter((country) => !markets.includes(country.code)).map((country) => <option key={country.code} value={country.code}>{country.name}</option>)}
+                </select>
+              </div>
+            </div>
+          </div>
+          <div className="list-row">
             <Badge tone={competitors.trim() ? "green" : "gray"}>Competitors</Badge>
             <div className="grow">
               <h4>Competitor domains</h4>
@@ -297,7 +333,7 @@ export function OverviewView({ site, repositories, githubInstalled, onSiteChange
             </section>
             <section className="panel">
               <div className="panel-heading"><div><div className="eyebrow">SEARCH LANDSCAPE</div><h3>Search & competitor evidence</h3></div></div>
-              {report.searchNarrative.totalImpressions > 0 && <div className="search-evidence"><strong>{formatNumber(report.searchNarrative.totalClicks)} clicks · {formatNumber(report.searchNarrative.totalImpressions)} impressions</strong><p>{report.searchNarrative.narrative}</p></div>}
+              {report.searchNarrative.totalImpressions > 0 && !report.search && <div className="search-evidence"><strong>{formatNumber(report.searchNarrative.totalClicks)} clicks · {formatNumber(report.searchNarrative.totalImpressions)} impressions</strong><p>{report.searchNarrative.narrative}</p></div>}
               {report.competitors.length ? report.competitors.slice(0, 5).map((competitor) => (
                 <div className="competitor" key={competitor.domain}>
                   <div className="domain-icon">{competitor.domain[0]?.toUpperCase()}</div>
@@ -307,6 +343,7 @@ export function OverviewView({ site, repositories, githubInstalled, onSiteChange
               )) : <p className="empty-state">Add competitor domains above. Eumon reads their sitemaps and a few pages per section to show which kinds of pages they publish that you don't. Rankings and competitor traffic are not inferred.</p>}
             </section>
           </div>
+          {report.search && <SearchIntelligence search={report.search} />}
           {report.competition && report.competition.rows.length > 0 && <ContentGaps competition={report.competition} onNavigate={onNavigate} />}
           {coverage?.families && coverage.families.length > 1 && <FamilyHealth families={coverage.families} />}
           {report.repo && <CodeIntelligence repo={report.repo} />}
@@ -483,6 +520,60 @@ function CodeIntelligence({ repo }: { repo: NonNullable<Report["repo"]> }) {
             ))}</tbody>
           </table>
         </div>
+      )}
+    </section>
+  );
+}
+
+const path = (url: string) => url.replace(/^https?:\/\/[^/]+/, "") || "/";
+
+/** Where search visibility comes from, what kind of searches bring clicks, and the demand closest to winning. */
+function SearchIntelligence({ search }: { search: NonNullable<Report["search"]> }) {
+  const share = (value: number) => `${Math.round(value * 100)}%`;
+  const entity = search.entityQueries?.byType[0];
+  return (
+    <section className="panel" style={{ marginTop: 13 }}>
+      <div className="panel-heading"><div><div className="eyebrow">SEARCH INTELLIGENCE · LAST 28 DAYS</div><h3>Who finds you, and through which searches</h3></div></div>
+      <p className="plan-situation">{search.narrative}</p>
+      <div className="metrics-grid">
+        <Kpi label="Clicks" value={formatNumber(search.totals.clicks)} caption={`${formatNumber(search.totals.impressions)} impressions · ${(search.totals.ctr * 100).toFixed(1)}% CTR`} />
+        <Kpi label="From target markets" value={search.targetShare ? share(search.targetShare.impressions) : "—"} caption={search.targetShare ? `of impressions · ${search.targetMarkets.map(countryName).join(", ")}` : "Set target markets above"} />
+        <Kpi label="Commercial searches" value={share(search.commercialShare)} caption="of clicks (cost, price, best, booking…)" />
+        <Kpi label={entity ? `Looking up a ${entity.entityType}` : "Branded searches"} value={share(entity ? search.entityQueries!.share : search.brandedShare)} caption={entity ? "of clicks name one specific record" : "of clicks include your brand"} />
+      </div>
+      {search.strikingDistance.length > 0 && (
+        <>
+          <div className="section-title">Closest to page-one clicks (positions 4–15)</div>
+          <div className="table-wrap" style={{ marginBottom: 10 }}>
+            <table className="table">
+              <thead><tr><th>Query</th><th>Page</th><th className="num">Position</th><th className="num">Impressions</th><th className="num">Clicks</th></tr></thead>
+              <tbody>{search.strikingDistance.slice(0, 8).map((entry) => (
+                <tr key={entry.query + entry.page}><td>{entry.query}</td><td className="small"><a href={entry.page} target="_blank" rel="noreferrer">{path(entry.page)}</a></td><td className="num">{entry.position.toFixed(1)}</td><td className="num">{formatNumber(entry.impressions)}</td><td className="num">{formatNumber(entry.clicks)}</td></tr>
+              ))}</tbody>
+            </table>
+          </div>
+        </>
+      )}
+      {search.lowCtrPages.length > 0 && (
+        <>
+          <div className="section-title">On page one, but searchers skip them</div>
+          <div className="table-wrap" style={{ marginBottom: 10 }}>
+            <table className="table">
+              <thead><tr><th>Page</th><th className="num">Position</th><th className="num">CTR</th><th className="num">Typical CTR</th><th>Top queries</th></tr></thead>
+              <tbody>{search.lowCtrPages.slice(0, 5).map((page) => (
+                <tr key={page.page}><td className="small"><a href={page.page} target="_blank" rel="noreferrer">{path(page.page)}</a></td><td className="num">{page.position.toFixed(1)}</td><td className="num"><span className="bad-count">{(page.ctr * 100).toFixed(1)}%</span></td><td className="num">{(page.expectedCtr * 100).toFixed(0)}%</td><td className="small">{page.queries.join(", ")}</td></tr>
+              ))}</tbody>
+            </table>
+          </div>
+        </>
+      )}
+      {search.cannibalized.length > 0 && (
+        <>
+          <div className="section-title">Pages competing for the same search</div>
+          <ul className="insights">{search.cannibalized.slice(0, 5).map((entry) => (
+            <li key={entry.query}>“{entry.query}” ({formatNumber(entry.impressions)} impressions): {entry.pages.map((page) => `${path(page.page)} (#${page.position.toFixed(0)})`).join(" vs ")}</li>
+          ))}</ul>
+        </>
       )}
     </section>
   );

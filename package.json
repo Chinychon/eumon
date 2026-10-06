@@ -10,8 +10,10 @@
   "scripts": {
     "dev": "npm run dev -w @organic-growth/web",
     "build": "npm run build:packages && npm run build -w @organic-growth/web",
+    "deploy": "npm run build:packages && npm run deploy -w @organic-growth/web",
     "typecheck": "npm run build:packages && npm run typecheck --workspaces --if-present",
     "db:migrate:local": "npm run db:migrate:local -w @organic-growth/web",
+    "db:migrate:remote": "npm run db:migrate:remote -w @organic-growth/web",
     "test": "npm run build:packages && npm run test --workspaces --if-present",
     "build:packages": "npm run build -w @organic-growth/core && npm run build -w @organic-growth/ai && npm run build -w @organic-growth/db && npm run build -w @organic-growth/repo-analyzer && npm run build -w @organic-growth/crawler && npm run build -w @organic-growth/scraper && npm run build -w @organic-growth/pages && npm run build -w @organic-growth/agents && npm run build -w @organic-growth/sdk",
     "eval": "npm run build:packages && node evals/edea-malls.mjs",

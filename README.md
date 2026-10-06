@@ -68,6 +68,7 @@ npm run typecheck   # every workspace
 npm run build       # packages + production Worker bundle
 npm run audit -- https://example.com --max 300   # site analysis from the command line
 npm run eval        # end-to-end collection quality on a real site (calls the model; a few cents)
+npm run db:migrate:remote && npm run deploy   # deploy (after `npx cf auth login`)
 ```
 
 `npm run audit` runs the same steps as the analysis Workflow — sitemap, robots.txt, a Googlebot crawl of every sitemap URL (up to `--max`), per-template coverage, sampled checks, findings, and the growth plan — with an in-memory SQLite database in place of D1. Add `--competitor other.com` (repeatable) to include competitors, `--market idn` (repeatable, Search Console country codes) for target markets, and `--json` for the full report. With Playwright installed (`npm i -D playwright`), it also renders one page per template in Chromium for the source-vs-render comparison. Behind an HTTPS proxy, run it with `NODE_USE_ENV_PROXY=1`.

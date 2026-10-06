@@ -14,7 +14,7 @@ The dashboard, API, public landing pages, and background Workflows, deployed as 
 3. Apply migrations: `npm run db:migrate:local -w @organic-growth/web`.
 4. Start: `npm run dev -w @organic-growth/web` (port 5174, fails rather than switching ports). Restart it after changing `cloudflare.config.ts` or `.dev.vars`.
 
-Deploy with `npm run deploy -w @organic-growth/web` after `npm run db:migrate:remote -w @organic-growth/web` and setting the secrets above on the deployed Worker. To deploy your own copy, set `CF_D1_DATABASE_ID` to your D1 database (and update the ID in the `db:migrate:*` scripts).
+To deploy, from the repository root: sign in with `npx cf auth login`, apply migrations with `npm run db:migrate:remote`, set the secrets above on the deployed Worker, then run `npm run deploy` (it builds the packages first). Re-run `npm run db:migrate:remote` after pulling changes that add files to `packages/db/migrations`; already-applied migrations are skipped. To deploy your own copy, set `CF_D1_DATABASE_ID` to your D1 database (and update the ID in the `db:migrate:*` scripts).
 
 ## The landing page engine
 

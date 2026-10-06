@@ -28,6 +28,8 @@ export interface AnalysisBundle {
   brandTerms?: string[];
   /** Content-architecture comparison with competitor sitemaps and pages. */
   competition?: CompetitionReport;
+  /** Collected datasets: records held versus entity pages published. */
+  datasets?: Array<{ name: string; entityType: string; records: number; livePages: number }>;
 }
 
 /** Query wording that usually signals purchase or booking intent, across common markets. */
@@ -137,7 +139,30 @@ export function buildOpportunities(bundle: AnalysisBundle): Opportunity[] {
     };
   }).sort((a, b) => b.priorityScore - a.priorityScore).slice(0, 10);
   const contentGaps = bundle.competition ? competitionOpportunities(bundle.competition, bundle.siteId, bundle.analysisId) : [];
-  return [...technical, ...searchOpportunities, ...contentGaps].sort((a, b) => b.priorityScore - a.priorityScore);
+  // Data already collected but not published: the cheapest landing pages to add.
+  const coveredByGap = new Set(bundle.competition?.rows.filter((row) => row.status === "gap" && row.data).map((row) => row.data!.dataset));
+  const unpublishedData = (bundle.datasets ?? [])
+    .filter((dataset) => dataset.records - dataset.livePages >= 20 && !coveredByGap.has(dataset.name))
+    .map((dataset) => {
+      const waiting = dataset.records - dataset.livePages;
+      return {
+        id: createId("opp"),
+        siteId: bundle.siteId,
+        analysisId: bundle.analysisId,
+        title: `Publish landing pages from your ${dataset.name} data (${waiting.toLocaleString()} records without a page)`,
+        searchDemand: 0,
+        intent: "unpublished_data",
+        competitorStrength: 0,
+        estimatedDifficulty: 20,
+        businessValue: 1.2,
+        conversionPotential: 1,
+        technicalEffort: 1,
+        contentEffort: 2,
+        priorityScore: Number(((12 * Math.log10(waiting + 1) * 1.2) / 2 * 2).toFixed(2)),
+        rationale: `“${dataset.name}” holds ${dataset.records.toLocaleString()} ${dataset.entityType} records and ${dataset.livePages.toLocaleString()} published pages. Each record with enough facts can become a landing page for searches that name it; the Data step shows how many pass the quality gate.`,
+      };
+    });
+  return [...technical, ...searchOpportunities, ...contentGaps, ...unpublishedData].sort((a, b) => b.priorityScore - a.priorityScore);
 }
 
 /** Below this priority, the top opportunity is housekeeping rather than growth. */
@@ -208,11 +233,13 @@ export function synthesizeGrowthPlan(bundle: AnalysisBundle): GrowthPlan {
     pagesAffected: opp.potentialPage ? [opp.potentialPage] : opp.currentPage ? [opp.currentPage] : [],
     implementationRequired: opp.intent === "technical_enabler"
       ? "Review the affected route and implement a targeted change in a Git branch."
-      : opp.intent === "content_gap"
+      : opp.intent === "content_gap" || opp.intent === "unpublished_data"
         ? "Create a dataset for this entity type in Data (or reuse the existing one), add sources, and generate one landing page per record with a template."
         : "Review the page against the query intent, then improve its title, content coverage, or internal links as evidence supports.",
     contentRequired: opp.intent === "technical_enabler"
       ? "No content change inferred from technical crawl data alone."
+      : opp.intent === "unpublished_data"
+        ? "Fill missing fields on thin records first; publish only pages that pass the quality gate."
       : opp.intent === "content_gap"
         ? `Study competitor examples${opp.potentialPage ? ` (e.g. ${opp.potentialPage})` : ""} for the facts searchers expect, and publish only pages with enough unique facts to stand on their own.`
         : "Validate the search intent and improve the existing page only where it adds distinct user value.",

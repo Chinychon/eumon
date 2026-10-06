@@ -257,6 +257,7 @@ export async function runFullAnalysis(input: RunAnalysisInput) {
     searchMetrics,
     competitors,
     competition,
+    datasets: input.datasets,
   };
 
   const opportunities = buildOpportunities(bundle);

@@ -119,6 +119,14 @@ describe("runFullAnalysis with competitors", () => {
     assert.equal(report.competitors[0]?.domain, "rival.example");
   });
 
+  it("turns collected but unpublished data into a priority even without competitors", async () => {
+    const report = await runFullAnalysis({
+      analysisId: "a", siteId: "s", name: "medbay.example", baseUrl: "https://medbay.example", fetcher, maxPages: 8, repeatability: false,
+      datasets: [{ name: "Hospitals", entityType: "hospital", records: 140, livePages: 0 }],
+    });
+    assert.equal(report.plan.highestImpactOpportunity, "Publish landing pages from your Hospitals data (140 records without a page)");
+  });
+
   it("points a healthy site without competitors at growth, not housekeeping", async () => {
     const report = await runFullAnalysis({ analysisId: "a", siteId: "s", name: "medbay.example", baseUrl: "https://medbay.example", fetcher, maxPages: 8, repeatability: false });
     assert.ok(report.plan.highestImpactOpportunity.startsWith("No serious technical blocker was found"), report.plan.highestImpactOpportunity);

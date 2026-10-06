@@ -188,7 +188,8 @@ function DatasetCard({ dataset, siteBaseUrl, onChanged }: { dataset: DatasetWith
           ))}
         </div>
       )}
-      {error && <div className={`callout ${/^(Imported|Merged|No duplicates)/.test(error) ? "" : "error"}`} style={{ marginBottom: 10 }}>{error}</div>}
+      {error && <div className={`callout ${/^(Imported|Merged|No duplicates|Created a template)/.test(error) ? "" : "error"}`} style={{ marginBottom: 10 }}>{error}</div>}
+      {dataset.recordCount > 0 && <PagePotentialPanel datasetId={dataset.id} recordCount={dataset.recordCount} entityType={dataset.entityType} onMessage={setError} />}
 
       <div className="section-title">Fields</div>
       {editingFields
@@ -423,6 +424,61 @@ function RecordsTable({ dataset, onChanged }: { dataset: Dataset; onChanged: () 
         <span className="small muted">{total ? `${offset + 1}–${Math.min(offset + 25, total)} of ${formatNumber(total)}` : ""}</span>
         <Button small variant="secondary" disabled={offset + 25 >= total} onClick={() => setOffset(offset + 25)}>Next</Button>
       </div>
+    </div>
+  );
+}
+
+type PagePotential = { name: string; groupBy: string[]; pages: number; candidates: number; thin: number; duplicates: number; examples: string[]; suggested: boolean };
+
+/** "How many landing pages can this data support?" — per page idea, plus groupings nobody proposed yet. */
+function PagePotentialPanel({ datasetId, recordCount, entityType, onMessage }: { datasetId: string; recordCount: number; entityType: string; onMessage: (message: string) => void }) {
+  const [estimates, setEstimates] = useState<PagePotential[] | null>(null);
+  const [creating, setCreating] = useState("");
+  const [created, setCreated] = useState<string[]>([]);
+  async function createTemplate(estimate: PagePotential) {
+    setCreating(estimate.name);
+    try {
+      await api(`/api/datasets/${datasetId}/templates`, { method: "POST", json: { groupBy: estimate.groupBy } });
+      setCreated((items) => [...items, estimate.name]);
+      onMessage(`Created a template for ${entityType} pages by ${estimate.groupBy.join(" × ")}. Review and publish it on the Landing pages step.`);
+    } catch (cause) { onMessage(errorMessage(cause)); } finally { setCreating(""); }
+  }
+  useEffect(() => {
+    let current = true;
+    api<{ estimates: PagePotential[] }>(`/api/datasets/${datasetId}/potential`)
+      .then((data) => { if (current) setEstimates(data.estimates); })
+      .catch(() => { if (current) setEstimates(null); });
+    return () => { current = false; };
+  }, [datasetId, recordCount]);
+  if (!estimates?.length) return null;
+  const planned = estimates.filter((estimate) => !estimate.suggested);
+  const suggested = estimates.filter((estimate) => estimate.suggested);
+  const total = planned.reduce((sum, estimate) => sum + estimate.pages, 0);
+  const row = (estimate: PagePotential) => (
+    <tr key={estimate.name}>
+      <td>{estimate.groupBy.length ? `By ${estimate.groupBy.join(" × ")}` : `One per ${entityType}`}{estimate.examples.length > 0 && <div className="small muted">e.g. {estimate.examples.join(", ")}</div>}</td>
+      <td className="num"><strong>{formatNumber(estimate.pages)}</strong></td>
+      <td className="num">{estimate.thin ? formatNumber(estimate.thin) : <span className="muted">0</span>}</td>
+      <td className="num">{estimate.duplicates ? formatNumber(estimate.duplicates) : <span className="muted">0</span>}</td>
+      <td>{estimate.suggested && (created.includes(estimate.name)
+        ? <span className="small muted">Template created</span>
+        : <Button small variant="secondary" busy={creating === estimate.name} disabled={Boolean(creating)} onClick={() => createTemplate(estimate)}>Create template</Button>)}</td>
+    </tr>
+  );
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <div className="section-title">Landing pages this data supports: ~{formatNumber(total)}</div>
+      <div className="table-wrap">
+        <table className="table">
+          <thead><tr><th>Page set</th><th className="num">Publishable</th><th className="num">Too thin</th><th className="num">Duplicate</th><th /></tr></thead>
+          <tbody>
+            {planned.map(row)}
+            {suggested.length > 0 && <tr><td colSpan={5} className="small muted">Other groupings your data supports:</td></tr>}
+            {suggested.map(row)}
+          </tbody>
+        </table>
+      </div>
+      <p className="small muted" style={{ margin: "6px 0 0" }}>Estimated with the same quality rules used at generation: entity pages need facts for most fields, grouped pages need at least 3 records, and pages listing identical records count once. Collecting more fields turns thin records into publishable pages.</p>
     </div>
   );
 }

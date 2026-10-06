@@ -1,6 +1,6 @@
 import type { CrawlPageResult, Finding, SitemapAudit } from "@organic-growth/core";
 import { createId, organicImpactScore, severityFromImpact } from "@organic-growth/core";
-import { contentMarkup, findTags, hasToken, innerText, parseAttributes, visibleText } from "./html.js";
+import { contentMarkup, elementSpans, findTags, hasToken, innerText, parseAttributes, visibleText } from "./html.js";
 import { GOOGLEBOT_TOKEN } from "./robots.js";
 import { classifyLanguage, classifyUrlType, isSameSite, sameDocument } from "./urls.js";
 
@@ -126,7 +126,8 @@ export function parseHtmlSignals(html: string, pageUrl?: string): HtmlSignals {
   const links = findTags(markup, "link");
   const metaContent = (name: string) => metas.find((meta) => meta.name?.toLowerCase() === name)?.content;
 
-  const title = markup.match(/<title\b[^>]*>([\s\S]*?)<\/title\s*>/i)?.[1];
+  const titleSpan = elementSpans(markup, ["title"])[0];
+  const title = titleSpan ? markup.slice(titleSpan.contentStart, titleSpan.contentEnd) : undefined;
   const canonical = links.find((link) => hasToken(link.rel, "canonical") && link.href)?.href;
   const hreflang = links
     .filter((link) => hasToken(link.rel, "alternate") && link.hreflang && link.href)
@@ -138,10 +139,9 @@ export function parseHtmlSignals(html: string, pageUrl?: string): HtmlSignals {
 
   const headingOutline: string[] = [];
   let h1Count = 0;
-  for (const match of markup.matchAll(/<(h[1-3])\b[^>]*>([\s\S]*?)<\/\1\s*>/gi)) {
-    const level = match[1]!.toLowerCase();
-    if (level === "h1") h1Count++;
-    if (headingOutline.length < 20) headingOutline.push(`${level}:${innerText(match[2]!).slice(0, 120)}`);
+  for (const heading of elementSpans(markup, ["h1", "h2", "h3"])) {
+    if (heading.tag === "h1") h1Count++;
+    if (headingOutline.length < 20) headingOutline.push(`${heading.tag}:${innerText(markup.slice(heading.contentStart, Math.min(heading.contentEnd, heading.contentStart + 2000))).slice(0, 120)}`);
   }
 
   let internalLinkCount = 0;
@@ -197,11 +197,11 @@ function readJsonLd(html: string): { blocks: number; types: string[]; invalid: n
       if (Array.isArray(node["@graph"])) visit(node["@graph"]);
     }
   };
-  for (const match of html.matchAll(/<script\b((?:[^>"']|"[^"]*"|'[^']*')*)>([\s\S]*?)<\/script\s*>/gi)) {
-    if (parseAttributes(match[1] ?? "").type?.toLowerCase() !== "application/ld+json") continue;
+  for (const script of elementSpans(html, ["script"])) {
+    if (parseAttributes(script.attrs).type?.toLowerCase() !== "application/ld+json") continue;
     blocks++;
     try {
-      visit(JSON.parse(match[2]!.trim()));
+      visit(JSON.parse(html.slice(script.contentStart, script.contentEnd).trim()));
     } catch {
       invalid++;
     }

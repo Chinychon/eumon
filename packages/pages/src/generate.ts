@@ -349,7 +349,11 @@ function attachRelatedLinks(pages: GeneratedPage[], template: PageTemplate, fiel
   };
   const pageKeys = new Map(live.map((page) => [page, keysFor(page)]));
   for (const [page, keys] of pageKeys) {
-    for (const key of keys) index.set(key, [...(index.get(key) ?? []), page]);
+    for (const key of keys) {
+      const peers = index.get(key);
+      if (peers) peers.push(page);
+      else index.set(key, [page]);
+    }
   }
   for (const [page, keys] of pageKeys) {
     const scores = new Map<GeneratedPage, number>();

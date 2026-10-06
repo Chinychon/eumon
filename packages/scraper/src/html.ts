@@ -1,5 +1,5 @@
 import type { JsonObject, JsonValue } from "@organic-growth/core";
-import { decodeEntities, findTags, hasToken } from "@organic-growth/crawler";
+import { decodeEntities, elementSpans, findTags, hasToken, parseAttributes, stripElements } from "@organic-growth/crawler";
 
 export { decodeEntities } from "@organic-growth/crawler";
 
@@ -10,11 +10,10 @@ function stripTags(value: string): string {
 /** Every JSON-LD object on the page, with `@graph` containers flattened. */
 export function extractJsonLd(html: string): JsonObject[] {
   const output: JsonObject[] = [];
-  const re = /<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
-  let match: RegExpExecArray | null;
-  while ((match = re.exec(html))) {
+  for (const script of elementSpans(html, ["script"])) {
+    if (parseAttributes(script.attrs).type?.toLowerCase() !== "application/ld+json") continue;
     try {
-      collect(JSON.parse(match[1]!.trim()) as JsonValue, output);
+      collect(JSON.parse(html.slice(script.contentStart, script.contentEnd).trim()) as JsonValue, output);
     } catch {
       // Malformed JSON-LD is common; skip it rather than fail the page.
     }
@@ -42,12 +41,16 @@ export type PageMeta = {
 };
 
 export function extractMeta(html: string): PageMeta {
-  const head = html.replace(/<(script|style|noscript|template|svg)\b[\s\S]*?<\/\1\s*>/gi, " ");
+  const head = stripElements(html, ["script", "style", "noscript", "template", "svg"]);
   const metas = findTags(head, "meta");
   const meta = (key: "name" | "property", value: string) =>
     metas.find((tag) => tag[key]?.toLowerCase() === value)?.content?.trim() || undefined;
-  const title = head.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1];
-  const h1 = head.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i)?.[1];
+  const inner = (tag: string) => {
+    const span = elementSpans(head, [tag])[0];
+    return span ? head.slice(span.contentStart, Math.min(span.contentEnd, span.contentStart + 5000)) : undefined;
+  };
+  const title = inner("title");
+  const h1 = inner("h1");
   return {
     title: title ? stripTags(title) : undefined,
     h1: h1 ? stripTags(h1) : undefined,
@@ -64,30 +67,61 @@ export function extractMeta(html: string): PageMeta {
  * navigation, and page chrome are dropped. Prefers `<main>`/`<article>`.
  */
 export function htmlToText(html: string, maxChars = 15_000): string {
-  let body = html
-    .replace(/<!--[\s\S]*?-->/g, " ")
-    .replace(/<(script|style|noscript|svg|template|iframe|form)\b[\s\S]*?<\/\1>/gi, " ");
-  const main = body.match(/<main\b[^>]*>([\s\S]*?)<\/main>/i)?.[1]
-    ?? body.match(/<article\b[^>]*>([\s\S]*?)<\/article>/i)?.[1];
+  // Linear-time element handling throughout: end tags such as </li>, </tr>,
+  // and </p> are optional in HTML, and regex pairs rescan the whole page for
+  // every unclosed one.
+  let body = stripElements(html, ["script", "style", "noscript", "svg", "template", "iframe", "form"]);
+  const container = elementSpans(body, ["main"])[0] ?? elementSpans(body, ["article"])[0];
+  const main = container ? body.slice(container.contentStart, container.contentEnd) : undefined;
   if (main && stripTags(main).length > 200) body = main;
-  else body = body.replace(/<(nav|footer|header|aside)\b[\s\S]*?<\/\1>/gi, " ");
+  else body = stripElements(body, ["nav", "footer", "header", "aside"]);
 
-  const text = body
-    .replace(/<h([1-6])[^>]*>([\s\S]*?)<\/h\1>/gi, (_m, level: string, inner: string) => `\n${"#".repeat(Number(level))} ${stripTags(inner)}\n`)
-    .replace(/<tr[^>]*>([\s\S]*?)<\/tr>/gi, (_m, inner: string) => {
-      const cells = [...inner.matchAll(/<t[hd][^>]*>([\s\S]*?)<\/t[hd]>/gi)].map((cell) => stripTags(cell[1]!));
-      return `\n| ${cells.join(" | ")} |`;
-    })
-    .replace(/<li[^>]*>([\s\S]*?)<\/li>/gi, (_m, inner: string) => `\n- ${stripTags(inner)}`)
-    .replace(/<(br|\/p|\/div|\/section|\/dd|\/dt)[^>]*>/gi, "\n")
-    .replace(/<[^>]+>/g, " ");
+  const text = flattenBlocks(body)
+    // Leftover markers for elements whose end tags were omitted.
+    .replace(/<t[hd]\b[^>]{0,500}>/gi, " | ")
+    .replace(/<(br|\/p|\/div|\/section|\/dd|\/dt|\/li|\/tr|\/h[1-6])\b[^>]{0,500}>/gi, "\n")
+    .replace(/<[^>]{0,4000}>/g, " ");
 
   return decodeEntities(text)
     .split("\n")
     .map((line) => line.replace(/[ \t]+/g, " ").trim())
-    .filter(Boolean)
+    .map((line) => (line.startsWith("|") && !line.endsWith("|") ? `${line} |` : line))
+    .filter((line) => line && line !== "|" && line !== "-")
     .join("\n")
     .slice(0, maxChars);
+}
+
+/**
+ * Puts each heading, list item, and table row on one line ("## Title",
+ * "- item", "| a | b |"), whatever markup is inside it. Elements that are
+ * never closed (end tags are optional for <li> and <tr>) or that contain
+ * another of their kind get a line marker instead, so work stays linear.
+ */
+function flattenBlocks(html: string): string {
+  const spans = elementSpans(html, ["h1", "h2", "h3", "h4", "h5", "h6", "li", "tr"]).sort((a, b) => a.start - b.start);
+  let output = "";
+  let position = 0;
+  for (const span of spans) {
+    if (span.start < position) continue;
+    output += html.slice(position, span.start);
+    const heading = span.tag.startsWith("h") ? "#".repeat(Number(span.tag[1])) : null;
+    const closed = span.contentEnd < html.length;
+    const inner = closed ? html.slice(span.contentStart, span.contentEnd) : "";
+    const nested = closed && (heading ? /<h[1-6]\b/i : span.tag === "li" ? /<li\b/i : /<tr\b/i).test(inner);
+    if (!closed || nested) {
+      output += heading ? `\n${heading} ` : span.tag === "li" ? "\n- " : "\n";
+      position = span.contentStart;
+      continue;
+    }
+    if (heading) output += `\n${heading} ${stripTags(inner)}\n`;
+    else if (span.tag === "li") output += `\n- ${stripTags(inner)}\n`;
+    else {
+      const cells = inner.split(/<t[hd]\b[^>]{0,500}>/i).slice(1).map(stripTags);
+      output += cells.length ? `\n| ${cells.join(" | ")} |\n` : `\n${stripTags(inner)}\n`;
+    }
+    position = span.end;
+  }
+  return output + html.slice(position);
 }
 
 /** Absolute same-origin links with fragments removed. */
@@ -142,10 +176,11 @@ export function findNextPage(html: string, pageUrl: string): string | null {
   const fromRel = relNext ? sameSite(relNext) : null;
   if (fromRel) return fromRel.toString();
 
-  const anchors = [...html.matchAll(/<a\b([^>]*)>([\s\S]*?)<\/a>/gi)].flatMap((match) => {
-    const href = match[1]!.match(/href=["']([^"'#]+)["']/i)?.[1];
+  const anchors = elementSpans(html, ["a"]).flatMap((anchor) => {
+    const href = anchor.attrs.match(/href=["']([^"'#]+)["']/i)?.[1];
     const url = href ? sameSite(href) : null;
-    return url ? [{ url, attrs: match[1]!, text: match[2]!.replace(/<[^>]+>/g, " ").trim() }] : [];
+    const text = html.slice(anchor.contentStart, Math.min(anchor.contentEnd, anchor.contentStart + 500));
+    return url ? [{ url, attrs: anchor.attrs, text: text.replace(/<[^>]{0,500}>/g, " ").trim() }] : [];
   });
 
   const labelled = anchors.find((anchor) =>

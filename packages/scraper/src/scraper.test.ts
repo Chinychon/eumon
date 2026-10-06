@@ -374,3 +374,14 @@ describe("duplicate resolution", () => {
     assert.deepEqual(merged, { name: "1st Avenue", city: "George Town", clients: ["Hanzo", "Pepper Lunch"] });
   });
 });
+
+describe("htmlToText on large malformed pages", () => {
+  it("handles lists and tables without end tags in linear time", () => {
+    const html = `<html><body><main><h1>Malls</h1><ul>${"<li>Gurney Plaza, Penang ".repeat(20_000)}</ul><table>${"<tr><td>Mall<td>Penang ".repeat(5_000)}</table></main></body></html>`;
+    const started = performance.now();
+    const text = htmlToText(html, 1_000_000);
+    assert.ok(performance.now() - started < 1500, `took ${Math.round(performance.now() - started)} ms`);
+    assert.ok(text.startsWith("# Malls\n- Gurney Plaza, Penang\n- Gurney Plaza, Penang"), text.slice(0, 80));
+    assert.ok(text.includes("| Mall | Penang |"), "table rows keep their shape without end tags");
+  });
+});

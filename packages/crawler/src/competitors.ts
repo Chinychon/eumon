@@ -105,7 +105,9 @@ export async function profileSitemaps(
   const pending = new Map<string, string[]>();
   const enqueue = (url: string) => {
     const key = fileStem(url);
-    pending.set(key, [...(pending.get(key) ?? []), url]);
+    const list = pending.get(key);
+    if (list) list.push(url);
+    else pending.set(key, [url]);
   };
   const visited = new Set<string>();
   let urlsSeen = 0;

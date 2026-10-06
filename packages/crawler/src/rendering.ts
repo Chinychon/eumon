@@ -212,7 +212,11 @@ export function findingsFromRendering(input: {
   }
 
   const byFamily = new Map<string, RepeatabilityResult[]>();
-  for (const result of input.repeatability ?? []) byFamily.set(result.family, [...(byFamily.get(result.family) ?? []), result]);
+  for (const result of input.repeatability ?? []) {
+    const list = byFamily.get(result.family);
+    if (list) list.push(result);
+    else byFamily.set(result.family, [result]);
+  }
   for (const [family, results] of byFamily) {
     const attempts = results.flatMap((result) => result.attempts);
     const flaky = results.filter((result) => result.attempts.some(isBad) && result.attempts.some((attempt) => !isBad(attempt)));
@@ -270,7 +274,9 @@ export function samplePerFamily(urls: string[], perFamily: number, limit: number
   const groups = new Map<string, string[]>();
   for (const url of urls) {
     const family = classifyUrlType(url);
-    groups.set(family, [...(groups.get(family) ?? []), url]);
+    const list = groups.get(family);
+    if (list) list.push(url);
+    else groups.set(family, [url]);
   }
   const ordered = [...groups.values()].sort((a, b) => b.length - a.length);
   const sample: string[] = [];

@@ -255,3 +255,11 @@ describe("findingsFromCrawlCoverage", () => {
     assert.ok(severity("more than one H1") <= 20);
   });
 });
+
+describe("malformed HTML stays linear", () => {
+  it("parses thousands of unclosed elements quickly", () => {
+    const started = performance.now();
+    parseHtmlSignals(`<html><body>${"<script>x <h1>y <title>z <!-- c ".repeat(15_000)}</body></html>`, "https://x.com/");
+    assert.ok(performance.now() - started < 1500, `took ${Math.round(performance.now() - started)} ms`);
+  });
+});

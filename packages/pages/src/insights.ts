@@ -106,7 +106,9 @@ export function buildPerformanceReport(input: {
   for (const row of input.queries) {
     if (!row.pageUrl.startsWith(origin)) continue;
     const path = row.pageUrl.slice(origin.length) || "/";
-    queriesByPath.set(path, [...(queriesByPath.get(path) ?? []), row]);
+    const list = queriesByPath.get(path);
+    if (list) list.push(row);
+    else queriesByPath.set(path, [row]);
   }
 
   const totals = input.pages.reduce((sum, page) => ({

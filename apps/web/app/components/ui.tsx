@@ -17,7 +17,7 @@ export function Button({ children, busy, variant = "primary", small, ...props }:
 
 const BADGE_TONE: Record<string, string> = {
   published: "green", active: "green", approved: "green", completed: "green", live: "green",
-  proposed: "amber", draft: "amber", queued: "amber", running: "blue", pending: "amber",
+  proposed: "amber", draft: "amber", queued: "amber", running: "green", pending: "amber",
   thin: "red", duplicate: "red", failed: "red", rejected: "red", blocked: "red",
   unpublished: "gray", retired: "gray", archived: "gray",
 };
@@ -29,6 +29,10 @@ export function Badge({ children, tone }: { children: ReactNode; tone?: string }
   const key = tone ?? (typeof children === "string" ? BADGE_TONE[children] : undefined) ?? "gray";
   return <span className={`badge badge-${key}`}>{children}</span>;
 }
+
+/** Drawn icons in one stroke weight; text glyphs never stand in for them. */
+export const CheckIcon = () => <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M1.5 5.2 4 7.7 8.5 2.5" fill="none" stroke="currentColor" strokeWidth="1.4" /></svg>;
+export const CrossIcon = () => <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 2l6 6M8 2 2 8" fill="none" stroke="currentColor" strokeWidth="1.4" /></svg>;
 
 export function Card({ title, subtitle, actions, children, id }: { title?: ReactNode; subtitle?: ReactNode; actions?: ReactNode; children?: ReactNode; id?: string }) {
   return (
@@ -47,11 +51,10 @@ export function Card({ title, subtitle, actions, children, id }: { title?: React
   );
 }
 
-export function ViewHeader({ eyebrow, title, description, actions }: { eyebrow: string; title: string; description?: ReactNode; actions?: ReactNode }) {
+export function ViewHeader({ title, description, actions }: { title: string; description?: ReactNode; actions?: ReactNode }) {
   return (
     <div className="view-header">
       <div>
-        <div className="eyebrow">{eyebrow}</div>
         <h1>{title}</h1>
         {description && <p>{description}</p>}
       </div>
@@ -82,7 +85,7 @@ export function Field({ label, hint, children, wide }: { label: string; hint?: R
 
 export function Progress({ done, total }: { done: number; total: number }) {
   const width = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
-  return <div className="progress" role="progressbar" aria-valuenow={width} aria-valuemin={0} aria-valuemax={100}><i style={{ width: `${width}%` }} /></div>;
+  return <div className="progress" role="progressbar" aria-valuenow={width} aria-valuemin={0} aria-valuemax={100}><i style={{ transform: `scaleX(${width / 100})` }} /></div>;
 }
 
 export function CopyBlock({ code }: { code: string }) {
@@ -97,7 +100,7 @@ export function CopyBlock({ code }: { code: string }) {
             setCopied(true);
             setTimeout(() => setCopied(false), 1600);
           } catch { /* clipboard may be unavailable; the code stays selectable */ }
-        }}>{copied ? "Copied ✓" : "Copy"}</Button>
+        }}>{copied ? "Copied" : "Copy"}</Button>
       </div>
       <pre className="code">{code}</pre>
     </div>

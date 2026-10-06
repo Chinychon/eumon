@@ -56,10 +56,9 @@ export function DataView({ site, onNavigate }: { site: SiteRecord; onNavigate: (
   return (
     <div>
       <ViewHeader
-        eyebrow="STEPS 1–3 · SCOPE, SOURCE & COLLECT"
         title="Data for your landing pages"
         description="Break the business down into the specific things people search for — each becomes a dataset, and each record becomes its own landing page."
-        actions={withRecords > 0 && <Button variant="secondary" onClick={() => onNavigate("pages")}>Design pages →</Button>}
+        actions={withRecords > 0 && <Button variant="secondary" onClick={() => onNavigate("pages")}>Design pages</Button>}
       />
       {error && <div className="callout error" role="alert" style={{ marginBottom: 14 }}>{error}</div>}
 
@@ -116,7 +115,7 @@ function NewDatasetForm({ siteId, onCreated }: { siteId: string; onCreated: () =
           <input className="input" value={fields} onChange={(event) => setFields(event.target.value)} />
         </Field>
       </div>
-      {error && <p className="small" style={{ color: "#9f3e31" }}>{error}</p>}
+      {error && <p className="small" style={{ color: "var(--red)" }}>{error}</p>}
       <div className="row" style={{ marginTop: 10 }}><Button busy={busy} disabled={!name.trim()} onClick={create}>Create dataset</Button></div>
     </div>
   );
@@ -198,7 +197,7 @@ function DatasetCard({ dataset, siteBaseUrl, onChanged }: { dataset: DatasetWith
           <div className="row">
             {dataset.fields.map((field) => (
               <span className="chip" key={field.key} title={field.description}>
-                {field.key === dataset.keyField ? "★ " : ""}{field.label} <span className="muted">· {field.type}</span>
+                {field.label} <span className="muted">· {field.type}{field.key === dataset.keyField ? " · key" : ""}</span>
               </span>
             ))}
             <Button small variant="ghost" onClick={() => setEditingFields(true)}>Edit</Button>
@@ -274,7 +273,7 @@ function FieldsEditor({ dataset, onDone }: { dataset: Dataset; onDone: () => Pro
           </tbody>
         </table>
       </div>
-      {error && <p className="small" style={{ color: "#9f3e31" }}>{error}</p>}
+      {error && <p className="small" style={{ color: "var(--red)" }}>{error}</p>}
       <div className="row" style={{ marginTop: 10 }}>
         <Button small variant="secondary" onClick={() => setFields((items) => [...items, { key: `field_${items.length + 1}`, label: "", type: "text" }])}>Add field</Button>
         <Button small busy={busy} onClick={save}>Save fields</Button>
@@ -306,16 +305,16 @@ function SourceRow({ source, onChanged }: { source: DataSource; onChanged: () =>
         <p className="small">
           {source.recordCount > 0 && <>{formatNumber(source.recordCount)} records · </>}
           up to {formatNumber(source.maxPages)} pages
-          {source.robotsAllowed === false && <> · <span style={{ color: "#9f3e31" }}>blocked by robots.txt</span></>}
-          {source.error && <> · <span style={{ color: "#9a6a16" }}>{source.error}</span></>}
+          {source.robotsAllowed === false && <> · <span style={{ color: "var(--red)" }}>blocked by robots.txt</span></>}
+          {source.error && <> · <span style={{ color: "var(--amber)" }}>{source.error}</span></>}
         </p>
-        {error && <p className="small" style={{ color: "#9f3e31" }}>{error}</p>}
+        {error && <p className="small" style={{ color: "var(--red)" }}>{error}</p>}
         {preview && (
           <div className="callout" style={{ marginTop: 8 }}>
             <div><strong>{formatNumber(preview.matched)}</strong> matching pages{preview.blocked ? `, ${preview.blocked} blocked by robots.txt` : ""}{preview.total !== undefined && preview.total < preview.matched ? ` (${formatNumber(preview.total)} within this source's page budget)` : ""}.</div>
             {preview.notes.map((note) => <div key={note} className="small">{note}</div>)}
             {preview.urls.length > 0 && <details className="disclosure" style={{ marginTop: 6 }}><summary>Example pages</summary>{preview.urls.map((url) => <div key={url} className="small mono">{url}</div>)}</details>}
-            {preview.sampleError && <div className="small" style={{ marginTop: 6, color: "#9a6a16" }}>Sample extraction: {preview.sampleError}</div>}
+            {preview.sampleError && <div className="small" style={{ marginTop: 6, color: "var(--amber)" }}>Sample extraction: {preview.sampleError}</div>}
             {preview.sample && (
               <div style={{ marginTop: 8 }}>
                 <div className="small">From <span className="mono">{preview.sample.url}</span>: {preview.sample.summary} — {preview.sample.records.length} record{preview.sample.records.length === 1 ? "" : "s"} extracted.</div>
@@ -358,7 +357,7 @@ function AddSourceForm({ datasetId, siteBaseUrl, onAdded }: { datasetId: string;
     } catch (cause) { setError(errorMessage(cause)); } finally { setBusy(false); }
   }
   return (
-    <div className="callout" style={{ marginTop: 8, background: "#fbfdfc" }}>
+    <div className="callout" style={{ marginTop: 8, background: "var(--surface)" }}>
       <div className="form-grid">
         <Field label="Source type">
           <select className="select" value={kind} onChange={(event) => setKind(event.target.value as DataSource["kind"])}>
@@ -380,7 +379,7 @@ function AddSourceForm({ datasetId, siteBaseUrl, onAdded }: { datasetId: string;
           <input className="input" type="number" min={1} max={kind === "page" ? 50 : 5000} value={maxPages} onChange={(event) => setMaxPages(event.target.value)} />
         </Field>
       </div>
-      {error && <p className="small" style={{ color: "#9f3e31" }}>{error}</p>}
+      {error && <p className="small" style={{ color: "var(--red)" }}>{error}</p>}
       <div className="row" style={{ marginTop: 10 }}><Button small busy={busy} onClick={add}>Add source</Button><Button small variant="ghost" onClick={() => setOpen(false)}>Cancel</Button></div>
       <p className="small muted" style={{ marginBottom: 0 }}>Eumon identifies itself as EumonBot, follows robots.txt, and paces requests. Only collect facts you are allowed to republish.</p>
     </div>

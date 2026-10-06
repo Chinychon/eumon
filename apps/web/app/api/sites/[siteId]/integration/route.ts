@@ -34,8 +34,8 @@ export default {
     },
     {
       id: "vercel",
-      label: "Vercel (vercel.json)",
-      when: "The site is deployed on Vercel (Next.js, Astro, Nuxt, Vite).",
+      label: "Vercel",
+      when: "The site is deployed on Vercel (Next.js, Astro, Nuxt, Vite). Add this to vercel.json.",
       language: "json",
       code: JSON.stringify({
         rewrites: mount
@@ -48,8 +48,8 @@ export default {
     },
     {
       id: "nextjs",
-      label: "Next.js (next.config)",
-      when: "A self-hosted Next.js app.",
+      label: "Next.js",
+      when: "A self-hosted Next.js app. Add this to next.config.",
       language: "js",
       code: `// next.config.js
 module.exports = {
@@ -65,8 +65,8 @@ module.exports = {
     },
     {
       id: "netlify",
-      label: "Netlify (netlify.toml)",
-      when: "The site is deployed on Netlify.",
+      label: "Netlify",
+      when: "The site is deployed on Netlify. Add this to netlify.toml.",
       language: "toml",
       code: `[[redirects]]
   from = "${prefix}/*"
@@ -90,8 +90,8 @@ module.exports = {
     },
     {
       id: "apache",
-      label: "Apache (.htaccess / vhost)",
-      when: "Apache with mod_proxy and mod_headers enabled.",
+      label: "Apache",
+      when: "Apache with mod_proxy and mod_headers enabled. Add this to .htaccess or the virtual host.",
       language: "apache",
       code: `SSLProxyEngine on
 RequestHeader set X-Eumon-Proxy "1"

@@ -12,12 +12,13 @@ import { Button } from "./components/ui";
 
 type View = "overview" | "data" | "pages" | "performance" | "setup";
 
-const NAV: Array<{ view: View; label: string; icon: string }> = [
-  { view: "overview", label: "Overview", icon: "◉" },
-  { view: "data", label: "Data", icon: "▤" },
-  { view: "pages", label: "Landing pages", icon: "▦" },
-  { view: "performance", label: "Performance", icon: "↗" },
-  { view: "setup", label: "Setup", icon: "⚙" },
+/** `steps` are the pipeline steps (README) a view covers. */
+const NAV: Array<{ view: View; label: string; steps?: string }> = [
+  { view: "overview", label: "Overview" },
+  { view: "data", label: "Data", steps: "1–3" },
+  { view: "pages", label: "Landing pages", steps: "4–5" },
+  { view: "performance", label: "Performance", steps: "6–7" },
+  { view: "setup", label: "Setup" },
 ];
 
 function setQuery(params: Record<string, string | null>) {
@@ -79,7 +80,7 @@ export default function Home() {
         <div className="workspace-label">{site ? new URL(site.baseUrl).hostname.toUpperCase() : "WORKSPACE"}</div>
         {NAV.map((item) => (
           <button key={item.view} className={`workspace${view === item.view && site && !adding ? " active" : ""}`} disabled={!site} onClick={() => { setAdding(false); navigate(item.view); }}>
-            <span className="nav-icon">{item.icon}</span><span>{item.label}</span>
+            <span>{item.label}</span>{item.steps && <small>{item.steps}</small>}
           </button>
         ))}
         <div className="site-switcher">
@@ -91,14 +92,14 @@ export default function Home() {
               </select>
             </>
           )}
-          <button onClick={() => setAdding(true)}>+ Add website</button>
+          <button onClick={() => setAdding(true)}>Add website</button>
         </div>
       </aside>
 
       <section className="main-area" id="top">
         <header className="topbar">
           <div className="breadcrumb">{site ? <>{new URL(site.baseUrl).hostname} <span>/</span> {adding ? "Add website" : NAV.find((item) => item.view === view)?.label}</> : "Welcome"}</div>
-          {site && <a className="top-actions" href={site.baseUrl} target="_blank" rel="noreferrer">Open site ↗</a>}
+          {site && <a className="top-actions" href={site.baseUrl} target="_blank" rel="noreferrer">Open site</a>}
         </header>
         <div className="content-wrap">
           {error && <div className="callout error" role="alert" style={{ marginBottom: 14 }}>{error} <button className="btn btn-ghost btn-small" onClick={() => setError("")}>Dismiss</button></div>}
@@ -155,12 +156,8 @@ function AddSite({ hasSites, repositories, githubInstalled, onAdded, onCancel }:
     <>
       {!hasSites && (
         <div className="welcome-row">
-          <div>
-            <div className="eyebrow">EUMON</div>
-            <h1>Turn what you sell into<br className="desktop-break" /> pages people search for.</h1>
-            <p className="intro">Eumon scopes the specific things your customers look for, collects the facts, publishes a crawlable landing page for each one on your domain, and shows you which pages bring customers.</p>
-          </div>
-          <div className="welcome-art" aria-hidden="true"><div className="art-orbit orbit-one" /><div className="art-orbit orbit-two" /><div className="art-spark">✳</div><div className="art-dot" /></div>
+          <h1>Turn what you sell into<br className="desktop-break" /> pages people search for.</h1>
+          <p className="intro">Eumon scopes the specific things your customers look for, collects the facts, publishes a crawlable landing page for each one on your domain, and shows you which pages bring customers.</p>
         </div>
       )}
       <form className="card" onSubmit={add}>
@@ -174,12 +171,12 @@ function AddSite({ hasSites, repositories, githubInstalled, onAdded, onCancel }:
                 <option value="">No repository</option>
                 {repositories.map((repo) => <option key={repo.id} value={repo.id}>{repo.fullName}{repo.isPrivate ? " · private" : ""}</option>)}
               </select>
-            ) : <a className="btn btn-secondary" href="/api/github/install">Connect GitHub ↗</a>}
+            ) : <a className="btn btn-secondary" href="/api/github/install">Connect GitHub</a>}
           </label>
         </div>
         {error && <div className="callout error" style={{ marginTop: 12 }}>{error}</div>}
         <div className="row" style={{ marginTop: 14 }}>
-          <Button busy={busy} disabled={!websiteUrl.trim()} onClick={undefined} type="submit">Add website →</Button>
+          <Button busy={busy} disabled={!websiteUrl.trim()} onClick={undefined} type="submit">Add website</Button>
           {onCancel && <Button variant="ghost" onClick={onCancel}>Cancel</Button>}
         </div>
       </form>

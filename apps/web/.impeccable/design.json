@@ -1,0 +1,403 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-06T16:12:18+00:00",
+  "title": "Design System: Eumon",
+  "extensions": {
+    "colorMeta": {
+      "green": {
+        "role": "primary",
+        "displayName": "Console Jade",
+        "tonalRamp": [
+          "#0a2e20",
+          "#11452f",
+          "#185d40",
+          "#1f7752",
+          "#279367",
+          "#2eb885",
+          "#5fd0a3",
+          "#a8e8cc"
+        ]
+      },
+      "green-hover": {
+        "role": "primary",
+        "displayName": "Lit Jade"
+      },
+      "bg": {
+        "role": "neutral",
+        "displayName": "Pure Black",
+        "tonalRamp": [
+          "#000000",
+          "#0a0a0a",
+          "#121212",
+          "#2e2e2e",
+          "#7c7c7c",
+          "#a1a1a1",
+          "#d4d4d4",
+          "#fafafa"
+        ]
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "Inset Black",
+        "tonalRamp": [
+          "#000000",
+          "#0a0a0a",
+          "#121212",
+          "#2e2e2e",
+          "#7c7c7c",
+          "#a1a1a1",
+          "#d4d4d4",
+          "#fafafa"
+        ]
+      },
+      "surface-2": {
+        "role": "neutral",
+        "displayName": "Raised Black",
+        "tonalRamp": [
+          "#000000",
+          "#0a0a0a",
+          "#121212",
+          "#2e2e2e",
+          "#7c7c7c",
+          "#a1a1a1",
+          "#d4d4d4",
+          "#fafafa"
+        ]
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Paper White",
+        "tonalRamp": [
+          "#000000",
+          "#0a0a0a",
+          "#121212",
+          "#2e2e2e",
+          "#7c7c7c",
+          "#a1a1a1",
+          "#d4d4d4",
+          "#fafafa"
+        ]
+      },
+      "ink-2": {
+        "role": "neutral",
+        "displayName": "Quiet White",
+        "tonalRamp": [
+          "#000000",
+          "#0a0a0a",
+          "#121212",
+          "#2e2e2e",
+          "#7c7c7c",
+          "#a1a1a1",
+          "#d4d4d4",
+          "#fafafa"
+        ]
+      },
+      "muted": {
+        "role": "neutral",
+        "displayName": "Graphite",
+        "tonalRamp": [
+          "#000000",
+          "#0a0a0a",
+          "#121212",
+          "#2e2e2e",
+          "#7c7c7c",
+          "#a1a1a1",
+          "#d4d4d4",
+          "#fafafa"
+        ]
+      },
+      "soft": {
+        "role": "neutral",
+        "displayName": "Ash",
+        "tonalRamp": [
+          "#000000",
+          "#0a0a0a",
+          "#121212",
+          "#2e2e2e",
+          "#7c7c7c",
+          "#a1a1a1",
+          "#d4d4d4",
+          "#fafafa"
+        ]
+      },
+      "line": {
+        "role": "neutral",
+        "displayName": "Hairline"
+      },
+      "line-strong": {
+        "role": "neutral",
+        "displayName": "Strong Hairline"
+      },
+      "amber": {
+        "role": "signal",
+        "displayName": "Warning Amber",
+        "tonalRamp": [
+          "#3a2504",
+          "#5c3b07",
+          "#80520a",
+          "#a86c0e",
+          "#d18a14",
+          "#f5a524",
+          "#f7c46c",
+          "#fbe2b3"
+        ]
+      },
+      "amber-tint": {
+        "role": "signal",
+        "displayName": "Warning Amber Tint"
+      },
+      "amber-ink": {
+        "role": "signal",
+        "displayName": "Warning Amber Text"
+      },
+      "red": {
+        "role": "signal",
+        "displayName": "Error Red",
+        "tonalRamp": [
+          "#3a1010",
+          "#5a1a1a",
+          "#7d2424",
+          "#a33030",
+          "#cc4646",
+          "#f26d6d",
+          "#f59a9a",
+          "#fbcfcf"
+        ]
+      },
+      "red-tint": {
+        "role": "signal",
+        "displayName": "Error Red Tint"
+      },
+      "red-ink": {
+        "role": "signal",
+        "displayName": "Error Red Text"
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "First-run welcome title only."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "The one title per view."
+      },
+      "figure": {
+        "displayName": "Figure",
+        "purpose": "KPI values, tabular."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Card and panel headings."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Base text."
+      },
+      "body-small": {
+        "displayName": "Body Small",
+        "purpose": "Secondary prose in cards and panels."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Mono uppercase field labels, KPI labels, table heads, section titles."
+      },
+      "nav": {
+        "displayName": "Nav",
+        "purpose": "Mono uppercase rail items and tabs."
+      },
+      "code": {
+        "displayName": "Code",
+        "purpose": "Code blocks and inline mono values."
+      }
+    },
+    "shadows": [
+      {
+        "name": "toast-lift",
+        "value": "0 12px 32px rgba(0, 0, 0, .6)",
+        "purpose": "The flash notice only; panels and controls are flat."
+      }
+    ],
+    "motion": [
+      {
+        "name": "state",
+        "value": ".15s",
+        "purpose": "Color, background, and border transitions on buttons, nav, inputs."
+      },
+      {
+        "name": "ease-out-expo",
+        "value": "cubic-bezier(.16, 1, .3, 1)",
+        "purpose": "Progress fill (.4s) and toast rise (.35s)."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "narrow-rail",
+        "value": "1050px"
+      },
+      {
+        "name": "single-column",
+        "value": "900px"
+      },
+      {
+        "name": "mobile",
+        "value": "760px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The forward action; at most one per view header.",
+      "html": "<button class=\"ds-btn ds-btn-primary\">Re-run analysis</button>",
+      "css": ".ds-btn { height: 34px; display: inline-flex; align-items: center; gap: 8px; padding: 0 14px; border: 1px solid transparent; border-radius: 0; font-family: var(--sans); font-size: 13px; font-weight: 500; cursor: pointer; transition: background-color .15s, border-color .15s, color .15s; } .ds-btn-primary { background: var(--green); color: #000; } .ds-btn-primary:hover { background: var(--green-hover); }"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Neutral actions beside or instead of the primary.",
+      "html": "<button class=\"ds-btn-secondary\">See performance</button>",
+      "css": ".ds-btn-secondary { height: 34px; padding: 0 14px; border: 1px solid var(--line-strong); border-radius: 0; background: transparent; color: var(--ink); font-family: var(--sans); font-size: 13px; font-weight: 500; cursor: pointer; transition: background-color .15s, border-color .15s; } .ds-btn-secondary:hover { border-color: rgba(255, 255, 255, .4); background: var(--surface-2); }"
+    },
+    {
+      "name": "Ghost Button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "Underlined inline action inside empty states and callouts.",
+      "html": "<button class=\"ds-btn-ghost\">Collect data first</button>",
+      "css": ".ds-btn-ghost { height: 28px; padding: 0 8px; border: 0; background: transparent; color: var(--ink); font-family: var(--sans); font-size: 12px; font-weight: 500; text-decoration: underline; text-decoration-color: var(--line-strong); text-underline-offset: 3px; cursor: pointer; } .ds-btn-ghost:hover { text-decoration-color: var(--ink); }"
+    },
+    {
+      "name": "Field",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Mono label above a square black input with a strong hairline.",
+      "html": "<label class=\"ds-field\"><span>Path</span><input class=\"ds-input\" placeholder=\"/guides\"><small>Everything under this path is served by Eumon.</small></label>",
+      "css": ".ds-field { display: flex; flex-direction: column; gap: 6px; } .ds-field > span { font-family: var(--mono); font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--soft); } .ds-field > small { font-size: 12px; color: var(--muted); } .ds-input { height: 36px; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: 0; background: var(--bg); color: var(--ink); font-family: var(--sans); font-size: 13.5px; outline: none; transition: border-color .15s; } .ds-input::placeholder { color: var(--soft); }"
+    },
+    {
+      "name": "Rail Navigation",
+      "kind": "nav",
+      "refersTo": "nav-item",
+      "description": "Mono uppercase rail items; green square marks the active one; pipeline steps at right.",
+      "html": "<nav class=\"ds-nav\"><button class=\"ds-nav-item active\"><span>Overview</span></button><button class=\"ds-nav-item\"><span>Data</span><small>1–3</small></button><button class=\"ds-nav-item\"><span>Landing pages</span><small>4–5</small></button></nav>",
+      "css": ".ds-nav { width: 236px; background: var(--bg); padding: 8px 0; } .ds-nav-item { width: calc(100% - 24px); height: 36px; display: flex; align-items: center; gap: 10px; margin: 0 12px 2px; padding: 0 10px; border: 0; background: transparent; color: var(--muted); font-family: var(--mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; text-align: left; cursor: pointer; transition: color .15s, background-color .15s; } .ds-nav-item::before { content: \"\"; width: 6px; height: 6px; flex: none; background: transparent; } .ds-nav-item:hover, .ds-nav-item.active { color: var(--ink); background: var(--surface-2); } .ds-nav-item.active::before { background: var(--green); } .ds-nav-item small { margin-left: auto; font-size: 11px; letter-spacing: .04em; color: var(--soft); }"
+    },
+    {
+      "name": "Badges",
+      "kind": "chip",
+      "refersTo": "badge",
+      "description": "Mono status badges; positive stays neutral, amber and red only for warning and error.",
+      "html": "<span class=\"ds-badge ds-badge-pos\">published</span> <span class=\"ds-badge\">archived</span> <span class=\"ds-badge ds-badge-amber\">draft</span> <span class=\"ds-badge ds-badge-red\">failed</span>",
+      "css": ".ds-badge { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border: 1px solid var(--line); border-radius: 0; background: rgba(255, 255, 255, .05); color: var(--muted); font-family: var(--mono); font-size: 11px; letter-spacing: .04em; } .ds-badge-pos { background: transparent; color: var(--ink); border-color: var(--line-strong); } .ds-badge-amber { background: var(--amber-tint); color: var(--amber); border-color: rgba(245, 165, 36, .3); } .ds-badge-red { background: var(--red-tint); color: var(--red); border-color: rgba(242, 109, 109, .3); }"
+    },
+    {
+      "name": "Card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "Black ruled cell; stacked cards share one hairline.",
+      "html": "<section class=\"ds-card\"><div class=\"ds-card-header\"><h2>Connections</h2><p>Each connection adds evidence. Only the website is required.</p></div></section><section class=\"ds-card\"><div class=\"ds-card-header\"><h2>Landing page engine</h2></div></section>",
+      "css": ".ds-card { background: var(--bg); border: 1px solid var(--line); border-radius: 0; padding: 20px 22px; } .ds-card + .ds-card { margin-top: -1px; } .ds-card-header h2 { margin: 0; font-family: var(--sans); font-size: 16px; font-weight: 500; letter-spacing: -.01em; color: var(--ink); } .ds-card-header p { margin: 6px 0 0; font-size: 13px; line-height: 1.55; color: var(--muted); }"
+    },
+    {
+      "name": "KPI Cells",
+      "kind": "custom",
+      "refersTo": "card",
+      "description": "Ruled KPI cells that butt together on shared rules.",
+      "html": "<div class=\"ds-kpis\"><div class=\"ds-kpi\"><span>URLs in sitemap</span><strong>22,913</strong><small>Declared to search engines</small></div><div class=\"ds-kpi\"><span>Key findings</span><strong>9</strong><small>Ranked by organic impact</small></div></div>",
+      "css": ".ds-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); } .ds-kpi { border: 1px solid var(--line); margin: 0 -1px -1px 0; padding: 16px; } .ds-kpi span { display: block; font-family: var(--mono); font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--soft); } .ds-kpi strong { display: block; margin: 10px 0 2px; font-size: 28px; font-weight: 400; letter-spacing: -.02em; font-variant-numeric: tabular-nums; color: var(--ink); } .ds-kpi small { font-size: 12px; color: var(--muted); }"
+    },
+    {
+      "name": "Progress",
+      "kind": "custom",
+      "refersTo": "progress",
+      "description": "Square 4px track with a green fill.",
+      "html": "<div class=\"ds-progress\"><i style=\"transform: scaleX(.6)\"></i></div>",
+      "css": ".ds-progress { height: 4px; width: 240px; background: rgba(255, 255, 255, .08); overflow: hidden; } .ds-progress > i { display: block; height: 100%; background: var(--green); transform-origin: left; transition: transform .4s cubic-bezier(.16, 1, .3, 1); }"
+    },
+    {
+      "name": "Callouts",
+      "kind": "custom",
+      "refersTo": "card",
+      "description": "Inset note, plus tinted warning and error variants.",
+      "html": "<div class=\"ds-callout\">Imported 1,204 query rows.</div><div class=\"ds-callout ds-warn\">Search Console is not connected.</div><div class=\"ds-callout ds-error\">The last analysis stopped before it finished.</div>",
+      "css": ".ds-callout { border: 1px solid var(--line); background: var(--surface); padding: 12px 14px; margin-bottom: 8px; font-size: 13.5px; line-height: 1.55; color: var(--ink-2); } .ds-warn { border-color: rgba(245, 165, 36, .3); background: var(--amber-tint); color: #f7c46c; } .ds-error { border-color: rgba(242, 109, 109, .3); background: var(--red-tint); color: #f59a9a; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Ruled Console",
+    "overview": "A working console in Better Auth's world, pinned by the user: pure black ground, near-white ink, a few fixed grays, and every surface drawn with a 1px hairline at 10% white. Nothing is rounded, nothing floats. Panels do not sit on the page as cards; they share their rules with their neighbours, so the screen reads as one ruled sheet divided into cells. The work column is framed by full-height hairlines, and small + registration marks sit where those verticals cross the top-bar rule.\n\nColour is spent, not spread. Green is the brand and marks only what moves a client site forward: the primary action, the active place in the navigation, and progress. Amber and red exist only to say something is wrong. Everything else is grayscale, and hierarchy comes from type size, weight, and the shift between Geist and Geist Mono.\n\nThe system is dark only. It refuses the category default of soft white cards, rounded corners, and mint tints.",
+    "keyCharacteristics": [
+      "Black ground, hairline rules, zero radius everywhere.",
+      "Geist regular for titles and prose; Geist Mono uppercase for the machinery (navigation, labels, table heads, codes, counts).",
+      "Green on four things only; amber and red only for warnings and errors.",
+      "Adjacent panels collapse onto a shared 1px rule.",
+      "The ruled frame with + registration marks is the signature."
+    ],
+    "rules": [
+      {
+        "name": "The Spent Green Rule",
+        "body": "Green appears on the primary button, the active navigation marker, progress, and the brand mark. Nowhere else. Status words that mean \"good\" (published, live, approved) render as a neutral badge with ink text and a strong hairline, not green.",
+        "section": "colors"
+      },
+      {
+        "name": "The Alarm-Only Rule",
+        "body": "Amber and red carry warnings and errors and nothing else. They are never decoration, emphasis, or category color.",
+        "section": "colors"
+      },
+      {
+        "name": "The Dark-Only Rule",
+        "body": "There is no light theme. `color-scheme: dark` is set on the root.",
+        "section": "colors"
+      },
+      {
+        "name": "The Mono-for-Machinery Rule",
+        "body": "If it is navigation, a field name, a column head, a count, a code, or a URL path, it is Geist Mono. If it is a title or a sentence, it is Geist.",
+        "section": "typography"
+      },
+      {
+        "name": "The Regular-Weight Rule",
+        "body": "Large titles are 400, never bold. Emphasis inside panels uses 500 at body sizes.",
+        "section": "typography"
+      },
+      {
+        "name": "The Tabular Rule",
+        "body": "Numbers in KPIs, tables, scores, and counts use tabular figures and right alignment in tables.",
+        "section": "typography"
+      },
+      {
+        "name": "The Flat Sheet Rule",
+        "body": "Panels, cards, and controls never cast shadows. If something needs to separate, give it a rule or the Inset Black surface.",
+        "section": "elevation"
+      },
+      {
+        "name": "The Square Rule",
+        "body": "No radius, anywhere. A rounded corner is a sign the component came from a different system.",
+        "section": "shapes"
+      },
+      {
+        "name": "The Registration Mark",
+        "body": "Where the work column's vertical rules meet the top bar's rule (and where the rail meets it), a 9px + drawn from two 1px Graphite lines marks the crossing. It belongs to the shell frame only.",
+        "section": "shapes"
+      }
+    ],
+    "dos": [
+      "Do keep every surface black and separate panels with 1px Hairline rules (`rgba(255, 255, 255, .1)`).",
+      "Do let adjacent cards, KPI cells, and grid cells share a rule with a -1px overlap.",
+      "Do set navigation, field labels, table heads, and counts in Geist Mono uppercase; set titles and prose in Geist at 400.",
+      "Do give each view one 36px regular title, a Graphite lede, and at most one green primary action on the right.",
+      "Do show warnings and errors as tinted amber or red blocks with a 30% border."
+    ],
+    "donts": [
+      "Don't add a light theme.",
+      "Don't use green outside the primary button, the active navigation marker, progress, and the brand mark; positive status badges stay neutral.",
+      "Don't use amber or red for anything but warnings and errors.",
+      "Don't round any corner or add shadows to panels, cards, or controls.",
+      "Don't use soft white cards, rounded corners, or mint tints.",
+      "Don't place a label above a view or card title."
+    ]
+  }
+}

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { COUNTRIES, countryName, type SiteRecord } from "@organic-growth/core";
 import { api, errorMessage, formatNumber } from "./api";
-import { Badge, Button, Card, Kpi, usePolling, ViewHeader } from "./ui";
+import { Badge, Button, Card, CrossIcon, Kpi, usePolling, ViewHeader } from "./ui";
 
 export type Repository = { id: number; name: string; fullName: string; owner: string; defaultBranch: string; isPrivate: boolean };
 
@@ -31,9 +31,9 @@ type Report = {
       key: string;
       label: string;
       status: "gap" | "advantage" | "shared" | "yours_only";
-      you: { pages: number };
+      you: { pages: number; urls?: number; languages?: number };
       data?: { dataset: string; records: number; livePages: number };
-      competitors: Array<{ domain: string; pages: number; examples: string[] }>;
+      competitors: Array<{ domain: string; pages: number; urls?: number; languages?: number; examples: string[] }>;
     }>;
     competitors: Array<{ domain: string; analyzed: boolean; partial: boolean; estimatedUrls: number }>;
     insights: string[];
@@ -82,6 +82,7 @@ export function OverviewView({ site, repositories, githubInstalled, onSiteChange
   const [pendingId, setPendingId] = useState("");
   const [progress, setProgress] = useState("");
   const [error, setError] = useState("");
+  const [failure, setFailure] = useState("");
   const [changes, setChanges] = useState<Change[]>([]);
   const [busy, setBusy] = useState("");
   const [gscProperties, setGscProperties] = useState<Array<{ siteUrl: string }>>([]);
@@ -109,7 +110,7 @@ export function OverviewView({ site, repositories, githubInstalled, onSiteChange
         } else if (latest.analysis?.status === "queued" || latest.analysis?.status === "running") {
           setPendingId(latest.analysis.analysisId);
         } else if (latest.analysis?.status === "failed") {
-          setError(`The last analysis failed: ${latest.analysis.error ?? "unknown error"}`);
+          setFailure(latest.analysis.error ?? "No error was recorded.");
         }
       } catch (cause) { setError(errorMessage(cause)); }
     })();
@@ -131,14 +132,14 @@ export function OverviewView({ site, repositories, githubInstalled, onSiteChange
       return false;
     }
     if (job.status === "failed") {
-      setError(job.error ?? "Analysis failed.");
+      setFailure(job.error ?? "No error was recorded.");
       setPendingId("");
       return false;
     }
   });
 
   async function runAnalysis() {
-    setError(""); setBusy("analysis");
+    setError(""); setFailure(""); setBusy("analysis");
     try {
       await api(`/api/sites/${site.id}/competitors`, { method: "PUT", json: { domains: competitors.split(/[\n,]/).map((value) => value.trim()).filter(Boolean) } });
       const queued = await api<{ analysisId: string }>(`/api/sites/${site.id}/analyses`, { method: "POST" });
@@ -195,12 +196,12 @@ export function OverviewView({ site, repositories, githubInstalled, onSiteChange
   return (
     <div>
       <ViewHeader
-        eyebrow="SITE INTELLIGENCE"
         title={site.name}
         description={<>What Google receives from <a href={site.baseUrl} target="_blank" rel="noreferrer">{site.baseUrl}</a>, what is holding organic traffic back, and what to fix first.</>}
         actions={<Button busy={busy === "analysis" || Boolean(pendingId)} onClick={runAnalysis}>{pendingId ? progress || "Analyzing…" : report ? "Re-run analysis" : "Run analysis"}</Button>}
       />
       {error && <div className="callout error" role="alert" style={{ marginBottom: 14 }}>{error}</div>}
+      {failure && <div className="callout error" role="alert" style={{ marginBottom: 14 }}>The last analysis stopped before it finished. Run it again; if it stops the same way, this is what failed:<div className="mono small" style={{ marginTop: 6, overflowWrap: "anywhere" }}>{failure}</div></div>}
 
       <div className="split">
         <Card title="Connections" subtitle="Each connection adds evidence. Only the website is required.">
@@ -221,7 +222,7 @@ export function OverviewView({ site, repositories, githubInstalled, onSiteChange
                   </select>
                   <Button small variant="secondary" disabled={!repositoryId} busy={busy === "repo"} onClick={attachRepository}>Connect</Button>
                 </div>
-              ) : <a className="btn btn-secondary btn-small" style={{ marginTop: 8 }} href="/api/github/install">Connect GitHub ↗</a>)}
+              ) : <a className="btn btn-secondary btn-small" style={{ marginTop: 8 }} href="/api/github/install">Connect GitHub</a>)}
             </div>
           </div>
           <div className="list-row">
@@ -230,7 +231,7 @@ export function OverviewView({ site, repositories, githubInstalled, onSiteChange
               <h4>{site.gscProperty ?? "Google Search Console"}</h4>
               <p>Queries, impressions, and rankings — the evidence behind page opportunities and the performance loop.</p>
               <div className="row" style={{ marginTop: 8 }}>
-                <a className="btn btn-secondary btn-small" href={`/api/sites/${site.id}/gsc/connect`}>{gscProperties.length || site.gscProperty ? "Reconnect Google" : "Connect Google ↗"}</a>
+                <a className="btn btn-secondary btn-small" href={`/api/sites/${site.id}/gsc/connect`}>{gscProperties.length || site.gscProperty ? "Reconnect Google" : "Connect Google"}</a>
                 {gscProperties.length > 0 && (
                   <select className="select" style={{ maxWidth: 320 }} value={gscSelected} onChange={(event) => void chooseProperty(event.target.value)}>
                     <option value="">Choose a property</option>
@@ -247,7 +248,7 @@ export function OverviewView({ site, repositories, githubInstalled, onSiteChange
               <h4>Target markets</h4>
               <p>The countries you sell to. Search traffic is checked against them, so visibility in the wrong market shows up as a problem.</p>
               <div className="row" style={{ marginTop: 8 }}>
-                {markets.map((code) => <span className="chip" key={code}>{countryName(code)} <button className="chip-remove" aria-label={`Remove ${countryName(code)}`} onClick={() => void saveMarkets(markets.filter((entry) => entry !== code))}>×</button></span>)}
+                {markets.map((code) => <span className="chip" key={code}>{countryName(code)} <button className="chip-remove" aria-label={`Remove ${countryName(code)}`} onClick={() => void saveMarkets(markets.filter((entry) => entry !== code))}><CrossIcon /></button></span>)}
                 <select className="select" style={{ maxWidth: 220 }} value="" onChange={(event) => event.target.value && void saveMarkets([...markets, event.target.value])}>
                   <option value="">Add a country…</option>
                   {COUNTRIES.filter((country) => !markets.includes(country.code)).map((country) => <option key={country.code} value={country.code}>{country.name}</option>)}
@@ -274,7 +275,7 @@ export function OverviewView({ site, repositories, githubInstalled, onSiteChange
             <li>Track which pages bring visits, clicks, and conversions — then improve them</li>
           </ol>
           <div className="row">
-            <Button onClick={() => onNavigate("data")}>Scope my data →</Button>
+            <Button onClick={() => onNavigate("data")}>Scope my data</Button>
             <Button variant="secondary" onClick={() => onNavigate("performance")}>See performance</Button>
           </div>
           {conversions && <p className="small muted" style={{ marginTop: 12 }}>Conversion events: {formatNumber(conversions.totalEvents)} total · {formatNumber(conversions.last28Days)} in the last 28 days</p>}
@@ -291,7 +292,7 @@ export function OverviewView({ site, repositories, githubInstalled, onSiteChange
           </div>
           <div className="dashboard-columns">
             <section className="panel" id="findings">
-              <div className="panel-heading"><div><div className="eyebrow">WHAT WE FOUND</div><h3>Technical findings</h3></div><span className="count-pill">{findings.length} findings</span></div>
+              <div className="panel-heading"><div><h3>Technical findings</h3></div><span className="count-pill">{findings.length} findings</span></div>
               {findings.length ? findings.slice(0, allFindings ? findings.length : 8).map((finding) => {
                 const change = changes.find((item) => item.findingId === finding.id);
                 const fixable = hasRepo && ["sitemap", "indexing"].includes(finding.category);
@@ -308,7 +309,7 @@ export function OverviewView({ site, repositories, githubInstalled, onSiteChange
                           <strong>{change.title}</strong>
                           <p>{change.reason}</p>
                           <pre>{change.patch}</pre>
-                          {change.prUrl ? <a href={change.prUrl} target="_blank" rel="noreferrer">Open draft pull request ↗</a> : <button className="inline-action" disabled={Boolean(busy)} onClick={() => openPullRequest(change)}>{busy === change.id ? "Opening draft PR…" : "Create draft GitHub PR"}</button>}
+                          {change.prUrl ? <a href={change.prUrl} target="_blank" rel="noreferrer">Open draft pull request</a> : <button className="inline-action" disabled={Boolean(busy)} onClick={() => openPullRequest(change)}>{busy === change.id ? "Opening draft PR…" : "Create draft GitHub PR"}</button>}
                         </div>
                       )}
                     </div>
@@ -319,11 +320,10 @@ export function OverviewView({ site, repositories, githubInstalled, onSiteChange
               {findings.length > 8 && <button className="inline-action" onClick={() => setAllFindings((value) => !value)}>{allFindings ? "Show the top 8" : `Show all ${findings.length} findings`}</button>}
             </section>
             <section className="panel" id="plan">
-              <div className="panel-heading"><div><div className="eyebrow">WEBSITE-SPECIFIC STRATEGY</div><h3>Growth plan</h3></div><span className="sparkle">✳</span></div>
+              <div className="panel-heading"><div><h3>Growth plan</h3></div></div>
               <p className="plan-situation">{report.plan.situation}</p>
-              <div className="advantage"><span>YOUR ADVANTAGE</span><p>{report.plan.competitiveAdvantage}</p></div>
-              <div className="priority-label">HIGHEST-IMPACT OPPORTUNITY</div>
-              <p className="top-opportunity">{report.plan.highestImpactOpportunity}</p>
+              <p className="advantage"><strong>Your advantage.</strong> {report.plan.competitiveAdvantage}</p>
+              <p className="top-opportunity"><span className="muted">Highest-impact opportunity: </span>{report.plan.highestImpactOpportunity}</p>
               <div className="priority-list">{report.plan.priorities.slice(0, 4).map((priority) => (
                 <div className="priority-row" key={priority.rank}><span className="priority-number">0{priority.rank}</span><div><strong>{priority.title}</strong><small>{priority.whyThisMatters}</small></div></div>
               ))}</div>
@@ -331,13 +331,13 @@ export function OverviewView({ site, repositories, githubInstalled, onSiteChange
           </div>
           <div className="dashboard-columns lower-columns">
             <section className="panel">
-              <div className="panel-heading"><div><div className="eyebrow">OPPORTUNITY ENGINE</div><h3>Where to focus</h3></div></div>
+              <div className="panel-heading"><div><h3>Where to focus</h3></div></div>
               {report.opportunities.length ? report.opportunities.slice(0, 4).map((opportunity) => (
                 <div className="opportunity" key={opportunity.title}><div><strong>{opportunity.title}</strong><p>{opportunity.rationale}</p>{opportunity.potentialPage && <code>{opportunity.potentialPage}</code>}</div><span className="score">{Math.round(opportunity.priorityScore)}<small>priority</small></span></div>
               )) : <p className="empty-state">No opportunities yet.</p>}
             </section>
             <section className="panel">
-              <div className="panel-heading"><div><div className="eyebrow">SEARCH LANDSCAPE</div><h3>Search & competitor evidence</h3></div></div>
+              <div className="panel-heading"><div><h3>Search & competitor evidence</h3></div></div>
               {report.searchNarrative.totalImpressions > 0 && !report.search && <div className="search-evidence"><strong>{formatNumber(report.searchNarrative.totalClicks)} clicks · {formatNumber(report.searchNarrative.totalImpressions)} impressions</strong><p>{report.searchNarrative.narrative}</p></div>}
               {report.competitors.length ? report.competitors.slice(0, 5).map((competitor) => (
                 <div className="competitor" key={competitor.domain}>
@@ -371,8 +371,8 @@ function FamilyHealth({ families }: { families: FamilyStats[] }) {
   const label = (family: string) => (family === "home" ? "Homepage" : family === "page" ? "Top-level pages" : `/${family}/`);
   const cell = (value: number, of: number) => (value ? <span className="bad-count">{formatNumber(value)}{of ? <small> ({Math.round((value / of) * 100)}%)</small> : null}</span> : <span className="muted">0</span>);
   return (
-    <section className="panel" style={{ marginTop: 13 }}>
-      <div className="panel-heading"><div><div className="eyebrow">RENDERING & INDEXING BY PAGE TYPE</div><h3>What Googlebot receives from each template</h3></div></div>
+    <section className="panel">
+      <div className="panel-heading"><div><h3>What Googlebot receives from each template</h3></div></div>
       <div className="table-wrap" style={{ marginBottom: 10 }}>
         <table className="table">
           <thead><tr><th>Page type</th><th className="num">Sitemap URLs</th><th className="num">Empty HTML</th><th className="num">Errors</th><th className="num">Noindex</th><th className="num">No structured data</th></tr></thead>
@@ -402,8 +402,8 @@ const VERDICT: Record<string, { label: string; tone: string }> = {
 /** Source-vs-render comparison per template, and repeated fetches that expose intermittent failures. */
 function RenderingChecks({ rendering }: { rendering: NonNullable<Report["rendering"]> }) {
   return (
-    <section className="panel" style={{ marginTop: 13 }}>
-      <div className="panel-heading"><div><div className="eyebrow">RENDERING INTELLIGENCE</div><h3>HTML vs. browser, and repeated Googlebot fetches</h3></div></div>
+    <section className="panel">
+      <div className="panel-heading"><div><h3>HTML vs. browser, and repeated Googlebot fetches</h3></div></div>
       {rendering.comparisons.length > 0 && (
         <div className="table-wrap" style={{ marginBottom: 12 }}>
           <table className="table">
@@ -448,12 +448,15 @@ const GAP_STATUS: Record<string, { label: string; tone: string }> = {
 /** Which kinds of pages competitors publish, compared with yours and with the data you already hold. */
 function ContentGaps({ competition, onNavigate }: { competition: NonNullable<Report["competition"]>; onNavigate: (view: "data") => void }) {
   const domains = competition.competitors.filter((competitor) => competitor.analyzed).slice(0, 3);
-  const pages = (value: number) => (value ? `~${formatNumber(value)}` : "—");
+  // Distinct pages lead; a translated section adds its language editions and URLs beneath.
+  const pages = (entry?: { pages: number; urls?: number; languages?: number }) => (entry?.pages
+    ? <>{`~${formatNumber(entry.pages)}`}{(entry.languages ?? 1) > 1 && <small className="cell-note">{entry.languages} languages · {formatNumber(entry.urls ?? entry.pages)} URLs</small>}</>
+    : "—");
   return (
-    <section className="panel" style={{ marginTop: 13 }}>
+    <section className="panel">
       <div className="panel-heading">
-        <div><div className="eyebrow">COMPETITOR CONTENT ARCHITECTURE</div><h3>What competitors publish, and what you have</h3></div>
-        {competition.rows.some((row) => row.status === "gap") && <Button small variant="secondary" onClick={() => onNavigate("data")}>Close a gap in Data →</Button>}
+        <div><h3>What competitors publish, and what you have</h3></div>
+        {competition.rows.some((row) => row.status === "gap") && <Button small variant="secondary" onClick={() => onNavigate("data")}>Close a gap in Data</Button>}
       </div>
       {competition.insights.length > 0 && <ul className="insights">{competition.insights.slice(0, 6).map((insight) => <li key={insight}>{insight}</li>)}</ul>}
       <div className="table-wrap" style={{ marginBottom: 10 }}>
@@ -462,10 +465,10 @@ function ContentGaps({ competition, onNavigate }: { competition: NonNullable<Rep
           <tbody>{competition.rows.slice(0, 15).map((row) => (
             <tr key={row.key}>
               <td>{row.label}</td>
-              <td className="num">{pages(row.you.pages)}</td>
+              <td className="num">{pages(row.you)}</td>
               {domains.map((competitor) => {
                 const entry = row.competitors.find((item) => item.domain === competitor.domain);
-                return <td className="num" key={competitor.domain}>{entry?.examples[0] ? <a href={entry.examples[0]} target="_blank" rel="noreferrer">{pages(entry.pages)}</a> : pages(entry?.pages ?? 0)}</td>;
+                return <td className="num" key={competitor.domain}>{entry?.examples[0] ? <a href={entry.examples[0]} target="_blank" rel="noreferrer">{pages(entry)}</a> : pages(entry)}</td>;
               })}
               <td><Badge tone={GAP_STATUS[row.status]?.tone}>{GAP_STATUS[row.status]?.label ?? row.status}</Badge></td>
               <td className="small">{row.data ? `${row.data.dataset}: ${formatNumber(row.data.records)} records, ${formatNumber(row.data.livePages)} live` : <span className="muted">—</span>}</td>
@@ -474,7 +477,7 @@ function ContentGaps({ competition, onNavigate }: { competition: NonNullable<Rep
         </table>
       </div>
       <p className="small muted" style={{ margin: "0 0 10px" }}>
-        Page counts come from each site's sitemaps{competition.competitors.some((competitor) => competitor.partial) ? " (large sitemaps are sampled and extrapolated)" : ""}{competition.aiLabels ? "; sections are matched across sites by content type" : "; sections are matched by URL name"}. They show where competitors invest, not search demand.
+        Page counts come from each site's sitemaps{competition.competitors.some((competitor) => competitor.partial) ? " (large sitemaps are sampled and extrapolated)" : ""}{competition.aiLabels ? "; sections are matched across sites by content type" : "; sections are matched by URL name"}.{competition.rows.some((row) => row.you.urls !== undefined) && " A page translated into several languages counts once, with its language editions and URLs beneath."} Counts show where competitors invest, not search demand.
       </p>
     </section>
   );
@@ -483,8 +486,8 @@ function ContentGaps({ competition, onNavigate }: { competition: NonNullable<Rep
 const RENDERING_LABEL: Record<string, { label: string; tone: string }> = {
   static: { label: "Static", tone: "green" },
   isr: { label: "Static + revalidate", tone: "green" },
-  ssr: { label: "Server per request", tone: "blue" },
-  on_demand: { label: "On demand", tone: "blue" },
+  ssr: { label: "Server per request", tone: "gray" },
+  on_demand: { label: "On demand", tone: "gray" },
   client: { label: "Browser", tone: "red" },
   unknown: { label: "Unknown", tone: "gray" },
 };
@@ -505,8 +508,8 @@ function CodeIntelligence({ repo }: { repo: NonNullable<Report["repo"]> }) {
   ];
   const routes = [...(repo.routeInspections ?? [])].sort((a, b) => Number(b.dynamic) - Number(a.dynamic)).slice(0, 15);
   return (
-    <section className="panel" style={{ marginTop: 13 }}>
-      <div className="panel-heading"><div><div className="eyebrow">WEBSITE INTELLIGENCE · FROM THE REPOSITORY</div><h3>Stack and routes</h3></div></div>
+    <section className="panel">
+      <div className="panel-heading"><div><h3>Stack and routes, from the repository</h3></div></div>
       <div className="fact-grid">{facts.filter(([, value]) => value).map(([label, value]) => <div key={label}><span>{label}</span><strong>{value}</strong></div>)}</div>
       {routes.length > 0 && (
         <div className="table-wrap" style={{ margin: "12px 0 10px" }}>
@@ -538,8 +541,8 @@ function SearchIntelligence({ search }: { search: NonNullable<Report["search"]> 
   const share = (value: number) => `${Math.round(value * 100)}%`;
   const entity = search.entityQueries?.byType[0];
   return (
-    <section className="panel" style={{ marginTop: 13 }}>
-      <div className="panel-heading"><div><div className="eyebrow">SEARCH INTELLIGENCE · LAST 28 DAYS</div><h3>Who finds you, and through which searches</h3></div></div>
+    <section className="panel">
+      <div className="panel-heading"><div><h3>Who found you in the last 28 days, and through which searches</h3></div></div>
       <p className="plan-situation">{search.narrative}</p>
       <div className="metrics-grid">
         <Kpi label="Clicks" value={formatNumber(search.totals.clicks)} caption={`${formatNumber(search.totals.impressions)} impressions · ${(search.totals.ctr * 100).toFixed(1)}% CTR`} />
@@ -591,10 +594,10 @@ const PATH_LABELS: Record<string, string> = { whatsapp: "WhatsApp", phone: "Phon
 function ConversionPaths({ conversion, onNavigate }: { conversion: NonNullable<Report["conversion"]>; onNavigate: (view: "setup") => void }) {
   const label = (family: string) => (family === "home" ? "Homepage" : family === "page" ? "Top-level pages" : `/${family}/`);
   return (
-    <section className="panel" style={{ marginTop: 13 }}>
+    <section className="panel">
       <div className="panel-heading">
-        <div><div className="eyebrow">CONVERSION</div><h3>How each template turns visitors into leads</h3></div>
-        <Button small variant="secondary" onClick={() => onNavigate("setup")}>Track conversions →</Button>
+        <div><h3>How each template turns visitors into leads</h3></div>
+        <Button small variant="secondary" onClick={() => onNavigate("setup")}>Track conversions</Button>
       </div>
       <div className="table-wrap" style={{ marginBottom: 10 }}>
         <table className="table">

@@ -39,11 +39,15 @@ type Report = {
     insights: string[];
     aiLabels: boolean;
   } | null;
+  repo?: { fingerprint: Fingerprint; routeInspections?: RouteInspection[]; sitemapCode?: { source: string; splitsSitemaps: boolean } } | null;
   rendering?: {
     comparisons: Array<{ url: string; family: string; verdict: string; rawTextLength: number; renderedTextLength: number; rawTitle?: string; renderedTitle?: string }>;
     repeatability: Array<{ family: string; urls: number; attempts: number; failed: number; medianMs: number }>;
   };
 };
+
+type RouteInspection = { pathPattern: string; source: string; dynamic: boolean; rendering: string; renderingEvidence?: string; clientDataFetching?: string; metadata: string; sequentialAwaits: number; unboundedQueries: string[] };
+type Fingerprint = { framework: string; router?: string; rendering?: string; deployment?: string; cms?: string; database?: string; analytics: string[]; seoTooling: string[]; contentSource?: string; language: string; packageManager: string };
 
 type Change = { id: string; findingId?: string; title: string; reason: string; patch: string; prUrl?: string };
 
@@ -305,6 +309,7 @@ export function OverviewView({ site, repositories, githubInstalled, onSiteChange
           </div>
           {report.competition && report.competition.rows.length > 0 && <ContentGaps competition={report.competition} onNavigate={onNavigate} />}
           {coverage?.families && coverage.families.length > 1 && <FamilyHealth families={coverage.families} />}
+          {report.repo && <CodeIntelligence repo={report.repo} />}
           {report.rendering && (report.rendering.comparisons.length > 0 || report.rendering.repeatability.length > 0) && <RenderingChecks rendering={report.rendering} />}
           {report.sitemap.errors.length > 0 && <div className="crawl-note"><strong>Sitemap note</strong><span>{report.sitemap.errors.join(" ")}</span></div>}
         </div>
@@ -428,6 +433,57 @@ function ContentGaps({ competition, onNavigate }: { competition: NonNullable<Rep
       <p className="small muted" style={{ margin: "0 0 10px" }}>
         Page counts come from each site's sitemaps{competition.competitors.some((competitor) => competitor.partial) ? " (large sitemaps are sampled and extrapolated)" : ""}{competition.aiLabels ? "; sections are matched across sites by content type" : "; sections are matched by URL name"}. They show where competitors invest, not search demand.
       </p>
+    </section>
+  );
+}
+
+const RENDERING_LABEL: Record<string, { label: string; tone: string }> = {
+  static: { label: "Static", tone: "green" },
+  isr: { label: "Static + revalidate", tone: "green" },
+  ssr: { label: "Server per request", tone: "blue" },
+  on_demand: { label: "On demand", tone: "blue" },
+  client: { label: "Browser", tone: "red" },
+  unknown: { label: "Unknown", tone: "gray" },
+};
+
+/** The detected stack and what each route's code means for the HTML crawlers receive. */
+function CodeIntelligence({ repo }: { repo: NonNullable<Report["repo"]> }) {
+  const { fingerprint } = repo;
+  const facts: Array<[string, string | undefined]> = [
+    ["Framework", [fingerprint.framework, fingerprint.router].filter(Boolean).join(" · ")],
+    ["Rendering", fingerprint.rendering],
+    ["Language", `${fingerprint.language} · ${fingerprint.packageManager}`],
+    ["Deployment", fingerprint.deployment],
+    ["Content", fingerprint.contentSource ?? (fingerprint.cms !== "none" ? fingerprint.cms : undefined)],
+    ["Database", fingerprint.database],
+    ["Analytics", fingerprint.analytics.join(", ") || undefined],
+    ["SEO tooling", fingerprint.seoTooling.join(", ") || undefined],
+    ["Sitemap code", repo.sitemapCode ? `${repo.sitemapCode.source}${repo.sitemapCode.splitsSitemaps ? " (split)" : ""}` : undefined],
+  ];
+  const routes = [...(repo.routeInspections ?? [])].sort((a, b) => Number(b.dynamic) - Number(a.dynamic)).slice(0, 15);
+  return (
+    <section className="panel" style={{ marginTop: 13 }}>
+      <div className="panel-heading"><div><div className="eyebrow">WEBSITE INTELLIGENCE · FROM THE REPOSITORY</div><h3>Stack and routes</h3></div></div>
+      <div className="fact-grid">{facts.filter(([, value]) => value).map(([label, value]) => <div key={label}><span>{label}</span><strong>{value}</strong></div>)}</div>
+      {routes.length > 0 && (
+        <div className="table-wrap" style={{ margin: "12px 0 10px" }}>
+          <table className="table">
+            <thead><tr><th>Route</th><th>Renders</th><th>Content data</th><th>Title & meta</th><th>Notes</th></tr></thead>
+            <tbody>{routes.map((route) => (
+              <tr key={route.source + route.pathPattern}>
+                <td><code>{route.pathPattern}</code><div className="small muted">{route.source}</div></td>
+                <td><Badge tone={RENDERING_LABEL[route.rendering]?.tone}>{RENDERING_LABEL[route.rendering]?.label ?? route.rendering}</Badge></td>
+                <td className="small">{route.clientDataFetching ? <span className="bad-count">In the browser</span> : route.rendering === "client" ? <span className="muted">—</span> : "In the HTML"}</td>
+                <td className="small">{route.metadata === "server" ? "Per page" : route.metadata === "inherited" ? <span className="bad-count">Layout only</span> : route.metadata === "client" ? <span className="bad-count">Set by JavaScript</span> : <span className="bad-count">None</span>}</td>
+                <td className="small">{[
+                  route.sequentialAwaits >= 3 && `${route.sequentialAwaits} sequential requests`,
+                  route.unboundedQueries.length > 0 && `unpaginated: ${route.unboundedQueries.map((query) => query.split(":")[0]).join(", ")}`,
+                ].filter(Boolean).join(" · ") || <span className="muted">—</span>}</td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+      )}
     </section>
   );
 }

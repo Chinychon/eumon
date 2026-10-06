@@ -34,6 +34,7 @@ import {
   synthesizeGrowthPlan,
   type AnalysisBundle,
 } from "./index.js";
+import { findingsFromCode } from "./code-findings.js";
 import {
   compareCompetition,
   competitorProfiles,
@@ -180,6 +181,18 @@ export async function runFullAnalysis(input: RunAnalysisInput) {
     }));
   } else {
     findings.push(...sampleFindings);
+  }
+
+  if (repo) {
+    findings.push(...findingsFromCode({
+      siteId: input.siteId,
+      analysisId,
+      repo,
+      coverage: input.crawlCoverage?.coverage,
+      comparisons,
+      repeatability: summarizeRepeatability(repeatability),
+      familySizes: sitemap.urlTypes,
+    }));
   }
 
   findings.push(...findingsFromRendering({

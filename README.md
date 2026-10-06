@@ -54,7 +54,7 @@ What each setting in `.dev.vars` unlocks (details in [apps/web/README.md](apps/w
 | `packages/crawler` | Sitemap discovery, Googlebot crawling, rendering and technical SEO findings. |
 | `packages/scraper` | Scoping analyst, robots.txt-aware collection, structured extraction, CSV import. |
 | `packages/pages` | Page generation with quality gates, HTML rendering, CTA testing, performance insights. |
-| `packages/repo-analyzer` | Framework, routing, and deployment detection from a GitHub repository. |
+| `packages/repo-analyzer` | Stack detection (framework, router, CMS, database, deployment) and per-route code inspection: rendering mode, browser-side data fetching, where titles come from, request waterfalls, and unpaginated queries. |
 | `packages/agents` | Growth plan synthesis, Search Console client, safe-change and pull request generation. |
 | `packages/sdk` | Browser conversion tracker for JavaScript sites. |
 
@@ -63,7 +63,7 @@ Built on Cloudflare Workers ([vinext](https://www.npmjs.com/package/vinext) + Re
 ## Development
 
 ```sh
-npm test            # unit tests (ai, crawler, db, scraper, pages)
+npm test            # unit tests (every package)
 npm run typecheck   # every workspace
 npm run build       # packages + production Worker bundle
 npm run audit -- https://example.com --max 300   # site analysis from the command line

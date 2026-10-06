@@ -431,3 +431,4 @@ export * from "./ai-plan.js";
 export * from "./google-search-console.js";
 export * from "./change-generator.js";
 export * from "./competition.js";
+export * from "./code-findings.js";

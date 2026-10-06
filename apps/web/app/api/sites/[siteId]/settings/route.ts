@@ -49,6 +49,10 @@ export async function PUT(request: Request, context: { params: Promise<{ siteId:
     if (!/^(https?:\/\/|mailto:|tel:)/i.test(value) || value.length > 500) return fail("The CTA link must be an https, mailto:, or tel: URL (WhatsApp links use https://wa.me/…).");
     next.ctaUrl = value;
   }
+  if (body.language !== undefined) {
+    if (typeof body.language !== "string" || !/^[a-z]{2,3}(-[A-Za-z0-9]{2,8})?$/.test(body.language)) return fail("Use a language code such as en, id, or ms.");
+    next.language = body.language;
+  }
   if (body.brandColor !== undefined) {
     if (typeof body.brandColor !== "string" || !/^#[0-9a-f]{6}$/i.test(body.brandColor)) return fail("Use a hex colour such as #176b50.");
     next.brandColor = body.brandColor;

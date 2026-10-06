@@ -16,7 +16,7 @@ export async function POST(_request: Request, context: { params: Promise<{ pageI
   const llm = appLlm();
   if (llm instanceof Response) return llm;
   try {
-    const options = await suggestSnippets({ llm, page, siteName: settings.siteName, queries });
+    const options = await suggestSnippets({ llm, page, siteName: settings.siteName, queries, language: settings.language });
     if (!options.length) return fail("The model did not return usable options; try again.", 502);
     return json({ options, queries: queries.slice(0, 10), model: llm.model });
   } catch (error) {

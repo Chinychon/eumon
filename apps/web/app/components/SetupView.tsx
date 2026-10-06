@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { PageSettings, SiteRecord } from "@organic-growth/core";
+import { PAGE_LANGUAGES } from "@organic-growth/pages/labels";
 import { api, errorMessage } from "./api";
 import { Button, Card, CopyBlock, Field, ViewHeader } from "./ui";
 
@@ -88,6 +89,12 @@ export function SetupView({ site }: { site: SiteRecord }) {
                 <input className="input mono" value={form.mountPath} placeholder="/guides" onChange={(event) => set("mountPath", event.target.value)} />
               </Field>
               <Field label="Business name"><input className="input" value={form.siteName} onChange={(event) => set("siteName", event.target.value)} /></Field>
+              <Field label="Page language" hint="New templates are written in this language; labels and the lang attribute follow it. Regenerate existing templates to switch their copy.">
+                <select className="select" value={form.language} onChange={(event) => set("language", event.target.value)}>
+                  {PAGE_LANGUAGES.map((language) => <option key={language.code} value={language.code}>{language.name}</option>)}
+                  {!PAGE_LANGUAGES.some((language) => language.code === form.language) && <option value={form.language}>{form.language}</option>}
+                </select>
+              </Field>
               <Field label="Brand colour"><div className="row" style={{ flexWrap: "nowrap" }}><input type="color" value={form.brandColor} onChange={(event) => set("brandColor", event.target.value)} style={{ width: 44, height: 36, border: 0, background: "none" }} /><input className="input mono" value={form.brandColor} onChange={(event) => set("brandColor", event.target.value)} /></div></Field>
               <Field label="Call-to-action label"><input className="input" value={form.ctaLabel} onChange={(event) => set("ctaLabel", event.target.value)} /></Field>
               <Field label="Call-to-action link" hint="WhatsApp (https://wa.me/60…), tel:, mailto:, or your contact page."><input className="input" value={form.ctaUrl} onChange={(event) => set("ctaUrl", event.target.value)} /></Field>

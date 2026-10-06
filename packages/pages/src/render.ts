@@ -1,4 +1,5 @@
 import type { GeneratedPage, PageLink, PageSettings } from "@organic-growth/core";
+import { htmlLang, labelsFor } from "./labels.js";
 
 export type RenderCta = { variantId?: string; label: string; copy: string; url: string };
 
@@ -64,7 +65,7 @@ function structuredData(page: GeneratedPage, options: RenderOptions, canonical: 
       "@type": "BreadcrumbList",
       itemListElement: [
         { "@type": "ListItem", position: 1, name: settings.siteName, item: settings.publicOrigin },
-        ...(settings.mountPath ? [{ "@type": "ListItem", position: 2, name: "Guides", item: hub }] : []),
+        ...(settings.mountPath ? [{ "@type": "ListItem", position: 2, name: labelsFor(settings.language).guides, item: hub }] : []),
         { "@type": "ListItem", position: settings.mountPath ? 3 : 2, name: page.h1, item: canonical },
       ],
     },
@@ -124,9 +125,9 @@ function itemFieldsHtml(fields: GeneratedPage["items"][number]["fields"], origin
   }).join("");
 }
 
-function relatedHtml(related: PageLink[]): string {
+function relatedHtml(related: PageLink[], heading: string): string {
   if (!related.length) return "";
-  return `<section class="related"><h2>Related</h2><ul>${related.map((link) => `<li><a href="${escapeHtml(link.path)}">${escapeHtml(link.title)}</a></li>`).join("")}</ul></section>`;
+  return `<section class="related"><h2>${escapeHtml(heading)}</h2><ul>${related.map((link) => `<li><a href="${escapeHtml(link.path)}">${escapeHtml(link.title)}</a></li>`).join("")}</ul></section>`;
 }
 
 function trackingScript(beaconPath: string, pageId: string, variantId: string | undefined, cookieDomain: string | undefined): string {
@@ -150,19 +151,21 @@ export function renderLandingPage(page: GeneratedPage, options: RenderOptions): 
   const hubPath = settings.mountPath || "/";
   const isEntity = page.items.length === 1;
   const item = page.items[0];
+  const labels = labelsFor(settings.language);
+  const lang = htmlLang(settings.language);
 
   const body = isEntity && item
-    ? `<section><h2>Details</h2><dl class="details">${itemFieldsHtml(item.fields, origin)}</dl></section>`
-    : `<section><h2>${escapeHtml(`${page.items.length} ${page.items.length === 1 ? "option" : "options"}`)}</h2><div class="items">${page.items.map((entry) =>
+    ? `<section><h2>${escapeHtml(labels.details)}</h2><dl class="details">${itemFieldsHtml(item.fields, origin)}</dl></section>`
+    : `<section><h2>${escapeHtml(labels.options(page.items.length))}</h2><div class="items">${page.items.map((entry) =>
       `<article class="item"><h3>${escapeHtml(entry.title)}</h3><dl class="details">${itemFieldsHtml(entry.fields, origin)}</dl></article>`).join("")}</div></section>`;
 
   const faq = page.faq.length
-    ? `<section class="faq"><h2>Frequently asked questions</h2>${page.faq.map((entry) =>
+    ? `<section class="faq"><h2>${escapeHtml(labels.faq)}</h2>${page.faq.map((entry) =>
       `<details><summary>${escapeHtml(entry.question)}</summary>${paragraphs(entry.answer)}</details>`).join("")}</section>`
     : "";
 
   return `<!doctype html>
-<html lang="en">
+<html lang="${escapeHtml(lang)}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -182,7 +185,7 @@ export function renderLandingPage(page: GeneratedPage, options: RenderOptions): 
 <body>
 <header class="top"><div class="wrap"><a class="brand" href="${escapeHtml(origin)}/">${escapeHtml(settings.siteName)}</a>${ctaButton(cta, origin, "header", "cta small")}</div></header>
 <main class="wrap">
-<nav class="crumbs" aria-label="Breadcrumb"><a href="${escapeHtml(origin)}/">Home</a>${settings.mountPath ? ` › <a href="${escapeHtml(hubPath)}">Guides</a>` : ""} › <span>${escapeHtml(page.h1)}</span></nav>
+<nav class="crumbs" aria-label="Breadcrumb"><a href="${escapeHtml(origin)}/">${escapeHtml(labels.home)}</a>${settings.mountPath ? ` › <a href="${escapeHtml(hubPath)}">${escapeHtml(labels.guides)}</a>` : ""} › <span>${escapeHtml(page.h1)}</span></nav>
 <div class="hero">
 <h1>${escapeHtml(page.h1)}</h1>
 <div class="lead">${paragraphs(page.intro)}</div>
@@ -191,9 +194,9 @@ export function renderLandingPage(page: GeneratedPage, options: RenderOptions): 
 ${body}
 ${faq}
 <div class="band"><h2>${escapeHtml(page.h1)}</h2><p>${escapeHtml(cta.copy)}</p>${ctaButton(cta, origin, "footer-band")}</div>
-${relatedHtml(page.related)}
+${relatedHtml(page.related, labels.related)}
 </main>
-<footer><div class="wrap">© ${new Date(page.updatedAt).getUTCFullYear()} ${escapeHtml(settings.siteName)} · Last updated ${escapeHtml(page.updatedAt.slice(0, 10))}</div></footer>
+<footer><div class="wrap">© ${new Date(page.updatedAt).getUTCFullYear()} ${escapeHtml(settings.siteName)} · ${escapeHtml(labels.lastUpdated)} ${escapeHtml(page.updatedAt.slice(0, 10))}</div></footer>
 <div class="sticky">${ctaButton(cta, origin, "sticky")}</div>
 ${trackingScript(options.beaconPath, page.id, cta.variantId, options.cookieDomain)}
 </body>
@@ -207,6 +210,8 @@ export function renderHubPage(input: {
   indexable: boolean;
 }): string {
   const { settings } = input;
+  const labels = labelsFor(settings.language);
+  const lang = htmlLang(settings.language);
   const origin = settings.publicOrigin.replace(/\/$/, "");
   const canonical = publicUrl(settings, settings.mountPath || "/");
   // Link text reads better without the "| Site name" suffix every title carries.
@@ -214,7 +219,7 @@ export function renderHubPage(input: {
   const sections = input.sections.filter((section) => section.pages.length).map((section) =>
     `<section class="related"><h2>${escapeHtml(section.name)}</h2><ul>${section.pages.map((page) =>
       `<li><a href="${escapeHtml(page.path)}">${escapeHtml(page.title.replace(suffix, "") || page.title)}</a></li>`).join("")}</ul></section>`).join("");
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escapeHtml(`Guides | ${settings.siteName}`)}</title><link rel="canonical" href="${escapeHtml(canonical)}"><meta name="robots" content="${input.indexable ? "index, follow" : "noindex, nofollow"}"><style>${styles(settings.brandColor)}</style></head><body><header class="top"><div class="wrap"><a class="brand" href="${escapeHtml(origin)}/">${escapeHtml(settings.siteName)}</a></div></header><main class="wrap"><div class="hero"><h1>${escapeHtml(`${settings.siteName} guides`)}</h1></div>${sections || "<p>No guides are published yet.</p>"}</main></body></html>`;
+  return `<!doctype html><html lang="${escapeHtml(lang)}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escapeHtml(`${labels.guides} | ${settings.siteName}`)}</title><link rel="canonical" href="${escapeHtml(canonical)}"><meta name="robots" content="${input.indexable ? "index, follow" : "noindex, nofollow"}"><style>${styles(settings.brandColor)}</style></head><body><header class="top"><div class="wrap"><a class="brand" href="${escapeHtml(origin)}/">${escapeHtml(settings.siteName)}</a></div></header><main class="wrap"><div class="hero"><h1>${escapeHtml(labels.hubTitle(settings.siteName))}</h1></div>${sections || `<p>${escapeHtml(labels.noGuides)}</p>`}</main></body></html>`;
 }
 
 export function renderSitemap(settings: PageSettings, pages: Array<{ path: string; updatedAt: string }>): string {

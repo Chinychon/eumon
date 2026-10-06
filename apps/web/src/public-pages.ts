@@ -14,7 +14,7 @@ import {
   getTemplate,
   type PageHitKind,
 } from "@organic-growth/db";
-import { chooseArm, escapeHtml, renderHubPage, renderLandingPage, renderSitemap, type RenderCta } from "@organic-growth/pages";
+import { chooseArm, escapeHtml, htmlLang, labelsFor, renderHubPage, renderLandingPage, renderSitemap, type RenderCta } from "@organic-growth/pages";
 import { createId } from "@organic-growth/core";
 import { readJson, settingsFor } from "./server";
 
@@ -44,9 +44,10 @@ function html(body: string, status: number, headers: Record<string, string>): Re
 
 function notFound(settings: PageSettings, status = 404): Response {
   const origin = settings.publicOrigin.replace(/\/$/, "");
-  const message = status === 410 ? "This page has been retired." : "We couldn’t find that page.";
+  const labels = labelsFor(settings.language);
+  const message = status === 410 ? labels.retired : labels.notFound;
   return html(
-    `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex"><title>${escapeHtml(message)}</title></head><body style="font-family:system-ui;margin:15vh auto;max-width:520px;padding:0 20px"><h1>${escapeHtml(message)}</h1><p><a href="${escapeHtml(settings.mountPath || "/")}">Browse all guides</a> or <a href="${escapeHtml(origin)}/">go to ${escapeHtml(settings.siteName)}</a>.</p></body></html>`,
+    `<!doctype html><html lang="${escapeHtml(htmlLang(settings.language))}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex"><title>${escapeHtml(message)}</title></head><body style="font-family:system-ui;margin:15vh auto;max-width:520px;padding:0 20px"><h1>${escapeHtml(message)}</h1><p><a href="${escapeHtml(settings.mountPath || "/")}">${escapeHtml(labels.browseGuides)}</a> · <a href="${escapeHtml(origin)}/">${escapeHtml(labels.goTo(settings.siteName))}</a></p></body></html>`,
     status,
     { "Cache-Control": "public, max-age=60", "X-Robots-Tag": "noindex" },
   );

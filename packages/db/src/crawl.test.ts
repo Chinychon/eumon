@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { CrawlPageResult } from "@organic-growth/core";
-import { createAnalysis, enqueueAnalysisCrawlUrls, getCrawlCoverage, listPendingCrawlUrls, saveCrawlBatch, upsertSite } from "./index.js";
+import { compactReport, createAnalysis, enqueueAnalysisCrawlUrls, getCrawlCoverage, listPendingCrawlUrls, saveCrawlBatch, upsertSite } from "./index.js";
 import { openSqliteD1 } from "./sqlite.js";
 
 function page(url: string, overrides: Partial<CrawlPageResult> = {}): CrawlPageResult {
@@ -85,5 +85,23 @@ describe("full-crawl coverage", async () => {
     const procedures = coverage.families?.find((family) => family.family === "procedures");
     assert.deepEqual(procedures, { family: "procedures", urls: 3, crawled: 2, emptyShells: 2, errors: 1, noindex: 0, missingStructuredData: 0 });
     assert.equal(coverage.families?.find((family) => family.family === "home")?.noindex, 1);
+  });
+});
+
+describe("compactReport", () => {
+  it("drops bulky detail before the summary when a report nears the row limit", () => {
+    const bulky = "x".repeat(2000);
+    const report = {
+      plan: { situation: "Keep me" },
+      pages: Array.from({ length: 50 }, () => ({ bulky })),
+      findings: Array.from({ length: 30 }, (_, index) => ({ title: `Finding ${index}`, evidence: { bulky } })),
+    };
+    const json = compactReport(report, 60_000);
+    assert.ok(json.length <= 60_000, `${json.length}`);
+    const parsed = JSON.parse(json);
+    assert.equal(parsed.plan.situation, "Keep me");
+    assert.equal(parsed.pages.length, 0);
+    assert.equal(parsed.findings.length, 30, "every finding is kept");
+    assert.equal(compactReport({ small: true }), JSON.stringify({ small: true }));
   });
 });

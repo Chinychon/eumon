@@ -1,6 +1,7 @@
 import { schema, type JsonLlm } from "@organic-growth/ai";
 import type { DataRecord, Dataset, FaqPattern, PageIdea, PageTemplate } from "@organic-growth/core";
 import { fieldCoverage, normalizeMountPath } from "./generate.js";
+import { languageName } from "./labels.js";
 import { placeholders, slugify } from "./patterns.js";
 
 type TemplateDraft = Omit<PageTemplate, "id" | "siteId" | "datasetId" | "status" | "createdAt" | "updatedAt">;
@@ -17,8 +18,53 @@ export function unknownPlaceholders(pattern: string, dataset: Pick<Dataset, "fie
   });
 }
 
+/** Data-only fallback copy (used when no language model is configured): factual, never invented. */
+const FALLBACK_COPY: Record<string, {
+  entityDescription: string;
+  entityIntro: (facts: string) => string;
+  and: string;
+  keyFacts: string;
+  groupTitle: (count: string, name: string, group: string) => string;
+  groupDescription: (name: string, group: string) => string;
+  groupIntro: (name: string, group: string) => string;
+  range: (label: string, min: string, max: string) => string;
+  groupIn: string;
+}> = {
+  en: {
+    entityDescription: "Everything you need to know about {KEY}. Compare details and get in touch with {site}.",
+    entityIntro: (facts) => `Here is what you need to know about {KEY}: ${facts}. {site} can help with next steps — get in touch for current details and availability.`,
+    and: "and", keyFacts: "the key facts",
+    groupTitle: (count, name, group) => `${count} ${name}: ${group} ({year})`,
+    groupDescription: (name, group) => `Compare {count} ${name.toLowerCase()} for ${group}, including {names}.`,
+    groupIntro: (name, group) => `There are {count} ${name.toLowerCase()} listed for ${group}, including {names}.`,
+    range: (label, min, max) => `${label} ranges from ${min} to ${max}.`,
+    groupIn: " in ",
+  },
+  id: {
+    entityDescription: "Semua yang perlu Anda ketahui tentang {KEY}. Bandingkan detailnya dan hubungi {site}.",
+    entityIntro: (facts) => `Berikut informasi penting tentang {KEY}: ${facts}. {site} siap membantu langkah selanjutnya — hubungi kami untuk detail dan ketersediaan terbaru.`,
+    and: "dan", keyFacts: "fakta utamanya",
+    groupTitle: (count, name, group) => `${count} ${name}: ${group} ({year})`,
+    groupDescription: (name, group) => `Bandingkan {count} ${name.toLowerCase()} untuk ${group}, termasuk {names}.`,
+    groupIntro: (name, group) => `Ada {count} ${name.toLowerCase()} untuk ${group}, termasuk {names}.`,
+    range: (label, min, max) => `${label} berkisar antara ${min} hingga ${max}.`,
+    groupIn: " di ",
+  },
+  ms: {
+    entityDescription: "Semua yang anda perlu tahu tentang {KEY}. Bandingkan butiran dan hubungi {site}.",
+    entityIntro: (facts) => `Berikut perkara penting tentang {KEY}: ${facts}. {site} boleh membantu langkah seterusnya — hubungi kami untuk butiran dan ketersediaan terkini.`,
+    and: "dan", keyFacts: "fakta utamanya",
+    groupTitle: (count, name, group) => `${count} ${name}: ${group} ({year})`,
+    groupDescription: (name, group) => `Bandingkan {count} ${name.toLowerCase()} untuk ${group}, termasuk {names}.`,
+    groupIntro: (name, group) => `Terdapat {count} ${name.toLowerCase()} untuk ${group}, termasuk {names}.`,
+    range: (label, min, max) => `${label} antara ${min} hingga ${max}.`,
+    groupIn: " di ",
+  },
+};
+
 /** A sound, data-only template used when no model is available or as a starting point. */
-export function defaultTemplate(dataset: Pick<Dataset, "name" | "entityType" | "fields" | "keyField">, idea: Pick<PageIdea, "name" | "groupBy">, mountPath: string): TemplateDraft {
+export function defaultTemplate(dataset: Pick<Dataset, "name" | "entityType" | "fields" | "keyField">, idea: Pick<PageIdea, "name" | "groupBy">, mountPath: string, language = "en"): TemplateDraft {
+  const copy = FALLBACK_COPY[language.toLowerCase().split("-")[0]!] ?? FALLBACK_COPY.en!;
   const mount = normalizeMountPath(mountPath);
   const entitySlug = slugify(dataset.name) || "items";
   const key = dataset.keyField;
@@ -26,16 +72,15 @@ export function defaultTemplate(dataset: Pick<Dataset, "name" | "entityType" | "
   const firstNumber = dataset.fields.find((field) => field.type === "number");
   if (idea.groupBy.length === 0) {
     const labels = dataset.fields.filter((field) => itemFields.includes(field.key)).slice(0, 5).map((field) => field.label.toLowerCase());
-    const labelList = labels.length > 1 ? `${labels.slice(0, -1).join(", ")} and ${labels.at(-1)}` : labels[0] ?? "the key facts";
+    const labelList = labels.length > 1 ? `${labels.slice(0, -1).join(", ")} ${copy.and} ${labels.at(-1)}` : labels[0] ?? copy.keyFacts;
     return {
       name: idea.name || `${dataset.name} pages`,
       groupBy: [],
       pathPattern: `${mount}/${entitySlug}/{${key}}`,
       titlePattern: `{${key}} | {site}`,
-      descriptionPattern: `Everything you need to know about {${key}}. Compare details and get in touch with {site}.`,
+      descriptionPattern: copy.entityDescription.replace("{KEY}", `{${key}}`),
       h1Pattern: `{${key}}`,
-      // Data-only fallback copy (used when no language model is configured): factual, never invented.
-      introPattern: `Here is what you need to know about {${key}}: ${labelList}. {site} can help with next steps — get in touch for current details and availability.`,
+      introPattern: copy.entityIntro(labelList).replace("{KEY}", `{${key}}`),
       itemTitleField: key,
       itemFields,
       sortDir: "asc",
@@ -43,15 +88,15 @@ export function defaultTemplate(dataset: Pick<Dataset, "name" | "entityType" | "
       faq: [],
     };
   }
-  const groupLabel = idea.groupBy.map((field) => `{${field}}`).join(" in ");
+  const groupLabel = idea.groupBy.map((field) => `{${field}}`).join(copy.groupIn);
   return {
     name: idea.name || `${dataset.name} by ${idea.groupBy.join(" & ")}`,
     groupBy: idea.groupBy,
     pathPattern: `${mount}/${entitySlug}/${idea.groupBy.map((field) => `{${field}}`).join("-in-")}`,
-    titlePattern: `{count} ${dataset.name}: ${groupLabel} ({year})`,
-    descriptionPattern: `Compare {count} ${dataset.name.toLowerCase()} for ${groupLabel}, including {names}.`,
+    titlePattern: copy.groupTitle("{count}", dataset.name, groupLabel),
+    descriptionPattern: copy.groupDescription(dataset.name, groupLabel),
     h1Pattern: `${dataset.name}: ${groupLabel}`,
-    introPattern: `There are {count} ${dataset.name.toLowerCase()} listed for ${groupLabel}, including {names}.${firstNumber ? ` ${firstNumber.label} ranges from {min:${firstNumber.key}} to {max:${firstNumber.key}}.` : ""}`,
+    introPattern: `${copy.groupIntro(dataset.name, groupLabel)}${firstNumber ? ` ${copy.range(firstNumber.label, `{min:${firstNumber.key}}`, `{max:${firstNumber.key}}`)}` : ""}`,
     itemTitleField: key,
     itemFields,
     sortBy: firstNumber?.key,
@@ -109,10 +154,12 @@ export async function proposeTemplate(input: {
   siteName: string;
   businessContext?: string;
   mountPath: string;
+  /** Language the copy is written in (BCP 47); defaults to English. */
+  language?: string;
 }): Promise<TemplateDraft> {
-  const fallback = defaultTemplate(input.dataset, input.idea, input.mountPath);
+  const fallback = defaultTemplate(input.dataset, input.idea, input.mountPath, input.language);
   const raw = await input.llm.json<Record<string, unknown>>({
-    system: TEMPLATE_SYSTEM,
+    system: `${TEMPLATE_SYSTEM}\n- Write every pattern (title, description, h1, intro, FAQ) in ${languageName(input.language)}, the language the page is published in, as a native copywriter would. Keep {placeholders} exactly as given.`,
     user: JSON.stringify({
       business: { name: input.siteName, context: input.businessContext ?? "" },
       mountPath: normalizeMountPath(input.mountPath) || "/",

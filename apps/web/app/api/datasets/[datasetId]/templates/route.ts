@@ -32,7 +32,7 @@ export async function POST(request: Request, context: { params: Promise<{ datase
   const filled = (record: (typeof firstRecords)[number]) => Object.values(record.data).filter((value) => value != null && value !== "" && !(Array.isArray(value) && !value.length)).length;
   const records = [...firstRecords].sort((a, b) => filled(b) - filled(a)).slice(0, 5);
   const settings = await settingsFor(site);
-  let draft = defaultTemplate(dataset, idea, settings.mountPath);
+  let draft = defaultTemplate(dataset, idea, settings.mountPath, settings.language);
   let model: string | null = null;
   let aiError: string | null = null;
   if (body.useAi !== false) {
@@ -44,7 +44,7 @@ export async function POST(request: Request, context: { params: Promise<{ datase
         const scope = await getSiteScope(env.DB, site.id);
         draft = await proposeTemplate({
           llm, dataset, idea, sampleRecords: records, coverageRecords: await listAllRecords(env.DB, datasetId, 5000),
-          siteName: settings.siteName, mountPath: settings.mountPath,
+          siteName: settings.siteName, mountPath: settings.mountPath, language: settings.language,
           businessContext: scope ? `${scope.businessSummary} Conversion: ${scope.conversionGoal}` : undefined,
         });
         model = llm.model;

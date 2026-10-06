@@ -280,7 +280,8 @@ export async function runFullAnalysis(input: RunAnalysisInput) {
   return {
     site,
     analysisId,
-    repo,
+    // Content-heavy repositories can declare thousands of routes; the inspected ones carry the detail.
+    repo: repo ? { ...repo, routes: repo.routes.slice(0, 300), sensitivePaths: repo.sensitivePaths.slice(0, 50) } : undefined,
     sitemap,
     coverage: input.crawlCoverage?.coverage ?? null,
     pages: pageResults,

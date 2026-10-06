@@ -506,6 +506,8 @@ export type PageSettings = {
   publicOrigin: string;
   /** Path prefix the proxy forwards to Eumon, e.g. `/guides`; `` for a whole subdomain. */
   mountPath: string;
+  /** Language the pages are written in (BCP 47, e.g. `en`, `id`, `ms`): page copy, interface labels, and `<html lang>`. */
+  language: string;
   siteName: string;
   brandColor: string;
   ctaLabel: string;

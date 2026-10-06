@@ -202,7 +202,7 @@ describe("templates", () => {
 
 describe("renderLandingPage", () => {
   const settings: PageSettings = {
-    siteId: "site_1", publicOrigin: "https://medbaycare.com", mountPath: "/guides", siteName: "MedBay",
+    siteId: "site_1", publicOrigin: "https://medbaycare.com", mountPath: "/guides", language: "en", siteName: "MedBay",
     brandColor: "#0a7", ctaLabel: "WhatsApp us", ctaUrl: "https://wa.me/60123456789", ctaCopy: "Free consultation.", updatedAt: "",
   };
   const [page] = generatePages({ siteId: "site_1", siteName: "MedBay", template: template({}), dataset, records, mountPath: "/guides" });
@@ -238,6 +238,35 @@ describe("renderLandingPage", () => {
     const xml = renderSitemap(settings, [{ path: "/guides/doctors/dr-amy-tan", updatedAt: "2026-10-01T00:00:00Z" }]);
     assert.ok(xml.includes("<loc>https://medbaycare.com/guides</loc>"));
     assert.ok(xml.includes("<loc>https://medbaycare.com/guides/doctors/dr-amy-tan</loc><lastmod>2026-10-01</lastmod>"));
+  });
+});
+
+describe("page language", () => {
+  const settings: PageSettings = {
+    siteId: "site_1", publicOrigin: "https://medbaycare.com", mountPath: "/panduan", language: "id", siteName: "MedBay",
+    brandColor: "#0a7", ctaLabel: "Chat WhatsApp", ctaUrl: "https://wa.me/60123456789", ctaCopy: "Konsultasi gratis.", updatedAt: "2026-10-01T00:00:00Z",
+  };
+  const [page] = generatePages({ siteId: "site_1", siteName: "MedBay", template: template({}), dataset, records, mountPath: "/panduan" });
+
+  it("renders interface text and the lang attribute in the page language", () => {
+    const html = renderLandingPage({ ...page!, faq: [{ question: "Berapa biayanya?", answer: "Mulai RM 500." }] }, {
+      settings, cta: { label: settings.ctaLabel, copy: settings.ctaCopy, url: settings.ctaUrl }, beaconPath: "/panduan/__eumon/e", indexable: true,
+    });
+    assert.match(html, /<html lang="id">/);
+    assert.match(html, /<h2>Pertanyaan yang sering diajukan<\/h2>/);
+    assert.match(html, />Beranda<\/a> › <a href="\/panduan">Panduan<\/a>/);
+    assert.ok(!html.includes("Frequently asked questions"));
+  });
+
+  it("falls back to a valid lang attribute and English labels for unknown values", () => {
+    const html = renderLandingPage(page!, { settings: { ...settings, language: "x\"><script>" }, cta: { label: "a", copy: "b", url: settings.ctaUrl }, beaconPath: "/e", indexable: false });
+    assert.match(html, /<html lang="en">/);
+  });
+
+  it("writes data-only fallback copy in the page language", () => {
+    const draft = defaultTemplate(dataset, { name: "", groupBy: [] }, "/panduan", "id");
+    assert.ok(draft.introPattern.startsWith("Berikut informasi penting tentang {name}"), draft.introPattern);
+    assert.ok(defaultTemplate(dataset, { name: "", groupBy: [] }, "/guides").introPattern.startsWith("Here is what you need to know"));
   });
 });
 

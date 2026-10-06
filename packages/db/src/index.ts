@@ -193,6 +193,39 @@ export async function updateAnalysisProgress(
     .bind(JSON.stringify({ stage, message }), id).run();
 }
 
+/** Stay well under D1's 2 MB row limit, leaving room for the other columns. */
+const MAX_REPORT_BYTES = 1_500_000;
+
+/**
+ * Keeps a report under the row limit by dropping the bulkiest detail first:
+ * sampled page records, then evidence beyond the top findings, then route
+ * lists. The summary fields the dashboard leads with are never dropped.
+ */
+export function compactReport(report: unknown, maxBytes = MAX_REPORT_BYTES): string {
+  let json = JSON.stringify(report);
+  if (json.length <= maxBytes || !report || typeof report !== "object") return json;
+  const copy = JSON.parse(json) as Record<string, unknown>;
+  const steps: Array<() => void> = [
+    () => { copy.pages = []; },
+    () => {
+      if (Array.isArray(copy.findings)) copy.findings = copy.findings.map((finding, index) => (index < 10 ? finding : { ...finding, evidence: {} }));
+    },
+    () => {
+      const repo = copy.repo as Record<string, unknown> | undefined;
+      if (repo) copy.repo = { ...repo, routes: [], sensitivePaths: [] };
+    },
+    () => {
+      if (Array.isArray(copy.findings)) copy.findings = copy.findings.map((finding) => ({ ...finding, evidence: {} }));
+    },
+  ];
+  for (const step of steps) {
+    step();
+    json = JSON.stringify(copy);
+    if (json.length <= maxBytes) return json;
+  }
+  return json;
+}
+
 export async function saveAnalysisReport(
   db: D1Like,
   id: string,
@@ -200,7 +233,7 @@ export async function saveAnalysisReport(
   summary: string,
 ): Promise<void> {
   await db.prepare("UPDATE analyses SET report_json = ?, summary = ?, status = 'completed', completed_at = ? WHERE id = ?")
-    .bind(JSON.stringify(report), summary, new Date().toISOString(), id).run();
+    .bind(compactReport(report), summary, new Date().toISOString(), id).run();
 }
 
 export async function upsertOAuthCredential(

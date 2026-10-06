@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { GeneratedPage, PageTemplate } from "@organic-growth/core";
 import { upsertSite } from "./index.js";
-import { datasetCoverage, setTemplatePublication, syncTemplatePages, upsertDataset, upsertRecords, upsertTemplate } from "./page-engine.js";
+import { datasetCoverage, defaultPageSettings, getPageSettings, setTemplatePublication, syncTemplatePages, upsertDataset, upsertPageSettings, upsertRecords, upsertTemplate } from "./page-engine.js";
 import { openSqliteD1 } from "./sqlite.js";
 
 describe("datasetCoverage", () => {
@@ -31,5 +31,17 @@ describe("datasetCoverage", () => {
     await setTemplatePublication(db, "entity", true);
     await setTemplatePublication(db, "by-city", true);
     assert.deepEqual(await datasetCoverage(db, "site"), [{ name: "Doctors", entityType: "doctor", records: 3, livePages: 2 }], "grouped pages are not entity pages");
+  });
+});
+
+describe("page settings", () => {
+  it("stores the page language", async () => {
+    const db = openSqliteD1();
+    const now = new Date().toISOString();
+    await upsertSite(db, { id: "site", name: "x.com", baseUrl: "https://x.com", createdAt: now, updatedAt: now });
+    const defaults = defaultPageSettings("site", "X", "https://x.com");
+    assert.equal(defaults.language, "en");
+    await upsertPageSettings(db, { ...defaults, language: "id" });
+    assert.equal((await getPageSettings(db, "site"))?.language, "id");
   });
 });

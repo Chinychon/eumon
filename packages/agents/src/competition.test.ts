@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import type { JsonLlm, JsonRequest } from "@organic-growth/ai";
 import type { Fetcher, PageInspection, SiteResearch } from "@organic-growth/crawler";
 import { compareCompetition, competitionOpportunities, contentKey, contentTypeEntries, counted, labelContentTypes, type OwnContent } from "./competition.js";
+import { synthesizeGrowthPlan } from "./index.js";
 import { runFullAnalysis } from "./pipeline.js";
 
 const inspection = (url: string, overrides: Partial<PageInspection> = {}): PageInspection => ({
@@ -144,5 +145,16 @@ describe("translated content", () => {
     assert.ok(!report.insights.some((insight) => insight.startsWith("You publish")));
     assert.equal(counted(blog.you, "blog articles"), "~19 blog articles in 3 languages (57 URLs)");
     assert.equal(counted(blog.competitors[0]!, "blog articles"), "~18 blog articles");
+  });
+
+  it("describes a translated site's page families in distinct pages", () => {
+    const plan = synthesizeGrowthPlan({
+      siteId: "s", analysisId: "a", baseUrl: "https://medbay.example", findings: [], searchMetrics: [], competitors: [],
+      sitemap: {
+        totalUrls: 60, sampledUrls: 0, indexFiles: [], errors: [], languages: { default: 20, id: 20, zh: 20 },
+        urlTypes: { blog: 57, home: 3 }, sections: { blog: { pages: 19, languages: 3 }, home: { pages: 1, languages: 3 } },
+      },
+    });
+    assert.match(plan.competitiveAdvantage, /\/blog\/: ~19 pages in 3 languages \(57 URLs\)/);
   });
 });

@@ -152,7 +152,7 @@ export function synthesizeGrowthPlan(bundle: AnalysisBundle): GrowthPlan {
       : bundle.repo
     ? `The repository exposes ${bundle.repo.routes.length} detected routes and uses ${bundle.fingerprint?.framework ?? "an unknown framework"}; these code-level signals support targeted implementation recommendations.`
     : families.length
-      ? `The site already publishes structured page families (${families.map(([type, count]) => `/${type}/: ${count.toLocaleString()} pages`).join(", ")}). Each family is a ready-made dataset for focused landing pages.`
+      ? `The site already publishes structured page families (${families.map(([type, urls]) => `/${type}/: ${counted({ pages: bundle.sitemap?.sections?.[type]?.pages ?? urls, urls, languages: bundle.sitemap?.sections?.[type]?.languages }, "pages")}`).join(", ")}). Each family is a ready-made dataset for focused landing pages.`
       : "The site's offering can be broken into specific products, services, or locations, each worth its own landing page — scope them in the Data step.";
 
   const top = opportunities[0];

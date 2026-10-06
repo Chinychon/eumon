@@ -146,6 +146,8 @@ export type CrawlPageResult = {
   googlebotBlockedStatus?: number;
   /** The response was a bot-protection challenge page rather than the site's content. */
   botChallenge?: boolean;
+  /** Target of a `<meta http-equiv="refresh">` redirect; such pages are redirects, not content. */
+  metaRefresh?: string;
 }
 
 export type SitemapAudit = {

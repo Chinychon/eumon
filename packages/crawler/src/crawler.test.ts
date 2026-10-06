@@ -117,6 +117,16 @@ describe("parseHtmlSignals", () => {
   });
 });
 
+describe("meta refresh redirects", () => {
+  it("are redirects, not empty shells", () => {
+    const html = `<!DOCTYPE html><link rel="me" href="https://m.example/@x"><meta http-equiv="refresh" content="0;URL='https://github.com/withastro/astro'">`;
+    const signals = parseHtmlSignals(html);
+    assert.equal(signals.metaRefresh, "https://github.com/withastro/astro");
+    assert.equal(isEmptyShell(html, signals), false);
+    assert.equal(parseHtmlSignals(`<meta http-equiv="refresh" content="300">`).metaRefresh, undefined, "a periodic reload is not a redirect");
+  });
+});
+
 describe("headerNoindex", () => {
   it("applies unscoped and googlebot-scoped directives only", () => {
     assert.equal(headerNoindex("noindex, nofollow"), true);

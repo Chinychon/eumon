@@ -110,6 +110,8 @@ export type HtmlSignals = {
   hasRootMount: boolean;
   /** A robots or googlebot meta tag excludes the page from the index. */
   metaNoindex: boolean;
+  /** Target of a `<meta http-equiv="refresh">` redirect (delay of 10 s or less). */
+  metaRefresh?: string;
   bodyTextSample: string;
 };
 
@@ -131,6 +133,7 @@ export function parseHtmlSignals(html: string, pageUrl?: string): HtmlSignals {
     .map((link) => ({ lang: link.hreflang!, href: link.href! }));
   const robots = metaContent("robots");
   const googlebot = metaContent("googlebot");
+  const refresh = metas.find((meta) => meta["http-equiv"]?.toLowerCase() === "refresh")?.content?.match(/^\s*(\d+(?:\.\d+)?)\s*[;,]\s*url\s*=\s*['"]?([^'"]+)/i);
   const jsonLd = readJsonLd(html);
 
   const headingOutline: string[] = [];
@@ -165,6 +168,7 @@ export function parseHtmlSignals(html: string, pageUrl?: string): HtmlSignals {
     textLength: text.length,
     hasRootMount: /\bid=["']?(root|app|__next|__nuxt|svelte)["'\s>]/i.test(markup),
     metaNoindex: [robots, googlebot].some((value) => /\b(noindex|none)\b/i.test(value ?? "")),
+    metaRefresh: refresh && Number(refresh[1]) <= 10 ? refresh[2]!.trim() : undefined,
     bodyTextSample: text.slice(0, 280),
   };
 }
@@ -231,6 +235,8 @@ export function headerNoindex(value: string | undefined): boolean {
  * text, typically with a client-side mount point waiting for JavaScript.
  */
 export function isEmptyShell(html: string, signals = parseHtmlSignals(html)): boolean {
+  // A meta-refresh stub is a redirect, not a page that failed to render.
+  if (signals.metaRefresh) return false;
   if (signals.textLength < 400 && signals.hasRootMount) return true;
   if (signals.textLength < 200) return true;
   return signals.hasRootMount && signals.jsonLdCount === 0 && signals.headingOutline.length === 0 && signals.textLength < 800;
@@ -380,6 +386,7 @@ function toCrawlResult(
     invalidJsonLd: signals.invalidJsonLd,
     routeFamily: classifyUrlType(url),
     canonicalMismatch: signals.canonical ? !sameDocument(signals.canonical, finalUrl) : false,
+    ...(signals.metaRefresh ? { metaRefresh: signals.metaRefresh } : {}),
   };
 }
 
@@ -661,6 +668,7 @@ export function findingsFromCrawl(input: {
 export * from "./tech-seo.js";
 export * from "./coverage-findings.js";
 export * from "./rendering.js";
+export * from "./competitors.js";
 export * from "./urls.js";
 export * from "./html.js";
 export * from "./robots.js";

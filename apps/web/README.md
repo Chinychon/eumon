@@ -48,7 +48,7 @@ The app has no built-in user accounts: put the hostname behind **Cloudflare Acce
 ## Current boundaries
 
 - One workspace; no multi-user membership or roles (see Access control).
-- Competitor entries are owner-supplied domains with one homepage fetch each; no SERP data.
+- Competitors are owner-supplied domains (up to five per analysis). Eumon reads their sitemaps within a fixed budget (large sitemap indexes are sampled and extrapolated), inspects one page per major section as EumonBot (robots.txt respected), and compares content types with yours and with your datasets. There is no SERP or backlink data, so counts show where competitors invest, not what ranks.
 - The scraper reads server-rendered HTML; sources that only render client-side, require logins, or block robots are skipped.
 - Collected facts are shown to the owner before anything is published, but extraction is model output — review records and page previews before publishing.
 - The analytics beacon is unauthenticated (as with any web analytics); counts can be inflated by deliberate abuse.

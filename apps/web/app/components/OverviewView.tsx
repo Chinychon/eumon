@@ -22,10 +22,23 @@ type Report = {
   } | null;
   pages: Array<{ url: string; renderedTextLength: number }>;
   findings: Finding[];
-  competitors: Array<{ domain: string; category: string; summary: string; technicalNotes?: string }>;
+  competitors: Array<{ domain: string; category: string; summary: string; relevanceScore?: number; architectureNotes?: string; conversionNotes?: string; technicalNotes?: string }>;
   opportunities: Array<{ title: string; rationale: string; priorityScore: number; potentialPage?: string }>;
   plan: { situation: string; competitiveAdvantage: string; highestImpactOpportunity: string; priorities: Array<{ rank: number; title: string; whyThisMatters: string }> };
   searchNarrative: { totalClicks: number; totalImpressions: number; narrative: string };
+  competition?: {
+    rows: Array<{
+      key: string;
+      label: string;
+      status: "gap" | "advantage" | "shared" | "yours_only";
+      you: { pages: number };
+      data?: { dataset: string; records: number; livePages: number };
+      competitors: Array<{ domain: string; pages: number; examples: string[] }>;
+    }>;
+    competitors: Array<{ domain: string; analyzed: boolean; partial: boolean; estimatedUrls: number }>;
+    insights: string[];
+    aiLabels: boolean;
+  } | null;
   rendering?: {
     comparisons: Array<{ url: string; family: string; verdict: string; rawTextLength: number; renderedTextLength: number; rawTitle?: string; renderedTitle?: string }>;
     repeatability: Array<{ family: string; urls: number; attempts: number; failed: number; medianMs: number }>;
@@ -281,11 +294,16 @@ export function OverviewView({ site, repositories, githubInstalled, onSiteChange
             <section className="panel">
               <div className="panel-heading"><div><div className="eyebrow">SEARCH LANDSCAPE</div><h3>Search & competitor evidence</h3></div></div>
               {report.searchNarrative.totalImpressions > 0 && <div className="search-evidence"><strong>{formatNumber(report.searchNarrative.totalClicks)} clicks · {formatNumber(report.searchNarrative.totalImpressions)} impressions</strong><p>{report.searchNarrative.narrative}</p></div>}
-              {report.competitors.length ? report.competitors.slice(0, 4).map((competitor) => (
-                <div className="competitor" key={competitor.domain}><div className="domain-icon">{competitor.domain[0]?.toUpperCase()}</div><div><strong>{competitor.domain}</strong><small><span>{competitor.category}</span> · {competitor.summary}<br />{competitor.technicalNotes}</small></div><span className="relevance">Owner<br />selected</span></div>
-              )) : <p className="empty-state">Add competitor domains above to record homepage evidence. Rankings and competitor traffic are not inferred.</p>}
+              {report.competitors.length ? report.competitors.slice(0, 5).map((competitor) => (
+                <div className="competitor" key={competitor.domain}>
+                  <div className="domain-icon">{competitor.domain[0]?.toUpperCase()}</div>
+                  <div><strong>{competitor.domain}</strong><small>{competitor.summary}{competitor.architectureNotes && <><br />{competitor.architectureNotes}</>}{competitor.conversionNotes && <><br />{competitor.conversionNotes}</>}</small></div>
+                  <span className="relevance">{competitor.relevanceScore !== undefined ? <>{Math.round(competitor.relevanceScore * 100)}%<br /><small>overlap</small></> : <>Owner<br />selected</>}</span>
+                </div>
+              )) : <p className="empty-state">Add competitor domains above. Eumon reads their sitemaps and a few pages per section to show which kinds of pages they publish that you don't. Rankings and competitor traffic are not inferred.</p>}
             </section>
           </div>
+          {report.competition && report.competition.rows.length > 0 && <ContentGaps competition={report.competition} onNavigate={onNavigate} />}
           {coverage?.families && coverage.families.length > 1 && <FamilyHealth families={coverage.families} />}
           {report.rendering && (report.rendering.comparisons.length > 0 || report.rendering.repeatability.length > 0) && <RenderingChecks rendering={report.rendering} />}
           {report.sitemap.errors.length > 0 && <div className="crawl-note"><strong>Sitemap note</strong><span>{report.sitemap.errors.join(" ")}</span></div>}
@@ -368,6 +386,48 @@ function RenderingChecks({ rendering }: { rendering: NonNullable<Report["renderi
           </table>
         </div>
       )}
+    </section>
+  );
+}
+
+const GAP_STATUS: Record<string, { label: string; tone: string }> = {
+  gap: { label: "Gap", tone: "red" },
+  advantage: { label: "You lead", tone: "green" },
+  yours_only: { label: "Only you", tone: "green" },
+  shared: { label: "Comparable", tone: "gray" },
+};
+
+/** Which kinds of pages competitors publish, compared with yours and with the data you already hold. */
+function ContentGaps({ competition, onNavigate }: { competition: NonNullable<Report["competition"]>; onNavigate: (view: "data") => void }) {
+  const domains = competition.competitors.filter((competitor) => competitor.analyzed).slice(0, 3);
+  const pages = (value: number) => (value ? `~${formatNumber(value)}` : "—");
+  return (
+    <section className="panel" style={{ marginTop: 13 }}>
+      <div className="panel-heading">
+        <div><div className="eyebrow">COMPETITOR CONTENT ARCHITECTURE</div><h3>What competitors publish, and what you have</h3></div>
+        {competition.rows.some((row) => row.status === "gap") && <Button small variant="secondary" onClick={() => onNavigate("data")}>Close a gap in Data →</Button>}
+      </div>
+      {competition.insights.length > 0 && <ul className="insights">{competition.insights.slice(0, 6).map((insight) => <li key={insight}>{insight}</li>)}</ul>}
+      <div className="table-wrap" style={{ marginBottom: 10 }}>
+        <table className="table">
+          <thead><tr><th>Content type</th><th className="num">You</th>{domains.map((competitor) => <th className="num" key={competitor.domain}>{competitor.domain}</th>)}<th>Status</th><th>Your data</th></tr></thead>
+          <tbody>{competition.rows.slice(0, 15).map((row) => (
+            <tr key={row.key}>
+              <td>{row.label}</td>
+              <td className="num">{pages(row.you.pages)}</td>
+              {domains.map((competitor) => {
+                const entry = row.competitors.find((item) => item.domain === competitor.domain);
+                return <td className="num" key={competitor.domain}>{entry?.examples[0] ? <a href={entry.examples[0]} target="_blank" rel="noreferrer">{pages(entry.pages)}</a> : pages(entry?.pages ?? 0)}</td>;
+              })}
+              <td><Badge tone={GAP_STATUS[row.status]?.tone}>{GAP_STATUS[row.status]?.label ?? row.status}</Badge></td>
+              <td className="small">{row.data ? `${row.data.dataset}: ${formatNumber(row.data.records)} records, ${formatNumber(row.data.livePages)} live` : <span className="muted">—</span>}</td>
+            </tr>
+          ))}</tbody>
+        </table>
+      </div>
+      <p className="small muted" style={{ margin: "0 0 10px" }}>
+        Page counts come from each site's sitemaps{competition.competitors.some((competitor) => competitor.partial) ? " (large sitemaps are sampled and extrapolated)" : ""}{competition.aiLabels ? "; sections are matched across sites by content type" : "; sections are matched by URL name"}. They show where competitors invest, not search demand.
+      </p>
     </section>
   );
 }

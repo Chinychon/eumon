@@ -3,8 +3,9 @@ import { WorkflowEntrypoint } from "cloudflare:workers";
 import { NonRetryableError } from "cloudflare:workflows";
 import type { WorkflowEvent, WorkflowStep } from "cloudflare:workers";
 import type { AppEnv } from "../cloudflare.config";
-import { createLlm } from "@organic-growth/ai";
+import { createLlm, type JsonLlm } from "@organic-growth/ai";
 import {
+  datasetCoverage,
   enqueueAnalysisCrawlUrls,
   getCrawlCoverage,
   getSite,
@@ -19,6 +20,7 @@ import {
   updateSiteFingerprint,
 } from "@organic-growth/db";
 import {
+  MAX_COMPETITORS,
   fetchSearchConsoleMetrics,
   runFullAnalysis,
   synthesizePlanNarrative,
@@ -37,6 +39,8 @@ import {
   defaultFetcher,
   isSafePublicUrl,
   parseRobots,
+  researchSite,
+  type SiteResearch,
 } from "@organic-growth/crawler";
 import { googleAccessToken } from "./gsc-auth";
 
@@ -103,6 +107,21 @@ export class SiteAnalysisWorkflow extends WorkflowEntrypoint<AppEnv, AnalysisPay
         if (crawled === 0) break;
       }
 
+      // Each competitor is researched in its own step (sitemaps and a few sample
+      // pages, fetched as EumonBot), so one slow site can retry on its own.
+      const competitorDomains = await step.do("list-competitors", async () => {
+        await updateAnalysisProgress(db, analysisId, "competitors", "Reading competitor sitemaps and sample pages");
+        return (await listSiteCompetitorDomains(db, siteId)).slice(0, MAX_COMPETITORS);
+      });
+      const competitorResearch: SiteResearch[] = [];
+      for (const domain of competitorDomains) {
+        competitorResearch.push(await step.do(`research-${domain}`, { retries: { limit: 1, delay: "10 seconds" } }, async () => {
+          const research = await researchSite(domain, undefined, { maxFiles: 15, maxUrls: 50_000 });
+          // Keep the step output small: the largest families are what the comparison uses.
+          return { ...research, sitemap: { ...research.sitemap, families: research.sitemap.families.slice(0, 40) } };
+        }));
+      }
+
       // The step persists the report itself and returns only a summary: the
       // full report can exceed the Workflow step-output size limit.
       await step.do(
@@ -118,7 +137,12 @@ export class SiteAnalysisWorkflow extends WorkflowEntrypoint<AppEnv, AnalysisPay
               site.defaultBranch ?? "main",
             )
             : undefined;
-          const competitorDomains = await listSiteCompetitorDomains(db, siteId);
+          let llm: JsonLlm | undefined;
+          try {
+            llm = createLlm(this.env);
+          } catch {
+            // No model configured: content types are matched by name and the plan is deterministic.
+          }
           let searchMetrics;
           if (site.gscProperty) {
             const accessToken = await googleAccessToken(
@@ -128,9 +152,10 @@ export class SiteAnalysisWorkflow extends WorkflowEntrypoint<AppEnv, AnalysisPay
             searchMetrics = await fetchSearchConsoleMetrics(accessToken, site.gscProperty);
             await replaceCurrentSearchMetrics(db, siteId, searchMetrics);
           }
-          const [coverage, examples] = await Promise.all([
+          const [coverage, examples, datasets] = await Promise.all([
             getCrawlCoverage(db, analysisId),
             listCrawlPageResults(db, analysisId, 50),
+            datasetCoverage(db, siteId),
           ]);
           const raw = await runFullAnalysis({
             analysisId,
@@ -142,18 +167,15 @@ export class SiteAnalysisWorkflow extends WorkflowEntrypoint<AppEnv, AnalysisPay
             defaultBranch: site.defaultBranch,
             gscProperty: site.gscProperty,
             searchMetrics,
-            competitorDomains,
+            competitorResearch,
+            datasets,
+            llm,
             repoSnapshot,
             maxPages: 25,
             crawlCoverage: { coverage, examples },
             renderPages: (urls) => this.renderPages(urls),
           });
-          let plan = raw.plan;
-          try {
-            plan = await synthesizePlanNarrative(createLlm(this.env), raw.plan, raw.findings);
-          } catch {
-            // No model configured: the deterministic plan stands on its own.
-          }
+          const plan = llm ? await synthesizePlanNarrative(llm, raw.plan, raw.findings) : raw.plan;
           if (raw.site.fingerprint) await updateSiteFingerprint(db, siteId, raw.site.fingerprint);
           await updateAnalysisProgress(db, analysisId, "saving", "Saving findings and growth plan");
           await saveAnalysisReport(db, analysisId, { ...raw, plan, sitemapUrlsDeclared: queued.declared }, plan.highestImpactOpportunity);

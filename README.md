@@ -8,7 +8,7 @@ A medical-tourism site becomes one page per doctor, procedure, and hospital. A m
 Scope → Find sources → Collect → Generate → Serve on your domain → Measure → Optimize
 ```
 
-Eumon also analyzes the existing site the way Google sees it — every sitemap URL fetched as Googlebot and broken down by page template, the HTML compared with what a browser renders, repeated fetches to catch intermittent empty pages, and ranked technical findings — and, when a GitHub repository is connected, proposes safe fixes as draft pull requests.
+Eumon also compares the site with the competitors you name — which kinds of pages they publish that you don't (and which of those you already have data for), plus how their pages convert — and analyzes the existing site the way Google sees it — every sitemap URL fetched as Googlebot and broken down by page template, the HTML compared with what a browser renders, repeated fetches to catch intermittent empty pages, and ranked technical findings — and, when a GitHub repository is connected, proposes safe fixes as draft pull requests.
 
 > **Status:** early MVP. Works with any website stack (Next.js, WordPress, Drupal, Webflow, custom); a GitHub repository is optional.
 

@@ -15,7 +15,8 @@ import {
   createAnalysis, enqueueAnalysisCrawlUrls, getCrawlCoverage, listCrawlPageResults, listPendingCrawlUrls, saveCrawlBatch, upsertSite,
 } from "@organic-growth/db";
 import { openSqliteD1 } from "@organic-growth/db/sqlite";
-import { runFullAnalysis } from "@organic-growth/agents";
+import { runFullAnalysis, synthesizePlanNarrative } from "@organic-growth/agents";
+import { createLlm } from "@organic-growth/ai";
 
 const args = process.argv.slice(2);
 const option = (name, fallback) => {
@@ -89,6 +90,14 @@ async function renderPages(urls) {
   }
 }
 
+// A language model (DEEPSEEK_API_KEY or ANTHROPIC_API_KEY) matches content types across sites and polishes the plan.
+let llm;
+try {
+  llm = createLlm(process.env);
+} catch {
+  log("No language model key set, so competitor sections are matched by URL name.");
+}
+
 const [coverage, examples] = await Promise.all([getCrawlCoverage(db, analysisId), listCrawlPageResults(db, analysisId, 50)]);
 log("Running sampled checks, rendering comparison, repeatability test, and synthesis…");
 const report = await runFullAnalysis({
@@ -96,7 +105,9 @@ const report = await runFullAnalysis({
   competitorDomains: options("competitor"),
   crawlCoverage: { coverage, examples },
   renderPages: playwright ? renderPages : undefined,
+  llm,
 });
+if (llm) report.plan = await synthesizePlanNarrative(llm, report.plan, report.findings);
 
 if (args.includes("--json")) {
   console.log(JSON.stringify({ ...report, coverage }, null, 2));
@@ -117,6 +128,16 @@ if (args.includes("--json")) {
     for (const entry of report.rendering.comparisons) {
       console.log(`${new URL(entry.url).pathname.slice(0, 32).padEnd(32)}${String(entry.rawTextLength).padStart(11)}${String(entry.renderedTextLength).padStart(10)}  ${entry.verdict}`);
     }
+    console.log("");
+  }
+  if (report.competition?.rows.length) {
+    console.log("Content type                  You  " + report.competition.competitors.filter((c) => c.analyzed).slice(0, 3).map((c) => c.domain.slice(0, 18).padStart(19)).join("") + "  Status");
+    for (const row of report.competition.rows.slice(0, 12)) {
+      const cells = report.competition.competitors.filter((c) => c.analyzed).slice(0, 3).map((c) => String(row.competitors.find((entry) => entry.domain === c.domain)?.pages ?? 0).padStart(19)).join("");
+      console.log(`${row.label.slice(0, 28).padEnd(28)}${String(row.you.pages).padStart(5)}  ${cells}  ${row.status}`);
+    }
+    console.log("");
+    for (const insight of report.competition.insights) console.log(`- ${insight}`);
     console.log("");
   }
   console.log(`Highest-impact opportunity: ${report.plan.highestImpactOpportunity}`);

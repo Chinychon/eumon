@@ -13,12 +13,17 @@ import {
   findingsFromCrawl,
   findingsFromCrawlCoverage,
   findingsFromRendering,
+  inspectPage,
+  researchSite,
   runTechnicalSeoAudit,
   samplePerFamily,
   testRepeatability,
   type Fetcher,
+  type PageInspection,
   type RenderComparison,
+  type SiteResearch,
 } from "@organic-growth/crawler";
+import type { JsonLlm } from "@organic-growth/ai";
 import {
   analyzeRepository,
   type RepoSnapshot,
@@ -26,10 +31,17 @@ import {
 import {
   analyzeSearchTraffic,
   buildOpportunities,
-  discoverCompetitors,
   synthesizeGrowthPlan,
   type AnalysisBundle,
 } from "./index.js";
+import {
+  compareCompetition,
+  competitorProfiles,
+  contentTypeEntries,
+  labelContentTypes,
+  type CompetitionReport,
+  type OwnContent,
+} from "./competition.js";
 
 export interface RunAnalysisInput {
   /** The persisted analysis this run belongs to, so findings link back to it. */
@@ -51,7 +63,16 @@ export interface RunAnalysisInput {
   crawlCoverage?: { coverage: CrawlCoverage; examples: CrawlPageResult[] };
   /** Re-fetch a sample several times to catch intermittent failures (default true). */
   repeatability?: boolean;
+  /** Competitor research done beforehand (e.g. one Workflow step per competitor); otherwise `competitorDomains` are researched here. */
+  competitorResearch?: SiteResearch[];
+  /** The site's collected datasets, so content gaps can be matched to data it already holds. */
+  datasets?: OwnContent["datasets"];
+  /** Language model for matching content types across sites; names are compared without it. */
+  llm?: JsonLlm;
 }
+
+/** Competitors researched per analysis; each costs a sitemap profile and a handful of page fetches. */
+export const MAX_COMPETITORS = 5;
 
 export async function runFullAnalysis(input: RunAnalysisInput) {
   const { analysisId } = input;
@@ -88,11 +109,15 @@ export async function runFullAnalysis(input: RunAnalysisInput) {
   const pageResults: CrawlPageResult[] = [];
   const userAgentPairs: Array<{ url: string; browser: CrawlPageResult; googlebot: CrawlPageResult }> = [];
   const findings = [];
+  // One page per template is inspected for conversion paths and structured data (compared with competitors).
+  const inspectUrls = new Set(samplePerFamily(seedUrls.slice(0, input.maxPages ?? 24), 1, 6));
+  const ownInspections: PageInspection[] = [];
   for (const url of seedUrls.slice(0, input.maxPages ?? 24)) {
     try {
       const audited = await fetchPageAudit(url, fetcher);
       pageResults.push(audited.googlebot);
       userAgentPairs.push({ url, browser: audited.raw, googlebot: audited.googlebot });
+      if (inspectUrls.has(url)) ownInspections.push(inspectPage(url, { status: audited.googlebot.status, body: audited.googlebotHtml }));
     } catch (err) {
       findings.push({
         id: createId("finding"),
@@ -188,20 +213,28 @@ export async function runFullAnalysis(input: RunAnalysisInput) {
 
   const searchMetrics = input.searchMetrics ?? [];
 
-  const competitorObservations = await Promise.all((input.competitorDomains ?? []).slice(0, 10).map(async (domain) => {
-    try {
-      const page = await fetchPageAudit(`https://${domain}/`, fetcher);
-      return { domain, status: page.googlebot.status, title: page.googlebot.title, pageCount: 1 };
-    } catch {
-      return { domain, pageCount: 0 };
+  // Competitors: sitemaps and sample pages, compared with this site's content and data.
+  const research = input.competitorResearch
+    ?? await Promise.all((input.competitorDomains ?? []).slice(0, MAX_COMPETITORS).map((domain) => researchSite(domain, fetcher)));
+  let competition: CompetitionReport | undefined;
+  if (research.length) {
+    const own: OwnContent = {
+      domain: new URL(input.baseUrl).hostname.replace(/^www\./, ""),
+      families: sitemap.urlTypes,
+      pages: ownInspections,
+      datasets: input.datasets,
+    };
+    let labels = new Map<string, string>();
+    if (input.llm) {
+      try {
+        labels = await labelContentTypes(input.llm, contentTypeEntries(own, research));
+      } catch {
+        // Without labels, families are matched by name.
+      }
     }
-  }));
-  const competitors = discoverCompetitors({
-    siteId: input.siteId,
-    baseUrl: input.baseUrl,
-    searchMetrics,
-    competitorDomains: competitorObservations,
-  });
+    competition = compareCompetition(own, research, labels);
+  }
+  const competitors = competition ? competitorProfiles(competition, input.siteId) : [];
 
   const rankedFindings = rankSeverityByOrganicImpact(findings);
 
@@ -223,6 +256,7 @@ export async function runFullAnalysis(input: RunAnalysisInput) {
     findings: rankedFindings,
     searchMetrics,
     competitors,
+    competition,
   };
 
   const opportunities = buildOpportunities(bundle);
@@ -244,6 +278,7 @@ export async function runFullAnalysis(input: RunAnalysisInput) {
       comparisons,
       repeatability: summarizeRepeatability(repeatability),
     },
+    competition: competition ?? null,
     // Raw Search Console rows are persisted separately; the report keeps the
     // synthesis so it stays well under Workflow step and D1 row limits.
     searchNarrative: {

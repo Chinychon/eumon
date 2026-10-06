@@ -357,6 +357,7 @@ export async function saveCrawlBatch(
       canonicalMismatch: page.canonicalMismatch,
       googlebotBlockedStatus: page.googlebotBlockedStatus,
       botChallenge: page.botChallenge,
+      metaRefresh: page.metaRefresh,
     };
     return db.prepare(
       `UPDATE pages SET status = ?, title = ?, is_empty_shell = ?, result_json = ?,
@@ -386,7 +387,10 @@ const CRAWL_ISSUES: Record<Exclude<CrawlIssue, "duplicateTitle">, { where: strin
   robotsBlocked: { where: `crawl_state = 'blocked'` },
   noindex: { where: `${SERVED} AND ${crawlField("noindex")} = 1`, detail: crawlField("robots") },
   canonicalMismatch: { where: `${SERVED} AND ${crawlField("canonicalMismatch")} = 1`, detail: crawlField("canonical") },
-  redirected: { where: `${SERVED} AND ${crawlField("finalUrl")} IS NOT NULL AND ${crawlField("finalUrl")} != url`, detail: crawlField("finalUrl") },
+  redirected: {
+    where: `${SERVED} AND ((${crawlField("finalUrl")} IS NOT NULL AND ${crawlField("finalUrl")} != url) OR ${crawlField("metaRefresh")} IS NOT NULL)`,
+    detail: `COALESCE(${crawlField("metaRefresh")}, ${crawlField("finalUrl")})`,
+  },
   missingH1: { where: `${SERVED} AND is_empty_shell = 0 AND ${crawlField("h1Count")} = 0` },
   multipleH1: { where: `${SERVED} AND is_empty_shell = 0 AND ${crawlField("h1Count")} > 1`, detail: crawlField("h1Count") },
   missingDescription: {
@@ -519,6 +523,7 @@ export async function listCrawlPageResults(
       invalidJsonLd: typeof details.invalidJsonLd === "number" ? details.invalidJsonLd : undefined,
       routeFamily: typeof details.routeFamily === "string" ? details.routeFamily : undefined,
       canonicalMismatch: typeof details.canonicalMismatch === "boolean" ? details.canonicalMismatch : undefined,
+      metaRefresh: typeof details.metaRefresh === "string" ? details.metaRefresh : undefined,
     };
   });
 }

@@ -71,6 +71,27 @@ export async function listDatasets(db: D1Like, siteId: string): Promise<Array<Da
   return results.map((row) => ({ ...mapDataset(row), recordCount: Number(row.record_count ?? 0) }));
 }
 
+/**
+ * Each active dataset with its record count and how many one-page-per-record
+ * pages are live: the data a site holds versus what it has turned into pages.
+ */
+export async function datasetCoverage(db: D1Like, siteId: string): Promise<Array<{ name: string; entityType: string; records: number; livePages: number }>> {
+  const { results } = await db.prepare(
+    `SELECT d.name, d.entity_type,
+       (SELECT COUNT(*) FROM data_records r WHERE r.dataset_id = d.id) AS records,
+       (SELECT COUNT(*) FROM generated_pages g JOIN page_templates t ON t.id = g.template_id
+         WHERE t.dataset_id = d.id AND g.status = 'published'
+           AND COALESCE(json_array_length(json_extract(t.config_json, '$.groupBy')), 0) = 0) AS live_pages
+     FROM datasets d WHERE d.site_id = ? AND d.status != 'archived' ORDER BY d.created_at`,
+  ).bind(siteId).all<Row>();
+  return results.map((row) => ({
+    name: String(row.name),
+    entityType: String(row.entity_type),
+    records: Number(row.records ?? 0),
+    livePages: Number(row.live_pages ?? 0),
+  }));
+}
+
 export async function deleteDataset(db: D1Like, id: string): Promise<void> {
   // D1 enforces foreign keys, so remove dependants explicitly in dependency order.
   await runStatements(db, [

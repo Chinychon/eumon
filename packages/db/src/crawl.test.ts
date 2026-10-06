@@ -26,14 +26,14 @@ describe("full-crawl coverage", async () => {
     siteId: "site",
     urls: [
       "/", "/about", "/doctors/a", "/doctors/b", "/doctors/c", "/doctors/d", "/doctors/e",
-      "/procedures/x", "/procedures/y", "/procedures/z", "/old/page", "/guarded/one", "/guarded/two",
+      "/procedures/x", "/procedures/y", "/procedures/z", "/old/page", "/guarded/one", "/guarded/two", "/go/github",
     ].map((path): { url: string; routeFamily: string; blocked?: boolean } => ({ url: u(path), routeFamily: path === "/" ? "home" : path.split("/").length > 2 ? path.split("/")[1]! : "page" }))
       .concat([{ url: u("/private/report"), routeFamily: "private", blocked: true }]),
   });
 
   it("queues robots-blocked URLs without crawling them", async () => {
     const pending = await listPendingCrawlUrls(db, "a1", 100);
-    assert.equal(pending.length, 13);
+    assert.equal(pending.length, 14);
     assert.equal(pending.includes(u("/private/report")), false);
   });
 
@@ -54,11 +54,12 @@ describe("full-crawl coverage", async () => {
         { url: u("/old/page"), page: page(u("/old/page"), { finalUrl: u("/new/page") }) },
         { url: u("/guarded/one"), page: page(u("/guarded/one"), { status: 403, botChallenge: true }) },
         { url: u("/guarded/two"), page: page(u("/guarded/two"), { fetchMode: "raw", googlebotBlockedStatus: 403 }) },
+        { url: u("/go/github"), page: page(u("/go/github"), { metaRefresh: "https://github.com/x" }) },
       ],
     });
     const coverage = await getCrawlCoverage(db, "a1");
-    assert.equal(coverage.totalUrls, 14);
-    assert.equal(coverage.completedUrls, 12);
+    assert.equal(coverage.totalUrls, 15);
+    assert.equal(coverage.completedUrls, 13);
     assert.equal(coverage.failedUrls, 1);
     assert.equal(coverage.pendingUrls, 0);
     assert.equal(coverage.emptyShellUrls, 2);
@@ -67,7 +68,7 @@ describe("full-crawl coverage", async () => {
       robotsBlocked: 1,
       noindex: 1,
       canonicalMismatch: 1,
-      redirected: 1,
+      redirected: 2,
       missingH1: 1,
       multipleH1: 1,
       missingDescription: 1,
@@ -78,7 +79,7 @@ describe("full-crawl coverage", async () => {
       duplicateTitle: 2,
     });
     assert.deepEqual(coverage.issueExamples?.canonicalMismatch, [{ url: u("/doctors/b"), detail: "https://x.com/" }]);
-    assert.deepEqual(coverage.issueExamples?.redirected, [{ url: u("/old/page"), detail: u("/new/page") }]);
+    assert.deepEqual(coverage.issueExamples?.redirected, [{ url: u("/go/github"), detail: "https://github.com/x" }, { url: u("/old/page"), detail: u("/new/page") }]);
     assert.deepEqual(coverage.issueExamples?.robotsBlocked, [{ url: u("/private/report") }]);
     assert.deepEqual(coverage.duplicateTitleGroups, [{ title: "Shared title", count: 2, examples: [u("/about"), u("/doctors/a")] }]);
     const procedures = coverage.families?.find((family) => family.family === "procedures");

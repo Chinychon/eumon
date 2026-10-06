@@ -1,33 +1,8 @@
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync } from "node:fs";
-import { DatabaseSync } from "node:sqlite";
 import { describe, it } from "node:test";
 import type { CrawlPageResult } from "@organic-growth/core";
-import type { D1Like } from "./d1.js";
 import { createAnalysis, enqueueAnalysisCrawlUrls, getCrawlCoverage, listPendingCrawlUrls, saveCrawlBatch, upsertSite } from "./index.js";
-
-type Param = string | number | bigint | null | Uint8Array;
-const toParam = (value: unknown): Param => (value === undefined ? null : typeof value === "boolean" ? Number(value) : value as Param);
-
-/** D1 over an in-memory SQLite database with every migration applied. */
-function testDb(): D1Like {
-  const sqlite = new DatabaseSync(":memory:");
-  const dir = new URL("../migrations/", import.meta.url);
-  for (const file of readdirSync(dir).filter((name) => name.endsWith(".sql")).sort()) {
-    sqlite.exec(readFileSync(new URL(file, dir), "utf8"));
-  }
-  const statement = (query: string, args: unknown[] = []) => ({
-    run: async () => sqlite.prepare(query).run(...args.map(toParam)),
-    first: async <T>() => (sqlite.prepare(query).get(...args.map(toParam)) ?? null) as T | null,
-    all: async <T>() => ({ results: sqlite.prepare(query).all(...args.map(toParam)) as T[] }),
-  });
-  return {
-    prepare: (query: string) => ({ ...statement(query), bind: (...args: unknown[]) => statement(query, args) }),
-    batch: async (statements: unknown[]) => {
-      for (const entry of statements) await (entry as { run(): Promise<unknown> }).run();
-    },
-  };
-}
+import { openSqliteD1 } from "./sqlite.js";
 
 function page(url: string, overrides: Partial<CrawlPageResult> = {}): CrawlPageResult {
   return {
@@ -41,7 +16,7 @@ function page(url: string, overrides: Partial<CrawlPageResult> = {}): CrawlPageR
 }
 
 describe("full-crawl coverage", async () => {
-  const db = testDb();
+  const db = openSqliteD1();
   const now = new Date().toISOString();
   await upsertSite(db, { id: "site", name: "x.com", baseUrl: "https://x.com", createdAt: now, updatedAt: now });
   await createAnalysis(db, { id: "a1", siteId: "site", status: "running", createdAt: now });

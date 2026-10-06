@@ -63,11 +63,14 @@ Built on Cloudflare Workers ([vinext](https://www.npmjs.com/package/vinext) + Re
 ## Development
 
 ```sh
-npm test            # unit tests (ai, crawler, scraper, pages)
+npm test            # unit tests (ai, crawler, db, scraper, pages)
 npm run typecheck   # every workspace
 npm run build       # packages + production Worker bundle
+npm run audit -- https://example.com --max 300   # site analysis from the command line
 npm run eval        # end-to-end collection quality on a real site (calls the model; a few cents)
 ```
+
+`npm run audit` runs the same steps as the analysis Workflow — sitemap, robots.txt, a Googlebot crawl of every sitemap URL (up to `--max`), per-template coverage, sampled checks, findings, and the growth plan — with an in-memory SQLite database in place of D1. Add `--competitor other.com` (repeatable) to include competitors and `--json` for the full report. Behind an HTTPS proxy, run it with `NODE_USE_ENV_PROXY=1`.
 
 `npm run eval` runs the real collection pipeline (pagination, extraction, merging, duplicate resolution) against a live website and grades it against an answer key parsed from the same pages without AI: how many collected records are real, how many published facts the site actually states, and how many of the site's facts were captured. Run it before and after changing prompts or merge logic.
 

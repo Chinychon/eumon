@@ -1,0 +1,90 @@
+// Runs the site analysis from the command line: the same steps as the
+// SiteAnalysisWorkflow (sitemap, robots.txt, full Googlebot crawl, coverage,
+// sampled checks, findings, growth plan), with an in-memory SQLite database
+// in place of D1. Useful for checking analyzer changes against real sites.
+//
+//   npm run audit -- https://example.com [--max 500] [--competitor other.com] [--json]
+//
+// Fetches go to the live site; keep --max modest on sites you don't own.
+
+import { createId } from "@organic-growth/core";
+import {
+  GOOGLEBOT_TOKEN, GOOGLEBOT_UA, auditSitemap, classifyUrlType, crawlGooglebotBatch, defaultFetcher, parseRobots,
+} from "@organic-growth/crawler";
+import {
+  createAnalysis, enqueueAnalysisCrawlUrls, getCrawlCoverage, listCrawlPageResults, listPendingCrawlUrls, saveCrawlBatch, upsertSite,
+} from "@organic-growth/db";
+import { openSqliteD1 } from "@organic-growth/db/sqlite";
+import { runFullAnalysis } from "@organic-growth/agents";
+
+const args = process.argv.slice(2);
+const option = (name, fallback) => {
+  const index = args.indexOf(`--${name}`);
+  return index >= 0 ? args[index + 1] : fallback;
+};
+const options = (name) => args.flatMap((value, index) => (args[index - 1] === `--${name}` ? [value] : []));
+const target = args.find((value) => /^https?:\/\//.test(value));
+if (!target) {
+  console.error("Usage: npm run audit -- https://example.com [--max 500] [--competitor other.com] [--json]");
+  process.exit(1);
+}
+const maxUrls = Number(option("max", "500"));
+const baseUrl = new URL(target).origin;
+const log = (message) => process.stderr.write(`${message}\n`);
+
+const db = openSqliteD1();
+const now = new Date().toISOString();
+const siteId = createId("site");
+const analysisId = createId("analysis");
+await upsertSite(db, { id: siteId, name: new URL(baseUrl).hostname, baseUrl, createdAt: now, updatedAt: now });
+await createAnalysis(db, { id: analysisId, siteId, status: "running", createdAt: now });
+
+log(`Reading the sitemap of ${baseUrl}…`);
+const { urls } = await auditSitemap(baseUrl, undefined, { maxUrls: 1 });
+const robots = await defaultFetcher(`${baseUrl}/robots.txt`, { userAgent: GOOGLEBOT_UA, maxBytes: 500_000 })
+  .then((response) => (response.status < 400 ? parseRobots(response.body, GOOGLEBOT_TOKEN) : null))
+  .catch(() => null);
+const capped = urls.slice(0, maxUrls);
+await enqueueAnalysisCrawlUrls(db, {
+  analysisId,
+  siteId,
+  urls: capped.map((url) => {
+    const parsed = new URL(url);
+    return { url, routeFamily: classifyUrlType(url), blocked: robots ? !robots.isAllowed(`${parsed.pathname}${parsed.search}`) : false };
+  }),
+});
+log(`${urls.length.toLocaleString()} sitemap URLs; crawling ${capped.length.toLocaleString()} as Googlebot…`);
+
+for (;;) {
+  const batch = await listPendingCrawlUrls(db, analysisId, 50);
+  if (!batch.length) break;
+  const outcomes = await crawlGooglebotBatch(batch, undefined, 6);
+  await saveCrawlBatch(db, { analysisId, outcomes });
+  const coverage = await getCrawlCoverage(db, analysisId);
+  log(`  ${(coverage.completedUrls + coverage.failedUrls).toLocaleString()} / ${coverage.totalUrls.toLocaleString()}`);
+}
+
+const [coverage, examples] = await Promise.all([getCrawlCoverage(db, analysisId), listCrawlPageResults(db, analysisId, 50)]);
+log("Running sampled checks and synthesis…");
+const report = await runFullAnalysis({
+  analysisId, siteId, name: new URL(baseUrl).hostname, baseUrl, maxPages: 25,
+  competitorDomains: options("competitor"),
+  crawlCoverage: { coverage, examples },
+});
+
+if (args.includes("--json")) {
+  console.log(JSON.stringify({ ...report, coverage }, null, 2));
+} else {
+  console.log(`\n${baseUrl}: ${coverage.totalUrls} sitemap URLs crawled (${coverage.emptyShellUrls} empty shells, ${coverage.httpErrorUrls} errors)\n`);
+  if (coverage.families?.length) {
+    console.log("Page type                 URLs  Empty  Errors  Noindex  No schema");
+    for (const family of coverage.families.slice(0, 12)) {
+      console.log(`${family.family.padEnd(24)}${String(family.urls).padStart(6)}${String(family.emptyShells).padStart(7)}${String(family.errors).padStart(8)}${String(family.noindex).padStart(9)}${String(family.missingStructuredData).padStart(11)}`);
+    }
+    console.log("");
+  }
+  for (const finding of report.findings) {
+    console.log(`[${finding.severity}] (${finding.organicImpactScore}) ${finding.title}\n  ${finding.summary}\n`);
+  }
+  console.log(`Highest-impact opportunity: ${report.plan.highestImpactOpportunity}`);
+}

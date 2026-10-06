@@ -7,13 +7,17 @@ import {
 } from "@organic-growth/core";
 import {
   auditSitemap,
+  compareRendering,
   defaultFetcher,
   fetchPageAudit,
   findingsFromCrawl,
   findingsFromCrawlCoverage,
-  parseHtmlSignals,
+  findingsFromRendering,
   runTechnicalSeoAudit,
+  samplePerFamily,
+  testRepeatability,
   type Fetcher,
+  type RenderComparison,
 } from "@organic-growth/crawler";
 import {
   analyzeRepository,
@@ -45,6 +49,8 @@ export interface RunAnalysisInput {
   renderPages?: (urls: string[]) => Promise<Record<string, string>>;
   /** Results of crawling every sitemap URL, when a full crawl ran first. */
   crawlCoverage?: { coverage: CrawlCoverage; examples: CrawlPageResult[] };
+  /** Re-fetch a sample several times to catch intermittent failures (default true). */
+  repeatability?: boolean;
 }
 
 export async function runFullAnalysis(input: RunAnalysisInput) {
@@ -79,12 +85,14 @@ export async function runFullAnalysis(input: RunAnalysisInput) {
 
   const seedUrls = ensureSeedUrls(input.baseUrl, sampleUrls);
 
-  const pageResults = [];
+  const pageResults: CrawlPageResult[] = [];
+  const userAgentPairs: Array<{ url: string; browser: CrawlPageResult; googlebot: CrawlPageResult }> = [];
   const findings = [];
   for (const url of seedUrls.slice(0, input.maxPages ?? 24)) {
     try {
       const audited = await fetchPageAudit(url, fetcher);
       pageResults.push(audited.googlebot);
+      userAgentPairs.push({ url, browser: audited.raw, googlebot: audited.googlebot });
     } catch (err) {
       findings.push({
         id: createId("finding"),
@@ -101,21 +109,30 @@ export async function runFullAnalysis(input: RunAnalysisInput) {
     }
   }
 
-  if (input.renderPages && pageResults.length) {
-    const sample = pageResults.slice(0, 5).map((page) => page.url);
+  // Source vs render: one page per template, rendered in a real browser.
+  const comparisons: RenderComparison[] = [];
+  const servedPages = pageResults.filter((page) => page.status < 400);
+  if (input.renderPages && servedPages.length) {
+    const sample = samplePerFamily(servedPages.map((page) => page.url), 1, 6);
     try {
       const rendered = await input.renderPages(sample);
-      for (const page of pageResults) {
+      for (const page of servedPages) {
         const html = rendered[page.url];
         if (!html) continue;
-        const signals = parseHtmlSignals(html);
-        page.renderedTextLength = signals.textLength;
-        page.renderDelta = signals.textLength - page.rawTextLength;
+        const comparison = compareRendering(page.url, page, html);
+        comparisons.push(comparison);
+        page.renderedTextLength = comparison.renderedTextLength;
+        page.renderDelta = comparison.renderedTextLength - page.rawTextLength;
       }
     } catch {
       // Browser failures do not discard the raw crawl; report coverage remains explicit.
     }
   }
+
+  // Repeatability: the same URLs fetched several times catch intermittent failures.
+  const repeatability = input.repeatability === false || !servedPages.length
+    ? []
+    : await testRepeatability(samplePerFamily(servedPages.map((page) => page.url), 2, 10), fetcher, 3);
 
   const sampleFindings = findingsFromCrawl({
     siteId: input.siteId,
@@ -139,6 +156,15 @@ export async function runFullAnalysis(input: RunAnalysisInput) {
   } else {
     findings.push(...sampleFindings);
   }
+
+  findings.push(...findingsFromRendering({
+    siteId: input.siteId,
+    analysisId,
+    familySizes: sitemap.urlTypes,
+    comparisons,
+    userAgentPairs,
+    repeatability,
+  }));
 
   let robotsTxt: string | undefined;
   try {
@@ -214,6 +240,10 @@ export async function runFullAnalysis(input: RunAnalysisInput) {
     competitors,
     opportunities,
     plan,
+    rendering: {
+      comparisons,
+      repeatability: summarizeRepeatability(repeatability),
+    },
     // Raw Search Console rows are persisted separately; the report keeps the
     // synthesis so it stays well under Workflow step and D1 row limits.
     searchNarrative: {
@@ -230,4 +260,23 @@ export async function runFullAnalysis(input: RunAnalysisInput) {
 function ensureSeedUrls(baseUrl: string, sample: string[]): string[] {
   const origin = new URL(baseUrl).origin;
   return [...new Set(sample.length ? sample : [`${origin}/`])];
+}
+
+/** Per-template totals of the repeated fetches, for the report. */
+function summarizeRepeatability(results: Awaited<ReturnType<typeof testRepeatability>>) {
+  const families = new Map<string, { family: string; urls: number; attempts: number; failed: number; medianMs: number; times: number[] }>();
+  for (const result of results) {
+    const entry = families.get(result.family) ?? { family: result.family, urls: 0, attempts: 0, failed: 0, medianMs: 0, times: [] };
+    entry.urls++;
+    for (const attempt of result.attempts) {
+      entry.attempts++;
+      if (attempt.error || attempt.status >= 500 || attempt.emptyShell) entry.failed++;
+      else entry.times.push(attempt.ms);
+    }
+    families.set(result.family, entry);
+  }
+  return [...families.values()].map(({ times, ...entry }) => ({
+    ...entry,
+    medianMs: times.length ? [...times].sort((a, b) => a - b)[Math.floor(times.length / 2)]! : 0,
+  }));
 }

@@ -168,7 +168,7 @@ export class SiteAnalysisWorkflow extends WorkflowEntrypoint<AppEnv, AnalysisPay
     }
   }
 
-  /** Browser-renders a few pages so raw HTML can be compared with the rendered DOM. */
+  /** Browser-renders one page per template so raw HTML can be compared with the rendered DOM. */
   private async renderPages(urls: string[]): Promise<Record<string, string>> {
     const browser = await puppeteer.launch(this.env.BROWSER);
     try {
@@ -186,7 +186,10 @@ export class SiteAnalysisWorkflow extends WorkflowEntrypoint<AppEnv, AnalysisPay
               void outbound.abort().catch(() => undefined);
             }
           });
-          await page.goto(url, { waitUntil: "domcontentloaded", timeout: 15000 });
+          // Wait for client-side data requests to settle (as Google's renderer does);
+          // on a timeout, use whatever has rendered so far.
+          const loaded = await page.goto(url, { waitUntil: "networkidle2", timeout: 20000 }).catch(() => null);
+          if (!loaded) await page.waitForSelector("body", { timeout: 5000 });
           if (new URL(page.url()).origin === new URL(url).origin) output[url] = await page.content();
         } catch {
           // Keep other representative pages when one browser navigation fails.

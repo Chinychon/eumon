@@ -26,6 +26,10 @@ type Report = {
   opportunities: Array<{ title: string; rationale: string; priorityScore: number; potentialPage?: string }>;
   plan: { situation: string; competitiveAdvantage: string; highestImpactOpportunity: string; priorities: Array<{ rank: number; title: string; whyThisMatters: string }> };
   searchNarrative: { totalClicks: number; totalImpressions: number; narrative: string };
+  rendering?: {
+    comparisons: Array<{ url: string; family: string; verdict: string; rawTextLength: number; renderedTextLength: number; rawTitle?: string; renderedTitle?: string }>;
+    repeatability: Array<{ family: string; urls: number; attempts: number; failed: number; medianMs: number }>;
+  };
 };
 
 type Change = { id: string; findingId?: string; title: string; reason: string; patch: string; prUrl?: string };
@@ -225,7 +229,7 @@ export function OverviewView({ site, repositories, githubInstalled, onSiteChange
             <Kpi label="URLs in sitemap" value={formatNumber(report.sitemap.totalUrls)} caption={report.sitemap.errors[0] ? "See sitemap note below" : "Declared to search engines"} />
             <Kpi label="Crawled as Googlebot" value={coverage ? `${formatNumber(coverage.completedUrls)}/${formatNumber(coverage.totalUrls)}` : "—"} caption={coverage ? `${formatNumber(coverage.emptyShellUrls)} empty shells · ${formatNumber(coverage.httpErrorUrls)} errors` : "Full crawl not run"} />
             <Kpi label="Key findings" value={findings.length} caption="Ranked by organic impact" />
-            <Kpi label="Browser rendered" value={`${report.pages.filter((page) => page.renderedTextLength > 0).length}`} caption="Pages compared with raw HTML" />
+            <Kpi label="Browser rendered" value={`${report.rendering?.comparisons.length ?? report.pages.filter((page) => page.renderedTextLength > 0).length}`} caption="Templates compared with raw HTML" />
           </div>
           <div className="dashboard-columns">
             <section className="panel" id="findings">
@@ -283,6 +287,7 @@ export function OverviewView({ site, repositories, githubInstalled, onSiteChange
             </section>
           </div>
           {coverage?.families && coverage.families.length > 1 && <FamilyHealth families={coverage.families} />}
+          {report.rendering && (report.rendering.comparisons.length > 0 || report.rendering.repeatability.length > 0) && <RenderingChecks rendering={report.rendering} />}
           {report.sitemap.errors.length > 0 && <div className="crawl-note"><strong>Sitemap note</strong><span>{report.sitemap.errors.join(" ")}</span></div>}
         </div>
       )}
@@ -317,6 +322,52 @@ function FamilyHealth({ families }: { families: FamilyStats[] }) {
           ))}</tbody>
         </table>
       </div>
+    </section>
+  );
+}
+
+const VERDICT: Record<string, { label: string; tone: string }> = {
+  server_rendered: { label: "Server-rendered", tone: "green" },
+  partially_client_rendered: { label: "Partly JavaScript", tone: "amber" },
+  client_rendered: { label: "Needs JavaScript", tone: "red" },
+  empty_after_render: { label: "Empty in browser too", tone: "red" },
+};
+
+/** Source-vs-render comparison per template, and repeated fetches that expose intermittent failures. */
+function RenderingChecks({ rendering }: { rendering: NonNullable<Report["rendering"]> }) {
+  return (
+    <section className="panel" style={{ marginTop: 13 }}>
+      <div className="panel-heading"><div><div className="eyebrow">RENDERING INTELLIGENCE</div><h3>HTML vs. browser, and repeated Googlebot fetches</h3></div></div>
+      {rendering.comparisons.length > 0 && (
+        <div className="table-wrap" style={{ marginBottom: 12 }}>
+          <table className="table">
+            <thead><tr><th>Page (one per template)</th><th className="num">Text in HTML</th><th className="num">Text after JavaScript</th><th>Verdict</th></tr></thead>
+            <tbody>{rendering.comparisons.map((entry) => (
+              <tr key={entry.url}>
+                <td><a href={entry.url} target="_blank" rel="noreferrer">{new URL(entry.url).pathname}</a></td>
+                <td className="num">{formatNumber(entry.rawTextLength)}</td>
+                <td className="num">{formatNumber(entry.renderedTextLength)}</td>
+                <td><Badge tone={VERDICT[entry.verdict]?.tone}>{VERDICT[entry.verdict]?.label ?? entry.verdict}</Badge></td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+      )}
+      {rendering.repeatability.length > 0 && (
+        <div className="table-wrap" style={{ marginBottom: 10 }}>
+          <table className="table">
+            <thead><tr><th>Template</th><th className="num">URLs × fetches</th><th className="num">Empty or failed</th><th className="num">Median response</th></tr></thead>
+            <tbody>{rendering.repeatability.map((entry) => (
+              <tr key={entry.family}>
+                <td><code>{entry.family === "home" ? "Homepage" : entry.family === "page" ? "Top-level pages" : `/${entry.family}/`}</code></td>
+                <td className="num">{entry.urls} × {Math.round(entry.attempts / Math.max(entry.urls, 1))}</td>
+                <td className="num">{entry.failed ? <span className="bad-count">{entry.failed} of {entry.attempts}</span> : <span className="muted">0</span>}</td>
+                <td className="num">{entry.medianMs ? `${(entry.medianMs / 1000).toFixed(1)} s` : "—"}</td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+      )}
     </section>
   );
 }

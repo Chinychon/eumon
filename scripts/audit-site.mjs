@@ -64,12 +64,38 @@ for (;;) {
   log(`  ${(coverage.completedUrls + coverage.failedUrls).toLocaleString()} / ${coverage.totalUrls.toLocaleString()}`);
 }
 
+// Browser rendering uses Playwright when it is installed (optional).
+const playwright = await import("playwright").catch(() => null);
+if (!playwright) log("Playwright isn't installed, so the browser-rendering comparison is skipped (npm i -D playwright to enable it).");
+async function renderPages(urls) {
+  const proxy = process.env.HTTPS_PROXY ? { proxy: { server: process.env.HTTPS_PROXY } } : {};
+  const browser = await playwright.chromium.launch(proxy);
+  try {
+    const output = {};
+    for (const url of urls) {
+      const page = await browser.newPage();
+      try {
+        await page.goto(url, { waitUntil: "networkidle", timeout: 20_000 }).catch(() => undefined);
+        output[url] = await page.content();
+      } catch {
+        // Keep the other pages when one navigation fails.
+      } finally {
+        await page.close();
+      }
+    }
+    return output;
+  } finally {
+    await browser.close();
+  }
+}
+
 const [coverage, examples] = await Promise.all([getCrawlCoverage(db, analysisId), listCrawlPageResults(db, analysisId, 50)]);
-log("Running sampled checks and synthesis…");
+log("Running sampled checks, rendering comparison, repeatability test, and synthesis…");
 const report = await runFullAnalysis({
   analysisId, siteId, name: new URL(baseUrl).hostname, baseUrl, maxPages: 25,
   competitorDomains: options("competitor"),
   crawlCoverage: { coverage, examples },
+  renderPages: playwright ? renderPages : undefined,
 });
 
 if (args.includes("--json")) {
@@ -85,6 +111,13 @@ if (args.includes("--json")) {
   }
   for (const finding of report.findings) {
     console.log(`[${finding.severity}] (${finding.organicImpactScore}) ${finding.title}\n  ${finding.summary}\n`);
+  }
+  if (report.rendering.comparisons.length) {
+    console.log("Rendered in a browser             HTML text  Rendered  Verdict");
+    for (const entry of report.rendering.comparisons) {
+      console.log(`${new URL(entry.url).pathname.slice(0, 32).padEnd(32)}${String(entry.rawTextLength).padStart(11)}${String(entry.renderedTextLength).padStart(10)}  ${entry.verdict}`);
+    }
+    console.log("");
   }
   console.log(`Highest-impact opportunity: ${report.plan.highestImpactOpportunity}`);
 }

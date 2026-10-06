@@ -660,6 +660,7 @@ export function findingsFromCrawl(input: {
 
 export * from "./tech-seo.js";
 export * from "./coverage-findings.js";
+export * from "./rendering.js";
 export * from "./urls.js";
 export * from "./html.js";
 export * from "./robots.js";

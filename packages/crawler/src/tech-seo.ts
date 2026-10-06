@@ -1,6 +1,16 @@
 import type { CrawlPageResult, Finding, SitemapAudit } from "@organic-growth/core";
 import { createId, organicImpactScore, severityFromImpact } from "@organic-growth/core";
-import { classifyLanguage, isSameSite } from "./urls.js";
+import { GOOGLEBOT_TOKEN, parseRobots } from "./robots.js";
+import { classifyLanguage, isSameSite, sameDocument } from "./urls.js";
+
+/** Crawlers that collect content for AI assistants and answer engines. */
+const AI_CRAWLERS = [
+  { name: "GPTBot", token: "gptbot", product: "OpenAI" },
+  { name: "OAI-SearchBot", token: "oai-searchbot", product: "ChatGPT search" },
+  { name: "ClaudeBot", token: "claudebot", product: "Anthropic" },
+  { name: "PerplexityBot", token: "perplexitybot", product: "Perplexity" },
+  { name: "Google-Extended", token: "google-extended", product: "Gemini" },
+];
 
 /**
  * Technical SEO audit rules ranked by expected organic impact.
@@ -16,16 +26,7 @@ export function runTechnicalSeoAudit(input: {
   const findings: Finding[] = [];
   const { pages, sitemap, siteId, analysisId } = input;
 
-  const canonicalMismatches = pages.filter((p) => {
-    if (!p.canonical) return false;
-    try {
-      const canon = new URL(p.canonical, p.url);
-      const page = new URL(p.finalUrl ?? p.url);
-      return canon.origin + canon.pathname !== page.origin + page.pathname;
-    } catch {
-      return true;
-    }
-  });
+  const canonicalMismatches = pages.filter((p) => p.canonical && !sameDocument(p.canonical, p.finalUrl ?? p.url));
   if (canonicalMismatches.length > 0) {
     const impact = organicImpactScore({
       category: "indexing",
@@ -107,7 +108,8 @@ export function runTechnicalSeoAudit(input: {
     });
   }
 
-  if (input.robotsTxt && /Disallow:\s*\/$/im.test(input.robotsTxt)) {
+  const googlebotRules = input.robotsTxt ? parseRobots(input.robotsTxt, GOOGLEBOT_TOKEN) : null;
+  if (googlebotRules && !googlebotRules.isAllowed("/")) {
     const impact = organicImpactScore({
       category: "indexing",
       pagesAffected: sitemap.totalUrls || 1,
@@ -119,11 +121,33 @@ export function runTechnicalSeoAudit(input: {
       analysisId,
       category: "indexing",
       severity: "CRITICAL",
-      title: "robots.txt blocks the entire site",
-      summary: "robots.txt contains Disallow: / which blocks crawlers from the whole site.",
-      evidence: { robotsTxt: input.robotsTxt.slice(0, 2000) },
+      title: "robots.txt blocks Googlebot from the entire site",
+      summary: "The robots.txt rules that apply to Googlebot disallow the homepage and everything below it, so Google cannot crawl the site.",
+      evidence: { robotsTxt: input.robotsTxt!.slice(0, 2000) },
       organicImpactScore: impact,
-      recommendation: "Remove sitewide Disallow and keep only intentional private path blocks.",
+      recommendation: "Remove the sitewide Disallow from the group that applies to Googlebot (its own group, or `User-agent: *`) and keep only intentional private path blocks.",
+      pagesAffected: [],
+      createdAt: new Date().toISOString(),
+    });
+  }
+
+  // Blocking AI crawlers is a legitimate business choice, but it removes the
+  // site from AI search answers; report it without treating it as an error.
+  const blockedAiCrawlers = input.robotsTxt
+    ? AI_CRAWLERS.filter((crawler) => !parseRobots(input.robotsTxt!, crawler.token).isAllowed("/"))
+    : [];
+  if (blockedAiCrawlers.length) {
+    findings.push({
+      id: createId("finding"),
+      siteId,
+      analysisId,
+      category: "indexing",
+      severity: "INFORMATIONAL",
+      title: "robots.txt blocks AI search crawlers",
+      summary: `robots.txt disallows ${blockedAiCrawlers.map((crawler) => `${crawler.name} (${crawler.product})`).join(", ")}. These crawlers feed AI assistants and answer engines, so the site will not be cited there.`,
+      evidence: { blocked: blockedAiCrawlers.map((crawler) => crawler.name) },
+      organicImpactScore: 10,
+      recommendation: "Keep the block if it is deliberate. To be cited in AI answers, allow the search-facing crawlers (e.g. OAI-SearchBot, PerplexityBot, Claude-SearchBot) while still blocking training crawlers if you prefer.",
       pagesAffected: [],
       createdAt: new Date().toISOString(),
     });

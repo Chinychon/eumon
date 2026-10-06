@@ -127,6 +127,18 @@ export type CrawlPageResult = {
   renderedTextLength: number;
   renderDelta: number;
   fetchMode: "raw" | "googlebot" | "browser";
+  /** Number of `<h1>` elements in the crawler-visible HTML. */
+  h1Count?: number;
+  /** Excluded from Google's index by a robots meta tag or an `X-Robots-Tag` header. */
+  noindex?: boolean;
+  /** schema.org `@type` values found in JSON-LD, `@graph` flattened. */
+  jsonLdTypes?: string[];
+  /** JSON-LD blocks that failed to parse (search engines ignore them). */
+  invalidJsonLd?: number;
+  /** Route family (`/en/doctors/jane` → `doctors`), used to report problems per page template. */
+  routeFamily?: string;
+  /** The canonical tag names a different URL than the one fetched. */
+  canonicalMismatch?: boolean;
 }
 
 export type SitemapAudit = {

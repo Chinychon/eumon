@@ -1,19 +1,7 @@
 import type { JsonObject, JsonValue } from "@organic-growth/core";
+import { decodeEntities, findTags, hasToken } from "@organic-growth/crawler";
 
-const ENTITIES: Record<string, string> = {
-  amp: "&", lt: "<", gt: ">", quot: "\"", apos: "'", nbsp: " ", ndash: "–", mdash: "—",
-  hellip: "…", rsquo: "’", lsquo: "‘", rdquo: "”", ldquo: "“", copy: "©", reg: "®", trade: "™",
-};
-
-export function decodeEntities(value: string): string {
-  return value.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (whole, entity: string) => {
-    if (entity[0] === "#") {
-      const code = entity[1]?.toLowerCase() === "x" ? parseInt(entity.slice(2), 16) : parseInt(entity.slice(1), 10);
-      return Number.isFinite(code) && code > 0 && code < 0x110000 ? String.fromCodePoint(code) : whole;
-    }
-    return ENTITIES[entity.toLowerCase()] ?? whole;
-  });
-}
+export { decodeEntities } from "@organic-growth/crawler";
 
 function stripTags(value: string): string {
   return decodeEntities(value.replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim();
@@ -54,20 +42,19 @@ export type PageMeta = {
 };
 
 export function extractMeta(html: string): PageMeta {
-  const attr = (re: RegExp) => {
-    const value = html.match(re)?.[1];
-    return value ? decodeEntities(value).trim() : undefined;
-  };
-  const title = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1];
-  const h1 = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i)?.[1];
+  const head = html.replace(/<(script|style|noscript|template|svg)\b[\s\S]*?<\/\1\s*>/gi, " ");
+  const metas = findTags(head, "meta");
+  const meta = (key: "name" | "property", value: string) =>
+    metas.find((tag) => tag[key]?.toLowerCase() === value)?.content?.trim() || undefined;
+  const title = head.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1];
+  const h1 = head.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i)?.[1];
   return {
     title: title ? stripTags(title) : undefined,
     h1: h1 ? stripTags(h1) : undefined,
-    description: attr(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']*)["']/i)
-      ?? attr(/<meta[^>]+content=["']([^"']*)["'][^>]+name=["']description["']/i),
-    image: attr(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']*)["']/i),
-    themeColor: attr(/<meta[^>]+name=["']theme-color["'][^>]+content=["']([^"']*)["']/i),
-    canonical: attr(/<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']*)["']/i),
+    description: meta("name", "description"),
+    image: meta("property", "og:image"),
+    themeColor: meta("name", "theme-color"),
+    canonical: findTags(head, "link").find((link) => hasToken(link.rel, "canonical") && link.href)?.href.trim(),
   };
 }
 

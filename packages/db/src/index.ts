@@ -333,6 +333,12 @@ export async function saveCrawlBatch(
       renderedTextLength: page.renderedTextLength,
       renderDelta: page.renderDelta,
       fetchMode: page.fetchMode,
+      h1Count: page.h1Count,
+      noindex: page.noindex,
+      jsonLdTypes: page.jsonLdTypes,
+      invalidJsonLd: page.invalidJsonLd,
+      routeFamily: page.routeFamily,
+      canonicalMismatch: page.canonicalMismatch,
     };
     return db.prepare(
       `UPDATE pages SET status = ?, title = ?, is_empty_shell = ?, result_json = ?,
@@ -408,6 +414,12 @@ export async function listCrawlPageResults(
       renderedTextLength: Number(details.renderedTextLength ?? 0),
       renderDelta: Number(details.renderDelta ?? 0),
       fetchMode: "googlebot",
+      h1Count: typeof details.h1Count === "number" ? details.h1Count : undefined,
+      noindex: typeof details.noindex === "boolean" ? details.noindex : undefined,
+      jsonLdTypes: Array.isArray(details.jsonLdTypes) ? details.jsonLdTypes.filter((item): item is string => typeof item === "string") : undefined,
+      invalidJsonLd: typeof details.invalidJsonLd === "number" ? details.invalidJsonLd : undefined,
+      routeFamily: typeof details.routeFamily === "string" ? details.routeFamily : undefined,
+      canonicalMismatch: typeof details.canonicalMismatch === "boolean" ? details.canonicalMismatch : undefined,
     };
   });
 }

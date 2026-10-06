@@ -1,6 +1,8 @@
 import type { CrawlCoverage, CrawlPageResult, Finding, SitemapAudit } from "@organic-growth/core";
 import { createId, organicImpactScore, severityFromImpact } from "@organic-growth/core";
-import { classifyLanguage, classifyUrlType, isSameSite } from "./urls.js";
+import { contentMarkup, findTags, hasToken, innerText, parseAttributes, visibleText } from "./html.js";
+import { GOOGLEBOT_TOKEN } from "./robots.js";
+import { classifyLanguage, classifyUrlType, isSameSite, sameDocument } from "./urls.js";
 
 export const GOOGLEBOT_UA =
   "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)";
@@ -91,96 +93,147 @@ export const defaultFetcher: Fetcher = async (url, init) => {
   throw new Error("Crawler stopped after an unsafe or excessive redirect chain.");
 };
 
-export function parseHtmlSignals(html: string): {
+export type HtmlSignals = {
   title?: string;
   description?: string;
   canonical?: string;
   robots?: string;
   hreflang: Array<{ lang: string; href: string }>;
   jsonLdCount: number;
+  jsonLdTypes: string[];
+  invalidJsonLd: number;
   headingOutline: string[];
+  h1Count: number;
   internalLinkCount: number;
+  /** Characters of visible text; scripts, styles, JSON-LD, and framework payloads excluded. */
   textLength: number;
   hasRootMount: boolean;
+  /** A robots or googlebot meta tag excludes the page from the index. */
+  metaNoindex: boolean;
   bodyTextSample: string;
-} {
-  const title = matchContent(html, /<title[^>]*>([\s\S]*?)<\/title>/i);
-  const description = matchAttr(
-    html,
-    /<meta[^>]+name=["']description["'][^>]+content=["']([^"']*)["']/i,
-  ) ?? matchAttr(
-    html,
-    /<meta[^>]+content=["']([^"']*)["'][^>]+name=["']description["']/i,
-  );
-  const canonical = matchAttr(
-    html,
-    /<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']*)["']/i,
-  );
-  const robots = matchAttr(
-    html,
-    /<meta[^>]+name=["']robots["'][^>]+content=["']([^"']*)["']/i,
-  );
-  const hreflang: Array<{ lang: string; href: string }> = [];
-  const hreflangRe =
-    /<link[^>]+rel=["']alternate["'][^>]+hreflang=["']([^"']+)["'][^>]+href=["']([^"']+)["']/gi;
-  let m: RegExpExecArray | null;
-  while ((m = hreflangRe.exec(html))) {
-    hreflang.push({ lang: m[1], href: m[2] });
-  }
-  const jsonLdCount = (html.match(/application\/ld\+json/gi) ?? []).length;
+};
+
+/**
+ * Reads the SEO-relevant signals a non-rendering crawler gets from an HTML
+ * response. Tags are matched by attribute, so attribute order and quoting
+ * don't matter. `pageUrl` lets absolute same-site links count as internal.
+ */
+export function parseHtmlSignals(html: string, pageUrl?: string): HtmlSignals {
+  const markup = contentMarkup(html);
+  const metas = findTags(markup, "meta");
+  const links = findTags(markup, "link");
+  const metaContent = (name: string) => metas.find((meta) => meta.name?.toLowerCase() === name)?.content;
+
+  const title = markup.match(/<title\b[^>]*>([\s\S]*?)<\/title\s*>/i)?.[1];
+  const canonical = links.find((link) => hasToken(link.rel, "canonical") && link.href)?.href;
+  const hreflang = links
+    .filter((link) => hasToken(link.rel, "alternate") && link.hreflang && link.href)
+    .map((link) => ({ lang: link.hreflang!, href: link.href! }));
+  const robots = metaContent("robots");
+  const googlebot = metaContent("googlebot");
+  const jsonLd = readJsonLd(html);
+
   const headingOutline: string[] = [];
-  const headingRe = /<(h[1-3])[^>]*>([\s\S]*?)<\/\1>/gi;
-  while ((m = headingRe.exec(html))) {
-    headingOutline.push(`${m[1]}:${stripTags(m[2]).slice(0, 120)}`);
+  let h1Count = 0;
+  for (const match of markup.matchAll(/<(h[1-3])\b[^>]*>([\s\S]*?)<\/\1\s*>/gi)) {
+    const level = match[1]!.toLowerCase();
+    if (level === "h1") h1Count++;
+    if (headingOutline.length < 20) headingOutline.push(`${level}:${innerText(match[2]!).slice(0, 120)}`);
   }
-  const internalLinkCount = (html.match(/<a\s+[^>]*href=["']\//gi) ?? []).length;
-  const text = stripTags(html).replace(/\s+/g, " ").trim();
-  const hasRootMount =
-    /id=["']root["']/i.test(html) ||
-    /id=["']app["']/i.test(html) ||
-    /id=["']__next["']/i.test(html);
+
+  let internalLinkCount = 0;
+  for (const anchor of findTags(markup, "a")) {
+    const href = anchor.href?.trim();
+    if (!href || href.startsWith("#") || /^(mailto|tel|javascript|data):/i.test(href)) continue;
+    const internal = href.startsWith("/") ? !href.startsWith("//") : Boolean(pageUrl && isSameSite(resolveUrl(href, pageUrl), pageUrl));
+    if (internal) internalLinkCount++;
+  }
+
+  const text = visibleText(markup);
   return {
-    title: title ? stripTags(title).trim() : undefined,
-    description,
+    title: title ? innerText(title) : undefined,
+    description: metaContent("description"),
     canonical,
     robots,
     hreflang,
-    jsonLdCount,
-    headingOutline: headingOutline.slice(0, 20),
+    jsonLdCount: jsonLd.blocks,
+    jsonLdTypes: jsonLd.types,
+    invalidJsonLd: jsonLd.invalid,
+    headingOutline,
+    h1Count,
     internalLinkCount,
     textLength: text.length,
-    hasRootMount,
+    hasRootMount: /\bid=["']?(root|app|__next|__nuxt|svelte)["'\s>]/i.test(markup),
+    metaNoindex: [robots, googlebot].some((value) => /\b(noindex|none)\b/i.test(value ?? "")),
     bodyTextSample: text.slice(0, 280),
   };
 }
 
-export function isEmptyShell(html: string, signals = parseHtmlSignals(html)): boolean {
-  // SPA shell: mount point + little meaningful content, generic/missing title
-  if (signals.textLength < 400 && signals.hasRootMount) return true;
-  if (signals.textLength < 200) return true;
-  if (
-    signals.hasRootMount &&
-    signals.jsonLdCount === 0 &&
-    signals.headingOutline.length === 0 &&
-    signals.textLength < 800
-  ) {
-    return true;
+function resolveUrl(href: string, base: string): string {
+  try {
+    return new URL(href, base).toString();
+  } catch {
+    return "";
+  }
+}
+
+/** Counts JSON-LD blocks and collects their schema.org types; malformed blocks are counted, not thrown. */
+function readJsonLd(html: string): { blocks: number; types: string[]; invalid: number } {
+  const types = new Set<string>();
+  let blocks = 0;
+  let invalid = 0;
+  const visit = (value: unknown): void => {
+    if (Array.isArray(value)) value.forEach(visit);
+    else if (value && typeof value === "object") {
+      const node = value as Record<string, unknown>;
+      const type = node["@type"];
+      for (const entry of Array.isArray(type) ? type : [type]) {
+        if (typeof entry === "string" && entry) types.add(entry.replace(/^https?:\/\/schema\.org\//i, ""));
+      }
+      if (Array.isArray(node["@graph"])) visit(node["@graph"]);
+    }
+  };
+  for (const match of html.matchAll(/<script\b((?:[^>"']|"[^"]*"|'[^']*')*)>([\s\S]*?)<\/script\s*>/gi)) {
+    if (parseAttributes(match[1] ?? "").type?.toLowerCase() !== "application/ld+json") continue;
+    blocks++;
+    try {
+      visit(JSON.parse(match[2]!.trim()));
+    } catch {
+      invalid++;
+    }
+  }
+  return { blocks, types: [...types].slice(0, 30), invalid };
+}
+
+/**
+ * True when an `X-Robots-Tag` header excludes the page from Google's index.
+ * Directives may be scoped to a crawler (`googlebot: noindex`); ones scoped
+ * to other crawlers don't apply.
+ */
+export function headerNoindex(value: string | undefined): boolean {
+  if (!value) return false;
+  const valued = new Set(["unavailable_after", "max-snippet", "max-image-preview", "max-video-preview"]);
+  let agent: string | null = null;
+  for (const part of value.split(",")) {
+    let directive = part.trim().toLowerCase();
+    const scoped = directive.match(/^([a-z0-9_-]+)\s*:\s*(.*)$/);
+    if (scoped && !valued.has(scoped[1]!)) {
+      agent = scoped[1]!;
+      directive = scoped[2]!;
+    }
+    if ((agent === null || agent === GOOGLEBOT_TOKEN) && /^(noindex|none)$/.test(directive)) return true;
   }
   return false;
 }
 
-function matchContent(html: string, re: RegExp): string | undefined {
-  const m = html.match(re);
-  return m?.[1];
-}
-
-function matchAttr(html: string, re: RegExp): string | undefined {
-  const m = html.match(re);
-  return m?.[1];
-}
-
-function stripTags(input: string): string {
-  return input.replace(/<[^>]+>/g, " ");
+/**
+ * A page that gives a non-rendering crawler nothing to index: little visible
+ * text, typically with a client-side mount point waiting for JavaScript.
+ */
+export function isEmptyShell(html: string, signals = parseHtmlSignals(html)): boolean {
+  if (signals.textLength < 400 && signals.hasRootMount) return true;
+  if (signals.textLength < 200) return true;
+  return signals.hasRootMount && signals.jsonLdCount === 0 && signals.headingOutline.length === 0 && signals.textLength < 800;
 }
 
 export async function fetchPageAudit(
@@ -269,12 +322,12 @@ function toCrawlResult(
   fetchResult: FetchResult,
   mode: CrawlPageResult["fetchMode"],
 ): CrawlPageResult {
-  const signals = parseHtmlSignals(fetchResult.body);
-  const empty = isEmptyShell(fetchResult.body, signals);
+  const finalUrl = fetchResult.finalUrl || url;
+  const signals = parseHtmlSignals(fetchResult.body, finalUrl);
   return {
     url,
     status: fetchResult.status,
-    finalUrl: fetchResult.finalUrl,
+    finalUrl,
     title: signals.title,
     description: signals.description,
     canonical: signals.canonical,
@@ -282,13 +335,19 @@ function toCrawlResult(
     hreflang: signals.hreflang,
     jsonLdCount: signals.jsonLdCount,
     contentLength: fetchResult.body.length,
-    isEmptyShell: empty,
+    isEmptyShell: isEmptyShell(fetchResult.body, signals),
     headingOutline: signals.headingOutline,
     internalLinkCount: signals.internalLinkCount,
-    rawTextLength: mode === "raw" ? signals.textLength : signals.textLength,
+    rawTextLength: signals.textLength,
     renderedTextLength: 0,
     renderDelta: 0,
     fetchMode: mode,
+    h1Count: signals.h1Count,
+    noindex: signals.metaNoindex || headerNoindex(fetchResult.headers["x-robots-tag"]),
+    jsonLdTypes: signals.jsonLdTypes,
+    invalidJsonLd: signals.invalidJsonLd,
+    routeFamily: classifyUrlType(url),
+    canonicalMismatch: signals.canonical ? !sameDocument(signals.canonical, finalUrl) : false,
   };
 }
 
@@ -659,3 +718,5 @@ export function findingsFromCrawlCoverage(input: {
 
 export * from "./tech-seo.js";
 export * from "./urls.js";
+export * from "./html.js";
+export * from "./robots.js";

@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { GOOGLEBOT_UA, defaultFetcher, isEmptyShell, parseHtmlSignals } from "@organic-growth/crawler";
+import { GOOGLEBOT_UA, defaultFetcher, headerNoindex, isEmptyShell, parseHtmlSignals } from "@organic-growth/crawler";
 import { listPublishedPaths, upsertPageSettings } from "@organic-growth/db";
 import { fail, findSite, json, settingsFor } from "../../../../../src/server";
 
@@ -228,9 +228,9 @@ export async function POST(_request: Request, context: { params: Promise<{ siteI
     const url = `${origin}${sample.path}`;
     try {
       const response = await defaultFetcher(url, { userAgent: GOOGLEBOT_UA });
-      const signals = parseHtmlSignals(response.body);
+      const signals = parseHtmlSignals(response.body, response.finalUrl);
       const fromEumon = /<meta name="generator" content="Eumon">/.test(response.body);
-      const robotsHeader = response.headers["x-robots-tag"] ?? "";
+      const noindex = signals.metaNoindex || headerNoindex(response.headers["x-robots-tag"]);
       checks.push({
         name: "A published page renders for Googlebot",
         ok: response.status === 200 && fromEumon && !isEmptyShell(response.body, signals),
@@ -242,8 +242,8 @@ export async function POST(_request: Request, context: { params: Promise<{ siteI
       if (!fromEumon) return json(await recordVerification(settings, checks));
       checks.push({
         name: "Indexable",
-        ok: !/noindex/i.test(robotsHeader) && !/noindex/i.test(signals.robots ?? ""),
-        detail: /noindex/i.test(robotsHeader) || /noindex/i.test(signals.robots ?? "")
+        ok: !noindex,
+        detail: noindex
           ? "The page is marked noindex — the proxy is probably not sending X-Eumon-Proxy: 1."
           : "No noindex directives.",
       });

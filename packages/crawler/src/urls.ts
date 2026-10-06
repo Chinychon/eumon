@@ -45,3 +45,14 @@ export function isSameSite(url: string, reference: string): boolean {
     return false;
   }
 }
+
+/** True when `href` (resolved against `pageUrl`) names the same document, ignoring query and fragment. */
+export function sameDocument(href: string, pageUrl: string): boolean {
+  try {
+    const target = new URL(href, pageUrl);
+    const page = new URL(pageUrl);
+    return target.origin + target.pathname === page.origin + page.pathname;
+  } catch {
+    return false;
+  }
+}

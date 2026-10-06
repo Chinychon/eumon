@@ -45,6 +45,7 @@ Each metric is stored per site per day. "Sum" metrics add up over a window; "lat
 | CTR, average position, Eumon share of clicks | SEO | Derived: clicks ÷ impressions; weight ÷ impressions; Eumon clicks ÷ site clicks | derived | — | ratio | 1 |
 | `queries_top3`, `queries_top10` | SEO | Distinct queries with average position ≤ 3 / ≤ 10 over the last 7 days | Search Console, `query` | weekly | latest | 1 |
 | `googlebot_fetches` | SEO | Googlebot requests to Eumon pages | `page_metrics_daily` | daily | sum | 1 |
+| `eumon_page_views`, `eumon_cta_clicks` | Outcomes | Visitor views of Eumon pages, and clicks on their calls to action | `page_metrics_daily` | daily | sum | 1 |
 | `crawl_urls`, `crawl_empty_shells`, `crawl_http_errors`, `crawl_noindex` | Site health | Coverage from an analysis run | analysis report | per analysis | latest | 1 |
 | `ai_crawler_fetches` (+ `.<engine>`) | GEO | AI training and AI-search crawler requests to Eumon pages | request user agent | daily | sum | 2 |
 | `ai_live_fetches` (+ `.<engine>`) | GEO | Requests an AI assistant made to answer a person (ChatGPT-User, Perplexity-User, …) | request user agent | daily | sum | 2 |
@@ -176,8 +177,24 @@ Each section is titled with the question it answers, in funnel order.
 1. **Are more people finding you on Google?** Clicks and impressions for the site and for Eumon pages (weekly lines); average position and CTR with change; queries in the top 3 and top 10 (weekly snapshots); pages Googlebot fetched.
 2. **Do AI assistants mention you?** Citation rate and mention rate per engine (ChatGPT, Perplexity, Gemini) as weekly trends; share of voice against the named competitors; AI assistants reading the pages (live fetches, crawler fetches) and visits they send. Every rate opens the questions and answers behind it, excerpt and citations included.
 3. **Do you show up for questions?** Impressions and clicks on question-style searches; rich-result impressions; pages with an FAQ block.
-4. **Is it bringing enquiries?** Enquiries per week since tracking began, from Eumon pages against the rest, and by landing source (Google, AI assistant, other); qualified leads and customers when those events exist. A count opens the landing pages that produced it.
+4. **Is it bringing enquiries?** A search-to-enquiry funnel for Eumon pages (Google impressions → Google clicks → page views → CTA clicks → enquiries), each step with its count and its conversion from the step before, all over the Search Console window so the steps are comparable. Then enquiries per week since tracking began, from Eumon pages against the rest, and by landing source (Google, AI assistant, other); qualified leads and customers when those events exist. A count opens the landing pages that produced it.
 5. **Is the site healthy?** Empty shells, HTTP errors, and noindex pages across analysis runs. Operator only.
+
+### Visual design
+
+The view inherits the dashboard's established world unchanged: black ground, Geist and Geist Mono, square hairline panels, green only on the primary action, the active navigation marker, and progress. Patterns drawn from the operator's PostHog dashboards are integrated in that world, not copied:
+
+- **Self-explaining tiles:**
+  - Every tile carries a one-line, plain-language definition under its title ("Clicks from Google search to any page on the site").
+  - Every section opens with its question and one sentence on why it matters.
+  - Every number's label names its window ("Google clicks · last 28 days").
+- **Dashed incomplete periods:** the current partial week, and the days Search Console has not yet reported, draw as a dashed tail, so a partial week never reads as a drop.
+- **Ranked horizontal bars** for breakdowns (enquiries by source, AI citations by engine, share of voice against competitors), in white and grays. Every bar is labeled with its value.
+- **Two-line charts:** Eumon pages in white, the whole site in gray, with the go-live marker as a hairline with a mono date label. No series introduces a new hue.
+- **Freshness:** a "data through" stamp in the title row and under every Google-based section.
+- **Loading:** hairline placeholder shapes in each tile's real chart position while data loads, never a spinner over empty space.
+
+Not taken from those dashboards: the light theme, multi-color series, rounded tiles, colored accent bars beside titles, and the date-range, filter, and breakdown toolbar.
 
 ### States
 
@@ -220,7 +237,7 @@ Site health; editing the AI question set and brand aliases; copying and revoking
 
 1. **Ledger, SEO, leads.**
    - Connecting Search Console on a site fills 16 months of daily clicks and impressions.
-   - Results shows the headline Google-clicks chart with site and Eumon-page lines and a go-live marker, the Google clicks, enquiries, and pages-live key numbers, sections 1 and 4 with their phase-1 metrics, and site health from analysis runs.
+   - Results shows the headline Google-clicks chart with site and Eumon-page lines and a go-live marker, the Google clicks, enquiries, and pages-live key numbers, section 1, section 4 with the search-to-enquiry funnel, and site health from analysis runs.
    - The client link opens the same numbers read-only and stops working after revoke.
 2. **Free GEO and AEO signals.**
    - AI crawler and live-fetch counts appear by engine.

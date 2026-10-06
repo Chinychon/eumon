@@ -52,7 +52,8 @@ Each metric is stored per site per day. "Sum" metrics add up over a window; "lat
 | `ai_crawlers_allowed` | GEO | Major AI crawlers robots.txt allows (of 5) | analysis report | per analysis | latest | 2 |
 | `question_impressions`, `question_clicks` | AEO | Search Console rows whose query is a question (see Question queries) | Search Console, `query` + `date` | daily | sum | 2 |
 | `rich_result_impressions` | AEO | Impressions with a rich-result search appearance | Search Console, `searchAppearance` | daily | sum | 2 |
-| `published_pages`, `faq_pages` | AEO | Published Eumon pages, and those with an FAQ block (every Eumon page already carries entity JSON-LD) | generated pages (`content_json.faq`) | daily | latest | 2 |
+| `published_pages` | Outcomes | Published Eumon pages | generated pages | daily | latest | 1 |
+| `faq_pages` | AEO | Published Eumon pages with an FAQ block (every Eumon page already carries entity JSON-LD) | generated pages (`content_json.faq`) | daily | latest | 2 |
 | `ai_answers`, `ai_mentions`, `ai_citations` (+ `.<engine>`) | GEO | Successful checks, answers naming the client, answers citing a client URL | AI answer checks | weekly | latest | 3 |
 | `ai_competitor_mentions` | GEO | Answers naming any operator-listed competitor | AI answer checks | weekly | latest | 3 |
 | Mention rate, citation rate, share of voice | GEO | Derived: mentions ÷ answers; citations ÷ answers; client mentions ÷ (client + competitor mentions) | derived | — | ratio | 3 |
@@ -154,27 +155,45 @@ CREATE INDEX IF NOT EXISTS idx_ai_answer_checks_site ON ai_answer_checks(site_id
 
 The ledger stores only additive daily values or point-in-time snapshots. Ratios are always derived at read time. One module (`packages/db`) owns writing points (`upsertMetricPoints`, `incrementMetricPoint`) and reading series (`listMetricSeries(siteId, metrics, from, to)`).
 
-## Results view (operator)
+## Results view
 
-- A new **Results** navigation item, between Overview and Data. It is built in the dashboard's established visual world through Impeccable's new-surface flow.
-- **Sections:** Outcomes, SEO, GEO, AEO, Site health, in that order.
-- **Each metric shows:**
-  - The current-window value.
-  - Change against Before, and against Previous (and Year over year when available).
-  - A line over time with a go-live marker. Daily metrics show 16 months; weekly metrics show every point since collection began.
-- **States:**
-  - Too few points: "collecting since <date>", with no number.
-  - No Search Console property: a connect prompt.
-  - AI engine unconfigured: "not configured".
-  - Incomplete AI week: labeled "incomplete".
-  - Freshness ("Search Console data through <date>") under each Search Console section.
-- **Drill-downs:** a GEO rate opens the questions and answers behind it, excerpt and citations included. A lead count opens the landing pages that produced the leads.
-- **Operator-only controls:** edit the AI question set and brand aliases, copy and revoke the client link, and the AI checks' weekly call count.
+A new **Results** navigation item, between Overview and Data. It answers one question for the whole site: is it working? Page-level work stays in Performance. The view is built in the dashboard's established visual world through Impeccable's new-surface flow. All charts are weekly; comparisons are fixed (no date pickers in the first version).
+
+### Top
+
+- **Title row:** the site name and the data's freshness ("Google data through 3 Oct").
+- **Headline chart:** Google clicks per week over 16 months, with a vertical go-live marker. Two lines: the whole site, and Eumon pages from go-live on. Hovering shows each week's values. Google clicks lead because they are the only series with real history before Eumon, through the backfill.
+- **Key numbers,** each for the current window, beneath the chart:
+  - **Google clicks**, "was X before Eumon".
+  - **Enquiries**, "was X before Eumon" when tracking predates go-live, otherwise "since <first tracked day>".
+  - **AI citations**, "cited in N of M answers", against the first check; "not configured" until an engine key exists.
+  - **Pages live**, "was 0 before Eumon".
+
+### Sections
+
+Each section is titled with the question it answers, in funnel order.
+
+1. **Are more people finding you on Google?** Clicks and impressions for the site and for Eumon pages (weekly lines); average position and CTR with change; queries in the top 3 and top 10 (weekly snapshots); pages Googlebot fetched.
+2. **Do AI assistants mention you?** Citation rate and mention rate per engine (ChatGPT, Perplexity, Gemini) as weekly trends; share of voice against the named competitors; AI assistants reading the pages (live fetches, crawler fetches) and visits they send. Every rate opens the questions and answers behind it, excerpt and citations included.
+3. **Do you show up for questions?** Impressions and clicks on question-style searches; rich-result impressions; pages with an FAQ block.
+4. **Is it bringing enquiries?** Enquiries per week since tracking began, from Eumon pages against the rest, and by landing source (Google, AI assistant, other); qualified leads and customers when those events exist. A count opens the landing pages that produced it.
+5. **Is the site healthy?** Empty shells, HTTP errors, and noindex pages across analysis runs. Operator only.
+
+### States
+
+- Too few points: "collecting since <date>", with no number.
+- No Search Console property: a connect prompt.
+- AI engine unconfigured: "not configured". Incomplete AI week: labeled "incomplete".
+- Search Console freshness ("data through <date>") under every Google-based section.
+
+### Operator-only controls
+
+Site health; editing the AI question set and brand aliases; copying and revoking the client link; the AI checks' weekly call count; links through to Overview and Performance.
 
 ## Client view
 
 - `GET /r/<token>`. The token is `signToken({ siteId, v: report_share_version }, 5 years)` from `packages/core`. It is valid while `v` matches the site's current version. Revoking increments the version and kills every earlier link.
-- It renders the Results sections read-only, titled with the client's site name, with a small "Report by Eumon" credit. It has no operator controls, no call counts, and no question editing. Answer excerpts and citations stay visible, because they are the evidence.
+- It renders the top and sections 1–4 read-only, titled with the client's site name, with a small "Report by Eumon" credit. It has no site health, no operator controls, no call counts, and no question editing. Answer excerpts and citations stay visible, because they are the evidence.
 - Like `/p/*`, `/r/*` must be excluded from Cloudflare Access. The README's Access control section lists it.
 
 ## Honesty rules
@@ -201,7 +220,7 @@ The ledger stores only additive daily values or point-in-time snapshots. Ratios 
 
 1. **Ledger, SEO, leads.**
    - Connecting Search Console on a site fills 16 months of daily clicks and impressions.
-   - Results shows site and Eumon-page series with a go-live marker, leads with Eumon leads, the weekly top-3/top-10 counts, and site health from analysis runs.
+   - Results shows the headline Google-clicks chart with site and Eumon-page lines and a go-live marker, the Google clicks, enquiries, and pages-live key numbers, sections 1 and 4 with their phase-1 metrics, and site health from analysis runs.
    - The client link opens the same numbers read-only and stops working after revoke.
 2. **Free GEO and AEO signals.**
    - AI crawler and live-fetch counts appear by engine.

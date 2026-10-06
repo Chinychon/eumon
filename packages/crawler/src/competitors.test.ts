@@ -51,11 +51,15 @@ describe("inspectPage", () => {
     const html = `<html><head><title>IVF in Penang</title><script type="application/ld+json">{"@type":"MedicalProcedure"}</script>
       <script>var price = "$1"; function book now(){}</script></head><body><h1>IVF in Penang</h1>
       <p>Packages from RM 12,500. Book a consultation today.</p><h2>Frequently asked questions</h2>
-      <a href="https://wa.me/60123456789">WhatsApp us</a><a href="tel:+60123456789">Call</a><form action="/enquire"></form></body></html>`;
+      <a href="https://wa.me/60123456789">WhatsApp us</a><a href="tel:+60123456789">Call</a><form action="/enquire"><input type="email" name="email"><textarea name="message"></textarea></form>
+      <script async src="https://www.googletagmanager.com/gtag/js?id=G-ABC123"></script></body></html>`;
     const page = inspectPage("https://rival.example/treatments/ivf", { status: 200, body: html });
     assert.deepEqual(page.conversion, { whatsapp: true, phone: true, email: false, form: true, booking: true, prices: true });
     assert.equal(page.faq, true);
     assert.deepEqual(page.schemaTypes, ["MedicalProcedure"]);
+    assert.deepEqual(page.tracking, ["Google Analytics"]);
+    const search = inspectPage("https://rival.example/a", { status: 200, body: `<form role="search"><input type="search" name="q"></form><p>${"Text. ".repeat(60)}</p>` });
+    assert.equal(search.conversion.form, false, "a search box is not a lead form");
     const scriptOnly = inspectPage("https://rival.example/a", { status: 200, body: `<html><body><p>${"Plain text. ".repeat(40)}</p><script>var a = "$1"; "book now"</script></body></html>` });
     assert.equal(scriptOnly.conversion.prices, false, "prices inside scripts don't count");
     assert.equal(scriptOnly.conversion.booking, false);

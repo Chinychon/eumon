@@ -7,7 +7,7 @@ import { runFullAnalysis } from "./pipeline.js";
 
 const inspection = (url: string, overrides: Partial<PageInspection> = {}): PageInspection => ({
   url, family: "x", status: 200, textLength: 3000, emptyShell: false, schemaTypes: ["WebPage"], faq: false,
-  conversion: { whatsapp: false, phone: false, email: false, form: true, booking: false, prices: false }, ...overrides,
+  conversion: { whatsapp: false, phone: false, email: false, form: true, booking: false, prices: false }, tracking: [], ...overrides,
 });
 
 const rival = (domain: string, families: Array<[string, number]>, pages: PageInspection[] = []): SiteResearch => ({
@@ -93,7 +93,8 @@ describe("compareCompetition", () => {
 });
 
 describe("runFullAnalysis with competitors", () => {
-  const page = (title: string) => `<html><head><title>${title}</title><meta name="description" content="A page about ${title} with enough words to count."></head><body><h1>${title}</h1><p>${"Useful facts. ".repeat(80)}</p></body></html>`;
+  // A site that converts and measures it, so content gaps decide the plan.
+  const page = (title: string) => `<html><head><title>${title}</title><meta name="description" content="A page about ${title} with enough words to count."><script async src="https://www.googletagmanager.com/gtag/js?id=G-1"></script></head><body><h1>${title}</h1><p>${"Useful facts. ".repeat(80)}</p><a href="https://wa.me/60123">WhatsApp us</a></body></html>`;
   const sitemap = (origin: string, paths: string[]) => `<urlset>${paths.map((path) => `<url><loc>${origin}${path}</loc></url>`).join("")}</urlset>`;
   const files: Record<string, string> = {
     "https://medbay.example/robots.txt": "User-agent: *\nAllow: /",

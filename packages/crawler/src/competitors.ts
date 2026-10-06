@@ -1,5 +1,5 @@
 import { defaultFetcher, isEmptyShell, isSafePublicUrl, parseHtmlSignals, type Fetcher, type FetchResult } from "./index.js";
-import { findTags, visibleText } from "./html.js";
+import { elementSpans, findTags, visibleText } from "./html.js";
 import { parseRobots, type RobotsPolicy } from "./robots.js";
 import { classifyLanguage, classifyUrlType, isSameSite } from "./urls.js";
 
@@ -41,6 +41,8 @@ export type PageInspection = {
   schemaTypes: string[];
   faq: boolean;
   conversion: { whatsapp: boolean; phone: boolean; email: boolean; form: boolean; booking: boolean; prices: boolean };
+  /** Analytics and conversion-tracking tools whose snippets appear in the page. */
+  tracking: string[];
 };
 
 export type SiteResearch = {
@@ -215,6 +217,27 @@ export async function profileSitemaps(
   };
 }
 
+const TRACKERS: Array<[string, RegExp]> = [
+  ["Google Analytics", /googletagmanager\.com\/gtag\/js|gtag\(\s*['"]config['"]|google-analytics\.com\/(analytics|ga)\.js/i],
+  ["Google Tag Manager", /googletagmanager\.com\/gtm\.js|['"]GTM-[A-Z0-9]{4,}['"]/],
+  ["PostHog", /posthog\.init|i\.posthog\.com|posthog-js/i],
+  ["Plausible", /plausible\.io\/js/i],
+  ["Meta Pixel", /connect\.facebook\.net\/[^"']*fbevents\.js|\bfbq\(\s*['"]init/i],
+  ["Vercel Analytics", /\/_vercel\/insights|va\.vercel-scripts\.com/i],
+  ["Microsoft Clarity", /clarity\.ms\/tag/i],
+  ["Umami", /umami\.(is|js)|data-website-id=/i],
+  ["Mixpanel", /cdn\.mxpnl\.com|mixpanel\.init/i],
+  ["Eumon", /eumonTrack|eumon_sid|\/__eumon\//],
+];
+
+/** A form that collects contact details (not a site search box or newsletter-free filter). */
+function hasLeadForm(html: string): boolean {
+  return elementSpans(html, ["form"]).some((form) => {
+    const body = html.slice(form.start, Math.min(form.end, form.start + 20_000));
+    return /type=["']?(email|tel)\b|<textarea\b|name=["']?(phone|mobile|whatsapp|email|message|enquiry|inquiry)\b/i.test(body);
+  });
+}
+
 const PRICE = /(?:RM|Rp|S\$|US\$|\$|€|£|฿|₱|₹|¥)\s?\d[\d.,]*|\b\d[\d.,]*\s?(?:ringgit|rupiah|USD|MYR|IDR|SGD|EUR)\b/i;
 const BOOKING = /\b(book (?:now|an? (?:appointment|consultation|call|demo))|schedule (?:a|an|your)|get a (?:free )?quote|request a (?:quote|call ?back)|buat janji|reservasi|daftar sekarang)\b/i;
 
@@ -237,10 +260,11 @@ export function inspectPage(url: string, response: Pick<FetchResult, "status" | 
       whatsapp: anchors.some((href) => /(?:wa\.me|api\.whatsapp\.com|chat\.whatsapp\.com|whatsapp:)/i.test(href)),
       phone: anchors.some((href) => /^tel:/i.test(href)),
       email: anchors.some((href) => /^mailto:/i.test(href)),
-      form: /<form\b/i.test(response.body),
+      form: hasLeadForm(response.body),
       booking: BOOKING.test(text),
       prices: PRICE.test(text),
     },
+    tracking: TRACKERS.filter(([, pattern]) => pattern.test(response.body)).map(([name]) => name),
   };
 }
 

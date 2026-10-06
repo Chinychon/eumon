@@ -36,6 +36,7 @@ import {
   type AnalysisBundle,
 } from "./index.js";
 import { findingsFromCode } from "./code-findings.js";
+import { auditConversion, findingsFromConversion } from "./conversion.js";
 import {
   compareCompetition,
   competitorProfiles,
@@ -188,6 +189,9 @@ export async function runFullAnalysis(input: RunAnalysisInput) {
     findings.push(...sampleFindings);
   }
 
+  const conversion = auditConversion(ownInspections);
+  findings.push(...findingsFromConversion(conversion, { siteId: input.siteId, analysisId, familySizes: sitemap.urlTypes }));
+
   if (repo) {
     findings.push(...findingsFromCode({
       siteId: input.siteId,
@@ -301,6 +305,7 @@ export async function runFullAnalysis(input: RunAnalysisInput) {
       repeatability: summarizeRepeatability(repeatability),
     },
     competition: competition ?? null,
+    conversion,
     search: searchMetrics.length ? search : null,
     // Raw Search Console rows are persisted separately; the report keeps the
     // synthesis so it stays well under Workflow step and D1 row limits.

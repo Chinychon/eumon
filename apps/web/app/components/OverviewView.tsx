@@ -39,6 +39,11 @@ type Report = {
     insights: string[];
     aiLabels: boolean;
   } | null;
+  conversion?: {
+    templates: Array<{ family: string; url: string; paths: string[]; prices: boolean; tracking: string[] }>;
+    tracking: string[];
+    suggestedEvents: Array<{ event: string; trigger: string }>;
+  } | null;
   search?: {
     totals: { clicks: number; impressions: number; ctr: number };
     targetMarkets: string[];
@@ -344,6 +349,7 @@ export function OverviewView({ site, repositories, githubInstalled, onSiteChange
             </section>
           </div>
           {report.search && <SearchIntelligence search={report.search} />}
+          {report.conversion && report.conversion.templates.length > 0 && <ConversionPaths conversion={report.conversion} onNavigate={onNavigate} />}
           {report.competition && report.competition.rows.length > 0 && <ContentGaps competition={report.competition} onNavigate={onNavigate} />}
           {coverage?.families && coverage.families.length > 1 && <FamilyHealth families={coverage.families} />}
           {report.repo && <CodeIntelligence repo={report.repo} />}
@@ -575,6 +581,36 @@ function SearchIntelligence({ search }: { search: NonNullable<Report["search"]> 
           ))}</ul>
         </>
       )}
+    </section>
+  );
+}
+
+const PATH_LABELS: Record<string, string> = { whatsapp: "WhatsApp", phone: "Phone", email: "Email", form: "Enquiry form", booking: "Booking / quote" };
+
+/** How each template turns a visitor into a lead, what measures it, and the events worth tracking. */
+function ConversionPaths({ conversion, onNavigate }: { conversion: NonNullable<Report["conversion"]>; onNavigate: (view: "setup") => void }) {
+  const label = (family: string) => (family === "home" ? "Homepage" : family === "page" ? "Top-level pages" : `/${family}/`);
+  return (
+    <section className="panel" style={{ marginTop: 13 }}>
+      <div className="panel-heading">
+        <div><div className="eyebrow">CONVERSION</div><h3>How each template turns visitors into leads</h3></div>
+        <Button small variant="secondary" onClick={() => onNavigate("setup")}>Track conversions →</Button>
+      </div>
+      <div className="table-wrap" style={{ marginBottom: 10 }}>
+        <table className="table">
+          <thead><tr><th>Template</th><th>Ways to convert</th><th>Prices shown</th><th>Tracking</th></tr></thead>
+          <tbody>{conversion.templates.map((template) => (
+            <tr key={template.url}>
+              <td><a href={template.url} target="_blank" rel="noreferrer"><code>{label(template.family)}</code></a></td>
+              <td>{template.paths.length ? template.paths.map((path) => PATH_LABELS[path] ?? path).join(", ") : <span className="bad-count">None found</span>}</td>
+              <td>{template.prices ? "Yes" : <span className="muted">No</span>}</td>
+              <td className="small">{template.tracking.join(", ") || <span className="bad-count">None found</span>}</td>
+            </tr>
+          ))}</tbody>
+        </table>
+      </div>
+      <div className="section-title">Events to track</div>
+      <ul className="insights">{conversion.suggestedEvents.map((entry) => <li key={entry.event}><code>{entry.event}</code> — {entry.trigger}</li>)}</ul>
     </section>
   );
 }

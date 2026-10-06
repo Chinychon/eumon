@@ -13,7 +13,13 @@ type Report = {
   analysisId: string;
   site: { name: string; baseUrl: string; fingerprint?: { framework: string; rendering?: string; deployment?: string } };
   sitemap: { totalUrls: number; sampledUrls: number; errors: string[] };
-  coverage?: { totalUrls: number; completedUrls: number; emptyShellUrls: number; httpErrorUrls: number } | null;
+  coverage?: {
+    totalUrls: number;
+    completedUrls: number;
+    emptyShellUrls: number;
+    httpErrorUrls: number;
+    families?: Array<{ family: string; urls: number; crawled: number; emptyShells: number; errors: number; noindex: number; missingStructuredData: number }>;
+  } | null;
   pages: Array<{ url: string; renderedTextLength: number }>;
   findings: Finding[];
   competitors: Array<{ domain: string; category: string; summary: string; technicalNotes?: string }>;
@@ -45,6 +51,7 @@ export function OverviewView({ site, repositories, githubInstalled, onSiteChange
   const [competitors, setCompetitors] = useState("");
   const [repositoryId, setRepositoryId] = useState("");
   const [conversions, setConversions] = useState<{ totalEvents: number; last28Days: number; leads: number } | null>(null);
+  const [allFindings, setAllFindings] = useState(false);
 
   const loadChanges = useCallback(async (analysisId: string) => {
     const data = await api<{ changes: Change[] }>(`/api/analyses/${analysisId}/changes`).catch(() => ({ changes: [] }));
@@ -223,7 +230,7 @@ export function OverviewView({ site, repositories, githubInstalled, onSiteChange
           <div className="dashboard-columns">
             <section className="panel" id="findings">
               <div className="panel-heading"><div><div className="eyebrow">WHAT WE FOUND</div><h3>Technical findings</h3></div><span className="count-pill">{findings.length} findings</span></div>
-              {findings.length ? findings.slice(0, 8).map((finding) => {
+              {findings.length ? findings.slice(0, allFindings ? findings.length : 8).map((finding) => {
                 const change = changes.find((item) => item.findingId === finding.id);
                 const fixable = hasRepo && ["sitemap", "indexing"].includes(finding.category);
                 return (
@@ -247,6 +254,7 @@ export function OverviewView({ site, repositories, githubInstalled, onSiteChange
                   </article>
                 );
               }) : <p className="empty-state">No high-impact technical issues surfaced. Connect Search Console to find demand and page opportunities.</p>}
+              {findings.length > 8 && <button className="inline-action" onClick={() => setAllFindings((value) => !value)}>{allFindings ? "Show the top 8" : `Show all ${findings.length} findings`}</button>}
             </section>
             <section className="panel" id="plan">
               <div className="panel-heading"><div><div className="eyebrow">WEBSITE-SPECIFIC STRATEGY</div><h3>Growth plan</h3></div><span className="sparkle">✳</span></div>
@@ -274,6 +282,7 @@ export function OverviewView({ site, repositories, githubInstalled, onSiteChange
               )) : <p className="empty-state">Add competitor domains above to record homepage evidence. Rankings and competitor traffic are not inferred.</p>}
             </section>
           </div>
+          {coverage?.families && coverage.families.length > 1 && <FamilyHealth families={coverage.families} />}
           {report.sitemap.errors.length > 0 && <div className="crawl-note"><strong>Sitemap note</strong><span>{report.sitemap.errors.join(" ")}</span></div>}
         </div>
       )}
@@ -281,5 +290,33 @@ export function OverviewView({ site, repositories, githubInstalled, onSiteChange
         <div className="empty" style={{ marginTop: 16 }}>Run an analysis to see what Google receives from this site — every sitemap URL is fetched as Googlebot.</div>
       )}
     </div>
+  );
+}
+
+type FamilyStats = NonNullable<NonNullable<Report["coverage"]>["families"]>[number];
+
+/** What Googlebot received for each page template, so problems point at the code that produces them. */
+function FamilyHealth({ families }: { families: FamilyStats[] }) {
+  const label = (family: string) => (family === "home" ? "Homepage" : family === "page" ? "Top-level pages" : `/${family}/`);
+  const cell = (value: number, of: number) => (value ? <span className="bad-count">{formatNumber(value)}{of ? <small> ({Math.round((value / of) * 100)}%)</small> : null}</span> : <span className="muted">0</span>);
+  return (
+    <section className="panel" style={{ marginTop: 13 }}>
+      <div className="panel-heading"><div><div className="eyebrow">RENDERING & INDEXING BY PAGE TYPE</div><h3>What Googlebot receives from each template</h3></div></div>
+      <div className="table-wrap" style={{ marginBottom: 10 }}>
+        <table className="table">
+          <thead><tr><th>Page type</th><th className="num">Sitemap URLs</th><th className="num">Empty HTML</th><th className="num">Errors</th><th className="num">Noindex</th><th className="num">No structured data</th></tr></thead>
+          <tbody>{families.slice(0, 12).map((family) => (
+            <tr key={family.family}>
+              <td><code>{label(family.family)}</code></td>
+              <td className="num">{formatNumber(family.urls)}</td>
+              <td className="num">{cell(family.emptyShells, family.crawled)}</td>
+              <td className="num">{cell(family.errors, family.urls)}</td>
+              <td className="num">{cell(family.noindex, family.crawled)}</td>
+              <td className="num">{family.family === "home" || family.family === "page" ? <span className="muted">—</span> : cell(family.missingStructuredData, family.crawled)}</td>
+            </tr>
+          ))}</tbody>
+        </table>
+      </div>
+    </section>
   );
 }

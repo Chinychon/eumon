@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
-import { auditSitemap, defaultFetcher, fetchGooglebotPage, headerNoindex, isEmptyShell, parseHtmlSignals, runTechnicalSeoAudit, type Fetcher } from "./index.js";
+import type { CrawlCoverage } from "@organic-growth/core";
+import { auditSitemap, defaultFetcher, fetchGooglebotPage, findingsFromCrawlCoverage, headerNoindex, isBotChallenge, isEmptyShell, parseHtmlSignals, runTechnicalSeoAudit, type Fetcher } from "./index.js";
 import { classifyLanguage, classifyUrlType, isSameSite } from "./urls.js";
 
 describe("isSameSite", () => {
@@ -168,5 +169,79 @@ describe("robots.txt rules in the technical audit", () => {
   it("respects a Googlebot group that overrides a wildcard block", () => {
     const findings = audit("User-agent: Googlebot\nAllow: /\n\nUser-agent: *\nDisallow: /");
     assert.equal(findings.some((finding) => finding.title.includes("blocks Googlebot")), false);
+  });
+});
+
+describe("firewalls and bot challenges", () => {
+  const content = `<html><head><title>Treatment prices in Penang</title></head><body><h1>Treatments</h1><p>${"Price list. ".repeat(60)}</p></body></html>`;
+
+  it("re-fetches as a browser when a Googlebot request is refused, and records the refusal", async () => {
+    const fake: Fetcher = async (url, init) => (init?.userAgent?.includes("Googlebot")
+      ? { url, finalUrl: url, status: 403, headers: {}, body: "Forbidden" }
+      : { url, finalUrl: url, status: 200, headers: {}, body: content });
+    const page = await fetchGooglebotPage("https://x.com/treatments/a", fake);
+    assert.equal(page.status, 200);
+    assert.equal(page.googlebotBlockedStatus, 403);
+    assert.equal(page.fetchMode, "raw");
+    assert.equal(page.isEmptyShell, false);
+  });
+
+  it("marks challenge pages instead of reporting them as empty shells", async () => {
+    const challenge = "<html><head><title>Just a moment...</title></head><body><script src=\"/cdn-cgi/challenge-platform/x.js\"></script></body></html>";
+    const fake: Fetcher = async (url) => ({ url, finalUrl: url, status: 403, headers: {}, body: challenge });
+    const page = await fetchGooglebotPage("https://x.com/a", fake);
+    assert.equal(page.botChallenge, true);
+    assert.equal(page.isEmptyShell, false);
+    assert.equal(isBotChallenge({ status: 200, headers: {}, body: challenge }), false, "only refused responses count");
+    assert.equal(isBotChallenge({ status: 403, headers: { "cf-mitigated": "challenge" }, body: "" }), true);
+  });
+});
+
+describe("findingsFromCrawlCoverage", () => {
+  const base: CrawlCoverage = {
+    totalUrls: 1000, completedUrls: 990, failedUrls: 0, pendingUrls: 0, emptyShellUrls: 0, httpErrorUrls: 0, missingTitleUrls: 0,
+    issues: {}, issueExamples: {}, families: [],
+  };
+  const findings = (coverage: Partial<CrawlCoverage>) => findingsFromCrawlCoverage({ siteId: "s", analysisId: "a", coverage: { ...base, ...coverage } });
+
+  it("names the templates where empty shells are concentrated", () => {
+    const [finding] = findings({
+      emptyShellUrls: 45,
+      families: [
+        { family: "doctors", urls: 900, crawled: 900, emptyShells: 0, errors: 0, noindex: 0, missingStructuredData: 0 },
+        { family: "procedures", urls: 50, crawled: 50, emptyShells: 45, errors: 0, noindex: 0, missingStructuredData: 0 },
+      ],
+    });
+    assert.ok(finding?.summary.includes("/procedures/ (45 of 50)"), finding?.summary);
+    assert.equal(finding?.summary.includes("doctors"), false);
+  });
+
+  it("treats a noindex homepage as critical", () => {
+    const result = findings({
+      issues: { noindex: 1 },
+      issueExamples: { noindex: [{ url: "https://x.com/", detail: "noindex" }] },
+      families: [{ family: "home", urls: 1, crawled: 1, emptyShells: 0, errors: 0, noindex: 1, missingStructuredData: 0 }],
+    });
+    assert.equal(result.length, 1);
+    assert.equal(result[0]?.title, "The homepage is marked noindex");
+    assert.equal(result[0]?.severity, "CRITICAL");
+  });
+
+  it("recognizes a layout-level canonical that points every page at the homepage", () => {
+    const urls = ["https://x.com/doctors/a", "https://x.com/doctors/b", "https://x.com/procedures/c"];
+    const [finding] = findings({
+      issues: { canonicalMismatch: 600 },
+      issueExamples: { canonicalMismatch: urls.map((url) => ({ url, detail: "https://x.com/" })) },
+    });
+    assert.equal(finding?.title, "Pages declare the homepage as their canonical URL");
+    assert.ok(["CRITICAL", "HIGH"].includes(finding?.severity ?? ""), finding?.severity);
+  });
+
+  it("keeps cosmetic issues below indexing problems", () => {
+    const result = findings({ issues: { multipleH1: 900, missingDescription: 900, robotsBlocked: 200 } });
+    const severity = (title: string) => result.find((finding) => finding.title.includes(title))?.organicImpactScore ?? 0;
+    assert.ok(severity("robots.txt blocks") > severity("more than one H1"));
+    assert.ok(severity("robots.txt blocks") > severity("meta descriptions"));
+    assert.ok(severity("more than one H1") <= 20);
   });
 });

@@ -22,11 +22,13 @@ export function runTechnicalSeoAudit(input: {
   sitemap: SitemapAudit;
   pages: CrawlPageResult[];
   robotsTxt?: string;
+  /** Every sitemap URL was crawled; per-page checks it covers are skipped here to avoid duplicates. */
+  fullCrawl?: boolean;
 }): Finding[] {
   const findings: Finding[] = [];
   const { pages, sitemap, siteId, analysisId } = input;
 
-  const canonicalMismatches = pages.filter((p) => p.canonical && !sameDocument(p.canonical, p.finalUrl ?? p.url));
+  const canonicalMismatches = input.fullCrawl ? [] : pages.filter((p) => p.canonical && !sameDocument(p.canonical, p.finalUrl ?? p.url));
   if (canonicalMismatches.length > 0) {
     const impact = organicImpactScore({
       category: "indexing",
@@ -82,7 +84,7 @@ export function runTechnicalSeoAudit(input: {
     });
   }
 
-  const weakTitles = pages.filter(
+  const weakTitles = input.fullCrawl ? [] : pages.filter(
     (p) =>
       !p.isEmptyShell &&
       (!p.title || p.title.length < 15 || /^https?:/i.test(p.title) || p.title === p.url),
@@ -179,7 +181,7 @@ export function runTechnicalSeoAudit(input: {
   }
 
   // Informational: decorative issues should not outrank empty shells
-  const thinDescriptions = pages.filter(
+  const thinDescriptions = input.fullCrawl ? [] : pages.filter(
     (p) => !p.isEmptyShell && (!p.description || p.description.length < 40),
   );
   if (thinDescriptions.length > 0) {

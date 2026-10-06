@@ -1,4 +1,4 @@
-import type { CrawlCoverage, CrawlPageResult, Finding, SitemapAudit } from "@organic-growth/core";
+import type { CrawlPageResult, Finding, SitemapAudit } from "@organic-growth/core";
 import { createId, organicImpactScore, severityFromImpact } from "@organic-growth/core";
 import { contentMarkup, findTags, hasToken, innerText, parseAttributes, visibleText } from "./html.js";
 import { GOOGLEBOT_TOKEN } from "./robots.js";
@@ -273,17 +273,49 @@ export async function fetchPageAudit(
   };
 }
 
+/** Responses that usually mean a firewall or rate limiter refused the request, not that the page is broken. */
+const REFUSED_STATUSES = new Set([401, 403, 429, 503]);
+
+/**
+ * A bot-protection interstitial (Cloudflare, Vercel, Akamai, Imperva,
+ * PerimeterX, DataDome…) instead of the site's own page.
+ */
+export function isBotChallenge(response: Pick<FetchResult, "status" | "headers" | "body">): boolean {
+  if (!REFUSED_STATUSES.has(response.status)) return false;
+  if (response.headers["cf-mitigated"] === "challenge") return true;
+  return /cf-chl-|challenge-platform|<title>\s*(just a moment|attention required|access denied|vercel security checkpoint)|_incapsula_|px-captcha|captcha-delivery|datadome/i.test(response.body.slice(0, 50_000));
+}
+
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 /**
  * The full crawl uses the Googlebot request profile for every sitemap URL.
  * Raw-vs-Googlebot and browser comparisons remain a representative sample,
  * where they provide much more signal per request.
+ *
+ * Many firewalls reject requests that claim to be Googlebot but don't come
+ * from Google's network (real Googlebot is verified by reverse DNS). When a
+ * Googlebot request is refused, the page is re-fetched as a browser so the
+ * crawl still describes the page, and the refusal is recorded.
  */
 export async function fetchGooglebotPage(
   url: string,
   fetcher: Fetcher = defaultFetcher,
 ): Promise<CrawlPageResult> {
-  const response = await fetcher(url, { userAgent: GOOGLEBOT_UA });
-  return toCrawlResult(url, response, "googlebot");
+  let response = await fetcher(url, { userAgent: GOOGLEBOT_UA });
+  if (response.status === 429 && !isBotChallenge(response)) {
+    const retryAfter = Number(response.headers["retry-after"]);
+    await delay(Number.isFinite(retryAfter) && retryAfter > 0 ? Math.min(retryAfter * 1000, 10_000) : 3_000);
+    response = await fetcher(url, { userAgent: GOOGLEBOT_UA });
+  }
+  if (REFUSED_STATUSES.has(response.status)) {
+    const browser = await fetcher(url, { userAgent: BROWSER_UA }).catch(() => null);
+    if (browser && browser.status < 400 && !isBotChallenge(browser)) {
+      return { ...toCrawlResult(url, browser, "raw"), googlebotBlockedStatus: response.status };
+    }
+  }
+  const page = toCrawlResult(url, response, "googlebot");
+  return isBotChallenge(response) ? { ...page, botChallenge: true, isEmptyShell: false } : page;
 }
 
 export type GooglebotCrawlOutcome =
@@ -626,97 +658,8 @@ export function findingsFromCrawl(input: {
   return findings;
 }
 
-/** Findings based on every sitemap URL, rather than extrapolating from a sample. */
-export function findingsFromCrawlCoverage(input: {
-  siteId: string;
-  analysisId: string;
-  coverage: CrawlCoverage;
-  examples?: CrawlPageResult[];
-}): Finding[] {
-  const { coverage } = input;
-  const findings: Finding[] = [];
-  const crawled = Math.max(coverage.completedUrls, 1);
-  const shellRatio = coverage.emptyShellUrls / crawled;
-
-  if (coverage.emptyShellUrls > 0) {
-    const impact = organicImpactScore({
-      category: "rendering",
-      pagesAffected: coverage.emptyShellUrls,
-      isEmptyShellAtScale: shellRatio >= 0.1 || coverage.emptyShellUrls >= 25,
-      isBlockingCrawl: shellRatio >= 0.3,
-    });
-    findings.push({
-      id: createId("finding"),
-      siteId: input.siteId,
-      analysisId: input.analysisId,
-      category: "rendering",
-      severity: severityFromImpact(impact),
-      title: "Googlebot receives empty or thin HTML on sitemap URLs",
-      summary: `${coverage.emptyShellUrls.toLocaleString()} of ${coverage.completedUrls.toLocaleString()} crawled sitemap URLs returned an empty or thin HTML shell (${Math.round(shellRatio * 100)}%).`,
-      evidence: {
-        coverage,
-        examples: (input.examples ?? []).filter((page) => page.isEmptyShell).slice(0, 20).map((page) => ({
-          url: page.url,
-          status: page.status,
-          title: page.title,
-          textLength: page.rawTextLength,
-        })),
-      },
-      organicImpactScore: impact,
-      recommendation: "Ensure indexable routes return meaningful server or edge HTML before client hydration, then validate the affected template across its sitemap URLs.",
-      pagesAffected: (input.examples ?? []).filter((page) => page.isEmptyShell).slice(0, 20).map((page) => page.url),
-      createdAt: new Date().toISOString(),
-    });
-  }
-
-  if (coverage.httpErrorUrls > 0 || coverage.failedUrls > 0) {
-    const affected = coverage.httpErrorUrls + coverage.failedUrls;
-    const impact = organicImpactScore({
-      category: "indexing",
-      pagesAffected: affected,
-      isBlockingCrawl: affected / Math.max(coverage.totalUrls, 1) >= 0.05,
-    });
-    findings.push({
-      id: createId("finding"),
-      siteId: input.siteId,
-      analysisId: input.analysisId,
-      category: "indexing",
-      severity: severityFromImpact(impact),
-      title: "Sitemap URLs fail or return error responses",
-      summary: `${coverage.httpErrorUrls.toLocaleString()} URLs returned HTTP errors and ${coverage.failedUrls.toLocaleString()} could not be fetched during the crawl.`,
-      evidence: { coverage },
-      organicImpactScore: impact,
-      recommendation: "Review recurring response failures by route template and remove invalid URLs from the sitemap after correcting the underlying route or data issue.",
-      pagesAffected: [],
-      createdAt: new Date().toISOString(),
-    });
-  }
-
-  if (coverage.missingTitleUrls > 0) {
-    const impact = organicImpactScore({
-      category: "metadata",
-      pagesAffected: coverage.missingTitleUrls,
-    });
-    findings.push({
-      id: createId("finding"),
-      siteId: input.siteId,
-      analysisId: input.analysisId,
-      category: "metadata",
-      severity: severityFromImpact(Math.min(impact, 65)),
-      title: "Sitemap URLs are missing useful title tags",
-      summary: `${coverage.missingTitleUrls.toLocaleString()} crawled sitemap URLs had no title or a title shorter than 15 characters.`,
-      evidence: { coverage },
-      organicImpactScore: Math.min(impact, 65),
-      recommendation: "Trace the affected URLs to their page template and generate unique titles from page-specific entities and search intent.",
-      pagesAffected: [],
-      createdAt: new Date().toISOString(),
-    });
-  }
-
-  return findings;
-}
-
 export * from "./tech-seo.js";
+export * from "./coverage-findings.js";
 export * from "./urls.js";
 export * from "./html.js";
 export * from "./robots.js";

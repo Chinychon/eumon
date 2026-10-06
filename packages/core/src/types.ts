@@ -139,6 +139,13 @@ export type CrawlPageResult = {
   routeFamily?: string;
   /** The canonical tag names a different URL than the one fetched. */
   canonicalMismatch?: boolean;
+  /**
+   * Status a Googlebot-identified request got before the crawler retried as a
+   * browser — typically a firewall rejecting unverified Googlebot traffic.
+   */
+  googlebotBlockedStatus?: number;
+  /** The response was a bot-protection challenge page rather than the site's content. */
+  botChallenge?: boolean;
 }
 
 export type SitemapAudit = {
@@ -151,6 +158,34 @@ export type SitemapAudit = {
   freshness?: string;
 }
 
+/** Problems counted across every crawled sitemap URL. */
+export type CrawlIssue =
+  | "robotsBlocked"
+  | "noindex"
+  | "canonicalMismatch"
+  | "redirected"
+  | "missingH1"
+  | "multipleH1"
+  | "missingDescription"
+  | "missingStructuredData"
+  | "invalidStructuredData"
+  | "duplicateTitle"
+  | "botFallback"
+  | "botChallenge";
+
+export type CrawlIssueExample = { url: string; detail?: string };
+
+/** Crawl health of one route family (page template), e.g. every `/doctors/*` URL. */
+export type CrawlFamilyStats = {
+  family: string;
+  urls: number;
+  crawled: number;
+  emptyShells: number;
+  errors: number;
+  noindex: number;
+  missingStructuredData: number;
+};
+
 /** Aggregate coverage for a sitemap-driven crawl. Individual page records live in storage. */
 export type CrawlCoverage = {
   totalUrls: number;
@@ -160,6 +195,11 @@ export type CrawlCoverage = {
   emptyShellUrls: number;
   httpErrorUrls: number;
   missingTitleUrls: number;
+  /** URL counts per issue. Absent in reports created before these checks existed. */
+  issues?: Partial<Record<CrawlIssue, number>>;
+  issueExamples?: Partial<Record<CrawlIssue, CrawlIssueExample[]>>;
+  duplicateTitleGroups?: Array<{ title: string; count: number; examples: string[] }>;
+  families?: CrawlFamilyStats[];
 }
 
 export type SearchMetricRow = {

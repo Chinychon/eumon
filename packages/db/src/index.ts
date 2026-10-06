@@ -1,6 +1,9 @@
 import type {
   CompetitorProfile,
   CrawlCoverage,
+  CrawlFamilyStats,
+  CrawlIssue,
+  CrawlIssueExample,
   CrawlPageResult,
   Finding,
   FrameworkFingerprint,
@@ -266,19 +269,32 @@ export async function updateAnalysisStatus(
     .run();
 }
 
+/**
+ * Queues sitemap URLs for the full crawl. URLs robots.txt blocks for Googlebot
+ * are recorded as `blocked` and never fetched; Google can't crawl them either.
+ */
 export async function enqueueAnalysisCrawlUrls(
   db: D1Like,
-  input: { analysisId: string; siteId: string; urls: string[] },
+  input: { analysisId: string; siteId: string; urls: Array<{ url: string; routeFamily: string; blocked?: boolean }> },
 ): Promise<number> {
-  const urls = [...new Set(input.urls)];
+  const seen = new Set<string>();
+  const urls = input.urls.filter((entry) => !seen.has(entry.url) && seen.add(entry.url));
   const createdAt = nowIso();
   for (const group of chunks(urls, 100)) {
-    const statements = group.map((url) => db.prepare(
+    const statements = group.map((entry) => db.prepare(
       `INSERT OR IGNORE INTO pages (
         id, site_id, analysis_id, url, status, is_empty_shell, result_json,
         crawl_state, created_at
-      ) VALUES (?, ?, ?, ?, NULL, 0, '{}', 'pending', ?)`,
-    ).bind(`page_${crypto.randomUUID()}`, input.siteId, input.analysisId, url, createdAt));
+      ) VALUES (?, ?, ?, ?, NULL, 0, ?, ?, ?)`,
+    ).bind(
+      `page_${crypto.randomUUID()}`,
+      input.siteId,
+      input.analysisId,
+      entry.url,
+      JSON.stringify({ routeFamily: entry.routeFamily }),
+      entry.blocked ? "blocked" : "pending",
+      createdAt,
+    ));
     await runStatements(db, statements);
   }
   return urls.length;
@@ -308,12 +324,12 @@ export async function saveCrawlBatch(
   const statements = input.outcomes.map((outcome) => {
     if (!outcome.page) {
       return db.prepare(
-        `UPDATE pages SET crawl_state = 'failed', crawl_error = ?, crawled_at = ?, result_json = ?
+        `UPDATE pages SET crawl_state = 'failed', crawl_error = ?, crawled_at = ?, result_json = json_set(result_json, '$.error', ?)
          WHERE analysis_id = ? AND url = ?`,
       ).bind(
         outcome.error ?? "The crawler could not fetch this URL.",
         crawledAt,
-        JSON.stringify({ error: outcome.error ?? "The crawler could not fetch this URL." }),
+        outcome.error ?? "The crawler could not fetch this URL.",
         input.analysisId,
         outcome.url,
       );
@@ -339,6 +355,8 @@ export async function saveCrawlBatch(
       invalidJsonLd: page.invalidJsonLd,
       routeFamily: page.routeFamily,
       canonicalMismatch: page.canonicalMismatch,
+      googlebotBlockedStatus: page.googlebotBlockedStatus,
+      botChallenge: page.botChallenge,
     };
     return db.prepare(
       `UPDATE pages SET status = ?, title = ?, is_empty_shell = ?, result_json = ?,
@@ -357,10 +375,42 @@ export async function saveCrawlBatch(
   for (const group of chunks(statements, 100)) await runStatements(db, group);
 }
 
+const crawlField = (path: string) => `json_extract(result_json, '$.${path}')`;
+/** A fetched page that served real content (not an error or a bot challenge). */
+const SERVED = `crawl_state = 'complete' AND status < 400`;
+const CHALLENGE = `COALESCE(${crawlField("botChallenge")}, 0) = 1`;
+const DETAIL_PAGE = `COALESCE(${crawlField("routeFamily")}, '') NOT IN ('home', 'page')`;
+
+/** SQL conditions for each crawl issue, plus the stored value worth showing beside an example URL. */
+const CRAWL_ISSUES: Record<Exclude<CrawlIssue, "duplicateTitle">, { where: string; detail?: string }> = {
+  robotsBlocked: { where: `crawl_state = 'blocked'` },
+  noindex: { where: `${SERVED} AND ${crawlField("noindex")} = 1`, detail: crawlField("robots") },
+  canonicalMismatch: { where: `${SERVED} AND ${crawlField("canonicalMismatch")} = 1`, detail: crawlField("canonical") },
+  redirected: { where: `${SERVED} AND ${crawlField("finalUrl")} IS NOT NULL AND ${crawlField("finalUrl")} != url`, detail: crawlField("finalUrl") },
+  missingH1: { where: `${SERVED} AND is_empty_shell = 0 AND ${crawlField("h1Count")} = 0` },
+  multipleH1: { where: `${SERVED} AND is_empty_shell = 0 AND ${crawlField("h1Count")} > 1`, detail: crawlField("h1Count") },
+  missingDescription: {
+    where: `${SERVED} AND is_empty_shell = 0 AND ${crawlField("h1Count")} IS NOT NULL AND LENGTH(COALESCE(${crawlField("description")}, '')) < 40`,
+    detail: crawlField("description"),
+  },
+  missingStructuredData: { where: `${SERVED} AND is_empty_shell = 0 AND ${DETAIL_PAGE} AND ${crawlField("jsonLdCount")} = 0` },
+  invalidStructuredData: { where: `${SERVED} AND ${crawlField("invalidJsonLd")} > 0`, detail: crawlField("invalidJsonLd") },
+  botFallback: { where: `${crawlField("googlebotBlockedStatus")} IS NOT NULL`, detail: crawlField("googlebotBlockedStatus") },
+  botChallenge: { where: `crawl_state = 'complete' AND ${CHALLENGE}`, detail: "status" },
+};
+
+/** Titles shared by several indexable pages (pages that canonicalize elsewhere are expected to repeat). */
+const DUPLICATE_TITLES = `SELECT title, COUNT(*) AS n, substr(group_concat(url, ' '), 1, 1200) AS urls
+  FROM pages
+  WHERE analysis_id = ? AND ${SERVED} AND is_empty_shell = 0 AND TRIM(COALESCE(title, '')) != ''
+    AND COALESCE(${crawlField("noindex")}, 0) = 0 AND COALESCE(${crawlField("canonicalMismatch")}, 0) = 0
+  GROUP BY title HAVING n > 1`;
+
 export async function getCrawlCoverage(
   db: D1Like,
   analysisId: string,
 ): Promise<CrawlCoverage> {
+  const issueKeys = Object.keys(CRAWL_ISSUES) as Array<keyof typeof CRAWL_ISSUES>;
   const row = await db.prepare(
     `SELECT
       COUNT(*) AS total_urls,
@@ -368,10 +418,43 @@ export async function getCrawlCoverage(
       SUM(CASE WHEN crawl_state = 'failed' THEN 1 ELSE 0 END) AS failed_urls,
       SUM(CASE WHEN crawl_state = 'pending' THEN 1 ELSE 0 END) AS pending_urls,
       SUM(CASE WHEN crawl_state = 'complete' AND is_empty_shell = 1 THEN 1 ELSE 0 END) AS empty_shell_urls,
-      SUM(CASE WHEN crawl_state = 'complete' AND status >= 400 THEN 1 ELSE 0 END) AS http_error_urls,
-      SUM(CASE WHEN crawl_state = 'complete' AND (title IS NULL OR LENGTH(TRIM(title)) < 15) THEN 1 ELSE 0 END) AS missing_title_urls
+      SUM(CASE WHEN crawl_state = 'complete' AND status >= 400 AND NOT (${CHALLENGE}) THEN 1 ELSE 0 END) AS http_error_urls,
+      SUM(CASE WHEN ${SERVED} AND (title IS NULL OR LENGTH(TRIM(title)) < 15) THEN 1 ELSE 0 END) AS missing_title_urls,
+      ${issueKeys.map((key) => `SUM(CASE WHEN ${CRAWL_ISSUES[key].where} THEN 1 ELSE 0 END) AS issue_${key}`).join(",\n      ")}
      FROM pages WHERE analysis_id = ?`,
   ).bind(analysisId).first<Record<string, number | null>>();
+
+  const issues: Partial<Record<CrawlIssue, number>> = {};
+  for (const key of issueKeys) issues[key] = Number(row?.[`issue_${key}`] ?? 0);
+
+  const issueExamples: Partial<Record<CrawlIssue, CrawlIssueExample[]>> = {};
+  await Promise.all(issueKeys.filter((key) => issues[key]).map(async (key) => {
+    const { where, detail } = CRAWL_ISSUES[key];
+    const { results } = await db.prepare(
+      `SELECT url, ${detail ?? "NULL"} AS detail FROM pages WHERE analysis_id = ? AND ${where} ORDER BY url LIMIT 8`,
+    ).bind(analysisId).all<{ url: string; detail: unknown }>();
+    issueExamples[key] = results.map((example) => (example.detail == null || example.detail === ""
+      ? { url: example.url }
+      : { url: example.url, detail: String(example.detail).slice(0, 300) }));
+  }));
+
+  const [duplicates, topDuplicates, families] = await Promise.all([
+    db.prepare(`SELECT COUNT(*) AS groups, COALESCE(SUM(n), 0) AS urls FROM (${DUPLICATE_TITLES})`).bind(analysisId).first<{ groups: number; urls: number }>(),
+    db.prepare(`${DUPLICATE_TITLES} ORDER BY n DESC, title LIMIT 8`).bind(analysisId).all<{ title: string; n: number; urls: string }>(),
+    db.prepare(
+      `SELECT COALESCE(${crawlField("routeFamily")}, 'other') AS family,
+        COUNT(*) AS urls,
+        SUM(CASE WHEN crawl_state = 'complete' THEN 1 ELSE 0 END) AS crawled,
+        SUM(CASE WHEN crawl_state = 'complete' AND is_empty_shell = 1 THEN 1 ELSE 0 END) AS empty_shells,
+        SUM(CASE WHEN crawl_state = 'failed' OR (crawl_state = 'complete' AND status >= 400 AND NOT (${CHALLENGE})) THEN 1 ELSE 0 END) AS errors,
+        SUM(CASE WHEN ${CRAWL_ISSUES.noindex.where} THEN 1 ELSE 0 END) AS noindex,
+        SUM(CASE WHEN ${CRAWL_ISSUES.missingStructuredData.where} THEN 1 ELSE 0 END) AS missing_structured_data
+       FROM pages WHERE analysis_id = ?
+       GROUP BY family ORDER BY urls DESC, family LIMIT 25`,
+    ).bind(analysisId).all<Record<string, number | string>>(),
+  ]);
+  issues.duplicateTitle = Number(duplicates?.urls ?? 0);
+
   return {
     totalUrls: Number(row?.total_urls ?? 0),
     completedUrls: Number(row?.completed_urls ?? 0),
@@ -380,6 +463,22 @@ export async function getCrawlCoverage(
     emptyShellUrls: Number(row?.empty_shell_urls ?? 0),
     httpErrorUrls: Number(row?.http_error_urls ?? 0),
     missingTitleUrls: Number(row?.missing_title_urls ?? 0),
+    issues,
+    issueExamples,
+    duplicateTitleGroups: topDuplicates.results.map((group) => ({
+      title: group.title,
+      count: Number(group.n),
+      examples: String(group.urls ?? "").split(" ").filter(Boolean).slice(0, 4),
+    })),
+    families: families.results.map((family): CrawlFamilyStats => ({
+      family: String(family.family),
+      urls: Number(family.urls ?? 0),
+      crawled: Number(family.crawled ?? 0),
+      emptyShells: Number(family.empty_shells ?? 0),
+      errors: Number(family.errors ?? 0),
+      noindex: Number(family.noindex ?? 0),
+      missingStructuredData: Number(family.missing_structured_data ?? 0),
+    })),
   };
 }
 

@@ -28,7 +28,16 @@ import {
   createGitHubApiClient,
   createInstallationToken,
 } from "@organic-growth/repo-analyzer";
-import { auditSitemap, crawlGooglebotBatch, isSafePublicUrl } from "@organic-growth/crawler";
+import {
+  GOOGLEBOT_TOKEN,
+  GOOGLEBOT_UA,
+  auditSitemap,
+  classifyUrlType,
+  crawlGooglebotBatch,
+  defaultFetcher,
+  isSafePublicUrl,
+  parseRobots,
+} from "@organic-growth/crawler";
 import { googleAccessToken } from "./gsc-auth";
 
 interface AnalysisPayload {
@@ -65,11 +74,20 @@ export class SiteAnalysisWorkflow extends WorkflowEntrypoint<AppEnv, AnalysisPay
 
       // Crawl every sitemap URL (as Googlebot) in resumable batches before
       // analysis, so findings describe the whole site rather than a sample.
+      // URLs robots.txt blocks for Googlebot are recorded but not fetched.
       const queued = await step.do("enqueue-full-crawl", async () => {
         const { urls } = await auditSitemap(site.baseUrl, undefined, { maxUrls: 1 });
         const capped = urls.slice(0, MAX_FULL_CRAWL_URLS);
-        await enqueueAnalysisCrawlUrls(db, { analysisId, siteId, urls: capped });
-        return { queued: capped.length, declared: urls.length };
+        const robots = await defaultFetcher(new URL("/robots.txt", site.baseUrl).toString(), { userAgent: GOOGLEBOT_UA, maxBytes: 500_000 })
+          .then((response) => (response.status < 400 ? parseRobots(response.body, GOOGLEBOT_TOKEN) : null))
+          .catch(() => null);
+        const entries = capped.map((url) => {
+          const parsed = new URL(url);
+          return { url, routeFamily: classifyUrlType(url), blocked: robots ? !robots.isAllowed(`${parsed.pathname}${parsed.search}`) : false };
+        });
+        await enqueueAnalysisCrawlUrls(db, { analysisId, siteId, urls: entries });
+        const blocked = entries.filter((entry) => entry.blocked).length;
+        return { queued: capped.length - blocked, declared: urls.length };
       });
 
       for (let batch = 0; batch * CRAWL_BATCH_SIZE < queued.queued + CRAWL_BATCH_SIZE; batch++) {

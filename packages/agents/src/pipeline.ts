@@ -123,9 +123,13 @@ export async function runFullAnalysis(input: RunAnalysisInput) {
     sitemap,
     pageResults,
   });
-  if (input.crawlCoverage?.coverage.completedUrls) {
+  const fullCrawl = Boolean(input.crawlCoverage?.coverage.completedUrls);
+  // Per-issue counts exist for crawls made since those checks were added.
+  const fullCrawlChecks = Boolean(fullCrawl && input.crawlCoverage?.coverage.issues);
+  if (fullCrawl && input.crawlCoverage) {
     // Evidence from every sitemap URL supersedes extrapolation from the sample.
-    findings.push(...sampleFindings.filter((finding) => finding.category !== "rendering" && finding.category !== "sitemap"));
+    const covered = new Set(["rendering", "sitemap", ...(fullCrawlChecks ? ["structured_data"] : [])]);
+    findings.push(...sampleFindings.filter((finding) => !covered.has(finding.category)));
     findings.push(...findingsFromCrawlCoverage({
       siteId: input.siteId,
       analysisId,
@@ -152,6 +156,7 @@ export async function runFullAnalysis(input: RunAnalysisInput) {
       sitemap,
       pages: pageResults,
       robotsTxt,
+      fullCrawl: fullCrawlChecks,
     }),
   );
 

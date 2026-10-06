@@ -43,10 +43,13 @@ Each metric is stored per site per day. "Sum" metrics add up over a window; "lat
 | `search_position_weight` | SEO | Σ(position × impressions); with impressions gives average position | Search Console | daily | sum | 1 |
 | `eumon_search_clicks`, `eumon_search_impressions`, `eumon_position_weight` | SEO | Same, for pages under the site's mount path | Search Console, page filter | daily | sum | 1 |
 | CTR, average position, Eumon share of clicks | SEO | Derived: clicks ÷ impressions; weight ÷ impressions; Eumon clicks ÷ site clicks | derived | — | ratio | 1 |
-| `queries_top3`, `queries_top10` | SEO | Distinct queries with average position ≤ 3 / ≤ 10 over the last 7 days | Search Console, `query` | weekly | latest | 1 |
+| `queries_top3`, `queries_top10`, `queries_top20`, `queries_top100` | SEO | Distinct queries with average position ≤ 3 / 10 / 20 / 100 over the last 7 days | Search Console, `query` | weekly | latest | 1 |
+| `queries_top10.new`, `queries_top10.lost` (and for each bucket) | SEO | Queries that entered or left the bucket against the 7 days before | Search Console, two 7-day windows | weekly | latest | 1 |
+| `search_visibility` | SEO | Impression-weighted expected CTR of the site's queries at their average positions (the `expectedCtr` curve in `packages/pages`), as a percentage | Search Console, `query` | weekly | latest | 2 |
 | `googlebot_fetches` | SEO | Googlebot requests to Eumon pages | `page_metrics_daily` | daily | sum | 1 |
 | `eumon_page_views`, `eumon_cta_clicks` | Outcomes | Visitor views of Eumon pages, and clicks on their calls to action | `page_metrics_daily` | daily | sum | 1 |
 | `crawl_urls`, `crawl_empty_shells`, `crawl_http_errors`, `crawl_noindex` | Site health | Coverage from an analysis run | analysis report | per analysis | latest | 1 |
+| `site_health` | Site health | Share of crawled sitemap URLs with no HTTP error, empty shell, or noindex | analysis report | per analysis | latest | 1 |
 | `ai_crawler_fetches` (+ `.<engine>`) | GEO | AI training and AI-search crawler requests to Eumon pages | request user agent | daily | sum | 2 |
 | `ai_live_fetches` (+ `.<engine>`) | GEO | Requests an AI assistant made to answer a person (ChatGPT-User, Perplexity-User, …) | request user agent | daily | sum | 2 |
 | `ai_referral_visits` (+ `.<assistant>`) | GEO | Eumon page views whose visitor arrived from an AI assistant | beacon referrer / `utm_source` | daily | sum | 2 |
@@ -69,6 +72,11 @@ Search Console omits anonymized queries, so query-level sums (`queries_top10`, q
 - The existing daily `SearchSyncWorkflow` (04:15 UTC) is extended. It re-fetches the last 7 days of both series and overwrites them, because Search Console revises recent days. It writes yesterday's lead, Googlebot, and (phase 2) AI counters, page counts, and question-query sums. It writes the weekly `queries_top3/top10` snapshot on Mondays.
 - The sync's first run for a site also backfills the existing history: leads from `conversion_events` since the first event, and Googlebot fetches from `page_metrics_daily`.
 - `fetchSearchConsoleMetrics` and the existing `querySearchAnalytics` helper in `packages/agents` already support the `date` dimension and paging. They are reused rather than adding a client.
+
+### Ranking buckets and visibility (phase 1, visibility in phase 2)
+
+- The Monday sync fetches the `query` dimension for the last 7 days and for the 7 days before, in one pass of two requests. Bucket counts come from the first window. A query is **new** to a bucket when its position there is inside the bucket and its earlier position was outside or absent, and **lost** the other way round. No per-query history is stored.
+- **Target-market scope:** when the site has target markets (`site_markets`), every Google-based number is computed for those countries, with the all-countries figure beside it. Search Console's `country` filter does this server-side.
 
 ### Analysis snapshots (phase 1)
 
@@ -174,11 +182,11 @@ A new **Results** navigation item, between Overview and Data. It answers one que
 
 Each section is titled with the question it answers, in funnel order.
 
-1. **Are more people finding you on Google?** Clicks and impressions for the site and for Eumon pages (weekly lines); average position and CTR with change; queries in the top 3 and top 10 (weekly snapshots); pages Googlebot fetched.
+1. **Are more people finding you on Google?** Clicks and impressions for the site and for Eumon pages (weekly lines); average position and CTR with change; ranking buckets (top 3, 10, 20, 100) as weekly counts with how many queries entered and left each; search visibility as one weekly line; a top-queries table (clicks, impressions, CTR, position, each with change against the previous 28 days); pages Googlebot fetched. When target markets are set, the section is scoped to them, and its title row says which countries ("Malaysia, Indonesia").
 2. **Do AI assistants mention you?** Citation rate and mention rate per engine (ChatGPT, Perplexity, Gemini) as weekly trends; share of voice against the named competitors; AI assistants reading the pages (live fetches, crawler fetches) and visits they send. Every rate opens the questions and answers behind it, excerpt and citations included.
 3. **Do you show up for questions?** Impressions and clicks on question-style searches; rich-result impressions; pages with an FAQ block.
 4. **Is it bringing enquiries?** A search-to-enquiry funnel for Eumon pages (Google impressions → Google clicks → page views → CTA clicks → enquiries), each step with its count and its conversion from the step before, all over the Search Console window so the steps are comparable. Then enquiries per week since tracking began, from Eumon pages against the rest, and by landing source (Google, AI assistant, other); qualified leads and customers when those events exist. A count opens the landing pages that produced it.
-5. **Is the site healthy?** Empty shells, HTTP errors, and noindex pages across analysis runs. Operator only.
+5. **Is the site healthy?** Site health as one percentage with its trend across analysis runs, then the empty shells, HTTP errors, and noindex pages behind it. Operator only.
 
 ### Visual design
 
@@ -233,16 +241,24 @@ Site health; editing the AI question set and brand aliases; copying and revoking
 - No test calls a live API. Engine adapters are tested on recorded responses.
 - Each phase ends with the Results view checked against the founder's own site (medbaycare.com).
 
+## Later candidates
+
+These came out of reviewing the operator's Semrush project for medbaycare.com, and are deliberately not in the three phases:
+
+- **Google Analytics 4 import:** users, sessions, and key events through the Google OAuth connection Eumon already has, plus the `analytics.readonly` scope. Key events would give enquiries a real "before Eumon" history, which first-party tracking cannot recover.
+- **Google AI Overviews and AI Mode:** there is no official API, so it needs SERP collection or a paid data provider.
+- **Backlinks, toxicity, and authority score:** these need a link index. They stay a non-goal unless the operator connects a data provider such as the Semrush API.
+
 ## Phases and acceptance
 
 1. **Ledger, SEO, leads.**
    - Connecting Search Console on a site fills 16 months of daily clicks and impressions.
-   - Results shows the headline Google-clicks chart with site and Eumon-page lines and a go-live marker, the Google clicks, enquiries, and pages-live key numbers, section 1, section 4 with the search-to-enquiry funnel, and site health from analysis runs.
+   - Results shows the headline Google-clicks chart with site and Eumon-page lines and a go-live marker, the Google clicks, enquiries, and pages-live key numbers, section 1 (with ranking buckets, new and lost queries, the top-queries table, and target-market scope), section 4 with the search-to-enquiry funnel, and site health as a percentage from analysis runs.
    - The client link opens the same numbers read-only and stops working after revoke.
 2. **Free GEO and AEO signals.**
    - AI crawler and live-fetch counts appear by engine.
    - AI-referred visits are counted, and Eumon leads split by landing source.
-   - Question-query and rich-result series appear, along with the structured-page counts.
+   - Question-query and rich-result series appear, along with the FAQ-page counts and the search-visibility line.
 3. **Paid AI answer checks.**
    - With at least one engine key set, the weekly workflow fills mention rate, citation rate, and share of voice per engine.
    - Every rate drills down to its stored answers.

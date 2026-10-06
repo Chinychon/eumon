@@ -13,6 +13,10 @@ export type SitemapFamilyProfile = {
   urls: number;
   /** Extrapolated to sitemap files that were listed but not read within the budget. */
   estimated: number;
+  /** Distinct pages, extrapolated like `estimated`: translations of one page count once (its largest language edition). */
+  pages?: number;
+  /** Language editions of this family seen in the sitemaps. */
+  languages?: number;
   examples: string[];
 };
 
@@ -92,11 +96,11 @@ export async function profileSitemaps(
   const declared = (options.robots?.sitemaps ?? []).filter((url) => isSameSite(url, origin) && isSafePublicUrl(url));
   const entries = declared.length ? declared : [`${origin}/sitemap.xml`, `${origin}/sitemap_index.xml`];
 
-  // Per stem: files listed, files read, and family counts in the files read.
-  const stems = new Map<string, { listed: Set<string>; read: number; counts: Map<string, number> }>();
+  // Per stem: files listed, files read, and family counts (in total and per language) in the files read.
+  const stems = new Map<string, { listed: Set<string>; read: number; counts: Map<string, number>; editions: Map<string, Map<string, number>> }>();
   const stemOf = (url: string) => {
     const key = fileStem(url);
-    const entry = stems.get(key) ?? { listed: new Set<string>(), read: 0, counts: new Map<string, number>() };
+    const entry = stems.get(key) ?? { listed: new Set<string>(), read: 0, counts: new Map<string, number>(), editions: new Map<string, Map<string, number>>() };
     stems.set(key, entry);
     return entry;
   };
@@ -182,11 +186,15 @@ export async function profileSitemaps(
       examples.set(family, list);
       const language = classifyLanguage(loc);
       languages[language] = (languages[language] ?? 0) + 1;
+      const byLanguage = stem.editions.get(family) ?? new Map<string, number>();
+      byLanguage.set(language, (byLanguage.get(language) ?? 0) + 1);
+      stem.editions.set(family, byLanguage);
     }
   }
   if (!foundAny && !declared.length) notes.push("No sitemap was found at /sitemap.xml or /sitemap_index.xml, and robots.txt declares none.");
 
   const families = new Map<string, SitemapFamilyProfile>();
+  const editions = new Map<string, Map<string, number>>();
   let filesListed = 0;
   let estimatedUrls = 0;
   for (const stem of stems.values()) {
@@ -199,6 +207,16 @@ export async function profileSitemaps(
       families.set(family, entry);
       estimatedUrls += Math.round(count * scale);
     }
+    for (const [family, byLanguage] of stem.editions) {
+      const total = editions.get(family) ?? new Map<string, number>();
+      for (const [language, count] of byLanguage) total.set(language, (total.get(language) ?? 0) + Math.round(count * scale));
+      editions.set(family, total);
+    }
+  }
+  for (const [family, entry] of families) {
+    const byLanguage = [...(editions.get(family)?.values() ?? [])];
+    entry.pages = byLanguage.length ? Math.max(...byLanguage) : entry.estimated;
+    entry.languages = Math.max(byLanguage.length, 1);
   }
   const unreadStems = [...stems.entries()].filter(([, stem]) => stem.listed.size > 0 && stem.read === 0).map(([key]) => key);
   if (unreadStems.length) notes.push(`Sitemap files named like ${unreadStems.slice(0, 5).join(", ")} were not read within the budget, so their pages are not counted.`);
@@ -264,8 +282,47 @@ export function inspectPage(url: string, response: Pick<FetchResult, "status" | 
       booking: BOOKING.test(text),
       prices: PRICE.test(text),
     },
-    tracking: TRACKERS.filter(([, pattern]) => pattern.test(response.body)).map(([name]) => name),
+    tracking: detectTrackers(response.body),
   };
+}
+
+/** Analytics and conversion-tracking tools whose code appears in `text` (a page or a script). */
+export function detectTrackers(text: string): string[] {
+  return TRACKERS.filter(([, pattern]) => pattern.test(text)).map(([name]) => name);
+}
+
+/**
+ * Trackers bundled into the page's own scripts, which its HTML alone can't
+ * show: apps that install posthog-js or gtag through their JavaScript bundle
+ * only name the vendors in a CSP allowlist. Same-site scripts only, at most
+ * `maxScripts` per page; `cache` shares one fetch per script across a run.
+ */
+export async function scriptTrackers(
+  html: string,
+  pageUrl: string,
+  fetcher: Fetcher = defaultFetcher,
+  cache = new Map<string, Promise<string[]>>(),
+  maxScripts = 3,
+): Promise<string[]> {
+  const scripts = [...new Set(findTags(html, "script").flatMap((tag) => {
+    try {
+      const url = tag.src ? new URL(tag.src, pageUrl).toString() : "";
+      return url && isSameSite(url, pageUrl) ? [url] : [];
+    } catch {
+      return [];
+    }
+  }))].slice(0, maxScripts);
+  const found = await Promise.all(scripts.map((url) => {
+    let trackers = cache.get(url);
+    if (!trackers) {
+      trackers = fetcher(url, { maxBytes: 5_000_000 })
+        .then((response) => (response.status < 400 ? detectTrackers(response.body) : []))
+        .catch(() => []);
+      cache.set(url, trackers);
+    }
+    return trackers;
+  }));
+  return [...new Set(found.flat())];
 }
 
 /**

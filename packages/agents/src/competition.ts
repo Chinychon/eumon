@@ -7,6 +7,8 @@ export type OwnContent = {
   domain: string;
   /** Sitemap URLs per route family. */
   families: Record<string, number>;
+  /** Distinct pages per family (translations count once), when the sitemap audit measured them. */
+  sections?: Record<string, { pages: number; languages: number }>;
   /** Inspected pages (homepage and one per template). */
   pages?: PageInspection[];
   /** Collected datasets: data the site already has, published or not. */
@@ -16,10 +18,11 @@ export type OwnContent = {
 export type ContentTypeRow = {
   key: string;
   label: string;
-  you: { pages: number; families: string[] };
+  /** `pages` counts distinct content (translations once); `urls` counts every sitemap URL. */
+  you: { pages: number; urls: number; languages: number; families: string[] };
   /** A dataset holding this kind of entity, when the site has one. */
   data?: { dataset: string; records: number; livePages: number };
-  competitors: Array<{ domain: string; pages: number; families: string[]; examples: string[] }>;
+  competitors: Array<{ domain: string; pages: number; urls: number; languages: number; families: string[]; examples: string[] }>;
   /**
    * `gap`: competitors publish far more of this content; `advantage`: you
    * publish far more; `shared`: comparable; `yours_only`: no competitor has it.
@@ -62,6 +65,10 @@ export function contentKey(value: string): string {
 
 const humanize = (family: string) => `/${family}/ pages`;
 const count = (value: number) => value.toLocaleString("en");
+
+/** "~19 blog articles in 3 languages (57 URLs)" for a translated section, "~19 blog articles" otherwise. */
+export const counted = (cell: { pages: number; urls?: number; languages?: number }, label = "") =>
+  `~${count(cell.pages)}${label ? ` ${label}` : ""}${(cell.languages ?? 1) > 1 ? ` in ${cell.languages} languages (${count(cell.urls ?? cell.pages)} URLs)` : ""}`;
 
 function signalsOf(pages: PageInspection[]): Signals {
   const served = pages.filter((page) => page.status < 400);
@@ -115,10 +122,10 @@ Entries that hold the same kind of content must get exactly the same label, even
 export function contentTypeEntries(own: OwnContent, research: SiteResearch[]) {
   return [
     ...Object.entries(own.families).filter(([family]) => isContentFamily(family)).slice(0, 25)
-      .map(([family, pages]) => ({ id: `you|${family}`, site: own.domain, name: `/${family}/`, pages, examples: [] as string[] })),
+      .map(([family, urls]) => ({ id: `you|${family}`, site: own.domain, name: `/${family}/`, pages: own.sections?.[family]?.pages ?? urls, examples: [] as string[] })),
     ...(own.datasets ?? []).map((dataset) => ({ id: `data|${dataset.name}`, site: `${own.domain} (dataset)`, name: `${dataset.name} (${dataset.entityType})`, pages: dataset.records, examples: [] as string[] })),
     ...research.flatMap((site) => site.sitemap.families.filter((family) => isContentFamily(family.family)).slice(0, 25)
-      .map((family) => ({ id: `${site.domain}|${family.family}`, site: site.domain, name: `/${family.family}/`, pages: Math.max(family.estimated, family.urls), examples: family.examples.slice(0, 2) }))),
+      .map((family) => ({ id: `${site.domain}|${family.family}`, site: site.domain, name: `/${family.family}/`, pages: family.pages ?? Math.max(family.estimated, family.urls), examples: family.examples.slice(0, 2) }))),
   ];
 }
 
@@ -134,16 +141,19 @@ export function compareCompetition(own: OwnContent, research: SiteResearch[], la
   };
   const rows = new Map<string, ContentTypeRow>();
   const rowFor = (key: string, label: string) => {
-    const row = rows.get(key) ?? { key, label, you: { pages: 0, families: [] }, competitors: [], status: "shared" as const };
+    const row = rows.get(key) ?? { key, label, you: { pages: 0, urls: 0, languages: 1, families: [] }, competitors: [], status: "shared" as const };
     rows.set(key, row);
     return row;
   };
 
-  for (const [family, pages] of Object.entries(own.families)) {
+  for (const [family, urls] of Object.entries(own.families)) {
     if (!isContentFamily(family)) continue;
     const { key, label } = keyFor(`you|${family}`, family);
     const row = rowFor(key, label);
-    row.you.pages += pages;
+    const section = own.sections?.[family];
+    row.you.pages += section?.pages ?? urls;
+    row.you.urls += urls;
+    row.you.languages = Math.max(row.you.languages, section?.languages ?? 1);
     row.you.families.push(family);
   }
   for (const site of research) {
@@ -151,14 +161,18 @@ export function compareCompetition(own: OwnContent, research: SiteResearch[], la
       if (!isContentFamily(family.family)) continue;
       const { key, label } = keyFor(`${site.domain}|${family.family}`, family.family);
       const row = rowFor(key, label);
-      const pages = Math.max(family.estimated, family.urls);
+      const urls = Math.max(family.estimated, family.urls);
+      const pages = family.pages ?? urls;
+      const languages = family.languages ?? 1;
       const entry = row.competitors.find((competitor) => competitor.domain === site.domain);
       if (entry) {
         entry.pages += pages;
+        entry.urls += urls;
+        entry.languages = Math.max(entry.languages, languages);
         entry.families.push(family.family);
         entry.examples.push(...family.examples.slice(0, 2));
       } else {
-        row.competitors.push({ domain: site.domain, pages, families: [family.family], examples: family.examples.slice(0, 3) });
+        row.competitors.push({ domain: site.domain, pages, urls, languages, families: [family.family], examples: family.examples.slice(0, 3) });
       }
     }
   }
@@ -217,11 +231,11 @@ export function competitionInsights(report: CompetitionReport): string[] {
     const dataNote = row.data
       ? ` You already hold ${count(row.data.records)} records in “${row.data.dataset}”${row.data.livePages ? ` (${count(row.data.livePages)} published)` : " but publish none of them"}.`
       : "";
-    insights.push(`${leader.domain} publishes ~${count(leader.pages)} ${row.label}; you have ${row.you.pages ? `~${count(row.you.pages)}` : "none"}.${dataNote}`);
+    insights.push(`${leader.domain} publishes ${counted(leader, row.label)}; you have ${row.you.pages ? counted(row.you) : "none"}.${dataNote}`);
   }
   for (const row of report.rows.filter((entry) => entry.status === "advantage" || entry.status === "yours_only").slice(0, 2)) {
     const most = row.competitors[0];
-    insights.push(`You publish ~${count(row.you.pages)} ${row.label}${most ? `, more than any competitor (largest: ${most.domain} with ~${count(most.pages)})` : "; no competitor analyzed has this content"}.`);
+    insights.push(`You publish ${counted(row.you, row.label)}${most ? `, more than any competitor (largest: ${most.domain} with ${counted(most)})` : "; no competitor analyzed has this content"}.`);
   }
   if (analyzed.length) {
     const share = (pick: (signals: Signals) => number) => analyzed.filter((competitor) => pick(competitor.signals) > 0).length;
@@ -269,7 +283,7 @@ export function competitionOpportunities(report: CompetitionReport, siteId: stri
       technicalEffort: 1,
       contentEffort,
       priorityScore: Number(priorityScore.toFixed(2)),
-      rationale: `${row.competitors.slice(0, 3).map((competitor) => `${competitor.domain}: ~${count(competitor.pages)}`).join(", ")}; you: ${row.you.pages ? `~${count(row.you.pages)}` : "none"}.${hasData ? ` Your “${row.data!.dataset}” dataset has ${count(row.data!.records)} records, ${count(row.data!.livePages)} published.` : ""} Page counts come from sitemaps and show where competitors invest, not search demand; check that these searches matter to your market before building pages.`,
+      rationale: `${row.competitors.slice(0, 3).map((competitor) => `${competitor.domain}: ${counted(competitor)}`).join(", ")}; you: ${row.you.pages ? counted(row.you) : "none"}.${hasData ? ` Your “${row.data!.dataset}” dataset has ${count(row.data!.records)} records, ${count(row.data!.livePages)} published.` : ""} Page counts come from sitemaps and show where competitors invest, not search demand; check that these searches matter to your market before building pages.`,
       potentialPage: leader.examples[0],
     };
   });

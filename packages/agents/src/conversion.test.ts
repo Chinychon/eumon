@@ -25,4 +25,13 @@ describe("conversion audit", () => {
     assert.deepEqual(titles, ["Visitors have no obvious way to get in touch", "No analytics or conversion tracking found"]);
     assert.equal(audit.templates.length, 3, "empty shells are not judged");
   });
+
+  it("trusts analytics the repository installs over a page-only miss", () => {
+    const audit = auditConversion([page("home", { whatsapp: true }), page("doctors", { whatsapp: true })]);
+    const none = (repoAnalytics: string[]) => findingsFromConversion(audit, { siteId: "s", analysisId: "a", familySizes: {}, repoAnalytics })
+      .filter((finding) => finding.title === "No analytics or conversion tracking found");
+    assert.equal(none([]).length, 1);
+    assert.match(none([])[0]!.summary, /in its HTML or its own scripts/);
+    assert.equal(none(["PostHog"]).length, 0);
+  });
 });

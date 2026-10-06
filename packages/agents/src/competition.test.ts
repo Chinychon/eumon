@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { JsonLlm, JsonRequest } from "@organic-growth/ai";
 import type { Fetcher, PageInspection, SiteResearch } from "@organic-growth/crawler";
-import { compareCompetition, competitionOpportunities, contentKey, contentTypeEntries, labelContentTypes, type OwnContent } from "./competition.js";
+import { compareCompetition, competitionOpportunities, contentKey, contentTypeEntries, counted, labelContentTypes, type OwnContent } from "./competition.js";
 import { runFullAnalysis } from "./pipeline.js";
 
 const inspection = (url: string, overrides: Partial<PageInspection> = {}): PageInspection => ({
@@ -131,5 +131,18 @@ describe("runFullAnalysis with competitors", () => {
   it("points a healthy site without competitors at growth, not housekeeping", async () => {
     const report = await runFullAnalysis({ analysisId: "a", siteId: "s", name: "medbay.example", baseUrl: "https://medbay.example", fetcher, maxPages: 8, repeatability: false });
     assert.ok(report.plan.highestImpactOpportunity.startsWith("No serious technical blocker was found"), report.plan.highestImpactOpportunity);
+  });
+});
+
+describe("translated content", () => {
+  it("counts a translated page once, so translations never manufacture an advantage", () => {
+    const translated: OwnContent = { domain: "medbay.example", families: { blog: 57 }, sections: { blog: { pages: 19, languages: 3 } } };
+    const report = compareCompetition(translated, [rival("rival.example", [["blog", 18]])]);
+    const blog = report.rows.find((row) => row.you.families.includes("blog"))!;
+    assert.deepEqual({ pages: blog.you.pages, urls: blog.you.urls, languages: blog.you.languages }, { pages: 19, urls: 57, languages: 3 });
+    assert.equal(blog.status, "shared", "19 articles against 18 is comparable, not a lead");
+    assert.ok(!report.insights.some((insight) => insight.startsWith("You publish")));
+    assert.equal(counted(blog.you, "blog articles"), "~19 blog articles in 3 languages (57 URLs)");
+    assert.equal(counted(blog.competitors[0]!, "blog articles"), "~18 blog articles");
   });
 });

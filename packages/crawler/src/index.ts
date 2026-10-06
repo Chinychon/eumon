@@ -435,12 +435,19 @@ export async function auditSitemap(
   const sampleUrls = selectRepresentativeSample(urls, maxUrls);
   const urlTypes: Record<string, number> = {};
   const languages: Record<string, number> = {};
+  const editions: Record<string, Record<string, number>> = {};
   for (const u of urls) {
     const type = classifyUrlType(u);
     urlTypes[type] = (urlTypes[type] ?? 0) + 1;
     const lang = classifyLanguage(u);
     languages[lang] = (languages[lang] ?? 0) + 1;
+    const byLanguage = editions[type] ??= {};
+    byLanguage[lang] = (byLanguage[lang] ?? 0) + 1;
   }
+  const sections = Object.fromEntries(Object.entries(editions).map(([type, byLanguage]) => [type, {
+    pages: Math.max(...Object.values(byLanguage)),
+    languages: Object.keys(byLanguage).length,
+  }]));
 
   return {
     audit: {
@@ -448,6 +455,7 @@ export async function auditSitemap(
       sampledUrls: sampleUrls.length,
       indexFiles,
       urlTypes,
+      sections,
       languages,
       errors,
     },

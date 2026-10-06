@@ -48,7 +48,7 @@ export function auditConversion(inspections: PageInspection[]): ConversionAudit 
  * waste their traffic, and without tracking, leads and revenue from organic
  * search can't be measured or learned from.
  */
-export function findingsFromConversion(audit: ConversionAudit, input: { siteId: string; analysisId: string; familySizes: Record<string, number> }): Finding[] {
+export function findingsFromConversion(audit: ConversionAudit, input: { siteId: string; analysisId: string; familySizes: Record<string, number>; repoAnalytics?: string[] }): Finding[] {
   const findings: Array<Pick<Finding, "title" | "summary" | "recommendation" | "evidence" | "organicImpactScore" | "pagesAffected">> = [];
   const without = audit.templates.filter((template) => template.paths.length === 0);
   if (without.length && without.length === audit.templates.length) {
@@ -73,10 +73,11 @@ export function findingsFromConversion(audit: ConversionAudit, input: { siteId: 
       });
     }
   }
-  if (audit.templates.length && audit.tracking.length === 0) {
+  // A connected repository that installs analytics outranks a miss in the fetched pages.
+  if (audit.templates.length && audit.tracking.length === 0 && !input.repoAnalytics?.length) {
     findings.push({
       title: "No analytics or conversion tracking found",
-      summary: `None of the ${audit.templates.length} pages checked loads Google Analytics, Tag Manager, PostHog, Plausible, or Eumon's tracker in its HTML. Organic leads, conversion rates, and revenue by landing page can't be measured.`,
+      summary: `None of the ${audit.templates.length} pages checked loads Google Analytics, Tag Manager, PostHog, Plausible, or Eumon's tracker in its HTML or its own scripts. Organic leads, conversion rates, and revenue by landing page can't be measured.`,
       recommendation: "Install Eumon's conversion snippet (Setup → Track conversions): it records WhatsApp, phone, email, and form conversions and credits them to the landing page a visitor arrived on.",
       evidence: { checked: audit.templates.map((template) => template.url) },
       organicImpactScore: 45,

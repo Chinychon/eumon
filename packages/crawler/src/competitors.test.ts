@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { Fetcher } from "./index.js";
-import { inspectPage, profileSitemaps, researchSite, RESEARCH_USER_AGENT } from "./competitors.js";
+import { detectTrackers, inspectPage, profileSitemaps, researchSite, RESEARCH_USER_AGENT, scriptTrackers } from "./competitors.js";
 
 const urlset = (paths: string[]) => `<?xml version="1.0"?><urlset>${paths.map((path) => `<url><loc>https://rival.example${path}</loc></url>`).join("")}</urlset>`;
 const range = (prefix: string, from: number, count: number) => Array.from({ length: count }, (_, index) => `${prefix}${from + index}`);
@@ -34,6 +34,16 @@ describe("profileSitemaps", () => {
     assert.equal(profile.partial, true);
   });
 
+  it("counts a translated page once per family, alongside its language editions", async () => {
+    const sitemap = urlset(["a", "b", "c"].flatMap((slug) => [`/hospitals/${slug}`, `/km/hospitals/${slug}`, `/th/hospitals/${slug}`]));
+    const translated: Fetcher = async (url) => ({ url, finalUrl: url, headers: {}, status: url.endsWith("/sitemap.xml") ? 200 : 404, body: url.endsWith("/sitemap.xml") ? sitemap : "" });
+    const profile = await profileSitemaps("https://rival.example", translated, { robots: { isAllowed: () => true, sitemaps: [] } });
+    const hospitals = profile.families.find((entry) => entry.family === "hospitals");
+    assert.equal(hospitals?.estimated, 9);
+    assert.equal(hospitals?.pages, 3);
+    assert.equal(hospitals?.languages, 3);
+  });
+
   it("researches a competitor as EumonBot and respects robots.txt", async () => {
     agents.length = 0;
     const research = await researchSite("rival.example", fake, { maxFiles: 3, samplePages: 1 });
@@ -63,5 +73,40 @@ describe("inspectPage", () => {
     const scriptOnly = inspectPage("https://rival.example/a", { status: 200, body: `<html><body><p>${"Plain text. ".repeat(40)}</p><script>var a = "$1"; "book now"</script></body></html>` });
     assert.equal(scriptOnly.conversion.prices, false, "prices inside scripts don't count");
     assert.equal(scriptOnly.conversion.booking, false);
+  });
+});
+
+describe("scriptTrackers", () => {
+  // Sites that bundle their analytics SDK only mention the vendors in a CSP allowlist.
+  const csp = `<meta http-equiv="Content-Security-Policy" content="script-src 'self' https://www.googletagmanager.com https://*.posthog.com https://*.clarity.ms">`;
+  const page = (scripts: string) => `<!doctype html><html><head>${csp}${scripts}</head><body><main>Clinic</main></body></html>`;
+  const serving = (bodies: Record<string, string>) => {
+    const calls: string[] = [];
+    const fetcher: Fetcher = async (url) => {
+      calls.push(url);
+      return { url, finalUrl: url, status: url in bodies ? 200 : 404, headers: {}, body: bodies[url] ?? "" };
+    };
+    return { fetcher, calls };
+  };
+
+  it("finds analytics bundled into the page's own scripts", async () => {
+    const { fetcher } = serving({ "https://clinic.example/assets/app.js": 'import"./x.js";posthog.init("phc_x",{api_host:"https://n.clinic.example"});' });
+    const html = page('<script type="module" crossorigin src="/assets/app.js"></script>');
+    assert.deepEqual(await scriptTrackers(html, "https://clinic.example/", fetcher), ["PostHog"]);
+  });
+
+  it("never counts a security-policy allowlist as tracking", async () => {
+    assert.deepEqual(detectTrackers(page("")), []);
+    const { fetcher } = serving({ "https://clinic.example/app.js": "console.log(1)" });
+    assert.deepEqual(await scriptTrackers(page('<script src="/app.js"></script>'), "https://clinic.example/", fetcher), []);
+  });
+
+  it("ignores other sites' scripts and fetches a shared bundle once per run", async () => {
+    const { fetcher, calls } = serving({ "https://clinic.example/app.js": "gtag('config', 'G-ABC123')" });
+    const cache = new Map<string, Promise<string[]>>();
+    const html = page('<script src="https://cdn.other.example/x.js"></script><script src="/app.js"></script>');
+    assert.deepEqual(await scriptTrackers(html, "https://clinic.example/a", fetcher, cache), ["Google Analytics"]);
+    assert.deepEqual(await scriptTrackers(html, "https://clinic.example/b", fetcher, cache), ["Google Analytics"]);
+    assert.deepEqual(calls, ["https://clinic.example/app.js"]);
   });
 });

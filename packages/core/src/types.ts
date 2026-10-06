@@ -148,6 +148,8 @@ export type SitemapAudit = {
   sampledUrls: number;
   indexFiles: string[];
   urlTypes: Record<string, number>;
+  /** Distinct pages per family: translations of one page count once (its largest language edition). */
+  sections?: Record<string, { pages: number; languages: number }>;
   languages: Record<string, number>;
   errors: string[];
   freshness?: string;

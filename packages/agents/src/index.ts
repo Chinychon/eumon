@@ -11,7 +11,7 @@ import {
   type CrawlPageResult,
 } from "@organic-growth/core";
 import type { RepoAnalysisResult } from "@organic-growth/repo-analyzer";
-import { competitionOpportunities, type CompetitionReport } from "./competition.js";
+import { competitionOpportunities, counted, type CompetitionReport } from "./competition.js";
 import { analyzeSearch, searchOpportunities, type SearchInsights } from "./search.js";
 
 export interface AnalysisBundle {
@@ -146,7 +146,7 @@ export function synthesizeGrowthPlan(bundle: AnalysisBundle): GrowthPlan {
   const lead = bundle.competition?.rows.find((row) => row.status === "advantage" || row.status === "yours_only");
   const unpublished = bundle.competition?.rows.find((row) => row.data && row.data.records > row.data.livePages * 2 && row.status === "gap");
   const competitiveAdvantage = lead
-    ? `You publish ~${lead.you.pages.toLocaleString()} ${lead.label}${lead.competitors[0] ? `, more than any competitor analyzed (largest: ${lead.competitors[0].domain} with ~${lead.competitors[0].pages.toLocaleString()})` : ", which no competitor analyzed has"}. ${unpublished ? `You also hold ${unpublished.data!.records.toLocaleString()} records in “${unpublished.data!.dataset}”, the data competitors turn into ${unpublished.label}.` : "Build on this with internal links and richer facts per page."}`
+    ? `You publish ${counted(lead.you, lead.label)}${lead.competitors[0] ? `, more than any competitor analyzed (largest: ${lead.competitors[0].domain} with ${counted(lead.competitors[0])})` : ", which no competitor analyzed has"}. ${unpublished ? `You also hold ${unpublished.data!.records.toLocaleString()} records in “${unpublished.data!.dataset}”, the data competitors turn into ${unpublished.label}.` : "Build on this with internal links and richer facts per page."}`
     : unpublished
       ? `You already hold ${unpublished.data!.records.toLocaleString()} records in “${unpublished.data!.dataset}” — the raw material for ${unpublished.label}, which competitors publish (~${unpublished.competitors[0]!.pages.toLocaleString()} on ${unpublished.competitors[0]!.domain}).`
       : bundle.repo
@@ -267,7 +267,7 @@ function searchConstraint(bundle: AnalysisBundle, search: SearchInsights): strin
 function competitionConstraint(bundle: AnalysisBundle): string {
   const gap = bundle.competition?.rows.find((row) => row.status === "gap");
   if (gap) {
-    return `Content gap: ${gap.competitors[0]!.domain} publishes ~${gap.competitors[0]!.pages.toLocaleString()} ${gap.label}; you have ${gap.you.pages ? `~${gap.you.pages.toLocaleString()}` : "none"}.`;
+    return `Content gap: ${gap.competitors[0]!.domain} publishes ${counted(gap.competitors[0]!, gap.label)}; you have ${gap.you.pages ? counted(gap.you) : "none"}.`;
   }
   if (bundle.competition?.competitors.some((competitor) => competitor.analyzed)) return "No large content gap against the competitors analyzed; differentiation will come from depth and conversion, not page count.";
   return bundle.competitors.length ? "Competitor observations are limited to domains selected by the site owner." : "No competitor domains have been supplied, so content gaps are unknown.";

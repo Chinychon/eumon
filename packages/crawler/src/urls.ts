@@ -1,7 +1,8 @@
 const LOCALE_SEGMENT = /^[a-z]{2}(?:[-_][a-z]{2,4})?$/i;
 const COMMON_LOCALES = new Set([
   "ar", "bn", "cs", "da", "de", "el", "en", "es", "fa", "fi", "fil", "fr", "he", "hi", "hu", "id", "it", "ja",
-  "ko", "ms", "nl", "no", "pl", "pt", "ro", "ru", "sv", "th", "tl", "tr", "uk", "ur", "vi", "zh",
+  "km", "ko", "lo", "ms", "nl", "no", "pl", "pt", "ro", "ru", "sv", "ta", "th", "tl", "tr", "uk", "ur", "vi", "zh",
+  // Not "my" (Burmese): `/my/` is far more often a "my account" route.
 ]);
 
 function pathSegments(url: string): string[] {

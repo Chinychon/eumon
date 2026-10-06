@@ -263,3 +263,18 @@ describe("malformed HTML stays linear", () => {
     assert.ok(performance.now() - started < 1500, `took ${Math.round(performance.now() - started)} ms`);
   });
 });
+
+describe("auditSitemap sections", () => {
+  it("counts a translated page once and keeps every URL in the URL count", async () => {
+    const paths = [
+      ...["a", "b"].flatMap((slug) => [`/blog/${slug}`, `/id/blog/${slug}`, `/zh/blog/${slug}`]),
+      "/doctors/d1", "/doctors/d2", "/doctors/d3", "/id/doctors/d1",
+    ];
+    const sitemap = `<urlset>${paths.map((path) => `<url><loc>https://clinic.example${path}</loc></url>`).join("")}</urlset>`;
+    const fake: Fetcher = async (url) => ({ url, finalUrl: url, headers: {}, status: url.endsWith("/sitemap.xml") ? 200 : 404, body: url.endsWith("/sitemap.xml") ? sitemap : "" });
+    const { audit } = await auditSitemap("https://clinic.example", fake);
+    assert.equal(audit.urlTypes.blog, 6);
+    assert.deepEqual(audit.sections?.blog, { pages: 2, languages: 3 });
+    assert.deepEqual(audit.sections?.doctors, { pages: 3, languages: 2 }, "a partly translated section counts its largest edition");
+  });
+});

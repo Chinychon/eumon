@@ -18,6 +18,7 @@ import {
   findingsFromCrawlCoverage,
   findingsFromRendering,
   inspectPage,
+  scriptTrackers,
   researchSite,
   runTechnicalSeoAudit,
   samplePerFamily,
@@ -142,12 +143,16 @@ export async function runFullAnalysis(input: RunAnalysisInput) {
   // One page per template is inspected for conversion paths and structured data (compared with competitors).
   const inspectUrls = new Set(samplePerFamily(seedUrls.slice(0, input.maxPages ?? 24), 1, 6));
   const ownInspections: PageInspection[] = [];
+  const inspectedHtml = new Map<string, string>();
   for (const url of seedUrls.slice(0, input.maxPages ?? 24)) {
     try {
       const audited = await fetchPageAudit(url, fetcher);
       pageResults.push(audited.googlebot);
       userAgentPairs.push({ url, browser: audited.raw, googlebot: audited.googlebot });
-      if (inspectUrls.has(url)) ownInspections.push(inspectPage(url, { status: audited.googlebot.status, body: audited.googlebotHtml }));
+      if (inspectUrls.has(url)) {
+        ownInspections.push(inspectPage(url, { status: audited.googlebot.status, body: audited.googlebotHtml }));
+        inspectedHtml.set(url, audited.googlebotHtml);
+      }
     } catch (err) {
       findings.push({
         id: createId("finding"),
@@ -212,8 +217,14 @@ export async function runFullAnalysis(input: RunAnalysisInput) {
     findings.push(...sampleFindings);
   }
 
+  // Analytics SDKs bundled into the site's JavaScript never appear in its HTML.
+  const scriptCache = new Map<string, Promise<string[]>>();
+  await Promise.all(ownInspections.map(async (inspection) => {
+    const bundled = await scriptTrackers(inspectedHtml.get(inspection.url) ?? "", inspection.url, fetcher, scriptCache);
+    inspection.tracking = [...new Set([...inspection.tracking, ...bundled])];
+  }));
   const conversion = auditConversion(ownInspections);
-  findings.push(...findingsFromConversion(conversion, { siteId: input.siteId, analysisId, familySizes: sitemap.urlTypes }));
+  findings.push(...findingsFromConversion(conversion, { siteId: input.siteId, analysisId, familySizes: sitemap.urlTypes, repoAnalytics: repo?.fingerprint.analytics }));
 
   if (repo) {
     findings.push(...findingsFromCode({
@@ -273,6 +284,7 @@ export async function runFullAnalysis(input: RunAnalysisInput) {
     const own: OwnContent = {
       domain: new URL(input.baseUrl).hostname.replace(/^www\./, ""),
       families: sitemap.urlTypes,
+      sections: sitemap.sections,
       pages: ownInspections,
       datasets: input.datasets,
     };

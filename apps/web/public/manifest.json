@@ -1,0 +1,24 @@
+{
+  "name": "Eumon",
+  "short_name": "Eumon",
+  "description": "Understand your website, find valuable organic opportunities, and turn evidence into a site-specific growth plan.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f4f5ee",
+  "theme_color": "#f4f5ee",
+  "scope": "/",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

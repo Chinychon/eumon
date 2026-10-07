@@ -15,6 +15,7 @@ export * from "./d1.js";
 export * from "./page-engine.js";
 export * from "./assistant.js";
 export * from "./metrics.js";
+import { analysisHealthPoints, upsertMetricPoints } from "./metrics.js";
 
 export async function upsertSite(
   db: D1Like,
@@ -307,8 +308,13 @@ export async function saveAnalysisReport(
   report: unknown,
   summary: string,
 ): Promise<void> {
+  const completedAt = new Date().toISOString();
   await db.prepare("UPDATE analyses SET report_json = ?, summary = ?, status = 'completed', completed_at = ? WHERE id = ?")
-    .bind(compactReport(report), summary, new Date().toISOString(), id).run();
+    .bind(compactReport(report), summary, completedAt, id).run();
+  // Every finished analysis adds a site-health point to Results.
+  const points = analysisHealthPoints(report, completedAt.slice(0, 10));
+  const site = points.length ? await db.prepare("SELECT site_id FROM analyses WHERE id = ?").bind(id).first<{ site_id: string }>() : null;
+  if (site) await upsertMetricPoints(db, site.site_id, points);
 }
 
 export async function upsertOAuthCredential(

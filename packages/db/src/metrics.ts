@@ -101,3 +101,20 @@ export async function syncFirstPartyResults(db: D1Like, siteId: string, now = ne
     { metric: "published_pages", day: today, value: pages.published },
   ]);
 }
+
+/** Coverage counts and site health (share of crawled URLs with no error, empty shell, or noindex) from a report. */
+export function analysisHealthPoints(report: unknown, day: string): MetricPoint[] {
+  const coverage = (report as { coverage?: { totalUrls?: number; completedUrls?: number; emptyShellUrls?: number; httpErrorUrls?: number; issues?: { noindex?: number } } | null } | null)?.coverage;
+  if (!coverage?.completedUrls) return [];
+  const empty = coverage.emptyShellUrls ?? 0;
+  const errors = coverage.httpErrorUrls ?? 0;
+  const noindex = coverage.issues?.noindex ?? 0;
+  const healthy = Math.max(0, coverage.completedUrls - empty - errors - noindex);
+  return [
+    { metric: "crawl_urls", day, value: coverage.totalUrls ?? coverage.completedUrls },
+    { metric: "crawl_empty_shells", day, value: empty },
+    { metric: "crawl_http_errors", day, value: errors },
+    { metric: "crawl_noindex", day, value: noindex },
+    { metric: "site_health", day, value: Math.round((healthy / coverage.completedUrls) * 1000) / 10 },
+  ];
+}

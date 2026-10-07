@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { COUNTRIES, countryName, type SiteRecord } from "@organic-growth/core";
 import { api, errorMessage, formatNumber } from "./api";
-import { Badge, Button, Card, CrossIcon, Kpi, usePolling, ViewHeader } from "./ui";
+import { AnalysisProgress, familyLabel, isFinished, useRun } from "./AnalysisProgress";
+import { Badge, Button, Card, CrossIcon, Kpi, ViewHeader } from "./ui";
 
 export type Repository = { id: number; name: string; fullName: string; owner: string; defaultBranch: string; isPrivate: boolean };
 
@@ -13,6 +14,8 @@ type Report = {
   analysisId: string;
   site: { name: string; baseUrl: string; fingerprint?: { framework: string; rendering?: string; deployment?: string } };
   sitemap: { totalUrls: number; sampledUrls: number; errors: string[] };
+  /** Unchanged pages whose results were carried over from the last crawl. */
+  crawlReuse?: { urls: number; from?: string };
   coverage?: {
     totalUrls: number;
     completedUrls: number;
@@ -80,7 +83,6 @@ export function OverviewView({ site, repositories, githubInstalled, onSiteChange
 }) {
   const [report, setReport] = useState<Report | null>(null);
   const [pendingId, setPendingId] = useState("");
-  const [progress, setProgress] = useState("");
   const [error, setError] = useState("");
   const [failure, setFailure] = useState("");
   const [changes, setChanges] = useState<Change[]>([]);
@@ -103,12 +105,19 @@ export function OverviewView({ site, repositories, githubInstalled, onSiteChange
     setReport(null); setPendingId(""); setError(""); setChanges([]); setGscSelected(site.gscProperty ?? "");
     void (async () => {
       try {
-        const latest = await api<{ analysis: { analysisId: string; status: string; report?: Report; error?: string } | null }>(`/api/sites/${site.id}/analyses`);
+        const latest = await api<{
+          analysis: { analysisId: string; status: string; report?: Report; error?: string } | null;
+          previous: { analysisId: string; report: Report } | null;
+        }>(`/api/sites/${site.id}/analyses`);
         if (latest.analysis?.status === "completed" && latest.analysis.report) {
           setReport(latest.analysis.report);
           void loadChanges(latest.analysis.analysisId);
         } else if (latest.analysis?.status === "queued" || latest.analysis?.status === "running") {
           setPendingId(latest.analysis.analysisId);
+          if (latest.previous) {
+            setReport(latest.previous.report);
+            void loadChanges(latest.previous.analysisId);
+          }
         } else if (latest.analysis?.status === "failed") {
           setFailure(latest.analysis.error ?? "No error was recorded.");
         }
@@ -122,28 +131,28 @@ export function OverviewView({ site, repositories, githubInstalled, onSiteChange
     api<{ totalEvents: number; last28Days: number; leads: number }>(`/api/sites/${site.id}/events/summary`).then(setConversions).catch(() => undefined);
   }, [site.id, site.gscProperty, loadChanges]);
 
-  usePolling(Boolean(pendingId), async () => {
-    const job = await api<{ status: string; progress?: { message: string }; report?: Report; error?: string }>(`/api/analyses/${pendingId}`);
-    setProgress(job.progress?.message ?? `Analysis ${job.status}`);
-    if (job.status === "completed" && job.report) {
-      setReport(job.report);
-      void loadChanges(pendingId);
+  const run = useRun(pendingId, site.id, new URL(site.baseUrl).hostname);
+  useEffect(() => {
+    if (!pendingId || !isFinished(run?.status)) return;
+    void (async () => {
+      const job = await api<{ status: string; report?: Report; error?: string }>(`/api/analyses/${pendingId}`).catch(() => null);
+      if (job?.status === "completed" && job.report) {
+        setReport(job.report);
+        void loadChanges(pendingId);
+      } else setFailure(job?.error ?? run?.error ?? "No error was recorded.");
       setPendingId("");
-      return false;
-    }
-    if (job.status === "failed") {
-      setFailure(job.error ?? "No error was recorded.");
-      setPendingId("");
-      return false;
-    }
-  });
+    })();
+  }, [pendingId, run?.status, run?.error, loadChanges]);
 
-  async function runAnalysis() {
+  /** A stalled run no longer blocks the header action, so a new run can replace it. */
+  const running = Boolean(pendingId) && !run?.stalled;
+
+  /** `full` fetches every sitemap URL again; otherwise unchanged pages from the last crawl are reused. */
+  async function runAnalysis(full = false) {
     setError(""); setFailure(""); setBusy("analysis");
     try {
       await api(`/api/sites/${site.id}/competitors`, { method: "PUT", json: { domains: competitors.split(/[\n,]/).map((value) => value.trim()).filter(Boolean) } });
-      const queued = await api<{ analysisId: string }>(`/api/sites/${site.id}/analyses`, { method: "POST" });
-      setProgress("Queued");
+      const queued = await api<{ analysisId: string }>(`/api/sites/${site.id}/analyses`, { method: "POST", json: { full } });
       setPendingId(queued.analysisId);
     } catch (cause) { setError(errorMessage(cause)); } finally { setBusy(""); }
   }
@@ -198,10 +207,14 @@ export function OverviewView({ site, repositories, githubInstalled, onSiteChange
       <ViewHeader
         title={site.name}
         description={<>What Google receives from <a href={site.baseUrl} target="_blank" rel="noreferrer">{site.baseUrl}</a>, what is holding organic traffic back, and what to fix first.</>}
-        actions={<Button busy={busy === "analysis" || Boolean(pendingId)} onClick={runAnalysis}>{pendingId ? progress || "Analyzing…" : report ? "Re-run analysis" : "Run analysis"}</Button>}
+        actions={<>
+          {report && !running && <Button variant="ghost" disabled={busy === "analysis"} onClick={() => runAnalysis(true)}>Re-crawl every page</Button>}
+          <Button busy={busy === "analysis" || running} onClick={() => runAnalysis()}>{running ? "Analyzing…" : run?.stalled ? "Start a new run" : report ? "Update analysis" : "Run analysis"}</Button>
+        </>}
       />
       {error && <div className="callout error" role="alert" style={{ marginBottom: 14 }}>{error}</div>}
       {failure && <div className="callout error" role="alert" style={{ marginBottom: 14 }}>The last analysis stopped before it finished. Run it again; if it stops the same way, this is what failed:<div className="mono small" style={{ marginTop: 6, overflowWrap: "anywhere" }}>{failure}</div></div>}
+      {pendingId && <AnalysisProgress run={run} />}
 
       <div className="split">
         <Card title="Connections" subtitle="Each connection adds evidence. Only the website is required.">
@@ -354,6 +367,12 @@ export function OverviewView({ site, repositories, githubInstalled, onSiteChange
           {coverage?.families && coverage.families.length > 1 && <FamilyHealth families={coverage.families} />}
           {report.repo && <CodeIntelligence repo={report.repo} />}
           {report.rendering && (report.rendering.comparisons.length > 0 || report.rendering.repeatability.length > 0) && <RenderingChecks rendering={report.rendering} />}
+          {report.crawlReuse && !pendingId && (
+            <div className="callout run-reuse">
+              <span>{formatNumber(report.crawlReuse.urls)} pages were reused from {report.crawlReuse.from ? `the analysis on ${new Date(report.crawlReuse.from).toLocaleDateString("en", { day: "numeric", month: "short" })}` : "the last analysis"} instead of being fetched again: their sitemap date shows no change since then, or they were fetched in the last 7 days. New, changed, and previously failed pages were fetched again.</span>
+              <Button small variant="ghost" disabled={busy === "analysis"} onClick={() => runAnalysis(true)}>Re-crawl every page</Button>
+            </div>
+          )}
           {report.sitemap.errors.length > 0 && <div className="crawl-note"><strong>Sitemap note</strong><span>{report.sitemap.errors.join(" ")}</span></div>}
         </div>
       )}
@@ -368,7 +387,6 @@ type FamilyStats = NonNullable<NonNullable<Report["coverage"]>["families"]>[numb
 
 /** What Googlebot received for each page template, so problems point at the code that produces them. */
 function FamilyHealth({ families }: { families: FamilyStats[] }) {
-  const label = (family: string) => (family === "home" ? "Homepage" : family === "page" ? "Top-level pages" : `/${family}/`);
   const cell = (value: number, of: number) => (value ? <span className="bad-count">{formatNumber(value)}{of ? <small> ({Math.round((value / of) * 100)}%)</small> : null}</span> : <span className="muted">0</span>);
   return (
     <section className="panel">
@@ -378,7 +396,7 @@ function FamilyHealth({ families }: { families: FamilyStats[] }) {
           <thead><tr><th>Page type</th><th className="num">Sitemap URLs</th><th className="num">Empty HTML</th><th className="num">Errors</th><th className="num">Noindex</th><th className="num">No structured data</th></tr></thead>
           <tbody>{families.slice(0, 12).map((family) => (
             <tr key={family.family}>
-              <td><code>{label(family.family)}</code></td>
+              <td><code>{familyLabel(family.family)}</code></td>
               <td className="num">{formatNumber(family.urls)}</td>
               <td className="num">{cell(family.emptyShells, family.crawled)}</td>
               <td className="num">{cell(family.errors, family.urls)}</td>

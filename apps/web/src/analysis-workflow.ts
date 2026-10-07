@@ -43,6 +43,8 @@ import { googleAccessToken } from "./gsc-auth";
 interface AnalysisPayload {
   analysisId: string;
   siteId: string;
+  /** Fetch every sitemap URL again instead of reusing unchanged results from the last crawl. */
+  full?: boolean;
 }
 
 /** Upper bound on sitemap URLs crawled per analysis (≈250 Workflow steps). */
@@ -52,7 +54,7 @@ const CRAWL_CONCURRENCY = 6;
 
 export class SiteAnalysisWorkflow extends WorkflowEntrypoint<AppEnv, AnalysisPayload> {
   async run(event: WorkflowEvent<AnalysisPayload>, step: WorkflowStep) {
-    const { analysisId, siteId } = event.payload;
+    const { analysisId, siteId, full } = event.payload;
     const db = this.env.DB;
     try {
       const site = await step.do("load-site", async () => {
@@ -74,8 +76,12 @@ export class SiteAnalysisWorkflow extends WorkflowEntrypoint<AppEnv, AnalysisPay
 
       // Crawl every sitemap URL (as Googlebot) in resumable batches before
       // analysis, so findings describe the whole site rather than a sample.
-      const queued = await step.do("enqueue-full-crawl", () =>
-        queueFullCrawl(db, { analysisId, siteId, baseUrl: site.baseUrl, maxUrls: MAX_FULL_CRAWL_URLS }));
+      // Results from the last crawl that still stand are reused unless `full`.
+      const queued = await step.do("enqueue-full-crawl", async () => {
+        const result = await queueFullCrawl(db, { analysisId, siteId, baseUrl: site.baseUrl, maxUrls: MAX_FULL_CRAWL_URLS, full });
+        await updateAnalysisProgress(db, analysisId, "crawl", `Crawling ${result.queued.toLocaleString()} sitemap URLs as Googlebot`);
+        return result;
+      });
 
       for (let batch = 0; batch * CRAWL_BATCH_SIZE < queued.queued + CRAWL_BATCH_SIZE; batch++) {
         const crawled = await step.do(`crawl-batch-${batch}`, { retries: { limit: 2, delay: "10 seconds", backoff: "exponential" } }, async () => {
@@ -97,8 +103,9 @@ export class SiteAnalysisWorkflow extends WorkflowEntrypoint<AppEnv, AnalysisPay
         return (await listSiteCompetitorDomains(db, siteId)).slice(0, MAX_COMPETITORS);
       });
       const competitorResearch: SiteResearch[] = [];
-      for (const domain of competitorDomains) {
+      for (const [index, domain] of competitorDomains.entries()) {
         competitorResearch.push(await step.do(`research-${domain}`, { retries: { limit: 1, delay: "10 seconds" } }, async () => {
+          await updateAnalysisProgress(db, analysisId, "competitors", `Reading ${domain}`, { competitor: domain, done: index, of: competitorDomains.length });
           const research = await researchSite(domain, undefined, { maxFiles: 15, maxUrls: 50_000 });
           // Keep the step output small: the largest families are what the comparison uses.
           return { ...research, sitemap: { ...research.sitemap, families: research.sitemap.families.slice(0, 40) } };
@@ -165,7 +172,10 @@ export class SiteAnalysisWorkflow extends WorkflowEntrypoint<AppEnv, AnalysisPay
           const plan = llm ? await synthesizePlanNarrative(llm, raw.plan, raw.findings) : raw.plan;
           if (raw.site.fingerprint) await updateSiteFingerprint(db, siteId, raw.site.fingerprint);
           await updateAnalysisProgress(db, analysisId, "saving", "Saving findings and growth plan");
-          await saveAnalysisReport(db, analysisId, { ...raw, plan, sitemapUrlsDeclared: queued.declared }, plan.highestImpactOpportunity);
+          await saveAnalysisReport(db, analysisId, {
+            ...raw, plan, sitemapUrlsDeclared: queued.declared,
+            ...(queued.reused ? { crawlReuse: { urls: queued.reused, from: queued.reusedFrom } } : {}),
+          }, plan.highestImpactOpportunity);
           return plan.highestImpactOpportunity;
         },
       );

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { SiteRecord } from "@organic-growth/core";
+import { runLabel, useSiteRun } from "./components/AnalysisProgress";
 import { api, errorMessage } from "./components/api";
 import { DataView } from "./components/DataView";
 import { OverviewView, type Repository } from "./components/OverviewView";
@@ -71,6 +72,7 @@ export default function Home() {
   useEffect(() => { if (!notice) return; const timer = setTimeout(() => setNotice(""), 6000); return () => clearTimeout(timer); }, [notice]);
 
   const site = sites?.find((entry) => entry.id === siteId) ?? null;
+  const run = useSiteRun(siteId);
   const navigate = (next: View) => { setView(next); window.scrollTo({ top: 0 }); };
 
   return (
@@ -99,6 +101,7 @@ export default function Home() {
       <section className="main-area" id="top">
         <header className="topbar">
           <div className="breadcrumb">{site ? <>{new URL(site.baseUrl).hostname} <span>/</span> {adding ? "Add website" : NAV.find((item) => item.view === view)?.label}</> : "Welcome"}</div>
+          {run && (view !== "overview" || adding) && <button className="top-actions run-chip" onClick={() => { setAdding(false); navigate("overview"); }}>{runLabel(run)}</button>}
           {site && <a className="top-actions" href={site.baseUrl} target="_blank" rel="noreferrer">Open site</a>}
         </header>
         <div className="content-wrap">

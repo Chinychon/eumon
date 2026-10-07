@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { CrawlPageResult } from "@organic-growth/core";
-import { compactReport, createAnalysis, enqueueAnalysisCrawlUrls, getCrawlCoverage, listPendingCrawlUrls, saveCrawlBatch, upsertSite } from "./index.js";
+import {
+  analysisStalled, compactReport, createAnalysis, enqueueAnalysisCrawlUrls, estimateCrawl, getAnalysisJob, getCrawlCoverage, getCrawlProgress, getPreviousCompletedAnalysis,
+  listCrawlStates, listPendingCrawlUrls, reuseCrawlResults, saveCrawlBatch, updateAnalysisProgress, updateAnalysisStatus, upsertSite,
+} from "./index.js";
 import { openSqliteD1 } from "./sqlite.js";
 
 function page(url: string, overrides: Partial<CrawlPageResult> = {}): CrawlPageResult {
@@ -103,5 +106,87 @@ describe("compactReport", () => {
     assert.equal(parsed.pages.length, 0);
     assert.equal(parsed.findings.length, 30, "every finding is kept");
     assert.equal(compactReport({ small: true }), JSON.stringify({ small: true }));
+  });
+});
+
+describe("live crawl progress", async () => {
+  const db = openSqliteD1();
+  const now = new Date().toISOString();
+  const u = (path: string) => `https://y.com${path}`;
+  await upsertSite(db, { id: "site", name: "y.com", baseUrl: "https://y.com", createdAt: now, updatedAt: now });
+  await createAnalysis(db, { id: "p1", siteId: "site", status: "running", createdAt: now });
+  await enqueueAnalysisCrawlUrls(db, {
+    analysisId: "p1", siteId: "site",
+    urls: [
+      ...["/doctors/a", "/doctors/b", "/doctors/c", "/doctors/d"].map((path) => ({ url: u(path), routeFamily: "doctors" })),
+      { url: u("/blog/x"), routeFamily: "blog" },
+      { url: u("/private/x"), routeFamily: "private", blocked: true },
+    ],
+  });
+  await saveCrawlBatch(db, {
+    analysisId: "p1",
+    outcomes: [
+      { url: u("/doctors/a"), page: page(u("/doctors/a")) },
+      { url: u("/doctors/b"), page: page(u("/doctors/b"), { isEmptyShell: true }) },
+      { url: u("/doctors/c"), page: page(u("/doctors/c"), { status: 404 }) },
+      { url: u("/blog/x"), error: "timeout" },
+    ],
+  });
+
+  it("counts what the crawl has done so far, per page type, with the latest pages", async () => {
+    const progress = await getCrawlProgress(db, "p1");
+    assert.deepEqual(
+      { total: progress.total, pending: progress.pending, crawled: progress.crawled, failed: progress.failed, blocked: progress.blocked, ok: progress.ok, httpErrors: progress.httpErrors, emptyShells: progress.emptyShells },
+      { total: 6, pending: 1, crawled: 4, failed: 1, blocked: 1, ok: 2, httpErrors: 1, emptyShells: 1 },
+    );
+    assert.deepEqual(progress.families.find((family) => family.family === "doctors"), { family: "doctors", total: 4, done: 3, fetched: 3, emptyShells: 1, errors: 1 });
+    assert.equal(progress.recent.length, 4);
+    assert.ok(progress.firstCrawledAt);
+  });
+
+  it("estimates pace and time left only once the crawl has settled", () => {
+    const start = Date.parse("2026-10-07T10:00:00.000Z");
+    assert.deepEqual(estimateCrawl({ crawled: 50, pending: 950, firstCrawledAt: "2026-10-07T10:00:00.000Z" }, start + 120_000), {}, "too few pages");
+    assert.deepEqual(estimateCrawl({ crawled: 300, pending: 900, firstCrawledAt: "2026-10-07T10:00:00.000Z" }, start + 30_000), {}, "too early");
+    assert.deepEqual(estimateCrawl({ crawled: 300, pending: 900, firstCrawledAt: "2026-10-07T10:00:00.000Z" }, start + 180_000), { perMinute: 100, secondsLeft: 540 });
+    assert.deepEqual(
+      estimateCrawl({ crawled: 600, pending: 0, firstCrawledAt: "2026-10-07T10:00:00.000Z", lastCrawledAt: "2026-10-07T10:03:00.000Z" }, start + 6 * 3_600_000),
+      { perMinute: 200, secondsLeft: 0 },
+      "a finished crawl keeps its own pace",
+    );
+  });
+
+  it("times each stage and carries stage detail", async () => {
+    await updateAnalysisProgress(db, "p1", "sitemap", "Reading the sitemap");
+    await updateAnalysisProgress(db, "p1", "crawl", "Crawled 100", { reused: 20 });
+    await updateAnalysisProgress(db, "p1", "crawl", "Crawled 200", { reused: 20 });
+    const job = await getAnalysisJob(db, "p1");
+    assert.deepEqual(job?.progress?.history?.map((entry) => entry.stage), ["sitemap", "crawl"]);
+    assert.equal(job?.progress?.message, "Crawled 200");
+    assert.deepEqual(job?.progress?.detail, { reused: 20 });
+  });
+
+  it("treats a run with no progress for 45 minutes as stopped", () => {
+    const start = Date.parse("2026-10-07T10:00:00.000Z");
+    const job = (status: string, updatedAt?: string) => ({ status, createdAt: "2026-10-07T10:00:00.000Z", progress: updatedAt ? { stage: "crawl", message: "", updatedAt } : undefined });
+    assert.equal(analysisStalled(job("running", "2026-10-07T10:30:00.000Z"), start + 60 * 60_000), false, "updated 30 minutes ago");
+    assert.equal(analysisStalled(job("running", "2026-10-07T10:30:00.000Z"), start + 80 * 60_000), true, "silent for 50 minutes");
+    assert.equal(analysisStalled(job("queued"), start + 50 * 60_000), true, "never started");
+    assert.equal(analysisStalled(job("completed"), start + 5 * 3_600_000), false, "finished runs are not stalled");
+  });
+
+  it("carries unchanged results into a re-run and never reuses a failure", async () => {
+    await updateAnalysisStatus(db, "p1", "completed", { completedAt: now });
+    await createAnalysis(db, { id: "p2", siteId: "site", status: "running", createdAt: new Date(Date.now() + 1000).toISOString() });
+    assert.deepEqual(await getPreviousCompletedAnalysis(db, "site", "p2"), { id: "p1", completedAt: now });
+    const states = await listCrawlStates(db, "p1");
+    assert.equal(states.get(u("/blog/x"))?.state, "failed");
+    await reuseCrawlResults(db, { analysisId: "p2", previousAnalysisId: "p1", urls: [u("/doctors/a"), u("/doctors/b"), u("/blog/x")] });
+    const progress = await getCrawlProgress(db, "p2");
+    assert.equal(progress.reused, 2, "the failed URL is not copied");
+    assert.deepEqual(progress.families.find((family) => family.family === "doctors"), { family: "doctors", total: 2, done: 2, fetched: 0, emptyShells: 1, errors: 0 });
+    assert.equal(progress.crawled, 0, "reused results do not count as fetched in this run");
+    const coverage = await getCrawlCoverage(db, "p2");
+    assert.equal(coverage.emptyShellUrls, 1, "reused results still count toward the analysis");
   });
 });

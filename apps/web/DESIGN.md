@@ -180,7 +180,7 @@ A grayscale console with one spent accent and two alarm colors.
 - **Error Red** (`red`, `red-tint`, `red-ink`): error callouts, failed/blocked badges, failed checks, danger buttons, bad counts, critical findings.
 
 ### Named Rules
-**The Spent Green Rule.** Green appears on the primary button, the active navigation marker, progress, and the brand mark. Nowhere else. Status words that mean "good" (published, live, approved) render as a neutral badge with ink text and a strong hairline, not green.
+**The Spent Green Rule.** Green appears on the primary button, the active navigation marker, progress, and the brand mark. Nowhere else. Progress includes the 6px square on a running analysis's active stage and on the top-bar run chip, and the fetched-this-run segment of a split bar. Status words that mean "good" (published, live, approved) render as a neutral badge with ink text and a strong hairline, not green.
 
 **The Alarm-Only Rule.** Amber and red carry warnings and errors and nothing else. They are never decoration, emphasis, or category color.
 
@@ -281,6 +281,17 @@ Drawn, never typed: 10px SVG at a 1.4 stroke in `currentColor` (`CheckIcon`, `Cr
 - **Callout:** Inset Black with a Hairline border, 12px 14px, 13.5px Quiet White. Warning and error variants use the amber or red tint, a 30% border, and the matching ink color.
 - **Empty state:** dashed Strong Hairline box, 28px padding, centered Graphite text, often with a ghost action.
 - **Progress:** a 4px square track at 8% white with a Console Jade fill that scales from the left (.4s, cubic-bezier(.16, 1, .3, 1)).
+- **Split progress:** the same track in two parts when a run carries earlier work over: a 30% white segment for what was reused or skipped, then Console Jade for what this run did. A legend line under it names both with 6px squares in the same two colors, and only appears when something was carried over.
+
+### Run panel
+A running analysis sits at the top of the Overview as one ruled stack, the same construction as the report below it: each block draws its own 1px rules and overlaps its neighbour by 1px, edge to edge. Nothing nests inside a bordered frame.
+- **Head:** the stage as a Title ("Crawling as Googlebot"), a Graphite subtitle naming the current step, a ghost "Notify me when it finishes" (or a mono note once allowed or blocked), and the elapsed count pill.
+- **Stage track:** five cells (Sitemap, Crawl, Competitors, Analysis, Saving) with mono Label names. A finished stage leads with `CheckIcon` and shows its duration; the active one has the Inset Black surface and the nav's 6px Console Jade square. Under 760px the cells stack as rows.
+- **Crawl block:** done / total sitemap URLs as a Figure, the percentage in mono, a split progress bar, and a mono pace line (pages a minute, about N min left).
+- **Tallies:** KPI cells at a 20px figure (Served, Empty HTML, Errors, Noindex, Blocked). Under 760px, Served spans the row above a 2×2 grid.
+- **Tables:** per page type (with split mini bars) beside the latest pages, sharing a rule. A latest-page path dims its folder in Ash and keeps its last segment in Quiet White; the folder gives way first when space runs out. Failures, 4xx/5xx, and empty HTML show as red badges; a 200 shows nothing.
+- **Stopped:** when the server reports no progress for 45 minutes, the title reads "Analysis stopped", the active stage's square and time turn amber ("Stopped"), the bar fills turn Graphite, an amber callout explains, and the header primary becomes "Start a new run".
+- **Run chip:** on other views, a mono top-actions label with the 6px Console Jade square ("42% crawled") sits before Open site in the top bar and returns to the Overview; on phones it takes Open site's place.
 
 ### Data
 - **Table:** inside a Hairline frame that scrolls horizontally; Inset Black head row with mono Label text; 10px 12px cells at 13px Quiet White; Hairline row dividers; row hover to Inset Black; numeric columns right-aligned and tabular.

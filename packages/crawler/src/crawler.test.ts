@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
 import type { CrawlCoverage } from "@organic-growth/core";
-import { auditSitemap, defaultFetcher, fetchGooglebotPage, findingsFromCrawlCoverage, headerNoindex, isBotChallenge, isEmptyShell, parseHtmlSignals, runTechnicalSeoAudit, type Fetcher } from "./index.js";
+import { auditSitemap, defaultFetcher, sitemapEntries, fetchGooglebotPage, findingsFromCrawlCoverage, headerNoindex, isBotChallenge, isEmptyShell, parseHtmlSignals, runTechnicalSeoAudit, type Fetcher } from "./index.js";
 import { classifyLanguage, classifyUrlType, isSameSite } from "./urls.js";
 
 describe("isSameSite", () => {
@@ -276,5 +276,29 @@ describe("auditSitemap sections", () => {
     assert.equal(audit.urlTypes.blog, 6);
     assert.deepEqual(audit.sections?.blog, { pages: 2, languages: 3 });
     assert.deepEqual(audit.sections?.doctors, { pages: 3, languages: 2 }, "a partly translated section counts its largest edition");
+  });
+});
+
+describe("sitemapEntries", () => {
+  it("reads each URL with its lastmod, and keeps entries without one", () => {
+    const xml = `<urlset><url><loc>https://a.example/x</loc><lastmod>2026-10-01</lastmod></url>
+      <url><loc><![CDATA[https://a.example/y]]></loc></url></urlset>`;
+    assert.deepEqual(sitemapEntries(xml), [{ loc: "https://a.example/x", lastmod: "2026-10-01" }, { loc: "https://a.example/y" }]);
+  });
+
+  it("stays linear on a sitemap whose url elements never close", () => {
+    const xml = `<urlset>${"<url><loc>https://a.example/z</loc>".repeat(50_000)}`;
+    const started = performance.now();
+    assert.deepEqual(sitemapEntries(xml), []);
+    assert.ok(performance.now() - started < 500, "a malformed file must not rescan for every opener");
+  });
+
+  it("hands lastmod to the sitemap audit", async () => {
+    const files: Record<string, string> = {
+      "https://a.example/sitemap.xml": `<urlset><url><loc>https://a.example/doctors/x</loc><lastmod>2026-09-30</lastmod></url></urlset>`,
+    };
+    const fake: Fetcher = async (url) => ({ url, finalUrl: url, headers: {}, status: files[url] ? 200 : 404, body: files[url] ?? "" });
+    const { lastmod } = await auditSitemap("https://a.example", fake);
+    assert.equal(lastmod.get("https://a.example/doctors/x"), "2026-09-30");
   });
 });

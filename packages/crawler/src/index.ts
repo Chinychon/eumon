@@ -398,7 +398,7 @@ export async function auditSitemap(
   baseUrl: string,
   fetcher: Fetcher = defaultFetcher,
   options?: { maxUrls?: number; maxSitemapFiles?: number },
-): Promise<{ audit: SitemapAudit; sampleUrls: string[]; urls: string[] }> {
+): Promise<{ audit: SitemapAudit; sampleUrls: string[]; urls: string[]; lastmod: Map<string, string> }> {
   const maxUrls = options?.maxUrls ?? 200;
   const origin = new URL(baseUrl).origin;
   const sitemapUrl = `${origin}/sitemap.xml`;
@@ -406,6 +406,7 @@ export async function auditSitemap(
 
   const errors: string[] = [];
   const indexFiles: string[] = [];
+  const lastmod = new Map<string, string>();
   let urls: string[] = [];
 
   try {
@@ -422,6 +423,7 @@ export async function auditSitemap(
     const state: SitemapCollectionState = {
       visited: new Set<string>(),
       maxFiles: options?.maxSitemapFiles ?? 500,
+      lastmod,
     };
     const collected: string[] = [];
     for (const entry of entries) {
@@ -461,12 +463,38 @@ export async function auditSitemap(
     },
     sampleUrls,
     urls,
+    lastmod,
   };
 }
 
 interface SitemapCollectionState {
   visited: Set<string>;
   maxFiles: number;
+  /** `<lastmod>` per page URL, for URLs whose sitemap entry declares one. */
+  lastmod?: Map<string, string>;
+}
+
+/**
+ * `<url>` entries of a sitemap with their `<lastmod>`. Walks the document
+ * with indexOf so a malformed file (a `<url>` never closed) stays linear.
+ */
+export function sitemapEntries(body: string): Array<{ loc: string; lastmod?: string }> {
+  const lower = body.toLowerCase();
+  const entries: Array<{ loc: string; lastmod?: string }> = [];
+  let from = 0;
+  for (;;) {
+    const start = lower.indexOf("<url", from);
+    if (start < 0) break;
+    if (!/[\s>]/.test(lower[start + 4] ?? "")) { from = start + 4; continue; } // <urlset>
+    const end = lower.indexOf("</url>", start);
+    if (end < 0) break;
+    const block = body.slice(start, end);
+    const loc = /<loc>\s*(?:<!\[CDATA\[)?\s*([^<\]]+?)\s*(?:\]\]>)?\s*<\/loc>/i.exec(block)?.[1];
+    const lastmod = /<lastmod>\s*([^<]+?)\s*<\/lastmod>/i.exec(block)?.[1];
+    if (loc) entries.push(lastmod ? { loc, lastmod } : { loc });
+    from = end + 6;
+  }
+  return entries;
 }
 
 /** Recursively collects page URLs from a sitemap or sitemap index on one origin. */
@@ -517,8 +545,10 @@ export async function collectSitemapUrls(
     }
     return nested;
   }
-  return [...body.matchAll(/<loc>\s*([^<]+)\s*<\/loc>/gi)].map((m) => m[1].trim())
-    .filter((loc) => isSafePublicUrl(loc) && isSameSite(loc, allowedOrigin));
+  const entries = sitemapEntries(body);
+  const locs = entries.length ? entries.map((entry) => entry.loc) : [...body.matchAll(/<loc>\s*([^<]+)\s*<\/loc>/gi)].map((m) => m[1].trim());
+  if (collection.lastmod) for (const entry of entries) if (entry.lastmod) collection.lastmod.set(entry.loc, entry.lastmod);
+  return locs.filter((loc) => isSafePublicUrl(loc) && isSameSite(loc, allowedOrigin));
 }
 
 export function selectRepresentativeSample(

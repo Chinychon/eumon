@@ -29,7 +29,7 @@ import {
   type SiteResearch,
 } from "@organic-growth/crawler";
 import type { JsonLlm } from "@organic-growth/ai";
-import { enqueueAnalysisCrawlUrls, type D1Like } from "@organic-growth/db";
+import { enqueueAnalysisCrawlUrls, getPreviousCompletedAnalysis, listCrawlStates, reuseCrawlResults, type D1Like } from "@organic-growth/db";
 import {
   analyzeRepository,
   type RepoSnapshot,
@@ -52,22 +52,56 @@ import {
   type OwnContent,
 } from "./competition.js";
 
+const DAY = 86_400_000;
+
+/**
+ * Whether an earlier crawl result still stands for a re-run. Only successful
+ * fetches carry over. With a sitemap `lastmod`, a page changed on or after
+ * the day it was crawled is fetched again, and results older than 30 days
+ * are refreshed anyway; without one, results older than 7 days are.
+ */
+export function shouldReuse(previous: { state: string; crawledAt: string | null } | undefined, lastmod: string | undefined, now: number): boolean {
+  if (previous?.state !== "complete" || !previous.crawledAt) return false;
+  const crawledAt = Date.parse(previous.crawledAt);
+  if (!Number.isFinite(crawledAt)) return false;
+  const changed = lastmod ? Date.parse(lastmod) : Number.NaN;
+  if (!Number.isFinite(changed)) return now - crawledAt < 7 * DAY;
+  const crawledDay = Date.parse(previous.crawledAt.slice(0, 10));
+  return changed < crawledDay && now - crawledAt < 30 * DAY;
+}
+
 /**
  * Queues every sitemap URL (up to `maxUrls`) for the Googlebot crawl. URLs
- * robots.txt blocks for Googlebot are recorded but will not be fetched.
+ * robots.txt blocks for Googlebot are recorded but will not be fetched. Unless
+ * `full`, results from the site's last finished crawl that still stand
+ * (`shouldReuse`) are copied over instead of being fetched again.
  */
 export async function queueFullCrawl(
   db: D1Like,
-  input: { analysisId: string; siteId: string; baseUrl: string; maxUrls: number },
-): Promise<{ declared: number; queued: number }> {
-  const { urls } = await auditSitemap(input.baseUrl, undefined, { maxUrls: 1 });
-  const robots = await fetchRobots(input.baseUrl, GOOGLEBOT_TOKEN, GOOGLEBOT_UA).catch(() => null);
-  const entries = urls.slice(0, input.maxUrls).map((url) => {
+  input: { analysisId: string; siteId: string; baseUrl: string; maxUrls: number; full?: boolean; fetcher?: Fetcher; now?: number },
+): Promise<{ declared: number; queued: number; reused: number; reusedFrom?: string }> {
+  const fetcher = input.fetcher ?? defaultFetcher;
+  const { urls, lastmod } = await auditSitemap(input.baseUrl, fetcher, { maxUrls: 1 });
+  const robots = await fetchRobots(input.baseUrl, GOOGLEBOT_TOKEN, GOOGLEBOT_UA, fetcher).catch(() => null);
+  const previous = input.full ? null : await getPreviousCompletedAnalysis(db, input.siteId, input.analysisId);
+  const prior = previous ? await listCrawlStates(db, previous.id) : new Map<string, { state: string; crawledAt: string | null }>();
+  const now = input.now ?? Date.now();
+  const reuse: string[] = [];
+  const toFetch: Array<{ url: string; routeFamily: string; blocked: boolean }> = [];
+  for (const url of urls.slice(0, input.maxUrls)) {
     const { pathname, search } = new URL(url);
-    return { url, routeFamily: classifyUrlType(url), blocked: robots ? !robots.isAllowed(`${pathname}${search}`) : false };
-  });
-  await enqueueAnalysisCrawlUrls(db, { analysisId: input.analysisId, siteId: input.siteId, urls: entries });
-  return { declared: urls.length, queued: entries.filter((entry) => !entry.blocked).length };
+    const blocked = robots ? !robots.isAllowed(`${pathname}${search}`) : false;
+    if (!blocked && shouldReuse(prior.get(url), lastmod.get(url), now)) reuse.push(url);
+    else toFetch.push({ url, routeFamily: classifyUrlType(url), blocked });
+  }
+  if (previous && reuse.length) await reuseCrawlResults(db, { analysisId: input.analysisId, previousAnalysisId: previous.id, urls: reuse });
+  await enqueueAnalysisCrawlUrls(db, { analysisId: input.analysisId, siteId: input.siteId, urls: toFetch });
+  return {
+    declared: urls.length,
+    queued: toFetch.filter((entry) => !entry.blocked).length,
+    reused: reuse.length,
+    ...(previous && reuse.length ? { reusedFrom: previous.completedAt } : {}),
+  };
 }
 
 export interface RunAnalysisInput {

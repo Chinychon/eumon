@@ -1,18 +1,18 @@
 # Results: metrics that prove SEO, GEO, and AEO improvement
 
-Date: 2026-10-06 · Status: approved design, awaiting spec review
+Date: 2026-10-06 · Status: approved; Phase 1 extended 2026-10-07 with Google Analytics 4 and index status (sub-project A of the SEO data roadmap)
 
 ## Goal
 
 Show, with real numbers over time, whether Eumon is improving a client's visibility and leads in search engines (SEO), in AI-generated answers (GEO), and in answer features such as rich results and question searches (AEO).
 
-**Audience:** one view for both. The operator (Eumon's founder, running sites for clients) uses it to see what works; each client gets a read-only link to the same numbers for their own site.
+**Audience:** one view for both. The dashboard is client-facing. Until sign-in exists (deferred past the MVP), each client reaches their numbers through a read-only link; the operator uses the same view to see what works.
 
 **Success:** for any site, the operator can open one view and say how leads, search traffic, and AI visibility have changed since Eumon's pages went live, and every number traces back to its source.
 
 ## Non-goals
 
-- Third-party SERP rank tracking, backlink data, or competitor traffic estimates.
+- Third-party SERP rank tracking and competitor traffic estimates. Free authority and backlink estimates, keyword volume and difficulty, and competitor keywords are separate sub-projects (B and C) with their own specs.
 - User accounts or roles. The client link is the only client access.
 - Scheduled email or PDF reports. They can follow once the view exists.
 
@@ -56,6 +56,9 @@ Each metric is stored per site per day. "Sum" metrics add up over a window; "lat
 | `ai_crawlers_allowed` | GEO | Major AI crawlers robots.txt allows (of 5) | analysis report | per analysis | latest | 2 |
 | `question_impressions`, `question_clicks` | AEO | Search Console rows whose query is a question (see Question queries) | Search Console, `query` + `date` | daily | sum | 2 |
 | `rich_result_impressions` | AEO | Impressions with a rich-result search appearance | Search Console, `searchAppearance` | daily | sum | 2 |
+| `ga4_sessions`, `ga4_organic_sessions` | SEO | All sessions, and sessions whose default channel group is Organic Search | Google Analytics 4 Data API, `date` × `sessionDefaultChannelGroup` | daily | sum | 1 |
+| `ga4_organic_engaged_sessions`, `ga4_organic_key_events` | Outcomes | Engaged sessions and key events from Organic Search sessions | Google Analytics 4 Data API | daily | sum | 1 |
+| `pages_indexed`, `pages_not_indexed` | SEO | Published Eumon pages Google reports as indexed (verdict PASS) or not, from each page's latest inspection | Search Console URL Inspection API | daily | latest | 1 |
 | `published_pages` | Outcomes | Published Eumon pages | generated pages | daily | latest | 1 |
 | `faq_pages` | AEO | Published Eumon pages with an FAQ block (every Eumon page already carries entity JSON-LD) | generated pages (`content_json.faq`) | daily | latest | 2 |
 | `ai_answers`, `ai_mentions`, `ai_citations` (+ `.<engine>`) | GEO | Successful checks, answers naming the client, answers citing a client URL | AI answer checks | weekly | latest | 3 |
@@ -77,6 +80,18 @@ Search Console omits anonymized queries, so query-level sums (`queries_top10`, q
 
 - The Monday sync fetches the `query` dimension for the last 7 days and for the 7 days before, in one pass of two requests. Bucket counts come from the first window. A query is **new** to a bucket when its position there is inside the bucket and its earlier position was outside or absent, and **lost** the other way round. No per-query history is stored.
 - **Target-market scope:** when the site has target markets (`site_markets`), every Google-based number is computed for those countries, with the all-countries figure beside it. Search Console's `country` filter does this server-side.
+
+### Google Analytics 4 (phase 1)
+
+- Connecting Google asks for `analytics.readonly` beside `webmasters.readonly`. Sites connected before this keep working for Search Console and show "Reconnect Google to add Analytics" until they reconnect; the granted scopes are stored with the credential.
+- The operator picks a GA4 property in Connections (listed through the Analytics Admin API's account summaries). It is stored on the site.
+- Backfill and daily sync follow Search Console: 16 months on the first sync, then the last 7 days overwritten daily. Dimensions `date` and `sessionDefaultChannelGroup`; metrics `sessions`, `engagedSessions`, `keyEvents`.
+- Key events give enquiries a "before Eumon" history that first-party tracking cannot recover; the view labels them "GA4 key events" and never adds them to Eumon's lead count.
+
+### Index status (phase 1)
+
+- The daily sync inspects up to 100 published Eumon pages a day through the URL Inspection API, least recently checked first (the API allows 2,000 a day per property). Each result (verdict, coverage state, last crawl) is stored per page.
+- `pages_indexed` and `pages_not_indexed` are written daily from the stored results; pages never inspected count as "not checked yet", never as not indexed.
 
 ### Analysis snapshots (phase 1)
 
@@ -190,19 +205,19 @@ Each section is titled with the question it answers, in funnel order.
 
 ### Visual design
 
-The view inherits the dashboard's established world unchanged: black ground, Geist and Geist Mono, square hairline panels, green only on the primary action, the active navigation marker, and progress. Patterns drawn from the operator's PostHog dashboards are integrated in that world, not copied:
+The view inherits the dashboard's established world as recorded in `apps/web/DESIGN.md`: warm paper and forest-night themes, Geist and Geist Mono, square hairline panels sharing rules, green for primary, progress, and positive state, and the existing chart components. Patterns drawn from the operator's PostHog dashboards are integrated in that world, not copied:
 
 - **Self-explaining tiles:**
   - Every tile carries a one-line, plain-language definition under its title ("Clicks from Google search to any page on the site").
   - Every section opens with its question and one sentence on why it matters.
   - Every number's label names its window ("Google clicks · last 28 days").
 - **Dashed incomplete periods:** the current partial week, and the days Search Console has not yet reported, draw as a dashed tail, so a partial week never reads as a drop.
-- **Ranked horizontal bars** for breakdowns (enquiries by source, AI citations by engine, share of voice against competitors), in white and grays. Every bar is labeled with its value.
-- **Two-line charts:** Eumon pages in white, the whole site in gray, with the go-live marker as a hairline with a mono date label. No series introduces a new hue.
+- **Ranked horizontal bars** for breakdowns (enquiries by source, AI citations by engine, share of voice against competitors), in the series colours. Every bar is labeled with its value.
+- **Two-line charts:** the whole site and Eumon pages in the first two series colours, with the go-live marker as a hairline with a mono date label.
 - **Freshness:** a "data through" stamp in the title row and under every Google-based section.
 - **Loading:** hairline placeholder shapes in each tile's real chart position while data loads, never a spinner over empty space.
 
-Not taken from those dashboards: the light theme, multi-color series, rounded tiles, colored accent bars beside titles, and the date-range, filter, and breakdown toolbar.
+Not taken from those dashboards: rounded tiles, colored accent bars beside titles, and the date-range, filter, and breakdown toolbar.
 
 ### States
 
@@ -245,14 +260,14 @@ Site health; editing the AI question set and brand aliases; copying and revoking
 
 These came out of reviewing the operator's Semrush project for medbaycare.com, and are deliberately not in the three phases:
 
-- **Google Analytics 4 import:** users, sessions, and key events through the Google OAuth connection Eumon already has, plus the `analytics.readonly` scope. Key events would give enquiries a real "before Eumon" history, which first-party tracking cannot recover.
 - **Google AI Overviews and AI Mode:** there is no official API, so it needs SERP collection or a paid data provider.
-- **Backlinks, toxicity, and authority score:** these need a link index. They stay a non-goal unless the operator connects a data provider such as the Semrush API.
+- **Backlinks and authority score:** sub-project B uses a free rough estimate (Open PageRank, built from Common Crawl); toxicity stays out.
 
 ## Phases and acceptance
 
-1. **Ledger, SEO, leads.**
-   - Connecting Search Console on a site fills 16 months of daily clicks and impressions.
+1. **Ledger, SEO, leads, Analytics, indexing.**
+   - Connecting Search Console on a site fills 16 months of daily clicks and impressions; choosing a GA4 property fills 16 months of sessions and organic key events.
+   - Pages live shows how many are indexed, not indexed, and not checked yet.
    - Results shows the headline Google-clicks chart with site and Eumon-page lines and a go-live marker, the Google clicks, enquiries, and pages-live key numbers, section 1 (with ranking buckets, new and lost queries, the top-queries table, and target-market scope), section 4 with the search-to-enquiry funnel, and site health as a percentage from analysis runs.
    - The client link opens the same numbers read-only and stops working after revoke.
 2. **Free GEO and AEO signals.**

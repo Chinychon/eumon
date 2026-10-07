@@ -13,6 +13,7 @@ import { chunks, nowIso, runStatements, type D1Like } from "./d1.js";
 
 export * from "./d1.js";
 export * from "./page-engine.js";
+export * from "./assistant.js";
 
 export async function upsertSite(
   db: D1Like,

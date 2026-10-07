@@ -351,3 +351,4 @@ export * from "./competition.js";
 export * from "./code-findings.js";
 export * from "./search.js";
 export * from "./conversion.js";
+export * from "./assistant.js";

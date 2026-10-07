@@ -121,8 +121,8 @@ function SplitBar({ carried, fetched, total, label }: { carried: number; fetched
   const share = (count: number) => (total > 0 ? Math.min(100, (count / total) * 100) : 0);
   return (
     <div className="progress run-split" role="progressbar" aria-label={label} aria-valuenow={Math.floor(share(carried + fetched))} aria-valuemin={0} aria-valuemax={100}>
-      <b style={{ width: `${share(carried)}%` }} />
-      <i style={{ width: `${share(fetched)}%` }} />
+      <b style={{ transform: `scaleX(${share(carried) / 100})` }} />
+      <i style={{ transform: `translateX(${share(carried)}%) scaleX(${share(fetched) / 100})` }} />
     </div>
   );
 }

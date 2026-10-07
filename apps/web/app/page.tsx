@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { SiteRecord } from "@organic-growth/core";
 import { runLabel, useSiteRun } from "./components/AnalysisProgress";
+import { AskDrawer, AskView } from "./components/Ask";
 import { api, errorMessage } from "./components/api";
 import { DataView } from "./components/DataView";
 import { OverviewView, type Repository } from "./components/OverviewView";
@@ -11,11 +12,12 @@ import { PerformanceView } from "./components/PerformanceView";
 import { SetupView } from "./components/SetupView";
 import { Button } from "./components/ui";
 
-type View = "overview" | "data" | "pages" | "performance" | "setup";
+type View = "overview" | "ask" | "data" | "pages" | "performance" | "setup";
 
 /** `steps` are the pipeline steps (README) a view covers. */
 const NAV: Array<{ view: View; label: string; steps?: string }> = [
   { view: "overview", label: "Overview" },
+  { view: "ask", label: "Ask" },
   { view: "data", label: "Data", steps: "1–3" },
   { view: "pages", label: "Landing pages", steps: "4–5" },
   { view: "performance", label: "Performance", steps: "6–7" },
@@ -40,6 +42,9 @@ export default function Home() {
   const [adding, setAdding] = useState(false);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
+  const [askThread, setAskThread] = useState("");
+  const [drawer, setDrawer] = useState(false);
+  const closeDrawer = useCallback(() => setDrawer(false), []);
 
   const loadSites = useCallback(async (preferred?: string) => {
     const data = await api<{ sites: SiteRecord[] }>("/api/sites");
@@ -54,6 +59,7 @@ export default function Home() {
     const query = new URLSearchParams(window.location.search);
     const requestedView = query.get("view") as View | null;
     if (requestedView && NAV.some((item) => item.view === requestedView)) setView(requestedView);
+    setAskThread(query.get("thread") ?? "");
     if (query.get("github") === "connected") setNotice("GitHub connected. Choose a repository on the Overview page.");
     if (query.get("github_error") === "installation_invalid") setError("GitHub returned without a valid install session. Start “Connect GitHub” from this tab and use the same address for the callback.");
     if (query.get("github_error") === "installation_failed") setError("GitHub installed the app, but Eumon couldn't save the connection. Check that SESSION_SECRET is at least 32 characters, then try again.");
@@ -68,15 +74,16 @@ export default function Home() {
       .catch(() => undefined);
   }, [loadSites]);
 
-  useEffect(() => { if (siteId) setQuery({ site: siteId, view }); }, [siteId, view]);
+  useEffect(() => { if (siteId) setQuery({ site: siteId, view, thread: view === "ask" ? askThread || null : null }); }, [siteId, view, askThread]);
   useEffect(() => { if (!notice) return; const timer = setTimeout(() => setNotice(""), 6000); return () => clearTimeout(timer); }, [notice]);
 
   const site = sites?.find((entry) => entry.id === siteId) ?? null;
   const run = useSiteRun(siteId);
   const navigate = (next: View) => { setView(next); window.scrollTo({ top: 0 }); };
+  const drawerOpen = drawer && Boolean(site) && view !== "ask" && !adding;
 
   return (
-    <main className="app-shell">
+    <main className={`app-shell${drawerOpen ? " ask-open" : ""}`}>
       <aside className="sidebar">
         <a className="brand" href="/"><span className="brand-mark">e</span><span>Eumon</span></a>
         <div className="workspace-label">{site ? new URL(site.baseUrl).hostname.toUpperCase() : "WORKSPACE"}</div>
@@ -89,7 +96,7 @@ export default function Home() {
           {sites && sites.length > 0 && (
             <>
               <label htmlFor="site-select">WEBSITE</label>
-              <select id="site-select" value={siteId} onChange={(event) => { setAdding(false); setSiteId(event.target.value); }}>
+              <select id="site-select" value={siteId} onChange={(event) => { setAdding(false); setAskThread(""); setSiteId(event.target.value); }}>
                 {sites.map((entry) => <option key={entry.id} value={entry.id}>{new URL(entry.baseUrl).hostname}</option>)}
               </select>
             </>
@@ -102,6 +109,7 @@ export default function Home() {
         <header className="topbar">
           <div className="breadcrumb">{site ? <>{new URL(site.baseUrl).hostname} <span>/</span> {adding ? "Add website" : NAV.find((item) => item.view === view)?.label}</> : "Welcome"}</div>
           {run && (view !== "overview" || adding) && <button className="top-actions run-chip" onClick={() => { setAdding(false); navigate("overview"); }}>{runLabel(run)}</button>}
+          {site && view !== "ask" && !adding && <button className="top-actions ask-toggle" aria-expanded={drawerOpen} onClick={() => setDrawer((value) => !value)}>Ask Eumon</button>}
           {site && <a className="top-actions" href={site.baseUrl} target="_blank" rel="noreferrer">Open site</a>}
         </header>
         <div className="content-wrap">
@@ -117,6 +125,7 @@ export default function Home() {
           ) : (
             <>
               {view === "overview" && <OverviewView site={site} repositories={repositories} githubInstalled={githubInstalled} onSiteChanged={(updated) => setSites((items) => items?.map((item) => (item.id === updated.id ? updated : item)) ?? null)} onNavigate={navigate} />}
+              {view === "ask" && <AskView key={site.id} site={site} threadId={askThread} onThreadChange={setAskThread} />}
               {view === "data" && <DataView site={site} onNavigate={navigate} />}
               {view === "pages" && <PagesView site={site} onNavigate={navigate} />}
               {view === "performance" && <PerformanceView site={site} onNavigate={navigate} />}
@@ -126,6 +135,15 @@ export default function Home() {
           <footer>Eumon <span>•</span> Landing pages from real data, measured by real outcomes</footer>
         </div>
       </section>
+      {site && (
+        <AskDrawer
+          site={site}
+          view={NAV.find((item) => item.view === view)?.label ?? "Overview"}
+          open={drawerOpen}
+          onClose={closeDrawer}
+          onOpenInAsk={(threadId) => { setAskThread(threadId); setDrawer(false); navigate("ask"); }}
+        />
+      )}
       {notice && <div className="flash" role="status">{notice}</div>}
     </main>
   );

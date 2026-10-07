@@ -180,7 +180,7 @@ A grayscale console with one spent accent and two alarm colors.
 - **Error Red** (`red`, `red-tint`, `red-ink`): error callouts, failed/blocked badges, failed checks, danger buttons, bad counts, critical findings.
 
 ### Named Rules
-**The Spent Green Rule.** Green appears on the primary button, the active navigation marker, progress, and the brand mark. Nowhere else. Progress includes the 6px square on a running analysis's active stage and on the top-bar run chip, and the fetched-this-run segment of a split bar. Status words that mean "good" (published, live, approved) render as a neutral badge with ink text and a strong hairline, not green.
+**The Spent Green Rule.** Green appears on the primary button, the active navigation marker, progress, and the brand mark. Nowhere else. Progress includes the 6px square on a running analysis's active stage, on the top-bar run chip, and on an Ask answer that is still working, and the fetched-this-run segment of a split bar. Charts are data, not progress: they stay gray. Status words that mean "good" (published, live, approved) render as a neutral badge with ink text and a strong hairline, not green.
 
 **The Alarm-Only Rule.** Amber and red carry warnings and errors and nothing else. They are never decoration, emphasis, or category color.
 
@@ -292,6 +292,21 @@ A running analysis sits at the top of the Overview as one ruled stack, the same 
 - **Tables:** per page type (with split mini bars) beside the latest pages, sharing a rule. A latest-page path dims its folder in Ash and keeps its last segment in Quiet White; the folder gives way first when space runs out. Failures, 4xx/5xx, and empty HTML show as red badges; a 200 shows nothing.
 - **Stopped:** when the server reports no progress for 45 minutes, the title reads "Analysis stopped", the active stage's square and time turn amber ("Stopped"), the bar fills turn Graphite, an amber callout explains, and the header primary becomes "Start a new run".
 - **Run chip:** on other views, a mono top-actions label with the 6px Console Jade square ("42% crawled") sits before Open site in the top bar and returns to the Overview; on phones it takes Open site's place.
+
+### Ask Eumon
+A conversation reads as a ruled transcript, not chat bubbles.
+- **Question:** a Title (16px, 500) with a hairline above it, separating exchanges.
+- **Answer:** prose at 14px / 1.65 in Quiet White, held to 68ch; **bold** lifts to Paper White at 500; lists use square markers in Ash. While it works, a mono Label line names what it is reading, led by a 6px Console Jade square that pulses (static under reduced motion).
+- **Blocks:** a chart or table the answer drew sits inline in a Hairline frame (14px 16px) with a 13px 500 caption and an optional 12px Graphite note. Every number in a block comes from a tool result, never from the model's text.
+- **Composer:** a full-width textarea; Enter sends, Shift+Enter breaks the line, never mid-IME-composition. During an answer the primary becomes a secondary "Stop". In the Ask view it is sticky to the bottom on a hairline once a conversation starts.
+- **Home:** prompt first, then suggestion chips (questions shaped by what is connected), then the conversation list as ruled rows, the latest led inline by "Continue your last conversation."
+- **Drawer:** "Ask Eumon" in the top bar opens a 440px panel on the right with a mono header and a drawn close icon. At 1100px and wider it pushes the page over instead of covering it; on phones it is a full-screen sheet. Flat: a Strong Hairline on its left edge, no shadow.
+
+### Charts
+Plain SVG and CSS from data rows, in the grays.
+- **Bars:** ranked rows of label, an 8px track at 6% white with a Graphite fill, and a mono value. Rows share one set of columns (subgrid), so every track lines up; in a container narrower than 440px the label sits above its bar.
+- **Funnel:** the same rows, each bar relative to the first step, with the share kept from the previous step in Ash mono.
+- **Line:** up to three series in Paper White, Graphite, and Ash at 1.5px, hairline gridlines at zero, half, and a round top, mono ticks in Ash. The segment into today is dashed because today is still filling in. Hovering draws a Strong Hairline cursor and a readout on Raised Black with a Strong Hairline border.
 
 ### Data
 - **Table:** inside a Hairline frame that scrolls horizontally; Inset Black head row with mono Label text; 10px 12px cells at 13px Quiet White; Hairline row dividers; row hover to Inset Black; numeric columns right-aligned and tabular.

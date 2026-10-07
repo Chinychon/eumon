@@ -1,3 +1,4 @@
+import { addDays } from "@organic-growth/core";
 import { chunks, nowIso, runStatements, type D1Like } from "./d1.js";
 
 /*
@@ -42,4 +43,61 @@ export async function bumpReportShareVersion(db: D1Like, siteId: string): Promis
   await db.prepare("UPDATE sites SET report_share_version = report_share_version + 1, updated_at = ? WHERE id = ?").bind(nowIso(), siteId).run();
   const row = await db.prepare("SELECT report_share_version AS v FROM sites WHERE id = ?").bind(siteId).first<{ v: number }>();
   return Number(row?.v ?? 1);
+}
+
+/** Contact actions that make a visit a lead (Results spec, "Lead"). */
+export const LEAD_EVENTS = ["whatsapp_click", "phone_click", "email_click", "form_submit", "booking_complete", "lead_created"];
+
+/** Leads per UTC day: a session counts once a day; an event without a session counts once. */
+export async function dailyLeads(db: D1Like, siteId: string, sinceDay: string) {
+  const { results } = await db.prepare(
+    `WITH contacts AS (
+       SELECT substr(occurred_at, 1, 10) AS day, COALESCE(session_id, 'event:' || id) AS who
+       FROM conversion_events
+       WHERE site_id = ? AND occurred_at >= ? AND event IN (SELECT value FROM json_each(?))
+       GROUP BY day, who
+     )
+     SELECT c.day AS day, COUNT(*) AS leads, SUM(CASE WHEN s.session_id IS NULL THEN 0 ELSE 1 END) AS eumon
+     FROM contacts c LEFT JOIN page_sessions s ON s.session_id = c.who AND s.site_id = ?
+     GROUP BY c.day ORDER BY c.day`,
+  ).bind(siteId, sinceDay, JSON.stringify(LEAD_EVENTS), siteId).all<{ day: string; leads: number; eumon: number }>();
+  return results.map((row) => ({ day: row.day, leads: Number(row.leads), eumonLeads: Number(row.eumon) }));
+}
+
+/** How many Eumon pages are published, and the day the first one went live. */
+export async function publishedPages(db: D1Like, siteId: string): Promise<{ published: number; goLive: string | null }> {
+  const row = await db.prepare(
+    "SELECT COUNT(*) AS n, MIN(published_at) AS first FROM generated_pages WHERE site_id = ? AND status = 'published'",
+  ).bind(siteId).first<{ n: number; first: string | null }>();
+  return { published: Number(row?.n ?? 0), goLive: row?.first ? row.first.slice(0, 10) : null };
+}
+
+/**
+ * Writes the first-party Results points: leads, Googlebot fetches, page views
+ * and CTA clicks per day, and today's published page count. The first run
+ * backfills all history; later runs rewrite the last 7 days.
+ */
+export async function syncFirstPartyResults(db: D1Like, siteId: string, now = new Date()): Promise<void> {
+  const today = now.toISOString().slice(0, 10);
+  const since = (await firstMetricDay(db, siteId, "published_pages")) ? addDays(today, -7) : "2000-01-01";
+  const [leads, activity, pages] = await Promise.all([
+    dailyLeads(db, siteId, since),
+    db.prepare(
+      `SELECT day, SUM(googlebot_hits) AS googlebot, SUM(views) AS views, SUM(cta_clicks) AS cta
+       FROM page_metrics_daily WHERE site_id = ? AND day >= ? GROUP BY day`,
+    ).bind(siteId, since).all<{ day: string; googlebot: number; views: number; cta: number }>(),
+    publishedPages(db, siteId),
+  ]);
+  await upsertMetricPoints(db, siteId, [
+    ...leads.flatMap((row) => [
+      { metric: "leads", day: row.day, value: row.leads },
+      { metric: "leads_eumon", day: row.day, value: row.eumonLeads },
+    ]),
+    ...activity.results.flatMap((row) => [
+      { metric: "googlebot_fetches", day: row.day, value: Number(row.googlebot) },
+      { metric: "eumon_page_views", day: row.day, value: Number(row.views) },
+      { metric: "eumon_cta_clicks", day: row.day, value: Number(row.cta) },
+    ]),
+    { metric: "published_pages", day: today, value: pages.published },
+  ]);
 }

@@ -118,3 +118,47 @@ export function analysisHealthPoints(report: unknown, day: string): MetricPoint[
     { metric: "site_health", day, value: Math.round((healthy / coverage.completedUrls) * 1000) / 10 },
   ];
 }
+
+/** Published Eumon pages to inspect next: never checked first, then the oldest check. */
+export async function pagesToInspect(db: D1Like, siteId: string, limit: number): Promise<Array<{ pageId: string; path: string }>> {
+  const { results } = await db.prepare(
+    `SELECT g.id, g.path FROM generated_pages g LEFT JOIN page_index_status s ON s.page_id = g.id
+     WHERE g.site_id = ? AND g.status = 'published'
+     ORDER BY s.checked_at IS NOT NULL, s.checked_at, g.path LIMIT ?`,
+  ).bind(siteId, limit).all<{ id: string; path: string }>();
+  return results.map((row) => ({ pageId: row.id, path: row.path }));
+}
+
+export async function saveIndexStatus(
+  db: D1Like, siteId: string,
+  rows: Array<{ pageId: string; verdict: string; coverageState: string | null; lastCrawlTime: string | null }>,
+): Promise<void> {
+  const checkedAt = nowIso();
+  const statements = rows.map((row) => db.prepare(
+    `INSERT INTO page_index_status (page_id, site_id, verdict, coverage_state, last_crawl_time, checked_at) VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT(page_id) DO UPDATE SET verdict = excluded.verdict, coverage_state = excluded.coverage_state,
+       last_crawl_time = excluded.last_crawl_time, checked_at = excluded.checked_at`,
+  ).bind(row.pageId, siteId, row.verdict, row.coverageState, row.lastCrawlTime, checkedAt));
+  for (const group of chunks(statements, 100)) await runStatements(db, group);
+}
+
+/** Published pages by their latest inspection: indexed (PASS), not indexed (any other verdict), never checked. */
+export async function indexStatusCounts(db: D1Like, siteId: string): Promise<{ indexed: number; notIndexed: number; unchecked: number }> {
+  const row = await db.prepare(
+    `SELECT SUM(CASE WHEN s.verdict = 'PASS' THEN 1 ELSE 0 END) AS indexed,
+            SUM(CASE WHEN s.verdict IS NOT NULL AND s.verdict != 'PASS' THEN 1 ELSE 0 END) AS not_indexed,
+            SUM(CASE WHEN s.verdict IS NULL THEN 1 ELSE 0 END) AS unchecked
+     FROM generated_pages g LEFT JOIN page_index_status s ON s.page_id = g.id
+     WHERE g.site_id = ? AND g.status = 'published'`,
+  ).bind(siteId).first<{ indexed: number | null; not_indexed: number | null; unchecked: number | null }>();
+  return { indexed: Number(row?.indexed ?? 0), notIndexed: Number(row?.not_indexed ?? 0), unchecked: Number(row?.unchecked ?? 0) };
+}
+
+/** Sites the daily Results sync covers. */
+export async function listSitesForResults(db: D1Like): Promise<string[]> {
+  const { results } = await db.prepare(
+    `SELECT id FROM sites WHERE gsc_property IS NOT NULL OR ga4_property IS NOT NULL
+       OR id IN (SELECT site_id FROM generated_pages WHERE status = 'published') ORDER BY id`,
+  ).all<{ id: string }>();
+  return results.map((row) => row.id);
+}

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { analysisHealthPoints, bumpReportShareVersion, createAnalysis, dailyLeads, firstMetricDay, getSite, insertConversionEvent, listMetricSeries, publishedPages, recordLandingSession, saveAnalysisReport, syncFirstPartyResults, updateSiteGa4Property, upsertMetricPoints, upsertSite } from "./index.js";
+import { analysisHealthPoints, indexStatusCounts, listSitesForResults, pagesToInspect, saveIndexStatus, bumpReportShareVersion, createAnalysis, dailyLeads, firstMetricDay, getSite, insertConversionEvent, listMetricSeries, publishedPages, recordLandingSession, saveAnalysisReport, syncFirstPartyResults, updateSiteGa4Property, upsertMetricPoints, upsertSite } from "./index.js";
 import { openSqliteD1 } from "./sqlite.js";
 
 const now = "2026-10-07T00:00:00.000Z";
@@ -76,5 +76,29 @@ describe("site health snapshots", async () => {
     const today = new Date().toISOString().slice(0, 10);
     const series = await listMetricSeries(db, "s", ["site_health"], today, today);
     assert.deepEqual(series.site_health, [{ day: today, value: 90 }]);
+  });
+});
+
+describe("index status", async () => {
+  const db = openSqliteD1();
+  await upsertSite(db, { id: "s", name: "x.com", baseUrl: "https://x.com", createdAt: now, updatedAt: now });
+  await upsertSite(db, { id: "idle", name: "y.com", baseUrl: "https://y.com", createdAt: now, updatedAt: now });
+  await db.prepare(`INSERT INTO datasets (id, site_id, name, entity_type, description, fields_json, key_field, page_ideas_json, status, created_at, updated_at)
+    VALUES ('d', 's', 'T', 't', '', '[]', 'name', '[]', 'active', ?, ?)`).bind(now, now).run();
+  await db.prepare(`INSERT INTO page_templates (id, site_id, dataset_id, name, config_json, status, created_at, updated_at) VALUES ('t', 's', 'd', 'T', '{}', 'active', ?, ?)`).bind(now, now).run();
+  for (const slug of ["a", "b", "c"]) {
+    await db.prepare(`INSERT INTO generated_pages (id, site_id, template_id, path, group_key, title, description, content_json, quality_score, quality_issues_json, status, published_at, created_at, updated_at)
+      VALUES (?, 's', 't', ?, ?, ?, '', '{}', 1, '[]', 'published', ?, ?, ?)`).bind(`p_${slug}`, `/guides/${slug}`, slug, slug, now, now, now).run();
+  }
+
+  it("inspects never-checked pages first and counts unchecked pages apart from not indexed", async () => {
+    await saveIndexStatus(db, "s", [{ pageId: "p_a", verdict: "PASS", coverageState: "Submitted and indexed", lastCrawlTime: null }]);
+    assert.deepEqual((await pagesToInspect(db, "s", 2)).map((page) => page.path), ["/guides/b", "/guides/c"]);
+    await saveIndexStatus(db, "s", [{ pageId: "p_b", verdict: "NEUTRAL", coverageState: "Discovered - currently not indexed", lastCrawlTime: null }]);
+    assert.deepEqual(await indexStatusCounts(db, "s"), { indexed: 1, notIndexed: 1, unchecked: 1 });
+  });
+
+  it("syncs only sites with something to sync", async () => {
+    assert.deepEqual(await listSitesForResults(db), ["s"]);
   });
 });

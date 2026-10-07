@@ -99,7 +99,7 @@ export function ResultsView({ endpoint, operator, onNavigate }: { endpoint: stri
                   <li key={bucket.top}>
                     <span className="rank-label">Top {bucket.top}</span>
                     <strong>{bucket.queries === null ? "—" : formatNumber(bucket.queries)}</strong>
-                    <span className="rank-change">{bucket.added === null ? "" : `+${formatNumber(bucket.added)} new · −${formatNumber(bucket.lost ?? 0)} lost`}</span>
+                    <span className="rank-change">{bucket.added === null ? "" : `+${formatNumber(bucket.added)} new · ${bucket.lost ? `−${formatNumber(bucket.lost)}` : "0"} lost`}</span>
                   </li>
                 ))}
               </ol>

@@ -625,7 +625,8 @@ details.disclosure[open] > summary { margin-bottom: 10px; }
 .chart-marker { stroke: var(--green); stroke-width: 1; stroke-dasharray: 2 3; vector-effect: non-scaling-stroke; }
 .chart-marker-label { position: absolute; top: -18px; transform: translateX(-50%); font-family: var(--mono); font-size: 11px; color: var(--green-ink); white-space: nowrap; }
 .results-pair { gap: 0 24px; margin-bottom: 14px; }
-.results-inline { margin: 6px 0 14px; }
+.results-inline { margin: 6px 0 14px; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+.rank-buckets + p { margin-top: 10px; }
 .rank-buckets { margin: 0 calc(-1 * var(--pad)); padding: 0; list-style: none; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
 .rank-buckets li { display: grid; gap: 4px; padding: 12px var(--pad); border-right: 1px solid var(--line); }
 .rank-buckets li:last-child { border-right: 0; }

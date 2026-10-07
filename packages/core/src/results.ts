@@ -30,16 +30,17 @@ function latest(series: DayValue[] | undefined, to: string): number | null {
   return points.length ? points[points.length - 1]!.value : null;
 }
 
-/** Weekly sums from the week of `from` to the week of `to`; weeks ending after `complete` are partial. */
+/** Weekly sums from the first full week on or after `from` to the week of `to`; weeks ending after `complete` are partial. */
 export function weekly(series: DayValue[] | undefined, from: string, to: string, complete: string) {
+  const first = weekStart(from) === from ? from : addDays(weekStart(from), 7);
   const sums = new Map<string, number>();
   for (const point of series ?? []) {
-    if (point.day < from || point.day > to) continue;
+    if (point.day < first || point.day > to) continue;
     const week = weekStart(point.day);
     sums.set(week, (sums.get(week) ?? 0) + point.value);
   }
   const weeks: Array<{ week: string; value: number | null; partial: boolean }> = [];
-  for (let week = weekStart(from); week <= to; week = addDays(week, 7)) {
+  for (let week = first; week <= to; week = addDays(week, 7)) {
     weeks.push({ week, value: sums.get(week) ?? null, partial: addDays(week, 6) > complete });
   }
   return weeks;

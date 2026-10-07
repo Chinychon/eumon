@@ -28,6 +28,11 @@ describe("results math", () => {
     ]);
   });
 
+  it("starts at the first full week, so history never opens on a part-week", () => {
+    const series = [{ day: "2026-09-16", value: 2 }, { day: "2026-09-21", value: 5 }];
+    assert.deepEqual(weekly(series, "2026-09-16", "2026-09-27", "2026-09-27"), [{ week: "2026-09-21", value: 5, partial: false }]);
+  });
+
   it("compares with the 28 days before go-live, and with the previous 28 days without one", () => {
     const clicks = days("2026-06-01", 128, (index) => (index < 60 ? 1 : 3));
     const live = resultsView(base({ goLive: "2026-07-31", published: 10, series: { search_clicks: clicks } }));

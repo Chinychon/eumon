@@ -81,6 +81,10 @@ export interface SiteRecord {
   defaultBranch?: string;
   fingerprint?: FrameworkFingerprint;
   gscProperty?: string;
+  /** GA4 property (`properties/123456`) whose sessions feed Results. */
+  ga4Property?: string;
+  /** Bumped to revoke every client link to this site's Results. */
+  reportShareVersion?: number;
   createdAt: string;
   updatedAt: string;
 }

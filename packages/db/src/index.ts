@@ -14,6 +14,7 @@ import { chunks, nowIso, runStatements, type D1Like } from "./d1.js";
 export * from "./d1.js";
 export * from "./page-engine.js";
 export * from "./assistant.js";
+export * from "./metrics.js";
 
 export async function upsertSite(
   db: D1Like,
@@ -122,6 +123,8 @@ function mapSite(row: Record<string, unknown>): SiteRecord {
       ? (JSON.parse(String(row.fingerprint_json)) as FrameworkFingerprint)
       : undefined,
     gscProperty: row.gsc_property ? String(row.gsc_property) : undefined,
+    ga4Property: row.ga4_property ? String(row.ga4_property) : undefined,
+    reportShareVersion: row.report_share_version === undefined || row.report_share_version === null ? undefined : Number(row.report_share_version),
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
   };

@@ -18,7 +18,7 @@ async function site() {
 describe("results sync", () => {
   it("keeps first-party points when Google access is revoked", async () => {
     const { db, site: record } = await site();
-    const notes = await syncResults(db, record, now, { token: async () => { throw new Error("Google access token refresh failed (400)."); }, scopes: [SEARCH_CONSOLE_SCOPE, ANALYTICS_SCOPE] });
+    const notes = await syncResults(db, record, now, { connect: async () => { throw new Error("Google access token refresh failed (400)."); } });
     assert.ok(notes.some((note) => note.startsWith("google failed")), notes.join("; "));
     const series = await listMetricSeries(db, "s", ["published_pages"], "2026-10-07", "2026-10-07");
     assert.equal(series.published_pages!.length, 1);
@@ -31,7 +31,7 @@ describe("results sync", () => {
       urls.push(url);
       return new Response(JSON.stringify(url.includes("urlInspection") ? {} : { rows: [{ keys: ["2026-10-01"], clicks: 1, impressions: 10, ctr: 0.1, position: 5 }] }));
     }) as typeof fetch;
-    const google = { token: async () => "t", scopes: [SEARCH_CONSOLE_SCOPE], fetchFn };
+    const google = { connect: async () => ({ token: "t", scopes: [SEARCH_CONSOLE_SCOPE] }), fetchFn };
     const first = await syncResults(db, record, now, google);
     assert.ok(first.includes("analytics: reconnect Google"));
     assert.equal(urls.some((url) => url.includes("analyticsdata")), false);
@@ -44,7 +44,7 @@ describe("results sync", () => {
   it("backfills target-market history when markets are added after the first sync", async () => {
     const { db, site: record } = await site();
     const rows = { rows: [{ keys: ["2026-10-01"], clicks: 1, impressions: 10, ctr: 0.1, position: 5 }] };
-    const google = { token: async () => "t", scopes: [SEARCH_CONSOLE_SCOPE], fetchFn: (async () => new Response(JSON.stringify(rows))) as unknown as typeof fetch };
+    const google = { connect: async () => ({ token: "t", scopes: [SEARCH_CONSOLE_SCOPE] }), fetchFn: (async () => new Response(JSON.stringify(rows))) as unknown as typeof fetch };
     await syncResults(db, record, now, google);
     await setSiteMarkets(db, "s", ["mys"]);
     const notes = await syncResults(db, record, now, google);
@@ -69,7 +69,7 @@ describe("results sync", () => {
       inFlight--;
       return new Response(JSON.stringify({ inspectionResult: { indexStatusResult: { verdict: "PASS" } } }));
     }) as typeof fetch;
-    const notes = await syncResults(db, record, now, { token: async () => "t", scopes: [SEARCH_CONSOLE_SCOPE], fetchFn });
+    const notes = await syncResults(db, record, now, { connect: async () => ({ token: "t", scopes: [SEARCH_CONSOLE_SCOPE] }), fetchFn });
     assert.ok(notes.includes("inspected 12 pages"), notes.join("; "));
     assert.ok(most > 1 && most <= 10, `at most ${most} inspections in flight`);
   });

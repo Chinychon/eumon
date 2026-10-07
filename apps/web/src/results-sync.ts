@@ -7,7 +7,8 @@ import {
 } from "@organic-growth/db";
 import { ANALYTICS_SCOPE } from "./gsc-auth.ts";
 
-export type GoogleAccess = { token: () => Promise<string>; scopes: string[]; fetchFn?: typeof fetch };
+/** Connects to Google only when a Google step runs; the token and the scopes it was granted come together. */
+export type GoogleAccess = { connect: () => Promise<{ token: string; scopes: string[] }>; fetchFn?: typeof fetch };
 
 /** Search Console and GA4 history fetched on a site's first sync. */
 const BACKFILL_DAYS = 486;
@@ -24,8 +25,9 @@ export async function syncResults(db: D1Like, site: SiteRecord, now: Date, googl
   await syncFirstPartyResults(db, site.id, now);
   if (!site.gscProperty && !site.ga4Property) return notes;
   let token: string;
+  let scopes: string[];
   try {
-    token = await google.token();
+    ({ token, scopes } = await google.connect());
   } catch (error) {
     return [...notes, `google failed: ${error instanceof Error ? error.message : String(error)}`];
   }
@@ -38,7 +40,7 @@ export async function syncResults(db: D1Like, site: SiteRecord, now: Date, googl
     }
   }
   if (site.ga4Property) {
-    if (!google.scopes.includes(ANALYTICS_SCOPE)) notes.push("analytics: reconnect Google");
+    if (!scopes.includes(ANALYTICS_SCOPE)) notes.push("analytics: reconnect Google");
     else {
       try {
         const backfill = !(await firstMetricDay(db, site.id, "ga4_sessions"));

@@ -873,15 +873,6 @@ export async function upsertPageSearchDaily(
   for (const group of chunks(statements, 100)) await runStatements(db, group);
 }
 
-/** Sites with live generated pages and a Search Console property, for the daily sync. */
-export async function listSitesWithLivePages(db: D1Like): Promise<string[]> {
-  const { results } = await db.prepare(
-    `SELECT DISTINCT s.id FROM sites s JOIN generated_pages p ON p.site_id = s.id AND p.status = 'published'
-     WHERE s.gsc_property IS NOT NULL`,
-  ).all<{ id: string }>();
-  return results.map((row) => row.id);
-}
-
 /** Maps public page URLs back to page IDs for Search Console imports. */
 export async function mapPageIdsByPath(db: D1Like, siteId: string): Promise<Map<string, string>> {
   const { results } = await db.prepare("SELECT id, path FROM generated_pages WHERE site_id = ?")

@@ -16,10 +16,10 @@ export async function GET(request: Request) {
     }),
   });
   if (!response.ok) return Response.redirect(new URL("/?gsc=error", url.origin), 303);
-  const token = await response.json() as { refresh_token?: string };
+  const token = await response.json() as { refresh_token?: string; scope?: string };
   if (!token.refresh_token) return Response.redirect(new URL("/?gsc=reauthorize", url.origin), 303);
   try {
-    await saveGoogleRefreshToken(env.DB, siteId, token.refresh_token, env.OAUTH_ENCRYPTION_KEY);
+    await saveGoogleRefreshToken(env.DB, siteId, token.refresh_token, env.OAUTH_ENCRYPTION_KEY, token.scope ?? "webmasters.readonly");
   } catch {
     return Response.json({ error: "Could not securely store the Google connection." }, { status: 500 });
   }

@@ -17,11 +17,22 @@ async function decryptSecret(value: string, secret: string): Promise<string> {
   return new TextDecoder().decode(plain);
 }
 
-export async function saveGoogleRefreshToken(db: D1Like, siteId: string, refreshToken: string, encryptionKey: string) {
+export const SEARCH_CONSOLE_SCOPE = "https://www.googleapis.com/auth/webmasters.readonly";
+export const ANALYTICS_SCOPE = "https://www.googleapis.com/auth/analytics.readonly";
+
+/** `scopes` is Google's space-separated grant, so later code can tell which APIs this connection may call. */
+export async function saveGoogleRefreshToken(db: D1Like, siteId: string, refreshToken: string, encryptionKey: string, scopes: string) {
   await upsertOAuthCredential(db, {
     id: createId("oauth"), siteId, provider: "google_search_console",
-    encryptedBlob: await encryptSecret(refreshToken, encryptionKey), scopes: "webmasters.readonly",
+    encryptedBlob: await encryptSecret(refreshToken, encryptionKey), scopes,
   });
+}
+
+/** Scopes the site's Google connection was granted; connections made before scopes were stored read as Search Console only. */
+export async function googleScopes(db: D1Like, siteId: string): Promise<string[]> {
+  const credential = await getOAuthCredential(db, siteId, "google_search_console");
+  if (!credential) return [];
+  return (credential.scopes ?? "").split(/\s+/).filter(Boolean).map((scope) => (scope === "webmasters.readonly" ? SEARCH_CONSOLE_SCOPE : scope));
 }
 
 export async function googleAccessToken(db: D1Like, siteId: string, clientId: string, clientSecret: string, encryptionKey: string) {

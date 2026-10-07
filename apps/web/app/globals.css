@@ -746,3 +746,6 @@ details.disclosure[open] > summary { margin-bottom: 10px; }
   .desktop-break { display: none; }
 }
 
+
+.client-report { width: min(1190px, 100% - 32px); margin: 0 auto; padding: 44px 0 32px; }
+.client-report-credit { margin-top: 40px; padding-top: 16px; border-top: 1px solid var(--line); font-family: var(--mono); font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--soft); }

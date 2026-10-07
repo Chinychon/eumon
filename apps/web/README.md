@@ -44,6 +44,7 @@ The app has no built-in user accounts: put the hostname behind **Cloudflare Acce
 
 - `/p/*` — landing pages, sitemap, and the analytics beacon
 - `/api/sites/*/events` — conversion events from customer sites
+- `/r/*` and `/api/r/*` — client Results links (each is a signed, revocable token)
 
 ## Current boundaries
 

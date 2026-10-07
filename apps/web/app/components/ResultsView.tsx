@@ -38,6 +38,15 @@ export function ResultsView({ endpoint, operator, onNavigate }: { endpoint: stri
     } catch (cause) { setError(errorMessage(cause)); } finally { setSyncing(false); }
   }
 
+  const [shared, setShared] = useState(false);
+  async function shareLink() {
+    try {
+      const { url } = await api<{ url: string }>(endpoint.replace(/\/results$/, "/share"), { method: "POST" });
+      await navigator.clipboard.writeText(url);
+      setShared(true);
+    } catch (cause) { setError(errorMessage(cause)); }
+  }
+
   if (error) return <div className="callout error" role="alert">{error}</div>;
   if (!data) return <div className="empty">Loading…</div>;
   const { site, results } = data;
@@ -51,7 +60,12 @@ export function ResultsView({ endpoint, operator, onNavigate }: { endpoint: stri
       <ViewHeader
         title={operator ? "Results" : site.name}
         description={<>Is Eumon working for {host}? {results.searchThrough ? `Google data through ${day(results.searchThrough)}.` : "Google data appears after the first sync."}</>}
-        actions={operator && <Button variant="secondary" busy={syncing} onClick={syncNow}>Sync now</Button>}
+        actions={operator && (
+          <div className="row">
+            <Button variant="ghost" onClick={shareLink}>{shared ? "Link copied" : "Copy client link"}</Button>
+            <Button variant="secondary" busy={syncing} onClick={syncNow}>Sync now</Button>
+          </div>
+        )}
       />
       <div className="results">
         <Card title="Google clicks per week" subtitle={results.goLive ? "The whole site, and Eumon's pages since they went live." : "The whole site. Eumon's pages appear once the first one is published."}>

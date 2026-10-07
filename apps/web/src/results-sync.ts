@@ -97,15 +97,20 @@ async function syncSearch(db: D1Like, site: SiteRecord, property: string, token:
   }
 
   // Index status: a rolling sample of published Eumon pages each day.
-  const pages = await pagesToInspect(db, site.id, INSPECTIONS_PER_DAY);
+  // Pages already checked today are skipped, so a second Sync now spends no quota.
+  const pages = await pagesToInspect(db, site.id, INSPECTIONS_PER_DAY, today);
   const inspected = [];
+  let refused: number | null = null;
   // Ten at a time: well under the API's 600 a minute, and "Sync now" answers in seconds rather than minutes.
-  for (let start = 0; start < pages.length; start += 10) {
+  for (let start = 0; start < pages.length && refused === null; start += 10) {
     const batch = await Promise.all(pages.slice(start, start + 10).map(async (page) => {
       try {
         return { pageId: page.pageId, ...await inspectUrl(token, property, `${origin}${page.path}`, fetchFn) };
-      } catch {
-        return null; // One page's failure (quota, a transient error) leaves it for tomorrow.
+      } catch (error) {
+        // Quota or permission refusals stop the run; any other failure leaves that page for tomorrow.
+        const status = (error as { status?: number }).status;
+        if (status === 401 || status === 403 || status === 429) refused = status;
+        return null;
       }
     }));
     inspected.push(...batch.filter((result) => result !== null));
@@ -116,5 +121,5 @@ async function syncSearch(db: D1Like, site: SiteRecord, property: string, token:
     points.push({ metric: "pages_indexed", day: today, value: counts.indexed }, { metric: "pages_not_indexed", day: today, value: counts.notIndexed });
   }
   await upsertMetricPoints(db, site.id, points);
-  return [`search: ${span} days`, ...(markets.length ? [`markets: ${marketSpan} days`] : []), `inspected ${inspected.length} pages`];
+  return [`search: ${span} days`, ...(markets.length ? [`markets: ${marketSpan} days`] : []), `inspected ${inspected.length} pages`, ...(refused ? [`inspection stopped: Google answered ${refused}`] : [])];
 }

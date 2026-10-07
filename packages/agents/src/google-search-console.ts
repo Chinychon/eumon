@@ -188,6 +188,6 @@ export async function inspectUrl(accessToken: string, property: string, url: str
     headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
     body: JSON.stringify({ inspectionUrl: url, siteUrl: property }),
   });
-  if (!response.ok) throw new Error(`URL Inspection request failed (${response.status}).`);
+  if (!response.ok) throw Object.assign(new Error(`URL Inspection request failed (${response.status}).`), { status: response.status });
   return inspectionResult(await response.json());
 }

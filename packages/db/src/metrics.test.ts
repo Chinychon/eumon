@@ -98,6 +98,8 @@ describe("index status", async () => {
     assert.deepEqual(await indexStatusCounts(db, "s"), { indexed: 1, notIndexed: 1, unchecked: 1 });
     await saveIndexStatus(db, "s", [{ pageId: "p_c", verdict: "VERDICT_UNSPECIFIED", coverageState: null, lastCrawlTime: null }]);
     assert.deepEqual(await indexStatusCounts(db, "s"), { indexed: 1, notIndexed: 1, unchecked: 1 }, "no verdict from Google is not checked yet, not 'not indexed'");
+    const today = new Date().toISOString().slice(0, 10);
+    assert.deepEqual(await pagesToInspect(db, "s", 10, today), [], "every page was checked today, so a second Sync now inspects nothing");
   });
 
   it("syncs only sites with something to sync", async () => {

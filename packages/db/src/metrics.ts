@@ -137,13 +137,13 @@ export function analysisHealthPoints(report: unknown, day: string): MetricPoint[
   ];
 }
 
-/** Published Eumon pages to inspect next: never checked first, then the oldest check. */
-export async function pagesToInspect(db: D1Like, siteId: string, limit: number): Promise<Array<{ pageId: string; path: string }>> {
+/** Published Eumon pages to inspect next: never checked first, then the oldest check; pages checked on or after `checkedBefore` are skipped. */
+export async function pagesToInspect(db: D1Like, siteId: string, limit: number, checkedBefore = "9999"): Promise<Array<{ pageId: string; path: string }>> {
   const { results } = await db.prepare(
     `SELECT g.id, g.path FROM generated_pages g LEFT JOIN page_index_status s ON s.page_id = g.id
-     WHERE g.site_id = ? AND g.status = 'published'
+     WHERE g.site_id = ? AND g.status = 'published' AND (s.checked_at IS NULL OR s.checked_at < ?)
      ORDER BY s.checked_at IS NOT NULL, s.checked_at, g.path LIMIT ?`,
-  ).bind(siteId, limit).all<{ id: string; path: string }>();
+  ).bind(siteId, checkedBefore, limit).all<{ id: string; path: string }>();
   return results.map((row) => ({ pageId: row.id, path: row.path }));
 }
 

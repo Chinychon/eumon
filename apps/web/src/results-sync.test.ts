@@ -15,6 +15,17 @@ async function site() {
   return { db, site: (await getSite(db, "s"))! };
 }
 
+
+async function publishPages(db: ReturnType<typeof openSqliteD1>, count: number) {
+  const at = now.toISOString();
+  await db.prepare(`INSERT INTO datasets (id, site_id, name, entity_type, description, fields_json, key_field, page_ideas_json, status, created_at, updated_at) VALUES ('d', 's', 'T', 't', '', '[]', 'name', '[]', 'active', ?, ?)`).bind(at, at).run();
+  await db.prepare(`INSERT INTO page_templates (id, site_id, dataset_id, name, config_json, status, created_at, updated_at) VALUES ('t', 's', 'd', 'T', '{}', 'active', ?, ?)`).bind(at, at).run();
+  for (let index = 0; index < count; index++) {
+    await db.prepare(`INSERT INTO generated_pages (id, site_id, template_id, path, group_key, title, description, content_json, quality_score, quality_issues_json, status, published_at, created_at, updated_at)
+      VALUES (?, 's', 't', ?, ?, 'x', '', '{}', 1, '[]', 'published', ?, ?, ?)`).bind(`p${index}`, `/guides/${index}`, String(index), at, at, at).run();
+  }
+}
+
 describe("results sync", () => {
   it("keeps first-party points when Google access is revoked", async () => {
     const { db, site: record } = await site();
@@ -53,13 +64,7 @@ describe("results sync", () => {
 
   it("inspects pages several at a time", async () => {
     const { db, site: record } = await site();
-    const at = now.toISOString();
-    await db.prepare(`INSERT INTO datasets (id, site_id, name, entity_type, description, fields_json, key_field, page_ideas_json, status, created_at, updated_at) VALUES ('d', 's', 'T', 't', '', '[]', 'name', '[]', 'active', ?, ?)`).bind(at, at).run();
-    await db.prepare(`INSERT INTO page_templates (id, site_id, dataset_id, name, config_json, status, created_at, updated_at) VALUES ('t', 's', 'd', 'T', '{}', 'active', ?, ?)`).bind(at, at).run();
-    for (let index = 0; index < 12; index++) {
-      await db.prepare(`INSERT INTO generated_pages (id, site_id, template_id, path, group_key, title, description, content_json, quality_score, quality_issues_json, status, published_at, created_at, updated_at)
-        VALUES (?, 's', 't', ?, ?, 'x', '', '{}', 1, '[]', 'published', ?, ?, ?)`).bind(`p${index}`, `/guides/${index}`, String(index), at, at, at).run();
-    }
+    await publishPages(db, 12);
     let inFlight = 0;
     let most = 0;
     const fetchFn = (async (url: string) => {
@@ -72,5 +77,19 @@ describe("results sync", () => {
     const notes = await syncResults(db, record, now, { connect: async () => ({ token: "t", scopes: [SEARCH_CONSOLE_SCOPE] }), fetchFn });
     assert.ok(notes.includes("inspected 12 pages"), notes.join("; "));
     assert.ok(most > 1 && most <= 10, `at most ${most} inspections in flight`);
+  });
+
+  it("stops inspecting when Google refuses (quota or permission)", async () => {
+    const { db, site: record } = await site();
+    await publishPages(db, 30);
+    let inspections = 0;
+    const fetchFn = (async (url: string) => {
+      if (!url.includes("urlInspection")) return new Response(JSON.stringify({ rows: [] }));
+      inspections++;
+      return new Response("quota", { status: 429 });
+    }) as typeof fetch;
+    const notes = await syncResults(db, record, now, { connect: async () => ({ token: "t", scopes: [SEARCH_CONSOLE_SCOPE] }), fetchFn });
+    assert.ok(inspections <= 10, `${inspections} inspections after the first refusal`);
+    assert.ok(notes.some((note) => note.startsWith("inspection stopped")), notes.join("; "));
   });
 });

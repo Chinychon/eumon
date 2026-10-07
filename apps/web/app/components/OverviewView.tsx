@@ -201,7 +201,7 @@ export function OverviewView({ site, onNavigate }: {
           </div>
           <div key={tab} className="view-enter" role="tabpanel">
             {tab === "overview" && <Briefing report={report} leads={leads} onOpen={openTab} onNavigate={onNavigate} />}
-            {tab === "technical" && <TechnicalTab report={report} changes={changes} busy={busy} hasRepo={hasRepo} onGenerateChange={generateChange} onOpenPullRequest={openPullRequest} onRecrawl={() => runAnalysis(true)} />}
+            {tab === "technical" && <TechnicalTab siteId={site.id} report={report} changes={changes} busy={busy} hasRepo={hasRepo} onGenerateChange={generateChange} onOpenPullRequest={openPullRequest} onRecrawl={() => runAnalysis(true)} />}
             {tab === "search" && <SearchTab report={report} onNavigate={onNavigate} />}
             {tab === "competitors" && <CompetitorsTab report={report} site={site} onNavigate={onNavigate} />}
             {tab === "leads" && <LeadsTab report={report} leads={leads} onNavigate={onNavigate} />}

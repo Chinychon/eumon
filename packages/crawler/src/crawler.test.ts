@@ -105,6 +105,12 @@ describe("parseHtmlSignals", () => {
     assert.deepEqual(signals.hreflang.map((entry) => entry.lang), ["id", "en"]);
     assert.equal(signals.h1Count, 2);
     assert.equal(signals.internalLinkCount, 2);
+    assert.deepEqual(signals.internalLinks, ["/hospitals", "/contact"], "same-site paths only; www counts as the same site");
+  });
+
+  it("stores each link once, by path, whatever its query, fragment, or trailing slash", () => {
+    const html = `<a href="/blog/">Blog</a><a href="/blog?page=2">More</a><a href="/blog#top">Top</a><a href="https://x.com/">Home</a><a href="caf%C3%A9">Café</a>`;
+    assert.deepEqual(parseHtmlSignals(html, "https://x.com/guides/a").internalLinks, ["/blog", "", "/guides/café"]);
   });
 
   it("collects JSON-LD types, flattening @graph, and counts malformed blocks", () => {

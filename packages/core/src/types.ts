@@ -141,6 +141,11 @@ export type CrawlPageResult = {
   botChallenge?: boolean;
   /** Target of a `<meta http-equiv="refresh">` redirect; such pages are redirects, not content. */
   metaRefresh?: string;
+  /**
+   * Same-site links on the page (path with no trailing slash, and its page
+   * type), from full-crawl fetches only. Stored in `page_links`, not with the page.
+   */
+  internalLinks?: Array<{ path: string; family: string }>;
 }
 
 export type SitemapAudit = {

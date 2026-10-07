@@ -503,7 +503,114 @@ export async function saveCrawlBatch(
       outcome.url,
     );
   });
-  for (const group of chunks(statements, 100)) await runStatements(db, group);
+  // A fetched page's links replace the ones it had; pages reused from an earlier crawl keep theirs.
+  const site = "(SELECT site_id FROM analyses WHERE id = ?)";
+  const links = input.outcomes.flatMap((outcome) => (outcome.page?.internalLinks ? [
+    db.prepare(`DELETE FROM page_links WHERE site_id = ${site} AND source_url = ?`).bind(input.analysisId, outcome.url),
+    db.prepare(
+      `INSERT OR IGNORE INTO page_links (site_id, source_url, source_family, target_path, target_family)
+       SELECT ${site}, ?, ?, json_extract(value, '$.path'), json_extract(value, '$.family') FROM json_each(?)`,
+    ).bind(input.analysisId, outcome.url, outcome.page.routeFamily ?? "page", JSON.stringify(outcome.page.internalLinks)),
+  ] : []));
+  for (const group of chunks([...statements, ...links], 100)) await runStatements(db, group);
+}
+
+/** A URL's path as `page_links` stores targets: no trailing slash, `` for the homepage. */
+const URL_PATH = (column: string) => `rtrim(substr(${column}, instr(substr(${column}, 9), '/') + 8), '/')`;
+
+export type LinkGraph = {
+  /** Page types of the site and Eumon's templates; `pages` sizes each node. */
+  nodes: Array<{ id: string; label: string; kind: "site" | "eumon"; pages: number }>;
+  /** Links between page types (links within one type are left out), counted. */
+  edges: Array<{ source: string; target: string; links: number }>;
+  /** Sitemap pages no other page links to; null until a crawl has recorded links. */
+  orphans: { count: number; examples: string[] } | null;
+  landingPages: { published: number; linkedFromSite: number };
+};
+
+/**
+ * The site's link structure from the latest finished crawl, aggregated in SQL
+ * by page type so a 25,000-page site returns a few dozen rows, plus Eumon's
+ * published pages grouped by template.
+ */
+export async function getLinkGraph(db: D1Like, siteId: string): Promise<LinkGraph> {
+  const latest = await getPreviousCompletedAnalysis(db, siteId, "");
+  const [families, familyEdges, anyLinks, published, templates] = await Promise.all([
+    latest ? db.prepare(
+      `SELECT COALESCE(${crawlField("routeFamily")}, 'other') AS family, COUNT(*) AS pages FROM pages WHERE analysis_id = ? GROUP BY family`,
+    ).bind(latest.id).all<{ family: string; pages: number }>() : { results: [] },
+    latest ? db.prepare(
+      `SELECT source_family, target_family, COUNT(*) AS links FROM page_links
+       WHERE site_id = ? AND source_family != target_family AND source_url IN (SELECT url FROM pages WHERE analysis_id = ?)
+       GROUP BY source_family, target_family`,
+    ).bind(siteId, latest.id).all<{ source_family: string; target_family: string; links: number }>() : { results: [] },
+    db.prepare("SELECT 1 AS found FROM page_links WHERE site_id = ? LIMIT 1").bind(siteId).first<{ found: number }>(),
+    db.prepare("SELECT path, template_id, content_json FROM generated_pages WHERE site_id = ? AND status = 'published'")
+      .bind(siteId).all<{ path: string; template_id: string; content_json: string }>(),
+    db.prepare("SELECT id, name FROM page_templates WHERE site_id = ?").bind(siteId).all<{ id: string; name: string }>(),
+  ]);
+
+  const nodes: LinkGraph["nodes"] = families.results.map((row) => ({ id: `f:${row.family}`, label: row.family, kind: "site", pages: Number(row.pages) }));
+  const known = new Set(nodes.map((node) => node.id));
+  const edges: LinkGraph["edges"] = familyEdges.results
+    .map((row) => ({ source: `f:${row.source_family}`, target: `f:${row.target_family}`, links: Number(row.links) }))
+    .filter((edge) => known.has(edge.source) && known.has(edge.target));
+
+  // Eumon's pages, one node per template; links between templates come from each page's related and entity links.
+  const pathOf = (path: string) => path.replace(/\/+$/, "");
+  const templateOf = new Map(published.results.map((page) => [pathOf(page.path), page.template_id]));
+  const names = new Map(templates.results.map((template) => [template.id, template.name]));
+  const pagesPer = new Map<string, number>();
+  const between = new Map<string, number>();
+  for (const page of published.results) {
+    pagesPer.set(page.template_id, (pagesPer.get(page.template_id) ?? 0) + 1);
+    let content: { related?: Array<{ path: string }>; items?: Array<{ fields?: Array<{ href?: string }> }> } = {};
+    try { content = JSON.parse(page.content_json); } catch { /* a malformed page links nowhere */ }
+    const targets = [...(content.related ?? []).map((link) => link.path), ...(content.items ?? []).flatMap((item) => (item.fields ?? []).map((field) => field.href ?? ""))];
+    for (const target of new Set(targets.filter(Boolean).map(pathOf))) {
+      const to = templateOf.get(target);
+      if (!to || to === page.template_id) continue;
+      const key = `${page.template_id}\n${to}`;
+      between.set(key, (between.get(key) ?? 0) + 1);
+    }
+  }
+  for (const [id, pages] of pagesPer) nodes.push({ id: `t:${id}`, label: names.get(id) ?? "Landing pages", kind: "eumon", pages });
+  for (const [key, links] of between) {
+    const [from, to] = key.split("\n");
+    edges.push({ source: `t:${from}`, target: `t:${to}`, links });
+  }
+
+  // Which of Eumon's pages the site itself links to, and from which page types.
+  let linkedFromSite = 0;
+  if (published.results.length) {
+    const { results } = await db.prepare(
+      `SELECT target_path, source_family, COUNT(*) AS links FROM page_links
+       WHERE site_id = ? AND target_path IN (SELECT value FROM json_each(?)) GROUP BY target_path, source_family`,
+    ).bind(siteId, JSON.stringify([...templateOf.keys()])).all<{ target_path: string; source_family: string; links: number }>();
+    linkedFromSite = new Set(results.map((row) => row.target_path)).size;
+    const fromSite = new Map<string, number>();
+    for (const row of results) {
+      const key = `f:${row.source_family}\nt:${templateOf.get(row.target_path)}`;
+      fromSite.set(key, (fromSite.get(key) ?? 0) + Number(row.links));
+    }
+    for (const [key, links] of fromSite) {
+      const [source, target] = key.split("\n");
+      if (known.has(source!)) edges.push({ source: source!, target: target!, links });
+    }
+  }
+
+  let orphans: LinkGraph["orphans"] = null;
+  if (latest && anyLinks) {
+    const orphan = `FROM pages p WHERE p.analysis_id = ? AND p.crawl_state = 'complete' AND p.status < 400
+      AND COALESCE(json_extract(p.result_json, '$.routeFamily'), '') != 'home'
+      AND NOT EXISTS (SELECT 1 FROM page_links l WHERE l.site_id = ? AND l.target_path = ${URL_PATH("p.url")} AND l.source_url != p.url)`;
+    const [count, examples] = await Promise.all([
+      db.prepare(`SELECT COUNT(*) AS n ${orphan}`).bind(latest.id, siteId).first<{ n: number }>(),
+      db.prepare(`SELECT p.url ${orphan} ORDER BY p.url LIMIT 5`).bind(latest.id, siteId).all<{ url: string }>(),
+    ]);
+    orphans = { count: Number(count?.n ?? 0), examples: examples.results.map((row) => row.url) };
+  }
+  return { nodes, edges, orphans, landingPages: { published: published.results.length, linkedFromSite } };
 }
 
 const crawlField = (path: string) => `json_extract(result_json, '$.${path}')`;

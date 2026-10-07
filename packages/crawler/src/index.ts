@@ -109,6 +109,8 @@ export type HtmlSignals = {
   headingOutline: string[];
   h1Count: number;
   internalLinkCount: number;
+  /** Distinct same-site link paths (no query, fragment, or trailing slash; `` is the homepage). */
+  internalLinks: string[];
   /** Characters of visible text; scripts, styles, JSON-LD, and framework payloads excluded. */
   textLength: number;
   hasRootMount: boolean;
@@ -149,11 +151,16 @@ export function parseHtmlSignals(html: string, pageUrl?: string): HtmlSignals {
   }
 
   let internalLinkCount = 0;
+  const internalLinks = new Set<string>();
   for (const anchor of findTags(markup, "a")) {
     const href = anchor.href?.trim();
     if (!href || href.startsWith("#") || /^(mailto|tel|javascript|data):/i.test(href)) continue;
     const internal = href.startsWith("/") ? !href.startsWith("//") : Boolean(pageUrl && isSameSite(resolveUrl(href, pageUrl), pageUrl));
-    if (internal) internalLinkCount++;
+    if (!internal) continue;
+    internalLinkCount++;
+    // ponytail: 300 distinct targets per page covers mega-menus; raise if sites need more.
+    const path = linkPath(href, pageUrl);
+    if (path !== null && internalLinks.size < 300) internalLinks.add(path);
   }
 
   const text = visibleText(markup);
@@ -169,12 +176,22 @@ export function parseHtmlSignals(html: string, pageUrl?: string): HtmlSignals {
     headingOutline,
     h1Count,
     internalLinkCount,
+    internalLinks: [...internalLinks],
     textLength: text.length,
     hasRootMount: /\bid=["']?(root|app|__next|__nuxt|svelte)["'\s>]/i.test(markup),
     metaNoindex: [robots, googlebot].some((value) => /\b(noindex|none)\b/i.test(value ?? "")),
     metaRefresh: refresh && Number(refresh[1]) <= 10 ? refresh[2]!.trim() : undefined,
     bodyTextSample: text.slice(0, 280),
   };
+}
+
+/** A link's path as the link graph stores it: no query, fragment, or trailing slash. */
+export function linkPath(href: string, base = "https://site.invalid/"): string | null {
+  try {
+    return decodeURI(new URL(href, base).pathname).replace(/\/+$/, "");
+  } catch {
+    return null;
+  }
 }
 
 function resolveUrl(href: string, base: string): string {
@@ -321,11 +338,11 @@ export async function fetchGooglebotPage(
   if (REFUSED_STATUSES.has(response.status)) {
     const browser = await fetcher(url, { userAgent: BROWSER_UA }).catch(() => null);
     if (browser && browser.status < 400 && !isBotChallenge(browser)) {
-      return { ...toCrawlResult(url, browser, "raw"), googlebotBlockedStatus: response.status };
+      return { ...toCrawlResult(url, browser, "raw", true), googlebotBlockedStatus: response.status };
     }
   }
-  const page = toCrawlResult(url, response, "googlebot");
-  return isBotChallenge(response) ? { ...page, botChallenge: true, isEmptyShell: false } : page;
+  const page = toCrawlResult(url, response, "googlebot", true);
+  return isBotChallenge(response) ? { ...page, botChallenge: true, isEmptyShell: false, internalLinks: [] } : page;
 }
 
 export type GooglebotCrawlOutcome =
@@ -363,6 +380,7 @@ function toCrawlResult(
   url: string,
   fetchResult: FetchResult,
   mode: CrawlPageResult["fetchMode"],
+  withLinks = false,
 ): CrawlPageResult {
   const finalUrl = fetchResult.finalUrl || url;
   const signals = parseHtmlSignals(fetchResult.body, finalUrl);
@@ -391,6 +409,7 @@ function toCrawlResult(
     routeFamily: classifyUrlType(url),
     canonicalMismatch: signals.canonical ? !sameDocument(signals.canonical, finalUrl) : false,
     ...(signals.metaRefresh ? { metaRefresh: signals.metaRefresh } : {}),
+    ...(withLinks ? { internalLinks: signals.internalLinks.map((path) => ({ path, family: classifyUrlType(new URL(path || "/", finalUrl).toString()) })) } : {}),
   };
 }
 

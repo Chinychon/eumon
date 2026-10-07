@@ -69,6 +69,26 @@ const PROSE = "Our dentists explain every step before treatment starts, give you
   + "Appointments are available on weekdays and Saturdays, and most insurance panels are accepted at every clinic. "
   + "Bring any previous X-rays you have; if you don't have them, we take new ones at the first visit at no extra charge. ";
 
+/**
+ * Each demo page's internal links: the homepage reaches clinics, treatments,
+ * the blog, and two of Eumon's guides; clinics reach their dentists; a
+ * treatment reaches its price pages in five cities only, so price pages in
+ * the other cities are orphans.
+ */
+function relatedLinks(path: string): string[] {
+  const [, first, second, third] = path.split("/");
+  if (path === "/") return [...CITIES.map((city) => `/clinics/${city}`), ...TREATMENTS.map((treatment) => `/treatments/${treatment}`), `/blog/${BLOG[12]}`, "/guides/braces", "/guides/dental-implants"];
+  if (first === "treatments") return CITIES.slice(0, 5).map((city) => `/prices/${second}/${city}`);
+  if (first === "clinics") return [...DENTISTS.filter((dentist) => dentist.clinic === second).map((dentist) => `/dentists/${dentist.slug}`), `/prices/dental-implants/${second}`];
+  if (first === "dentists") return [`/clinics/${DENTISTS.find((dentist) => dentist.slug === second)?.clinic}`];
+  if (first === "blog") {
+    const next = BLOG[BLOG.indexOf((second === "drafts" ? third : second) ?? "") + 1];
+    return next ? [`/blog/${next}`] : [];
+  }
+  if (first === "prices") return [`/treatments/${second}`, `/clinics/${third}`];
+  return [];
+}
+
 function document(input: { path: string; title: string; description: string; h1: string; body: string; jsonLd?: object; robots?: string; tracking?: boolean; shell?: boolean }) {
   const ld = input.jsonLd ? `<script type="application/ld+json">${JSON.stringify(input.jsonLd)}</script>` : "";
   const head = `<title>${input.title}</title><meta name="description" content="${input.description}"><link rel="canonical" href="${ORIGIN}${input.path}">`
@@ -77,7 +97,8 @@ function document(input: { path: string; title: string; description: string; h1:
   if (input.shell) return `<!doctype html><html lang="en"><head>${head}</head><body><div id="root"></div><script src="/assets/app.js"></script></body></html>`;
   const nav = `<nav><a href="/">Home</a> <a href="/treatments/dental-implants">Treatments</a> <a href="/dentists/${DENTISTS[0]!.slug}">Dentists</a> <a href="/clinics/kuala-lumpur">Clinics</a> <a href="/contact">Contact</a></nav>`;
   const cta = `<p><a href="https://wa.me/60300000000?text=Hi">Chat on WhatsApp</a> or <a href="/contact">book an appointment</a>.</p>`;
-  return `<!doctype html><html lang="en"><head>${head}</head><body>${nav}<main><h1>${input.h1}</h1>${input.body}<h2>Book a visit</h2><p>${PROSE}</p>${cta}</main></body></html>`;
+  const related = relatedLinks(input.path).map((href) => `<li><a href="${href}">${href}</a></li>`).join("");
+  return `<!doctype html><html lang="en"><head>${head}</head><body>${nav}<main><h1>${input.h1}</h1>${input.body}<ul>${related}</ul><h2>Book a visit</h2><p>${PROSE}</p>${cta}</main></body></html>`;
 }
 
 /** The demo site's response for one path, as it stood in `version`. */

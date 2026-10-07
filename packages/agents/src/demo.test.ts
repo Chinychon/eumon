@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { getAnalysisJob, getCrawlProgress, getSite } from "@organic-growth/db";
+import { getAnalysisJob, getCrawlProgress, getLinkGraph, getSite } from "@organic-growth/db";
 import { openSqliteD1 } from "@organic-growth/db/sqlite";
 import { advanceDemoRun, DEMO_SITE_ID, isLocalHost, seedDemoSite, startDemoRun } from "./demo.js";
 
@@ -29,6 +29,9 @@ describe("demo site", () => {
     assert.ok(after.findings.length > 3);
     assert.ok(after.competition?.rows.length, "competitor content compared");
     assert.ok(after.search, "search insights");
+    const links = await getLinkGraph(db, DEMO_SITE_ID);
+    assert.ok(links.orphans!.count > 300, `orphans ${links.orphans?.count}: price pages outside five cities`);
+    assert.deepEqual(links.landingPages, { published: 60, linkedFromSite: 2 });
     const live = await db.prepare("SELECT COUNT(*) AS n FROM generated_pages WHERE site_id = ? AND status = 'published'").bind(DEMO_SITE_ID).first<{ n: number }>();
     assert.ok(Number(live?.n) > 20, `published ${live?.n}`);
 

@@ -5,6 +5,7 @@ import { countryName, type SiteRecord } from "@organic-growth/core";
 import { formatNumber } from "./api";
 import { BarList, Funnel, Heatmap, PairedBars, Scatter } from "./charts";
 import { CrawlGarden } from "./pixel";
+import { SiteGraph } from "./SiteGraph";
 import { familyLabel, findingTab, gapsFirst, HEALTH_COLUMNS, opportunityTab, pageTypeHealth, type Finding, type Report } from "./report-model";
 import { Badge, Button, Card, Kpi } from "./ui";
 
@@ -40,7 +41,8 @@ export function WhyRow({ lead, title, aside, children }: { lead?: ReactNode; tit
 export const Severity = ({ value }: { value: string }) => <span className={`severity ${SEVERITY_CLASS[value] ?? "info"}`}>{value}</span>;
 
 /** The site as Google receives it, where it breaks, and the fixes, most impact first. */
-export function TechnicalTab({ report, changes, busy, hasRepo, onGenerateChange, onOpenPullRequest, onRecrawl }: {
+export function TechnicalTab({ siteId, report, changes, busy, hasRepo, onGenerateChange, onOpenPullRequest, onRecrawl }: {
+  siteId: string;
   report: Report;
   changes: Change[];
   busy: string;
@@ -76,6 +78,7 @@ export function TechnicalTab({ report, changes, busy, hasRepo, onGenerateChange,
           <Heatmap caption="Problems per page type" columns={HEALTH_COLUMNS.map((column) => column.label)} rows={pageTypeHealth(families).map((row) => ({ ...row, note: `${formatNumber(row.urls)} ${row.urls === 1 ? "URL" : "URLs"}` }))} />
         </Card>
       )}
+      <SiteGraph siteId={siteId} />
       <Card title="Fixes" actions={<span className="count-pill">{findings.length} findings</span>}>
         {findings.length ? findings.map((finding) => (
           <FindingRow key={finding.id} finding={finding} change={changes.find((item) => item.findingId === finding.id)} busy={busy}

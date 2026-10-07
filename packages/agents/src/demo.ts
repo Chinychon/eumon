@@ -1,10 +1,10 @@
 import type { DataRecord, Dataset, PageTemplate, SearchMetricRow } from "@organic-growth/core";
-import { slugify } from "@organic-growth/core";
+import { addDays, slugify } from "@organic-growth/core";
 import { crawlGooglebotBatch, researchSite, type Fetcher, type SiteResearch } from "@organic-growth/crawler";
 import {
   chunks, createAnalysis, datasetCoverage, deleteSite, getAnalysisJob, getCrawlCoverage, getCrawlProgress, insertConversionEvent, listAllRecords,
   listCrawlPageResults, listPendingCrawlUrls, recordLandingSession, replaceCurrentSearchMetrics, replacePageSearchMetrics, runStatements, saveAnalysisReport, saveCrawlBatch,
-  saveSiteScope, setSiteCompetitorDomains, setSiteMarkets, setTemplatePublication, syncTemplatePages, updateAnalysisProgress,
+  saveIndexStatus, saveSiteScope, setSiteCompetitorDomains, syncFirstPartyResults, upsertMetricPoints, type MetricPoint, setSiteMarkets, setTemplatePublication, syncTemplatePages, updateAnalysisProgress,
   updateAnalysisStatus, upsertDataset, upsertRecords, upsertSite, upsertTemplate, type D1Like,
 } from "@organic-growth/db";
 import { generatePages } from "@organic-growth/pages";
@@ -404,6 +404,7 @@ export async function seedDemoSite(db: D1Like, now = Date.now()): Promise<{ site
   await seedPageEngine(db, now);
   await completedAnalysis(db, "analysis_demo_1", 1, now - 30 * DAY);
   await completedAnalysis(db, "analysis_demo_2", 2, now - 2 * DAY);
+  await seedDemoResults(db, now);
   return { siteId: DEMO_SITE_ID };
 }
 
@@ -460,4 +461,69 @@ export async function advanceDemoRun(db: D1Like, analysisId: string, now = Date.
       reused: Number(detail.reused) ? { urls: Number(detail.reused), ...(detail.reusedFrom ? { from: String(detail.reusedFrom) } : {}) } : undefined,
     });
   }
+}
+
+/**
+ * Fictional Results history for the demo: Search Console and GA4 back 16
+ * months, growth after Eumon's guides went live 80 days ago, weekly ranking
+ * buckets, and index statuses. Real sites get these from the daily sync.
+ */
+async function seedDemoResults(db: D1Like, now: number) {
+  const today = new Date(now).toISOString().slice(0, 10);
+  const goLive = addDays(today, -80);
+  await db.prepare("UPDATE generated_pages SET published_at = ? WHERE site_id = ? AND status = 'published'").bind(`${goLive}T02:00:00.000Z`, DEMO_SITE_ID).run();
+  const points: MetricPoint[] = [];
+  for (let back = 486; back >= 1; back--) {
+    const day = addDays(today, -back);
+    const live = day >= goLive;
+    const weekday = new Date(`${day}T00:00:00Z`).getUTCDay();
+    const season = 1 + 0.12 * Math.sin(back / 24) - (weekday === 0 || weekday === 6 ? 0.18 : 0);
+    const lift = live ? 1 + Math.min(1, (80 - back + 1) / 60) * 0.55 : 1;
+    const clicks = Math.round(70 * season * lift);
+    const impressions = Math.round(2600 * season * (live ? lift * 1.1 : 1));
+    const position = live ? 11 - Math.min(1, (80 - back) / 60) * 2.5 : 11;
+    points.push(
+      { metric: "search_clicks", day, value: clicks },
+      { metric: "search_impressions", day, value: impressions },
+      { metric: "search_position_weight", day, value: impressions * position },
+      { metric: "search_clicks@markets", day, value: Math.round(clicks * 0.93) },
+      { metric: "search_impressions@markets", day, value: Math.round(impressions * 0.9) },
+      { metric: "search_position_weight@markets", day, value: Math.round(impressions * 0.9) * (position - 0.4) },
+      { metric: "ga4_sessions", day, value: Math.round(clicks * 2.6) },
+      { metric: "ga4_organic_sessions", day, value: Math.round(clicks * 1.15) },
+      { metric: "ga4_organic_engaged_sessions", day, value: Math.round(clicks * 0.8) },
+      { metric: "ga4_organic_key_events", day, value: Math.round(clicks * 0.05) },
+    );
+    if (live) {
+      const eumonClicks = Math.round(clicks * Math.min(0.32, (80 - back + 1) / 200));
+      points.push(
+        { metric: "eumon_search_clicks", day, value: eumonClicks },
+        { metric: "eumon_search_impressions", day, value: eumonClicks * 38 },
+        { metric: "eumon_search_position_weight", day, value: eumonClicks * 38 * 9 },
+      );
+    }
+  }
+  for (let week = 0; week < 16; week++) {
+    const day = addDays(today, -7 * week);
+    const growth = Math.max(0, 16 - week);
+    for (const [top, base] of [[3, 14], [10, 52], [20, 118], [100, 290]] as const) {
+      const queries = base + growth * (top === 3 ? 1 : 3);
+      for (const suffix of ["", "@markets"]) {
+        points.push(
+          { metric: `queries_top${top}${suffix}`, day, value: suffix ? Math.round(queries * 0.9) : queries },
+          { metric: `queries_top${top}.new${suffix}`, day, value: 2 + (week % 3) },
+          { metric: `queries_top${top}.lost${suffix}`, day, value: week % 2 },
+        );
+      }
+    }
+  }
+  await upsertMetricPoints(db, DEMO_SITE_ID, points);
+  const { results: guides } = await db.prepare("SELECT id FROM generated_pages WHERE site_id = ? AND status = 'published' ORDER BY path").bind(DEMO_SITE_ID).all<{ id: string }>();
+  await saveIndexStatus(db, DEMO_SITE_ID, guides.slice(0, 52).map((page, index) => ({
+    pageId: page.id,
+    verdict: index < 40 ? "PASS" : "NEUTRAL",
+    coverageState: index < 40 ? "Submitted and indexed" : "Discovered - currently not indexed",
+    lastCrawlTime: index < 40 ? `${addDays(today, -(index % 9) - 1)}T03:00:00Z` : null,
+  })));
+  await syncFirstPartyResults(db, DEMO_SITE_ID, new Date(now));
 }

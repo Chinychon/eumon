@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { getAnalysisJob, getCrawlProgress, getLinkGraph, getSite } from "@organic-growth/db";
+import { addDays, RESULT_METRICS, resultsView } from "@organic-growth/core";
+import { getAnalysisJob, getCrawlProgress, getLinkGraph, getSite, indexStatusCounts, listMetricSeries, publishedPages } from "@organic-growth/db";
 import { openSqliteD1 } from "@organic-growth/db/sqlite";
 import { advanceDemoRun, DEMO_SITE_ID, isLocalHost, seedDemoSite, startDemoRun } from "./demo.js";
 
@@ -48,5 +49,23 @@ describe("demo site", () => {
     const progress = await getCrawlProgress(db, "analysis_demo_run");
     assert.ok(progress.reused > 500 && progress.crawled > 500, `reused ${progress.reused}, crawled ${progress.crawled}`);
     assert.equal((run!.report as Report).coverage.emptyShellUrls, 0, "the fix landed");
+  });
+
+  it("gives the demo 16 months of Results history with a go-live 80 days ago", async () => {
+    const db = openSqliteD1();
+    const now = Date.now();
+    await seedDemoSite(db, now);
+    const today = new Date(now).toISOString().slice(0, 10);
+    const pages = await publishedPages(db, DEMO_SITE_ID);
+    assert.equal(pages.goLive, addDays(today, -80));
+    const view = resultsView({
+      today, goLive: pages.goLive, markets: ["mys", "sgp"], published: pages.published,
+      series: await listMetricSeries(db, DEMO_SITE_ID, RESULT_METRICS, addDays(today, -500), today),
+      index: await indexStatusCounts(db, DEMO_SITE_ID), searchConnected: true, ga4Connected: true,
+    });
+    assert.ok(view.numbers.clicks.current! > view.numbers.clicks.before!, "clicks grew after go-live");
+    assert.deepEqual(view.numbers.pages, { live: 60, indexed: 40, notIndexed: 12, unchecked: 8 });
+    assert.ok(view.search!.buckets[1]!.queries! > 0);
+    assert.ok(view.organic!.length > 60);
   });
 });

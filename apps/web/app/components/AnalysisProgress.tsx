@@ -4,6 +4,7 @@ import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react
 import { ApiError, api, formatNumber } from "./api";
 import { CrawlGarden } from "./pixel";
 import { Button, CheckIcon, Kpi, useTweened } from "./ui";
+import { familyLabel } from "./report-model";
 
 /** `GET /api/analyses/:id/progress`. */
 export type RunProgress = {
@@ -33,7 +34,6 @@ const STAGES = [
 
 export const isFinished = (status?: string) => status === "completed" || status === "failed" || status === "cancelled";
 
-export const familyLabel = (family: string) => (family === "home" ? "Homepage" : family === "page" ? "Top-level pages" : `/${family}/`);
 
 const duration = (ms: number) => {
   if (ms < 1000) return "under 1 s";

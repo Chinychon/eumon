@@ -42,6 +42,7 @@
     "db:migrate:local": "cf d1 migrations apply 591e4045-cbff-4ef4-a894-cbe4ece424ec --local --persist-to ./.cloudflare/state --dir ../../packages/db/migrations",
     "db:migrate:remote": "cf d1 migrations apply 591e4045-cbff-4ef4-a894-cbe4ece424ec --dir ../../packages/db/migrations",
     "deploy": "vinext-cloudflare deploy",
-    "typecheck": "cf workers types -q && tsc --noEmit -p ."
+    "typecheck": "cf workers types -q && tsc --noEmit -p .",
+    "test": "node --test \"app/**/*.test.ts\""
   }
 }

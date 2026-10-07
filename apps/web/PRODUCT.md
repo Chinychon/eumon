@@ -8,7 +8,7 @@ web
 
 ## Users
 
-The operator: Eumon's founder, who runs Eumon on their own sites and on client sites as a done-for-you service. They use the console to analyse a site, collect its data, publish landing pages, and see which pages bring customers. Clients receive the pages and the results, not the console.
+The operator: Eumon's founder, who runs Eumon on their own sites and on client sites as a done-for-you service. They use the console to analyse a site, collect its data, publish landing pages, and see which pages bring customers. Clients also use the dashboard: it is client-facing, so each client sees their own sites, results, and reports.
 
 ## Product Purpose
 

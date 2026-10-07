@@ -87,7 +87,7 @@ export default function Home() {
       .catch(() => undefined);
   }, [loadSites]);
 
-  useEffect(() => { if (siteId) setQuery({ site: siteId, view, thread: view === "ask" ? askThread || null : null }); }, [siteId, view, askThread]);
+  useEffect(() => { if (siteId) setQuery({ site: siteId, view, thread: view === "ask" ? askThread || null : null, ...(view === "overview" ? {} : { tab: null }) }); }, [siteId, view, askThread]);
   useEffect(() => { if (!notice) return; const timer = setTimeout(() => setNotice(""), 6000); return () => clearTimeout(timer); }, [notice]);
 
   const site = sites?.find((entry) => entry.id === siteId) ?? null;

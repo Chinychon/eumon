@@ -288,7 +288,7 @@ Garden and sprite colours live only in the sprites, each defined per theme: leaf
 
 A fixed left rail (236px; 200px under 1050px) beside the main area. The rail's brand row and the top bar are both 59px, so their bottom rules form one line. The work column is centred, `calc(100% - 64px)` wide up to 1190px, padded 44px 40px 32px, and bounded left and right by full-height hairlines.
 
-Grids are cells, not gaps: step cards, KPI strips (auto-fit, min 160px), metric grids (4 columns, 2 under 760px), split layouts (1.15fr / .85fr), and stacked cards overlap by -1px so neighbours share a rule. The Overview is one ruled stack: KPI strip, run or finished card, Connections strip, then the report panels, each joined to the next on a shared rule.
+Grids are cells, not gaps: step cards, KPI strips (auto-fit, min 160px), metric grids (4 columns, 2 under 760px), split layouts (1.15fr / .85fr), and stacked cards overlap by -1px so neighbours share a rule. The Overview is one ruled stack: KPI strip, run or finished card, Connections strip, then a tab row (Overview · Technical · Search · Competitors · Leads, kept in `?tab=`). The Overview tab is a one-screen briefing: a 2fr / 1fr row (where pages break | do first) over three equal chart cards, each opening its tab. Report grids (`.ruled-grid` c11, c21, c3) share rules like the rest and stack to one column under 760px (c3 already under 1050px).
 
 Rows and tables inside a card or panel bleed to its edges: findings, opportunities, competitors, list rows, and template rows extend by the panel's `--pad` on both sides so their rules meet the frame, and a table placed directly in a panel or tile drops its side borders and pads its first and last cells by `--pad` instead.
 
@@ -375,7 +375,13 @@ Charts and tables an answer drew sit in a ruled tile: a 36px Surface 2 header st
 Plain SVG and CSS from tool rows, in the series colours.
 - **Bars:** label, a 10px Track with a Sprout fill, and a mono value, aligned on shared subgrid columns; bars grow from the left staggered 45ms. In a container under 440px the label sits over its bar.
 - **Funnel:** the same rows in Sky, with the share kept from the previous step in Soft.
+- **Heatmap:** page type × problem as a real table; each cell is tinted Red from 10% to 90% by the share of that page type affected, with the count in mono. Zero cells stay Surface; cells that don't apply are Surface 2 with a dash.
+- **Scatter:** search position (1 left) against impressions; a Green Soft band marks positions 4–15. Points are 8px squares (Sprout, 10px, for queries near page one; Soft otherwise); hover or arrow keys read out each point.
+- **Paired bars:** one row per section, one 8px bar per site on a shared scale (Sprout for you, then Sky, Clay, Sun), legend below.
 - **Line:** up to three series (Sprout, Sun, Sky) at 2px, Line gridlines, mono ticks; the segment into today is dashed (3 4). The plot wipes in left to right (.9s). Hover or keyboard focus draws a Control Line cursor and a floating readout with series squares.
+
+### Why rows
+Every finding, opportunity, and insight is one 46px line: an optional severity or mark, the title (13.5px medium), an aside (impact, priority, CTR), and a green-ink mono "Why" with a chevron. It opens in place to the explanation and next step (13px Muted, max 76ch). Rows bleed to the card's edges and share rules. "Do first" is the same idea as three ranked buttons, each opening the tab that explains it.
 
 ### Inputs and navigation
 - **Fields:** 38px, Control Line border on Surface, 13.5px text, Soft placeholder; label 13px 500 Ink 2 above, 12px Muted hint below.

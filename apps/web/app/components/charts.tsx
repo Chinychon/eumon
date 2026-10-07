@@ -125,3 +125,130 @@ function niceCeiling(value: number) {
   const power = 10 ** Math.floor(Math.log10(value));
   return ([1, 2, 2.5, 5, 10].find((step) => step * power >= value) ?? 10) * power;
 }
+
+/**
+ * Rows × columns, each cell shaded by its share (0–1) and labelled with its
+ * count. A table underneath, so screen readers get the numbers as numbers.
+ */
+export function Heatmap({ columns, rows, caption }: {
+  columns: string[];
+  rows: Array<{ label: string; note?: string; cells: Array<{ count: number; share: number; applies?: boolean }> }>;
+  caption: string;
+}) {
+  return (
+    <div className="table-wrap heatmap-wrap">
+      <table className="heatmap">
+        <caption className="sr-only">{caption}</caption>
+        <thead><tr><th scope="col"><span className="sr-only">Page type</span></th>{columns.map((column) => <th key={column} scope="col">{column}</th>)}</tr></thead>
+        <tbody>{rows.map((row, rowIndex) => (
+          <tr key={row.label}>
+            <th scope="row"><code>{row.label}</code>{row.note && <small>{row.note}</small>}</th>
+            {row.cells.map((cell, index) => (
+              <td
+                key={columns[index]}
+                className={cell.applies === false ? "na" : cell.count ? undefined : "zero"}
+                style={{ ["--share" as string]: Math.min(1, cell.share), ["--i" as string]: rowIndex + index }}
+                title={cell.applies === false ? `${columns[index]} does not apply to ${row.label}` : `${row.label}: ${formatNumber(cell.count)} ${columns[index]!.toLowerCase()} (${Math.round(cell.share * 100)}%)`}
+              >
+                {cell.applies === false ? "—" : cell.count ? formatNumber(cell.count) : "0"}
+              </td>
+            ))}
+          </tr>
+        ))}</tbody>
+      </table>
+    </div>
+  );
+}
+
+type Point = { label: string; x: number; y: number; detail?: string; highlight?: boolean };
+
+/**
+ * Search position (1 on the left, better) against impressions. A shaded band
+ * marks the positions worth pushing; hover or arrow keys read out each point.
+ */
+export function Scatter({ points, band, xLabel, yLabel }: { points: Point[]; band?: [number, number]; xLabel: string; yLabel: string }) {
+  const [active, setActive] = useState<number | null>(null);
+  const sorted = [...points].sort((a, b) => a.x - b.x);
+  const xMax = Math.max(20, ...sorted.map((point) => Math.ceil(point.x)));
+  const yTop = niceCeiling(Math.max(1, ...sorted.map((point) => point.y)));
+  const px = (x: number) => ((x - 1) / (xMax - 1)) * 100;
+  const py = (y: number) => 100 - (y / yTop) * 100;
+  const current = active === null ? undefined : sorted[active];
+  const summary = `${sorted.length} queries by ${xLabel} and ${yLabel}${band ? `; ${sorted.filter((point) => point.x >= band[0] && point.x <= band[1]).length} sit at positions ${band[0]}–${band[1]}` : ""}. Use the arrow keys to read each point.`;
+  return (
+    <div className="chart-line chart-scatter">
+      <div
+        className="chart-plot"
+        role="img"
+        aria-label={summary}
+        tabIndex={0}
+        onMouseMove={(event) => {
+          const box = event.currentTarget.getBoundingClientRect();
+          const mx = ((event.clientX - box.left) / box.width) * 100;
+          const my = ((event.clientY - box.top) / box.height) * 100;
+          let best = -1;
+          let distance = Infinity;
+          sorted.forEach((point, index) => {
+            const d = (px(point.x) - mx) ** 2 + ((py(point.y) - my) * (box.height / box.width)) ** 2;
+            if (d < distance) { distance = d; best = index; }
+          });
+          setActive(best >= 0 && distance < 60 ? best : null);
+        }}
+        onMouseLeave={() => setActive(null)}
+        onFocus={() => setActive(0)}
+        onBlur={() => setActive(null)}
+        onKeyDown={(event) => {
+          if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+          event.preventDefault();
+          setActive((index) => Math.max(0, Math.min(sorted.length - 1, (index ?? 0) + (event.key === "ArrowLeft" ? -1 : 1))));
+        }}
+      >
+        <svg className="chart-draw" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+          {band && <rect className="chart-band" x={px(band[0])} y="0" width={px(band[1]) - px(band[0])} height="100" />}
+          {[0, 0.5, 1].map((fraction) => <line key={fraction} x1="0" x2="100" y1={py(yTop * fraction)} y2={py(yTop * fraction)} className="chart-grid" />)}
+        </svg>
+        {sorted.map((point, index) => (
+          <i
+            key={`${point.label}${index}`}
+            className={`chart-dot${point.highlight ? " hot" : ""}${index === active ? " on" : ""}`}
+            style={{ left: `${px(point.x)}%`, top: `${py(point.y)}%`, ["--i" as string]: index }}
+          />
+        ))}
+        {[1, 0.5, 0].map((fraction) => <span key={fraction} className="chart-tick" style={{ top: `${py(yTop * fraction)}%` }}>{compact(yTop * fraction)}</span>)}
+        {current && (
+          <div className={`chart-readout${px(current.x) > 55 ? " left" : ""}`} style={{ left: `${px(current.x)}%`, top: `${Math.min(70, py(current.y))}%` }} aria-live="polite">
+            <strong>{current.label}</strong>
+            <span className="plain">position {current.x.toFixed(1)} · {formatNumber(current.y)} {yLabel}</span>
+            {current.detail && <span className="plain">{current.detail}</span>}
+          </div>
+        )}
+      </div>
+      <div className="chart-x"><span>{xLabel} 1</span><span>{xMax}</span></div>
+    </div>
+  );
+}
+
+/** One group per row (a content section), one bar per series (you, then each competitor), on a shared scale. */
+export function PairedBars({ groups, series }: { groups: Array<{ label: string; values: number[] }>; series: string[] }) {
+  const max = Math.max(1, ...groups.flatMap((group) => group.values));
+  return (
+    <div className="chart-box">
+      <ol className="paired-bars">
+        {groups.map((group, groupIndex) => (
+          <li key={group.label}>
+            <span className="chart-bar-label" title={group.label}>{group.label}</span>
+            <div className="paired-tracks">
+              {group.values.map((value, index) => (
+                <span key={series[index]} className={`paired-row s${index}`}>
+                  <span className="chart-bar-track"><i style={{ width: `${(value / max) * 100}%`, ["--i" as string]: groupIndex * 2 + index }} /></span>
+                  <span className="chart-bar-value" aria-label={`${series[index]}: ${formatNumber(value)}`}>{formatNumber(value)}</span>
+                </span>
+              ))}
+            </div>
+          </li>
+        ))}
+      </ol>
+      <div className="chart-legend paired-legend">{series.map((name, index) => <span key={name} className={`s${index}`}>{name}</span>)}</div>
+    </div>
+  );
+}

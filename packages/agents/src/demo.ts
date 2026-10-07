@@ -4,7 +4,7 @@ import { crawlGooglebotBatch, researchSite, type Fetcher, type SiteResearch } fr
 import {
   chunks, createAnalysis, datasetCoverage, deleteSite, getAnalysisJob, getCrawlCoverage, getCrawlProgress, insertConversionEvent, listAllRecords,
   listCrawlPageResults, listPendingCrawlUrls, recordLandingSession, replaceCurrentSearchMetrics, replacePageSearchMetrics, runStatements, saveAnalysisReport, saveCrawlBatch,
-  saveIndexStatus, saveSiteScope, setSiteCompetitorDomains, syncFirstPartyResults, upsertMetricPoints, type MetricPoint, setSiteMarkets, setTemplatePublication, syncTemplatePages, updateAnalysisProgress,
+  saveIndexStatus, saveSiteScope, setSiteCompetitorDomains, syncFirstPartyResults, updateSiteGa4Property, upsertMetricPoints, type MetricPoint, setSiteMarkets, setTemplatePublication, syncTemplatePages, updateAnalysisProgress,
   updateAnalysisStatus, upsertDataset, upsertRecords, upsertSite, upsertTemplate, type D1Like,
 } from "@organic-growth/db";
 import { generatePages } from "@organic-growth/pages";
@@ -471,6 +471,8 @@ export async function advanceDemoRun(db: D1Like, analysisId: string, now = Date.
 async function seedDemoResults(db: D1Like, now: number) {
   const today = new Date(now).toISOString().slice(0, 10);
   const goLive = addDays(today, -80);
+  // A fictional GA4 property, so the view shows the organic sessions below.
+  await updateSiteGa4Property(db, DEMO_SITE_ID, "properties/0");
   await db.prepare("UPDATE generated_pages SET published_at = ? WHERE site_id = ? AND status = 'published'").bind(`${goLive}T02:00:00.000Z`, DEMO_SITE_ID).run();
   const points: MetricPoint[] = [];
   for (let back = 486; back >= 1; back--) {

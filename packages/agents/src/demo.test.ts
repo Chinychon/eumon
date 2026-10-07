@@ -58,6 +58,7 @@ describe("demo site", () => {
     const today = new Date(now).toISOString().slice(0, 10);
     const pages = await publishedPages(db, DEMO_SITE_ID);
     assert.equal(pages.goLive, addDays(today, -80));
+    assert.ok((await getSite(db, DEMO_SITE_ID))?.ga4Property, "the demo has an Analytics property, so the view shows organic sessions");
     const view = resultsView({
       today, goLive: pages.goLive, markets: ["mys", "sgp"], published: pages.published,
       series: await listMetricSeries(db, DEMO_SITE_ID, RESULT_METRICS, addDays(today, -500), today),

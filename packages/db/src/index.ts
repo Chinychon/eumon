@@ -314,7 +314,11 @@ export async function saveAnalysisReport(
   // Every finished analysis adds a site-health point to Results.
   const points = analysisHealthPoints(report, completedAt.slice(0, 10));
   const site = points.length ? await db.prepare("SELECT site_id FROM analyses WHERE id = ?").bind(id).first<{ site_id: string }>() : null;
-  if (site) await upsertMetricPoints(db, site.site_id, points);
+  try {
+    if (site) await upsertMetricPoints(db, site.site_id, points);
+  } catch {
+    // The report is what matters; a missing ledger (code deployed before its migration) only costs the health point.
+  }
 }
 
 export async function upsertOAuthCredential(

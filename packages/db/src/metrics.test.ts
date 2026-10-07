@@ -129,3 +129,15 @@ describe("review fixes", async () => {
     assert.deepEqual(Object.entries(left).filter(([, points]) => points.length).map(([metric]) => metric), ["ga4_sessions", "leads"]);
   });
 });
+
+describe("deploy order", () => {
+  it("still saves an analysis when the Results ledger table doesn't exist yet", async () => {
+    const db = openSqliteD1();
+    await upsertSite(db, { id: "s", name: "x.com", baseUrl: "https://x.com", createdAt: now, updatedAt: now });
+    await createAnalysis(db, { id: "a1", siteId: "s", status: "running", createdAt: now });
+    await db.prepare("DROP TABLE metric_points").run();
+    await saveAnalysisReport(db, "a1", { coverage: { totalUrls: 10, completedUrls: 10, emptyShellUrls: 1, httpErrorUrls: 0 } }, "summary");
+    const row = await db.prepare("SELECT status FROM analyses WHERE id = 'a1'").first<{ status: string }>();
+    assert.equal(row?.status, "completed");
+  });
+});

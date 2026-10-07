@@ -17,10 +17,10 @@ export function BarList({ rows }: { rows: Array<{ label: string; value: number }
   return (
     <div className="chart-box">
       <ol className="chart-bars">
-        {rows.map((row) => (
+        {rows.map((row, index) => (
           <li key={row.label}>
             <span className="chart-bar-label" title={row.label}>{row.label}</span>
-            <span className="chart-bar-track"><i style={{ width: `${Math.max(0, (row.value / max) * 100)}%` }} /></span>
+            <span className="chart-bar-track"><i style={{ width: `${Math.max(0, (row.value / max) * 100)}%`, ["--i" as string]: index }} /></span>
             <span className="chart-bar-value">{formatNumber(row.value)}</span>
           </li>
         ))}
@@ -40,7 +40,7 @@ export function Funnel({ steps }: { steps: Array<{ label: string; value: number 
           return (
             <li key={step.label}>
               <span className="chart-bar-label" title={step.label}>{step.label}</span>
-              <span className="chart-bar-track"><i style={{ width: `${Math.max(0, (step.value / first) * 100)}%` }} /></span>
+              <span className="chart-bar-track"><i style={{ width: `${Math.max(0, (step.value / first) * 100)}%`, ["--i" as string]: index }} /></span>
               <span className="chart-bar-value">
                 {formatNumber(step.value)}
                 {previous ? <small>{Math.round((step.value / previous) * 100)}%</small> : null}
@@ -68,18 +68,32 @@ export function LineChart({ points, series }: { points: Array<{ x: string; value
   const incomplete = points.length > 1 && points.at(-1)?.x === TODAY();
   const path = (pairs: Array<[number, number]>) => pairs.map(([px, py], index) => `${index ? "L" : "M"}${px},${py}`).join("");
   const current = hover === null ? undefined : points[hover];
+  const last = points.at(-1);
+  const summary = `${series.map((name) => name.replace(/_/g, " ")).join(", ")} by day from ${points[0]?.x ?? ""} to ${last?.x ?? ""}`
+    + (last ? `; latest ${series.map((name, index) => `${name.replace(/_/g, " ")} ${last.values[index] === null ? "unknown" : formatNumber(last.values[index]!)}`).join(", ")}` : "")
+    + ". Use the arrow keys to read each day.";
 
   return (
     <div className="chart-line">
       <div
         className="chart-plot"
+        role="img"
+        aria-label={summary}
+        tabIndex={0}
         onMouseMove={(event) => {
           const box = event.currentTarget.getBoundingClientRect();
           setHover(Math.round(((event.clientX - box.left) / box.width) * (points.length - 1)));
         }}
         onMouseLeave={() => setHover(null)}
+        onFocus={() => setHover(points.length - 1)}
+        onBlur={() => setHover(null)}
+        onKeyDown={(event) => {
+          if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+          event.preventDefault();
+          setHover((index) => Math.max(0, Math.min(points.length - 1, (index ?? points.length - 1) + (event.key === "ArrowLeft" ? -1 : 1))));
+        }}
       >
-        <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+        <svg className="chart-draw" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
           {[0, 0.5, 1].map((fraction) => <line key={fraction} x1="0" x2="100" y1={y(top * fraction)} y2={y(top * fraction)} className="chart-grid" />)}
           {series.map((name, index) => {
             const pairs = points.flatMap((point, at): Array<[number, number]> => (point.values[index] === null || point.values[index] === undefined ? [] : [[x(at), y(point.values[index]!)]]));
@@ -94,7 +108,7 @@ export function LineChart({ points, series }: { points: Array<{ x: string; value
         </svg>
         {[1, 0.5, 0].map((fraction) => <span key={fraction} className="chart-tick" style={{ top: `${y(top * fraction)}%` }}>{compact(top * fraction)}</span>)}
         {current && (
-          <div className={`chart-readout${hover! > points.length / 2 ? " left" : ""}`} style={{ left: `${x(hover!)}%` }}>
+          <div className={`chart-readout${hover! > points.length / 2 ? " left" : ""}`} style={{ left: `${x(hover!)}%` }} aria-live="polite">
             <strong>{current.x}{current.x === TODAY() ? " · so far" : ""}</strong>
             {series.map((name, index) => <span key={name} className={`s${index}`}>{name.replace(/_/g, " ")} {current.values[index] === null ? "—" : formatNumber(current.values[index]!)}</span>)}
           </div>

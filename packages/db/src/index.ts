@@ -634,7 +634,7 @@ export type CrawlProgress = {
   firstCrawledAt?: string;
   lastCrawledAt?: string;
   /** Per page type: `done` is everything no longer pending; `fetched` is what this run fetched itself (the rest was reused or blocked). */
-  families: Array<{ family: string; total: number; done: number; fetched: number; emptyShells: number; errors: number }>;
+  families: Array<{ family: string; total: number; done: number; fetched: number; blocked: number; emptyShells: number; errors: number }>;
   recent: Array<{ url: string; status: number | null; family: string; emptyShell: boolean; failed: boolean; crawledAt: string }>;
 };
 
@@ -663,9 +663,10 @@ export async function getCrawlProgress(db: D1Like, analysisId: string): Promise<
       `SELECT COALESCE(${crawlField("routeFamily")}, 'other') AS family, COUNT(*) AS total,
         SUM(CASE WHEN crawl_state != 'pending' THEN 1 ELSE 0 END) AS done,
         SUM(CASE WHEN crawl_state IN ('complete', 'failed') AND ${FRESH} THEN 1 ELSE 0 END) AS fetched,
+        SUM(CASE WHEN crawl_state = 'blocked' THEN 1 ELSE 0 END) AS blocked,
         SUM(CASE WHEN crawl_state = 'complete' AND is_empty_shell = 1 THEN 1 ELSE 0 END) AS empty_shells,
         SUM(CASE WHEN crawl_state = 'failed' OR (crawl_state = 'complete' AND status >= 400 AND NOT (${CHALLENGE})) THEN 1 ELSE 0 END) AS errors
-       FROM pages WHERE analysis_id = ? GROUP BY family ORDER BY total DESC, family LIMIT 12`,
+       FROM pages WHERE analysis_id = ? GROUP BY family ORDER BY total DESC, family LIMIT 40`,
     ).bind(analysisId).all<Record<string, number | string>>(),
     db.prepare(
       `SELECT url, status, is_empty_shell, crawl_state, crawled_at, COALESCE(${crawlField("routeFamily")}, 'other') AS family
@@ -692,6 +693,7 @@ export async function getCrawlProgress(db: D1Like, analysisId: string): Promise<
       total: Number(row.total ?? 0),
       done: Number(row.done ?? 0),
       fetched: Number(row.fetched ?? 0),
+      blocked: Number(row.blocked ?? 0),
       emptyShells: Number(row.empty_shells ?? 0),
       errors: Number(row.errors ?? 0),
     })),
@@ -704,6 +706,26 @@ export async function getCrawlProgress(db: D1Like, analysisId: string): Promise<
       crawledAt: String(row.crawled_at),
     })),
   };
+}
+
+/**
+ * How fast this site's crawls run: pages a minute from the most recent
+ * finished analysis that fetched enough pages itself to measure, from its
+ * first fetch to its last. Null until one exists.
+ */
+export async function crawlPace(db: D1Like, siteId: string): Promise<{ perMinute: number } | null> {
+  const { results } = await db.prepare(
+    "SELECT id FROM analyses WHERE site_id = ? AND status = 'completed' ORDER BY created_at DESC LIMIT 5",
+  ).bind(siteId).all<{ id: string }>();
+  for (const { id } of results) {
+    const row = await db.prepare(
+      `SELECT COUNT(*) AS n, MIN(crawled_at) AS first_at, MAX(crawled_at) AS last_at FROM pages
+       WHERE analysis_id = ? AND crawl_state IN ('complete', 'failed') AND ${FRESH}`,
+    ).bind(id).first<{ n: number; first_at: string | null; last_at: string | null }>();
+    const minutes = row?.first_at && row.last_at ? (Date.parse(row.last_at) - Date.parse(row.first_at)) / 60_000 : 0;
+    if (Number(row?.n) >= 500 && minutes >= 1) return { perMinute: Math.round(Number(row!.n) / minutes) };
+  }
+  return null;
 }
 
 /**

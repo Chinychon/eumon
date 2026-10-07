@@ -1,26 +1,26 @@
 ---
-version: 1
+version: 3
 slug: "app-page-tsx"
 primary_target: "app/page.tsx"
-related_targets: ["app/globals.css","app/layout.tsx","app/components/ui.tsx","app/components/OverviewView.tsx","app/components/DataView.tsx","app/components/PagesView.tsx","app/components/PerformanceView.tsx","app/components/SetupView.tsx"]
+related_targets: ["app/globals.css","app/layout.tsx","app/components/ui.tsx","app/components/pixel.tsx","app/components/charts.tsx","app/components/Ask.tsx","app/components/AnalysisProgress.tsx","app/components/OverviewView.tsx","app/components/ConnectionsView.tsx","app/components/DataView.tsx","app/components/PagesView.tsx","app/components/PerformanceView.tsx","app/components/SetupView.tsx"]
 ---
 
 # Dashboard
 
-Mode: Operate. The operator (Eumon's founder) runs client sites through the pipeline: Overview, Data, Landing pages, Performance, Setup. Layout, navigation model, views, and controls stay as they are; only the visual world changes.
+Mode: Operate. The operator (Eumon's founder) runs client sites through the pipeline: Overview, Ask, Connections, Data, Landing pages, Performance, Setup. The navigation model, views, and controls stay; the world changes around them.
 
-Constraints: dark only (user, 2026-10-06). Green stays the brand colour, on the primary button, the active navigation item, and progress bars (user). Generated landing pages keep each client's brand and are out of scope. No invented results or claims in interface copy. Labels above headings are removed (craft floor); the pipeline step ranges they carried now sit in the navigation.
+Constraints (user, 2026-10-07, second revision): keep Better Auth's straight edges, hard corners, hairline rules, frame lines, and + registration marks; the soft, rounded pass is rejected. From cofounder.co and adaline.ai take only the colours (warm paper by day, warm forest-night by night, never #000), and from spline.design only the interactivity. Keep both themes following the device with a toggle, all motion, the pixel garden and seedling, hover readouts, and the keyboard-readable chart. Overview leads with the numbers; Connections is its own tab with a one-line link strip on Overview. Ask follows PostHog AI: a visible step trace, short notes between steps, and insight tiles with a header strip. A localhost-only demo site with fictional data (labelled as demo) exercises every view. Generated landing pages keep each client's brand and are out of scope. No invented results or claims in interface copy. No labels above headings.
 
 ## Direction contract
 
-THESIS: A working console in Better Auth's world, pinned by the user: black, square, hairline-ruled, with green spent only on what moves a client site forward. It refuses the category default of soft white cards, rounded corners, and mint tints.
+THESIS: Eumon tends client sites like a garden, drawn on a ruled workbench: everything sits on hairlines that meet at square corners, and the only soft things are the colour and the motion. Crawled pages sprout, answers show their working, a finished analysis blooms. It refuses the rounded, shadowed SaaS card and the cold pure-black console.
 
-OWN-WORLD: Pure black ground, near-white ink, three fixed grays; 1px rules at 10% white; zero radius on every panel, button, input, badge, and tab. Geist at regular weight for titles and text; Geist Mono uppercase for navigation, field labels, table heads, and numbers. A jade green fill with black text for the primary button, the active navigation marker, and progress; amber and red only for warnings and errors.
+OWN-WORLD: Day is warm green-tinted paper with deep forest ink; night is warm forest-charcoal (#0f1411) with visible steps. Panels share 1px rules (they overlap by a pixel, never float on gaps or shadows); the work column is framed by full-height hairlines with + marks where rules cross. Corners are square everywhere: buttons, chips, badges, inputs, the composer, tiles, the drawer. Sprout green marks progress and positive state; sun, sky, and clay join it as data colours. Geist for prose, Geist Mono uppercase for machinery. Pixel sprites and the pixel garden are the only illustration. Shadows only on things that float: the toast, the garden tip, the chart readout, the drawer.
 
-STORY: The operator opens a client site, reads what is connected and what failed, and moves through the pipeline views without relearning anything.
+STORY: The operator opens a client and reads the numbers first, starts an update, and watches the garden fill while knowing how long is left and how to stop; the finished card says what changed. On any view they ask a question and watch Eumon read the site's data step by step, then get an answer with charts they can flip to rows.
 
-FIRST VIEWPORT: Left rail with a square green mark and EUMON wordmark, the client hostname in mono, text-only mono navigation with a green square on the active item and the pipeline steps each view covers (1–3, 4–5, 6–7) at the right, website switcher at the foot. Top bar with a mono breadcrumb; rail and top bar share one ruled line. The work column (max 1190px) is bounded by full-height hairlines with + marks where they cross that line; a 36px regular-weight title with no label above it, gray lede, green primary action on the right; panels below stack on shared 1px rules.
+FIRST VIEWPORT: Tinted rail with the pixel sprout mark, square nav items with a rotating green marker, the theme toggle at its foot; a ruled top bar with the breadcrumb, run chip, and Ask Eumon. Overview: title, lede, actions with a time estimate, then one ruled stack: KPI strip, the run or finished card, the Connections strip, then the report. Ask: a seedling, a greeting, one centred square composer, three chips.
 
-FORM: Pinned by the user (better-auth.com), so no concept-seed roll and no seed key. Operate rules apply: the world lends type, palette, density, and one signature move, the ruled frame with + registration marks.
+FORM: Pinned by the user (Better Auth structure, cofounder.co and adaline.ai palettes, spline.design interactivity, PostHog AI for Ask), so no concept-seed roll. Signature move: the pixel garden. Motion: counts tween between polls, bars grow, lines draw, steps rise in, the drawer slides, the composer travels from centre to dock; under 300ms for interaction, one bloom per finished analysis; all of it off under reduced motion.
 
 FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, DESIGN.md, and every shipping raster carrying its provenance

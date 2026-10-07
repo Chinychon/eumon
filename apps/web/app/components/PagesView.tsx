@@ -67,12 +67,13 @@ export function PagesView({ site, onNavigate }: { site: SiteRecord; onNavigate: 
       <ViewHeader
         title="Landing pages"
         description="Each template turns records into landing pages: what the searcher is looking for, the facts that answer it, and a clear call to action. Thin or duplicate pages are never published."
-        actions={<><Badge tone={verified ? "green" : "amber"}>{`${formatNumber(approved)} ${verified ? "live" : "approved"}`}</Badge><Button variant="secondary" onClick={() => onNavigate("setup")}>Serving setup</Button></>}
+        actions={<><Badge tone={verified && approved ? "green" : approved ? "amber" : "gray"}>{`${formatNumber(approved)} ${verified ? "live" : "approved"}`}</Badge><Button variant="secondary" onClick={() => onNavigate("setup")}>Serving setup</Button></>}
       />
-      {error && <div className="callout error" role="alert" style={{ marginBottom: 14 }}>{error}</div>}
-      {message && <div className="callout" style={{ marginBottom: 14 }}>{message}</div>}
+      <div className="results">
+      {error && <div className="callout error" role="alert">{error}</div>}
+      {message && <div className="callout">{message}</div>}
       {!verified && approved > 0 && (
-        <div className="callout warn" style={{ marginBottom: 14 }}>
+        <div className="callout warn">
           {formatNumber(approved)} approved pages are not on {host} yet: nobody, including Google, can see them until the proxy rule is added and verified.{" "}
           <Button small variant="ghost" onClick={() => onNavigate("setup")}>Finish setup</Button>
         </div>
@@ -96,6 +97,7 @@ export function PagesView({ site, onNavigate }: { site: SiteRecord; onNavigate: 
           </Card>
         );
       })}
+      </div>
     </div>
   );
 }
@@ -118,7 +120,7 @@ function TemplateCard({ template, dataset, site, settings, verified, onChanged, 
   }
 
   return (
-    <div style={{ border: "1px solid var(--line)", borderRadius: 10, padding: "14px 16px", marginTop: 10 }}>
+    <div className="template-row">
       <div className="row spread">
         <div className="grow">
           <h3 style={{ margin: 0, fontSize: 15, fontWeight: 650 }}>{template.name}</h3>

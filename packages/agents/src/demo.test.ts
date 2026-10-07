@@ -1,0 +1,49 @@
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+import { getAnalysisJob, getCrawlProgress, getSite } from "@organic-growth/db";
+import { openSqliteD1 } from "@organic-growth/db/sqlite";
+import { advanceDemoRun, DEMO_SITE_ID, isLocalHost, seedDemoSite, startDemoRun } from "./demo.js";
+
+describe("demo site", () => {
+  it("is only served to this machine", () => {
+    for (const host of ["localhost", "127.0.0.1", "[::1]", "LOCALHOST"]) assert.equal(isLocalHost(host), true, host);
+    for (const host of ["eumon.app", "localhost.example.com", "10.0.0.2", "192.168.1.5"]) assert.equal(isLocalHost(host), false, host);
+  });
+
+  it("seeds two analyses through the real pipeline and plays a simulated run to the end", async () => {
+    const db = openSqliteD1();
+    // Stage changes are stamped with the real clock, so the simulated clock starts from it.
+    const now = Date.now();
+    await seedDemoSite(db, now);
+    assert.match((await getSite(db, DEMO_SITE_ID))!.name, /demo/i);
+
+    const older = await getAnalysisJob(db, "analysis_demo_1");
+    const latest = await getAnalysisJob(db, "analysis_demo_2");
+    type Report = { coverage: { totalUrls: number; emptyShellUrls: number; httpErrorUrls: number; families: unknown[] }; findings: unknown[]; competition: { rows: unknown[] } | null; search: unknown };
+    const [before, after] = [older!.report as Report, latest!.report as Report];
+    assert.equal(latest!.status, "completed");
+    assert.ok(after.coverage.totalUrls > 1_700, `crawled ${after.coverage.totalUrls}`);
+    assert.ok(after.coverage.families.length >= 6);
+    assert.ok(before.coverage.emptyShellUrls > after.coverage.emptyShellUrls && after.coverage.emptyShellUrls > 0, "fewer empty pages a month later");
+    assert.ok(after.coverage.httpErrorUrls > 0);
+    assert.ok(after.findings.length > 3);
+    assert.ok(after.competition?.rows.length, "competitor content compared");
+    assert.ok(after.search, "search insights");
+    const live = await db.prepare("SELECT COUNT(*) AS n FROM generated_pages WHERE site_id = ? AND status = 'published'").bind(DEMO_SITE_ID).first<{ n: number }>();
+    assert.ok(Number(live?.n) > 20, `published ${live?.n}`);
+
+    // An update re-fetches only the changed price and dentist pages, then finishes with a report.
+    await startDemoRun(db, { analysisId: "analysis_demo_run", full: false, now });
+    let at = now;
+    for (let poll = 0; poll < 400; poll++) {
+      at += 3_000;
+      await advanceDemoRun(db, "analysis_demo_run", at);
+      if ((await getAnalysisJob(db, "analysis_demo_run"))!.status !== "running") break;
+    }
+    const run = await getAnalysisJob(db, "analysis_demo_run");
+    assert.equal(run!.status, "completed");
+    const progress = await getCrawlProgress(db, "analysis_demo_run");
+    assert.ok(progress.reused > 500 && progress.crawled > 500, `reused ${progress.reused}, crawled ${progress.crawled}`);
+    assert.equal((run!.report as Report).coverage.emptyShellUrls, 0, "the fix landed");
+  });
+});

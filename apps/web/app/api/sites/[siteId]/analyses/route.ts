@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
+import { DEMO_SITE_ID, startDemoRun } from "@organic-growth/agents";
 import { createId } from "@organic-growth/core";
-import { analysisStalled, createAnalysis, getAnalysisJob, getLatestAnalysisForSite, getPreviousCompletedAnalysis, getSite, updateAnalysisStatus } from "@organic-growth/db";
+import { analysisStalled, crawlPace, createAnalysis, getAnalysisJob, getLatestAnalysisForSite, getPreviousCompletedAnalysis, getSite, updateAnalysisStatus } from "@organic-growth/db";
 import { readJson } from "../../../../../src/server";
 
 export async function GET(_request: Request, context: { params: Promise<{ siteId: string }> }) {
@@ -10,7 +11,7 @@ export async function GET(_request: Request, context: { params: Promise<{ siteId
   // While a re-run is in progress, the last finished report stays readable.
   const running = job.status === "queued" || job.status === "running";
   const last = running ? await getPreviousCompletedAnalysis(env.DB, siteId, job.id) : null;
-  const previous = last ? await getAnalysisJob(env.DB, last.id) : null;
+  const [previous, pace] = await Promise.all([last ? getAnalysisJob(env.DB, last.id) : null, crawlPace(env.DB, siteId)]);
   return Response.json({
     analysis: {
       analysisId: job.id,
@@ -20,6 +21,7 @@ export async function GET(_request: Request, context: { params: Promise<{ siteId
       report: job.status === "completed" ? job.report : undefined,
     },
     previous: previous?.report ? { analysisId: previous.id, report: previous.report } : null,
+    pace,
   }, { headers: { "Cache-Control": "no-store" } });
 }
 
@@ -35,6 +37,11 @@ export async function POST(request: Request, context: { params: Promise<{ siteId
   }
 
   const analysisId = createId("analysis");
+  // The demo site is served from memory, so its run is simulated as the progress view polls.
+  if (siteId === DEMO_SITE_ID) {
+    await startDemoRun(env.DB, { analysisId, full });
+    return Response.json({ analysisId, status: "running" }, { status: 202, headers: { "Cache-Control": "no-store" } });
+  }
   const createdAt = new Date().toISOString();
   await createAnalysis(env.DB, { id: analysisId, siteId, status: "queued", createdAt });
   try {

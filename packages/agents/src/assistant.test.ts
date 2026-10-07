@@ -56,9 +56,12 @@ describe("runAssistantTurn", async () => {
     const events: AssistantEvent[] = [];
     const turn = await runAssistantTurn({ env: {}, db, site: site("a"), history: [], question: "Which page types are empty?", emit: (event) => events.push(event), chat });
 
-    assert.deepEqual(events.map((event) => event.type), ["status", "block", "text"], "the preamble before the tool call is dropped");
-    assert.deepEqual(turn.parts.map((part) => part.type), ["block", "text"]);
-    const block = turn.parts[0]!.type === "block" ? turn.parts[0]!.block : undefined;
+    assert.deepEqual(events.map((event) => event.type), ["note", "step", "step", "block", "text"], "the line before the tool call becomes a note");
+    assert.deepEqual(turn.parts.map((part) => part.type), ["note", "step", "block", "text"], "the finished step replaces the running one");
+    const step = turn.parts[1]!.type === "step" ? turn.parts[1]! : undefined;
+    assert.equal(step?.label, "Read crawl coverage");
+    assert.match(step?.summary ?? "", /^Crawl finished/, "the step says what it found");
+    const block = turn.parts[2]!.type === "block" ? turn.parts[2]!.block : undefined;
     assert.deepEqual(block?.rows, [{ page_type: "/procedures/", empty_html: 3 }, { page_type: "/doctors/", empty_html: 0 }], "rows come from the tool, ranked");
     assert.equal(sent.length, 3);
     const toolMessage = sent[1]!.messages.find((message) => message.role === "tool");
@@ -90,13 +93,13 @@ describe("runAssistantTurn resilience", async () => {
   const db = openSqliteD1();
   await upsertSite(db, site("a"));
 
-  it("drops a short preamble before tool calls, keeps a long answer streaming", async () => {
+  it("keeps a short line before tool calls as a note, out of the answer text", async () => {
     const { chat } = scriptedChat([
       () => [{ type: "text", text: "I'll check the overview." }, { type: "tool_calls", calls: [{ id: "c", name: "site_overview", arguments: "{}" }] }, { type: "finish", reason: "tool_calls" }],
       () => [{ type: "text", text: "Search Console is not connected." }, { type: "finish", reason: "stop" }],
     ]);
     const turn = await runAssistantTurn({ env: {}, db, site: site("a"), history: [], question: "Status?", emit: () => undefined, chat });
-    assert.deepEqual(turn.parts, [{ type: "text", text: "Search Console is not connected." }]);
+    assert.deepEqual(turn.parts.filter((part) => part.type !== "step"), [{ type: "note", text: "I'll check the overview." }, { type: "text", text: "Search Console is not connected." }]);
   });
 
   it("retries a round once when it fails before saying anything, then reports the error", async () => {

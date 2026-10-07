@@ -170,7 +170,7 @@ export function synthesizeGrowthPlan(bundle: AnalysisBundle): GrowthPlan {
       ? "Prioritized from the observed technical finding. Search demand and conversion value are not yet available."
       : opp.intent === "content_gap"
         ? `${opp.rationale} Competitors that invest this heavily in a page type usually do so because it brings them traffic.`
-        : `${opp.rationale} This opportunity score is a prioritization aid, not a traffic forecast.`,
+        : /prioritization aid/i.test(opp.rationale) ? opp.rationale : `${opp.rationale} This opportunity score is a prioritization aid, not a traffic forecast.`,
     pagesAffected: opp.potentialPage ? [opp.potentialPage] : opp.currentPage ? [opp.currentPage] : [],
     implementationRequired: opp.intent === "technical_enabler"
       ? "Review the affected route and implement a targeted change in a Git branch."
@@ -352,3 +352,4 @@ export * from "./code-findings.js";
 export * from "./search.js";
 export * from "./conversion.js";
 export * from "./assistant.js";
+export * from "./demo.js";

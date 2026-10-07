@@ -23,7 +23,7 @@ function delta(before: number, after: number): string {
   return `${change >= 0 ? "+" : ""}${Math.round(change * 100)}%`;
 }
 
-export function PerformanceView({ site, onNavigate }: { site: SiteRecord; onNavigate: (view: "pages" | "overview") => void }) {
+export function PerformanceView({ site, onNavigate }: { site: SiteRecord; onNavigate: (view: "pages" | "connections") => void }) {
   const [days, setDays] = useState(28);
   const [data, setData] = useState<PerformanceData | null>(null);
   const [error, setError] = useState("");
@@ -62,7 +62,7 @@ export function PerformanceView({ site, onNavigate }: { site: SiteRecord; onNavi
           </select>
           {data?.searchConnected
             ? <Button variant="secondary" busy={busy === "sync"} onClick={sync}>Sync Search Console</Button>
-            : <Button variant="secondary" onClick={() => onNavigate("overview")}>Connect Search Console</Button>}
+            : <Button variant="secondary" onClick={() => onNavigate("connections")}>Connect Search Console</Button>}
         </>}
       />
       {error && <div className="callout error" role="alert" style={{ marginBottom: 14 }}>{error}</div>}
@@ -70,9 +70,9 @@ export function PerformanceView({ site, onNavigate }: { site: SiteRecord; onNavi
       {!report || !totals ? <div className="empty">Loading…</div> : totals.pages === 0 ? (
         <div className="empty">No approved pages yet. <Button small variant="ghost" onClick={() => onNavigate("pages")}>Approve pages</Button></div>
       ) : (
-        <>
+        <div className="results">
           {!data?.live && (
-            <div className="callout warn" style={{ marginBottom: 14 }}>
+            <div className="callout warn">
               These pages are approved but not live on {data?.publicHost} yet, so there is no real traffic to measure. Numbers start once the proxy rule in Setup is verified.
             </div>
           )}
@@ -91,7 +91,7 @@ export function PerformanceView({ site, onNavigate }: { site: SiteRecord; onNavi
               : report.suggestions.map((suggestion, index) => <SuggestionRow key={index} suggestion={suggestion} siteId={site.id} onApplied={load} />)}
           </Card>
 
-          <div className="split" style={{ marginTop: 14 }}>
+          <div className="split">
             <Card title="By template" subtitle="Which kinds of page earn traffic and conversions.">
               <div className="table-wrap">
                 <table className="table">
@@ -150,7 +150,7 @@ export function PerformanceView({ site, onNavigate }: { site: SiteRecord; onNavi
               </div>
             )}
           </Card>
-        </>
+        </div>
       )}
     </div>
   );

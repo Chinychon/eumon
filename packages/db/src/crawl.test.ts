@@ -139,7 +139,7 @@ describe("live crawl progress", async () => {
       { total: progress.total, pending: progress.pending, crawled: progress.crawled, failed: progress.failed, blocked: progress.blocked, ok: progress.ok, httpErrors: progress.httpErrors, emptyShells: progress.emptyShells },
       { total: 6, pending: 1, crawled: 4, failed: 1, blocked: 1, ok: 2, httpErrors: 1, emptyShells: 1 },
     );
-    assert.deepEqual(progress.families.find((family) => family.family === "doctors"), { family: "doctors", total: 4, done: 3, fetched: 3, emptyShells: 1, errors: 1 });
+    assert.deepEqual(progress.families.find((family) => family.family === "doctors"), { family: "doctors", total: 4, done: 3, fetched: 3, blocked: 0, emptyShells: 1, errors: 1 });
     assert.equal(progress.recent.length, 4);
     assert.ok(progress.firstCrawledAt);
   });
@@ -184,7 +184,7 @@ describe("live crawl progress", async () => {
     await reuseCrawlResults(db, { analysisId: "p2", previousAnalysisId: "p1", urls: [u("/doctors/a"), u("/doctors/b"), u("/blog/x")] });
     const progress = await getCrawlProgress(db, "p2");
     assert.equal(progress.reused, 2, "the failed URL is not copied");
-    assert.deepEqual(progress.families.find((family) => family.family === "doctors"), { family: "doctors", total: 2, done: 2, fetched: 0, emptyShells: 1, errors: 0 });
+    assert.deepEqual(progress.families.find((family) => family.family === "doctors"), { family: "doctors", total: 2, done: 2, fetched: 0, blocked: 0, emptyShells: 1, errors: 0 });
     assert.equal(progress.crawled, 0, "reused results do not count as fetched in this run");
     const coverage = await getCrawlCoverage(db, "p2");
     assert.equal(coverage.emptyShellUrls, 1, "reused results still count toward the analysis");

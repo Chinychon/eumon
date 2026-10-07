@@ -23,5 +23,5 @@ export async function GET(request: Request) {
   } catch {
     return Response.json({ error: "Could not securely store the Google connection." }, { status: 500 });
   }
-  return Response.redirect(new URL(`/?gsc=connected&site=${encodeURIComponent(siteId)}`, url.origin), 303);
+  return Response.redirect(new URL(`/?gsc=connected&view=connections&site=${encodeURIComponent(siteId)}`, url.origin), 303);
 }

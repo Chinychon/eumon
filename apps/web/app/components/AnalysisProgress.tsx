@@ -2,7 +2,8 @@
 
 import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
 import { ApiError, api, formatNumber } from "./api";
-import { Button, CheckIcon, Kpi } from "./ui";
+import { CrawlGarden } from "./pixel";
+import { Button, CheckIcon, Kpi, useTweened } from "./ui";
 
 /** `GET /api/analyses/:id/progress`. */
 export type RunProgress = {
@@ -17,7 +18,7 @@ export type RunProgress = {
     total: number; pending: number; crawled: number; failed: number; blocked: number; reused: number;
     ok: number; httpErrors: number; emptyShells: number; noindex: number; challenges: number;
     perMinute?: number; secondsLeft?: number;
-    families: Array<{ family: string; total: number; done: number; fetched: number; emptyShells: number; errors: number }>;
+    families: Array<{ family: string; total: number; done: number; fetched: number; blocked: number; emptyShells: number; errors: number }>;
     recent: Array<{ url: string; status: number | null; family: string; emptyShell: boolean; failed: boolean; crawledAt: string }>;
   };
 };
@@ -30,7 +31,7 @@ const STAGES = [
   { key: "saving", label: "Saving", title: "Saving the report", tab: "Saving" },
 ];
 
-export const isFinished = (status?: string) => status === "completed" || status === "failed";
+export const isFinished = (status?: string) => status === "completed" || status === "failed" || status === "cancelled";
 
 export const familyLabel = (family: string) => (family === "home" ? "Homepage" : family === "page" ? "Top-level pages" : `/${family}/`);
 
@@ -134,20 +135,64 @@ function PagePath({ url }: { url: string }) {
   return <code className="run-path-text"><span>{path.slice(0, cut)}</span><span>{path.slice(cut) || "/"}</span></code>;
 }
 
-/** What a running analysis is doing: stage timeline, crawl progress with pace and time left, and what the crawl has found so far. */
-export function AnalysisProgress({ run }: { run?: RunProgress }) {
-  if (!run) {
-    return <section className="run" aria-busy="true"><div className="panel run-head"><div className="panel-heading"><h3>Starting the analysis</h3></div></div></section>;
+/** One before → after figure from the report this run replaced; lower is better for all of them but the URL count. */
+export type RunDelta = { label: string; before?: number; after: number; lowerIsBetter?: boolean };
+
+function Delta({ delta, index }: { delta: RunDelta; index: number }) {
+  const change = delta.before === undefined ? 0 : delta.after - delta.before;
+  const tone = change === 0 || !delta.lowerIsBetter ? "same" : change < 0 ? "down" : "up";
+  return (
+    <span className="run-delta" style={{ animationDelay: `${200 + index * 70}ms` }}>
+      {delta.label} <strong>{delta.before !== undefined && delta.before !== delta.after ? `${formatNumber(delta.before)} → ${formatNumber(delta.after)}` : formatNumber(delta.after)}</strong>
+      {delta.before !== undefined && <em className={tone}>{change === 0 ? "no change" : `${change > 0 ? "+" : "−"}${formatNumber(Math.abs(change))}`}</em>}
+    </span>
+  );
+}
+
+/**
+ * What a running analysis is doing: stage timeline, crawl progress with pace
+ * and time left, the crawl garden, and what the crawl has found so far. When
+ * the run finishes the card stays to say what changed, and the garden blooms.
+ */
+export function AnalysisProgress({ run, analysisId, finish, onDismiss }: {
+  run?: RunProgress;
+  analysisId: string;
+  finish?: { deltas: RunDelta[]; first: boolean };
+  onDismiss?: () => void;
+}) {
+  const [confirming, setConfirming] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  const [cancelError, setCancelError] = useState("");
+  const crawl = run?.crawl;
+  const done = crawl ? crawl.total - crawl.pending : 0;
+  const shown = useTweened(done);
+  const served = useTweened(crawl?.ok ?? 0);
+
+  if (!run || !crawl) {
+    return <section className="run" aria-busy="true"><div className="run-head"><div className="panel-heading"><h3>Starting the analysis</h3></div></div></section>;
   }
+
+  async function cancel() {
+    setCancelling(true);
+    setCancelError("");
+    try {
+      await api(`/api/analyses/${analysisId}/cancel`, { method: "POST" });
+    } catch (error) {
+      setCancelError(error instanceof Error ? error.message : String(error));
+      setCancelling(false);
+    }
+  }
+
   const now = Date.parse(run.now);
-  const { crawl, progress } = run;
+  const { progress } = run;
+  const finished = Boolean(finish);
   const history = progress?.history ?? [];
-  const current = STAGES.findIndex((stage) => stage.key === progress?.stage);
+  const current = finished ? STAGES.length : STAGES.findIndex((stage) => stage.key === progress?.stage);
   const stage = STAGES[current];
   const timeIn = (key: string) => {
     const index = history.findIndex((entry) => entry.stage === key);
     if (index < 0) return undefined;
-    const end = history[index + 1]?.at ?? (key === stage?.key ? run.now : undefined);
+    const end = history[index + 1]?.at ?? (key === stage?.key || (finished && key === "saving") ? run.now : undefined);
     return end ? duration(Date.parse(end) - Date.parse(history[index]!.at)) : undefined;
   };
 
@@ -160,7 +205,6 @@ export function AnalysisProgress({ run }: { run?: RunProgress }) {
     : stage.key === "crawl" ? "Every sitemap URL, fetched the way Google fetches it."
     : activity;
 
-  const done = crawl.total - crawl.pending;
   const crawlDone = crawl.total > 0 && crawl.pending === 0;
   const swatches = crawl.reused > 0;
   const fetchedLabel = `${formatNumber(crawl.crawled)} fetched${crawlDone && timeIn("crawl") ? ` in ${timeIn("crawl")}` : ""}`;
@@ -174,26 +218,51 @@ export function AnalysisProgress({ run }: { run?: RunProgress }) {
   // Crawl batches report every few seconds, so a quiet crawl is worth saying; other stages can be quiet for minutes.
   if (stage?.key === "crawl" && !run.stalled && quiet > 3 * 60_000) pace.push(`last update ${duration(quiet)} ago`);
   const errors = crawl.failed + crawl.httpErrors + crawl.challenges;
+  const gardenLabel = `Crawl garden: ${formatNumber(done)} of ${formatNumber(crawl.total)} sitemap URLs checked; ${formatNumber(crawl.emptyShells)} with empty HTML, ${formatNumber(errors)} errors, ${formatNumber(crawl.blocked)} blocked.`;
 
   return (
     <section className={`run${run.stalled ? " stalled" : ""}`} aria-label="Analysis progress">
-      <div className="panel run-head">
-        <div className="panel-heading">
-          <div>
-            <h3 aria-live="polite">{title}</h3>
-            {subtitle && <p className="run-sub">{subtitle}</p>}
+      {finish ? (
+        <div className="run-finish">
+          <div className="panel-heading">
+            <div>
+              <h3 aria-live="polite">Analysis finished</h3>
+              <p>{finish.first ? "Here is the first look at this site; the full report is below." : `Took ${duration(now - Date.parse(run.queuedAt))}. Here is what changed since the last analysis; the full report is below.`}</p>
+            </div>
+            {onDismiss && <Button small variant="secondary" onClick={onDismiss}>Dismiss</Button>}
           </div>
-          <div className="row">
-            {!run.stalled && <NotifyWhenDone />}
-            <span className="count-pill">{duration(now - Date.parse(run.queuedAt))} elapsed</span>
-          </div>
+          <div className="run-deltas">{finish.deltas.map((delta, index) => <Delta key={delta.label} delta={delta} index={index} />)}</div>
         </div>
-        {run.stalled && (
-          <div className="callout warn" role="alert">
-            Nothing has moved for {duration(quiet)}, so this run has most likely stopped, for example because the server restarted. Start a new run to continue.
+      ) : (
+        <div className="run-head">
+          <div className="panel-heading">
+            <div>
+              <h3 aria-live="polite">{title}</h3>
+              {subtitle && <p className="run-sub">{subtitle}</p>}
+            </div>
+            <div className="row">
+              {!run.stalled && <NotifyWhenDone />}
+              <span className="count-pill">{duration(now - Date.parse(run.queuedAt))} elapsed</span>
+              {!run.stalled && !confirming && <Button small variant="secondary" onClick={() => setConfirming(true)}>Cancel run</Button>}
+            </div>
           </div>
-        )}
-      </div>
+          {confirming && !run.stalled && (
+            <div className="run-confirm" role="alertdialog" aria-label="Cancel this analysis?">
+              <span>Stop this analysis? The pages it has fetched so far won't be reused by the next run.</span>
+              <span className="row">
+                <Button small variant="danger" busy={cancelling} onClick={() => void cancel()}>Stop analysis</Button>
+                <Button small variant="secondary" disabled={cancelling} onClick={() => setConfirming(false)}>Keep running</Button>
+              </span>
+            </div>
+          )}
+          {cancelError && <div className="callout error" role="alert">{cancelError}</div>}
+          {run.stalled && (
+            <div className="callout warn" role="alert">
+              Nothing has moved for {duration(quiet)}, so this run has most likely stopped, for example because the server restarted. Start a new run to continue.
+            </div>
+          )}
+        </div>
+      )}
 
       <ol className="run-stages">
         {STAGES.map((entry, index) => {
@@ -209,60 +278,77 @@ export function AnalysisProgress({ run }: { run?: RunProgress }) {
 
       {crawl.total > 0 && (
         <>
-          <div className="panel run-crawl">
-            <div className="run-crawl-head">
-              <span><strong className="run-count">{formatNumber(done)}</strong> of {formatNumber(crawl.total)} sitemap URLs</span>
-              <span className="run-percent">{Math.floor((done / crawl.total) * 100)}%</span>
+          {!finished && (crawlDone && stage?.key !== "crawl" ? (
+            <div className="run-crawl">
+              <p className="run-crawl-done">
+                <CheckIcon /><strong>Crawl finished</strong> {formatNumber(crawl.total)} sitemap URLs{timeIn("crawl") ? ` in ${timeIn("crawl")}` : ""}
+                <span className="muted">· {formatNumber(crawl.emptyShells)} empty HTML · {formatNumber(errors)} errors</span>
+              </p>
             </div>
-            <SplitBar carried={done - crawl.crawled} fetched={crawl.crawled} total={crawl.total} label="Crawl progress" />
-            <p className="run-pace">{pace.map((item, index) => <span key={index}>{index > 0 && " · "}{item}</span>)}</p>
+          ) : (
+            <div className="run-crawl">
+              <div className="run-crawl-head">
+                <span><strong className="run-count">{formatNumber(shown)}</strong> of {formatNumber(crawl.total)} sitemap URLs</span>
+                <span className="run-percent">{Math.floor((done / crawl.total) * 100)}%</span>
+              </div>
+              <SplitBar carried={done - crawl.crawled} fetched={crawl.crawled} total={crawl.total} label="Crawl progress" />
+              <p className="run-pace">{pace.map((item, index) => <span key={index}>{index > 0 && " · "}{item}</span>)}</p>
+            </div>
+          ))}
+
+          <div className="run-garden">
+            <CrawlGarden families={crawl.families} bloom={finished} label={gardenLabel} />
           </div>
 
-          <div className="kpi-grid run-tallies">
-            <Kpi label="Served" value={formatNumber(crawl.ok)} caption="Answered with a page" />
-            <Kpi label="Empty HTML" value={formatNumber(crawl.emptyShells)} caption="No content without JavaScript" />
-            <Kpi label="Errors" value={formatNumber(errors)} caption={crawl.challenges ? `Includes ${formatNumber(crawl.challenges)} bot challenges` : "4xx, 5xx, or no answer"} />
-            <Kpi label="Noindex" value={formatNumber(crawl.noindex)} caption="Asks Google not to index" />
-            <Kpi label="Blocked" value={formatNumber(crawl.blocked)} caption="By robots.txt, not fetched" />
-          </div>
+          {!finished && (
+            <>
+              <div className="kpi-grid run-tallies">
+                <Kpi label="Served" value={formatNumber(served)} caption="Answered with a page" />
+                <Kpi label="Empty HTML" value={formatNumber(crawl.emptyShells)} caption="No content without JavaScript" />
+                <Kpi label="Errors" value={formatNumber(errors)} caption={crawl.challenges ? `Includes ${formatNumber(crawl.challenges)} bot challenges` : "4xx, 5xx, or no answer"} />
+                <Kpi label="Noindex" value={formatNumber(crawl.noindex)} caption="Asks Google not to index" />
+                <Kpi label="Blocked" value={formatNumber(crawl.blocked)} caption="By robots.txt, not fetched" />
+              </div>
 
-          <div className="run-columns">
-            <div className="table-wrap">
-              <table className="table">
-                <thead><tr><th>Page type</th><th>Progress</th><th className="num">Done</th><th className="num run-wide">Empty HTML</th><th className="num run-wide">Errors</th></tr></thead>
-                <tbody>{crawl.families.slice(0, 8).map((family) => (
-                  <tr key={family.family}>
-                    <td><code>{familyLabel(family.family)}</code></td>
-                    <td className="run-bar"><SplitBar carried={family.done - family.fetched} fetched={family.fetched} total={family.total} label={`${familyLabel(family.family)} progress`} /></td>
-                    <td className="num">{formatNumber(family.done)} / {formatNumber(family.total)}</td>
-                    <td className="num run-wide">{family.emptyShells ? <span className="bad-count">{formatNumber(family.emptyShells)}</span> : <span className="muted">0</span>}</td>
-                    <td className="num run-wide">{family.errors ? <span className="bad-count">{formatNumber(family.errors)}</span> : <span className="muted">0</span>}</td>
-                  </tr>
-                ))}</tbody>
-              </table>
-            </div>
-            <div className="table-wrap">
-              <table className="table">
-                <thead><tr><th>Latest pages</th><th className="num">Fetched</th></tr></thead>
-                <tbody>{crawl.recent.length ? crawl.recent.map((page) => {
-                  const age = now - Date.parse(page.crawledAt);
-                  return (
-                    <tr key={page.url} className="run-arrive">
-                      <td className="run-path-cell" title={page.url}>
-                        <div className="run-path">
-                          <PagePath url={page.url} />
-                          {page.failed ? <span className="badge badge-red">Failed</span>
-                            : page.status !== null && page.status >= 400 ? <span className="badge badge-red">{page.status}</span>
-                            : page.emptyShell ? <span className="badge badge-red">Empty HTML</span> : null}
-                        </div>
-                      </td>
-                      <td className="num">{age < 5000 ? "just now" : `${duration(age)} ago`}</td>
-                    </tr>
-                  );
-                }) : <tr><td colSpan={2} className="muted">Nothing fetched yet in this run</td></tr>}</tbody>
-              </table>
-            </div>
-          </div>
+              <div className="run-columns">
+                <div className="table-wrap">
+                  <table className="table">
+                    <thead><tr><th>Page type</th><th>Progress</th><th className="num">Done</th><th className="num run-wide">Empty HTML</th><th className="num run-wide">Errors</th></tr></thead>
+                    <tbody>{crawl.families.slice(0, 8).map((family) => (
+                      <tr key={family.family}>
+                        <td><code>{familyLabel(family.family)}</code></td>
+                        <td className="run-bar"><SplitBar carried={family.done - family.fetched} fetched={family.fetched} total={family.total} label={`${familyLabel(family.family)} progress`} /></td>
+                        <td className="num">{formatNumber(family.done)} / {formatNumber(family.total)}</td>
+                        <td className="num run-wide">{family.emptyShells ? <span className="bad-count">{formatNumber(family.emptyShells)}</span> : <span className="muted">0</span>}</td>
+                        <td className="num run-wide">{family.errors ? <span className="bad-count">{formatNumber(family.errors)}</span> : <span className="muted">0</span>}</td>
+                      </tr>
+                    ))}</tbody>
+                  </table>
+                </div>
+                <div className="table-wrap">
+                  <table className="table">
+                    <thead><tr><th>Latest pages</th><th className="num">Fetched</th></tr></thead>
+                    <tbody>{crawl.recent.length ? crawl.recent.map((page) => {
+                      const age = now - Date.parse(page.crawledAt);
+                      return (
+                        <tr key={page.url} className="run-arrive">
+                          <td className="run-path-cell" title={page.url}>
+                            <div className="run-path">
+                              <PagePath url={page.url} />
+                              {page.failed ? <span className="badge badge-red">Failed</span>
+                                : page.status !== null && page.status >= 400 ? <span className="badge badge-red">{page.status}</span>
+                                : page.emptyShell ? <span className="badge badge-red">Empty HTML</span> : null}
+                            </div>
+                          </td>
+                          <td className="num">{age < 5000 ? "just now" : `${duration(age)} ago`}</td>
+                        </tr>
+                      );
+                    }) : <tr><td colSpan={2} className="muted">Nothing fetched yet in this run</td></tr>}</tbody>
+                  </table>
+                </div>
+              </div>
+            </>
+          )}
         </>
       )}
     </section>

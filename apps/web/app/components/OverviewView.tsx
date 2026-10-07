@@ -1,10 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { COUNTRIES, countryName, type SiteRecord } from "@organic-growth/core";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { countryName, type SiteRecord } from "@organic-growth/core";
 import { api, errorMessage, formatNumber } from "./api";
-import { AnalysisProgress, familyLabel, isFinished, useRun } from "./AnalysisProgress";
-import { Badge, Button, Card, CrossIcon, Kpi, ViewHeader } from "./ui";
+import { AnalysisProgress, familyLabel, isFinished, useRun, type RunDelta, type RunProgress } from "./AnalysisProgress";
+import { Badge, Button, Kpi, ViewHeader } from "./ui";
 
 export type Repository = { id: number; name: string; fullName: string; owner: string; defaultBranch: string; isPrivate: boolean };
 
@@ -72,29 +72,34 @@ type Fingerprint = { framework: string; router?: string; rendering?: string; dep
 
 type Change = { id: string; findingId?: string; title: string; reason: string; patch: string; prUrl?: string };
 
+/** The figures a finished run compares with the report it replaced. */
+function deltasBetween(before: Report | null, after: Report): RunDelta[] {
+  return [
+    { label: "Findings", before: before?.findings.length, after: after.findings.length, lowerIsBetter: true },
+    { label: "Empty HTML", before: before?.coverage?.emptyShellUrls, after: after.coverage?.emptyShellUrls ?? 0, lowerIsBetter: true },
+    { label: "HTTP errors", before: before?.coverage?.httpErrorUrls, after: after.coverage?.httpErrorUrls ?? 0, lowerIsBetter: true },
+    { label: "Sitemap URLs", before: before?.sitemap.totalUrls, after: after.sitemap.totalUrls },
+  ];
+}
+
 const SEVERITY_CLASS: Record<string, string> = { CRITICAL: "critical", HIGH: "high", MEDIUM: "medium", LOW: "low", INFORMATIONAL: "info" };
 
-export function OverviewView({ site, repositories, githubInstalled, onSiteChanged, onNavigate }: {
+export function OverviewView({ site, onNavigate }: {
   site: SiteRecord;
-  repositories: Repository[];
-  githubInstalled: boolean;
-  onSiteChanged: (site: SiteRecord) => void;
-  onNavigate: (view: "data" | "pages" | "performance" | "setup") => void;
+  onNavigate: (view: "connections" | "data" | "pages" | "performance" | "setup") => void;
 }) {
   const [report, setReport] = useState<Report | null>(null);
   const [pendingId, setPendingId] = useState("");
+  const [finished, setFinished] = useState<{ run: RunProgress; analysisId: string; deltas: RunDelta[]; first: boolean } | null>(null);
+  const [note, setNote] = useState("");
+  const [pace, setPace] = useState<{ perMinute: number } | null>(null);
   const [error, setError] = useState("");
   const [failure, setFailure] = useState("");
   const [changes, setChanges] = useState<Change[]>([]);
   const [busy, setBusy] = useState("");
-  const [gscProperties, setGscProperties] = useState<Array<{ siteUrl: string }>>([]);
-  const [gscSelected, setGscSelected] = useState(site.gscProperty ?? "");
-  const [gscMessage, setGscMessage] = useState("");
-  const [competitors, setCompetitors] = useState("");
-  const [repositoryId, setRepositoryId] = useState("");
-  const [conversions, setConversions] = useState<{ totalEvents: number; last28Days: number; leads: number } | null>(null);
+  const [competitorCount, setCompetitorCount] = useState(0);
   const [allFindings, setAllFindings] = useState(false);
-  const [markets, setMarkets] = useState<string[]>([]);
+  const [markets, setMarkets] = useState(0);
 
   const loadChanges = useCallback(async (analysisId: string) => {
     const data = await api<{ changes: Change[] }>(`/api/analyses/${analysisId}/changes`).catch(() => ({ changes: [] }));
@@ -102,13 +107,15 @@ export function OverviewView({ site, repositories, githubInstalled, onSiteChange
   }, []);
 
   useEffect(() => {
-    setReport(null); setPendingId(""); setError(""); setChanges([]); setGscSelected(site.gscProperty ?? "");
+    setReport(null); setPendingId(""); setFinished(null); setNote(""); setError(""); setChanges([]);
     void (async () => {
       try {
         const latest = await api<{
           analysis: { analysisId: string; status: string; report?: Report; error?: string } | null;
           previous: { analysisId: string; report: Report } | null;
+          pace: { perMinute: number } | null;
         }>(`/api/sites/${site.id}/analyses`);
+        setPace(latest.pace);
         if (latest.analysis?.status === "completed" && latest.analysis.report) {
           setReport(latest.analysis.report);
           void loadChanges(latest.analysis.analysisId);
@@ -123,62 +130,38 @@ export function OverviewView({ site, repositories, githubInstalled, onSiteChange
         }
       } catch (cause) { setError(errorMessage(cause)); }
     })();
-    api<{ domains: string[] }>(`/api/sites/${site.id}/competitors`).then((data) => setCompetitors(data.domains.join("\n"))).catch(() => undefined);
-    api<{ countries: string[] }>(`/api/sites/${site.id}/markets`).then((data) => setMarkets(data.countries)).catch(() => setMarkets([]));
-    api<{ properties: Array<{ siteUrl: string }>; selected: string | null }>(`/api/sites/${site.id}/gsc/properties`)
-      .then((data) => { setGscProperties(data.properties); if (data.selected) setGscSelected(data.selected); })
-      .catch(() => setGscProperties([]));
-    api<{ totalEvents: number; last28Days: number; leads: number }>(`/api/sites/${site.id}/events/summary`).then(setConversions).catch(() => undefined);
-  }, [site.id, site.gscProperty, loadChanges]);
+    api<{ domains: string[] }>(`/api/sites/${site.id}/competitors`).then((data) => setCompetitorCount(data.domains.length)).catch(() => undefined);
+    api<{ countries: string[] }>(`/api/sites/${site.id}/markets`).then((data) => setMarkets(data.countries.length)).catch(() => undefined);
+  }, [site.id, loadChanges]);
 
   const run = useRun(pendingId, site.id, new URL(site.baseUrl).hostname);
+  const reportBefore = useRef(report);
+  reportBefore.current = report;
   useEffect(() => {
-    if (!pendingId || !isFinished(run?.status)) return;
+    if (!pendingId || !run || !isFinished(run.status)) return;
     void (async () => {
       const job = await api<{ status: string; report?: Report; error?: string }>(`/api/analyses/${pendingId}`).catch(() => null);
       if (job?.status === "completed" && job.report) {
+        // The card stays to say what changed, and the garden blooms; the new report renders below it.
+        setFinished({ run, analysisId: pendingId, deltas: deltasBetween(reportBefore.current, job.report), first: !reportBefore.current });
         setReport(job.report);
         void loadChanges(pendingId);
-      } else setFailure(job?.error ?? run?.error ?? "No error was recorded.");
+      } else if (job?.status === "cancelled") setNote(reportBefore.current ? "Analysis cancelled. The last report is still shown below." : "Analysis cancelled.");
+      else setFailure(job?.error ?? run.error ?? "No error was recorded.");
       setPendingId("");
     })();
-  }, [pendingId, run?.status, run?.error, loadChanges]);
+  }, [pendingId, run, loadChanges]);
 
   /** A stalled run no longer blocks the header action, so a new run can replace it. */
   const running = Boolean(pendingId) && !run?.stalled;
 
   /** `full` fetches every sitemap URL again; otherwise unchanged pages from the last crawl are reused. */
   async function runAnalysis(full = false) {
-    setError(""); setFailure(""); setBusy("analysis");
+    setError(""); setFailure(""); setNote(""); setFinished(null); setBusy("analysis");
     try {
-      await api(`/api/sites/${site.id}/competitors`, { method: "PUT", json: { domains: competitors.split(/[\n,]/).map((value) => value.trim()).filter(Boolean) } });
       const queued = await api<{ analysisId: string }>(`/api/sites/${site.id}/analyses`, { method: "POST", json: { full } });
       setPendingId(queued.analysisId);
     } catch (cause) { setError(errorMessage(cause)); } finally { setBusy(""); }
-  }
-
-  async function saveMarkets(next: string[]) {
-    setMarkets(next);
-    try {
-      await api(`/api/sites/${site.id}/markets`, { method: "PUT", json: { countries: next } });
-    } catch (cause) { setError(errorMessage(cause)); }
-  }
-
-  async function attachRepository() {
-    setBusy("repo"); setError("");
-    try {
-      const data = await api<{ site: SiteRecord }>("/api/sites", { method: "POST", json: { websiteUrl: site.baseUrl, repositoryId: Number(repositoryId) } });
-      onSiteChanged(data.site);
-    } catch (cause) { setError(errorMessage(cause)); } finally { setBusy(""); }
-  }
-
-  async function chooseProperty(property: string) {
-    setGscSelected(property);
-    try {
-      await api(`/api/sites/${site.id}/gsc/properties`, { method: "POST", json: { property } });
-      setGscMessage("Search Console property saved.");
-      onSiteChanged({ ...site, gscProperty: property });
-    } catch (cause) { setGscMessage(errorMessage(cause)); }
   }
 
   async function generateChange(findingId: string) {
@@ -207,102 +190,43 @@ export function OverviewView({ site, repositories, githubInstalled, onSiteChange
       <ViewHeader
         title={site.name}
         description={<>What Google receives from <a href={site.baseUrl} target="_blank" rel="noreferrer">{site.baseUrl}</a>, what is holding organic traffic back, and what to fix first.</>}
-        actions={<>
-          {report && !running && <Button variant="ghost" disabled={busy === "analysis"} onClick={() => runAnalysis(true)}>Re-crawl every page</Button>}
-          <Button busy={busy === "analysis" || running} onClick={() => runAnalysis()}>{running ? "Analyzing…" : run?.stalled ? "Start a new run" : report ? "Update analysis" : "Run analysis"}</Button>
-        </>}
+        actions={running ? undefined : (
+          <div className="view-actions">
+            <div className="row">
+              {report && <Button variant="ghost" disabled={busy === "analysis"} onClick={() => runAnalysis(true)}>Re-crawl every page</Button>}
+              <Button busy={busy === "analysis"} onClick={() => runAnalysis()}>{run?.stalled ? "Start a new run" : report ? "Update analysis" : "Run analysis"}</Button>
+            </div>
+            {report && !run?.stalled && (
+              <p className="view-note">
+                Update reuses pages that haven't changed.{pace ? ` Re-crawling all ${formatNumber(report.sitemap.totalUrls)} takes about ${Math.max(1, Math.round(report.sitemap.totalUrls / pace.perMinute))} min.` : ""}
+              </p>
+            )}
+          </div>
+        )}
       />
       {error && <div className="callout error" role="alert" style={{ marginBottom: 14 }}>{error}</div>}
       {failure && <div className="callout error" role="alert" style={{ marginBottom: 14 }}>The last analysis stopped before it finished. Run it again; if it stops the same way, this is what failed:<div className="mono small" style={{ marginTop: 6, overflowWrap: "anywhere" }}>{failure}</div></div>}
-      {pendingId && <AnalysisProgress run={run} />}
-
-      <div className="split">
-        <Card title="Connections" subtitle="Each connection adds evidence. Only the website is required.">
-          <div className="list-row">
-            <Badge tone="green">Website</Badge>
-            <div className="grow"><h4>{site.baseUrl}</h4><p>Crawled as Googlebot, including every sitemap URL.</p></div>
-          </div>
-          <div className="list-row">
-            <Badge tone={hasRepo ? "green" : "gray"}>{hasRepo ? "GitHub" : "Optional"}</Badge>
-            <div className="grow">
-              <h4>{hasRepo ? `${site.githubOwner}/${site.githubRepo}` : "GitHub repository"}</h4>
-              <p>{hasRepo ? "Code-level analysis and reviewable pull requests are enabled." : "Adds framework and route analysis and lets Eumon open fix PRs. Skip this for WordPress, Drupal, or other CMS sites."}</p>
-              {!hasRepo && (githubInstalled && repositories.length ? (
-                <div className="row" style={{ marginTop: 8 }}>
-                  <select className="select" style={{ maxWidth: 320 }} value={repositoryId} onChange={(event) => setRepositoryId(event.target.value)}>
-                    <option value="">Choose a repository</option>
-                    {repositories.map((repo) => <option key={repo.id} value={repo.id}>{repo.fullName}{repo.isPrivate ? " · private" : ""}</option>)}
-                  </select>
-                  <Button small variant="secondary" disabled={!repositoryId} busy={busy === "repo"} onClick={attachRepository}>Connect</Button>
-                </div>
-              ) : <a className="btn btn-secondary btn-small" style={{ marginTop: 8 }} href="/api/github/install">Connect GitHub</a>)}
-            </div>
-          </div>
-          <div className="list-row">
-            <Badge tone={site.gscProperty ? "green" : "gray"}>{site.gscProperty ? "Search Console" : "Recommended"}</Badge>
-            <div className="grow">
-              <h4>{site.gscProperty ?? "Google Search Console"}</h4>
-              <p>Queries, impressions, and rankings — the evidence behind page opportunities and the performance loop.</p>
-              <div className="row" style={{ marginTop: 8 }}>
-                <a className="btn btn-secondary btn-small" href={`/api/sites/${site.id}/gsc/connect`}>{gscProperties.length || site.gscProperty ? "Reconnect Google" : "Connect Google"}</a>
-                {gscProperties.length > 0 && (
-                  <select className="select" style={{ maxWidth: 320 }} value={gscSelected} onChange={(event) => void chooseProperty(event.target.value)}>
-                    <option value="">Choose a property</option>
-                    {gscProperties.map((property) => <option key={property.siteUrl} value={property.siteUrl}>{property.siteUrl}</option>)}
-                  </select>
-                )}
-              </div>
-              {gscMessage && <p className="small">{gscMessage}</p>}
-            </div>
-          </div>
-          <div className="list-row">
-            <Badge tone={markets.length ? "green" : "gray"}>{markets.length ? "Markets" : "Recommended"}</Badge>
-            <div className="grow">
-              <h4>Target markets</h4>
-              <p>The countries you sell to. Search traffic is checked against them, so visibility in the wrong market shows up as a problem.</p>
-              <div className="row" style={{ marginTop: 8 }}>
-                {markets.map((code) => <span className="chip" key={code}>{countryName(code)} <button className="chip-remove" aria-label={`Remove ${countryName(code)}`} onClick={() => void saveMarkets(markets.filter((entry) => entry !== code))}><CrossIcon /></button></span>)}
-                <select className="select" style={{ maxWidth: 220 }} value="" onChange={(event) => event.target.value && void saveMarkets([...markets, event.target.value])}>
-                  <option value="">Add a country…</option>
-                  {COUNTRIES.filter((country) => !markets.includes(country.code)).map((country) => <option key={country.code} value={country.code}>{country.name}</option>)}
-                </select>
-              </div>
-            </div>
-          </div>
-          <div className="list-row">
-            <Badge tone={competitors.trim() ? "green" : "gray"}>Competitors</Badge>
-            <div className="grow">
-              <h4>Competitor domains</h4>
-              <p>Saved with the next analysis run; one per line.</p>
-              <textarea className="textarea" style={{ marginTop: 8, minHeight: 60 }} placeholder={"competitor-one.com\ncompetitor-two.com"} value={competitors} onChange={(event) => setCompetitors(event.target.value)} />
-            </div>
-          </div>
-        </Card>
-
-        <Card title="Landing page engine" subtitle="Turn what you sell into one high-intent landing page per thing people search for.">
-          <ol className="small steps-list">
-            <li>Scope the data that matters (doctors, procedures, malls, products…)</li>
-            <li>Find and collect it from your site or public sources</li>
-            <li>Generate a landing page per record, with a clear call to action</li>
-            <li>Serve real HTML on your domain, crawlable by Google</li>
-            <li>Track which pages bring visits, clicks, and conversions — then improve them</li>
-          </ol>
-          <div className="row">
-            <Button onClick={() => onNavigate("data")}>Scope my data</Button>
-            <Button variant="secondary" onClick={() => onNavigate("performance")}>See performance</Button>
-          </div>
-          {conversions && <p className="small muted" style={{ marginTop: 12 }}>Conversion events: {formatNumber(conversions.totalEvents)} total · {formatNumber(conversions.last28Days)} in the last 28 days</p>}
-        </Card>
+      {note && <div className="callout" role="status" style={{ marginBottom: 14 }}>{note}</div>}
+      <div className="metrics-grid overview-kpis">
+        <Kpi label="URLs in sitemap" value={report ? formatNumber(report.sitemap.totalUrls) : "—"} caption={!report ? "Run an analysis to fill these in" : report.sitemap.errors[0] ? "See sitemap note below" : "Declared to search engines"} />
+        <Kpi label="Crawled as Googlebot" value={coverage ? `${formatNumber(coverage.completedUrls)}/${formatNumber(coverage.totalUrls)}` : "—"} caption={coverage ? `${formatNumber(coverage.emptyShellUrls)} empty shells · ${formatNumber(coverage.httpErrorUrls)} errors` : report ? "Full crawl not run" : "Every sitemap URL, fetched as Google"} />
+        <Kpi label="Key findings" value={report ? findings.length : "—"} caption="Ranked by organic impact" />
+        <Kpi label="Browser rendered" value={report ? `${report.rendering?.comparisons.length ?? report.pages.filter((page) => page.renderedTextLength > 0).length}` : "—"} caption="Templates compared with raw HTML" />
       </div>
+      {pendingId ? <AnalysisProgress run={run} analysisId={pendingId} />
+        : finished && <AnalysisProgress run={finished.run} analysisId={finished.analysisId} finish={finished} onDismiss={() => setFinished(null)} />}
+      <button className="connections-strip" onClick={() => onNavigate("connections")}>
+        <span className="connections-label">Connections</span>
+        <span className="on">Website</span>
+        <span className={hasRepo ? "on" : ""}>{hasRepo ? "GitHub" : "GitHub not connected"}</span>
+        <span className={site.gscProperty ? "on" : ""}>{site.gscProperty ? "Search Console" : "Search Console missing"}</span>
+        <span className={markets ? "on" : ""}>{markets ? `${markets} ${markets === 1 ? "market" : "markets"}` : "No markets"}</span>
+        <span className={competitorCount ? "on" : ""}>{competitorCount ? `${competitorCount} ${competitorCount === 1 ? "competitor" : "competitors"}` : "No competitors"}</span>
+        <span className="connections-open">Open Connections →</span>
+      </button>
 
       {report && (
         <div className="results">
-          <div className="metrics-grid">
-            <Kpi label="URLs in sitemap" value={formatNumber(report.sitemap.totalUrls)} caption={report.sitemap.errors[0] ? "See sitemap note below" : "Declared to search engines"} />
-            <Kpi label="Crawled as Googlebot" value={coverage ? `${formatNumber(coverage.completedUrls)}/${formatNumber(coverage.totalUrls)}` : "—"} caption={coverage ? `${formatNumber(coverage.emptyShellUrls)} empty shells · ${formatNumber(coverage.httpErrorUrls)} errors` : "Full crawl not run"} />
-            <Kpi label="Key findings" value={findings.length} caption="Ranked by organic impact" />
-            <Kpi label="Browser rendered" value={`${report.rendering?.comparisons.length ?? report.pages.filter((page) => page.renderedTextLength > 0).length}`} caption="Templates compared with raw HTML" />
-          </div>
           <div className="dashboard-columns">
             <section className="panel" id="findings">
               <div className="panel-heading"><div><h3>Technical findings</h3></div><span className="count-pill">{findings.length} findings</span></div>
@@ -337,9 +261,6 @@ export function OverviewView({ site, repositories, githubInstalled, onSiteChange
               <p className="plan-situation">{report.plan.situation}</p>
               <p className="advantage"><strong>Your advantage.</strong> {report.plan.competitiveAdvantage}</p>
               <p className="top-opportunity"><span className="muted">Highest-impact opportunity: </span>{report.plan.highestImpactOpportunity}</p>
-              <div className="priority-list">{report.plan.priorities.slice(0, 4).map((priority) => (
-                <div className="priority-row" key={priority.rank}><span className="priority-number">0{priority.rank}</span><div><strong>{priority.title}</strong><small>{priority.whyThisMatters}</small></div></div>
-              ))}</div>
             </section>
           </div>
           <div className="dashboard-columns lower-columns">
@@ -358,7 +279,7 @@ export function OverviewView({ site, repositories, githubInstalled, onSiteChange
                   <div><strong>{competitor.domain}</strong><small>{competitor.summary}{competitor.architectureNotes && <><br />{competitor.architectureNotes}</>}{competitor.conversionNotes && <><br />{competitor.conversionNotes}</>}</small></div>
                   <span className="relevance">{competitor.relevanceScore !== undefined ? <>{Math.round(competitor.relevanceScore * 100)}%<br /><small>overlap</small></> : <>Owner<br />selected</>}</span>
                 </div>
-              )) : <p className="empty-state">Add competitor domains above. Eumon reads their sitemaps and a few pages per section to show which kinds of pages they publish that you don't. Rankings and competitor traffic are not inferred.</p>}
+              )) : <p className="empty-state">Add competitor domains in Connections. Eumon reads their sitemaps and a few pages per section to show which kinds of pages they publish that you don't. Rankings and competitor traffic are not inferred.</p>}
             </section>
           </div>
           {report.search && <SearchIntelligence search={report.search} />}
@@ -375,9 +296,6 @@ export function OverviewView({ site, repositories, githubInstalled, onSiteChange
           )}
           {report.sitemap.errors.length > 0 && <div className="crawl-note"><strong>Sitemap note</strong><span>{report.sitemap.errors.join(" ")}</span></div>}
         </div>
-      )}
-      {!report && !pendingId && !error && (
-        <div className="empty" style={{ marginTop: 16 }}>Run an analysis to see what Google receives from this site — every sitemap URL is fetched as Googlebot.</div>
       )}
     </div>
   );

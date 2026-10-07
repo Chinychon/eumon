@@ -1,23 +1,26 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { SiteRecord } from "@organic-growth/core";
 import { runLabel, useSiteRun } from "./components/AnalysisProgress";
 import { AskDrawer, AskView } from "./components/Ask";
+import { ConnectionsView } from "./components/ConnectionsView";
 import { api, errorMessage } from "./components/api";
 import { DataView } from "./components/DataView";
 import { OverviewView, type Repository } from "./components/OverviewView";
 import { PagesView } from "./components/PagesView";
 import { PerformanceView } from "./components/PerformanceView";
 import { SetupView } from "./components/SetupView";
-import { Button } from "./components/ui";
+import { BrandMark } from "./components/pixel";
+import { Button, LeafIcon, ThemeToggle } from "./components/ui";
 
-type View = "overview" | "ask" | "data" | "pages" | "performance" | "setup";
+type View = "overview" | "ask" | "connections" | "data" | "pages" | "performance" | "setup";
 
 /** `steps` are the pipeline steps (README) a view covers. */
 const NAV: Array<{ view: View; label: string; steps?: string }> = [
   { view: "overview", label: "Overview" },
   { view: "ask", label: "Ask" },
+  { view: "connections", label: "Connections" },
   { view: "data", label: "Data", steps: "1–3" },
   { view: "pages", label: "Landing pages", steps: "4–5" },
   { view: "performance", label: "Performance", steps: "6–7" },
@@ -44,7 +47,17 @@ export default function Home() {
   const [error, setError] = useState("");
   const [askThread, setAskThread] = useState("");
   const [drawer, setDrawer] = useState(false);
-  const closeDrawer = useCallback(() => setDrawer(false), []);
+  const askToggle = useRef<HTMLButtonElement>(null);
+  // Closing the drawer hands focus back to the button that opened it.
+  const closeDrawer = useCallback(() => { setDrawer(false); askToggle.current?.focus(); }, []);
+  const [narrow, setNarrow] = useState(false);
+  useEffect(() => {
+    const query = window.matchMedia("(max-width: 760px)");
+    const update = () => setNarrow(query.matches);
+    update();
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
+  }, []);
 
   const loadSites = useCallback(async (preferred?: string) => {
     const data = await api<{ sites: SiteRecord[] }>("/api/sites");
@@ -60,11 +73,11 @@ export default function Home() {
     const requestedView = query.get("view") as View | null;
     if (requestedView && NAV.some((item) => item.view === requestedView)) setView(requestedView);
     setAskThread(query.get("thread") ?? "");
-    if (query.get("github") === "connected") setNotice("GitHub connected. Choose a repository on the Overview page.");
+    if (query.get("github") === "connected") setNotice("GitHub connected. Choose a repository in Connections.");
     if (query.get("github_error") === "installation_invalid") setError("GitHub returned without a valid install session. Start “Connect GitHub” from this tab and use the same address for the callback.");
     if (query.get("github_error") === "installation_failed") setError("GitHub installed the app, but Eumon couldn't save the connection. Check that SESSION_SECRET is at least 32 characters, then try again.");
     const gsc = query.get("gsc");
-    if (gsc === "connected") setNotice("Google connected. Choose a Search Console property on the Overview page.");
+    if (gsc === "connected") setNotice("Google connected. Choose a Search Console property in Connections.");
     else if (gsc) setError("The Google Search Console connection needs attention — try connecting again.");
     setQuery({ github: null, github_error: null, gsc: null });
 
@@ -81,11 +94,13 @@ export default function Home() {
   const run = useSiteRun(siteId);
   const navigate = (next: View) => { setView(next); window.scrollTo({ top: 0 }); };
   const drawerOpen = drawer && Boolean(site) && view !== "ask" && !adding;
+  // On phones the drawer covers the page, so the page behind it is taken out of reach.
+  const covered = drawerOpen && narrow;
 
   return (
     <main className={`app-shell${drawerOpen ? " ask-open" : ""}`}>
-      <aside className="sidebar">
-        <a className="brand" href="/"><span className="brand-mark">e</span><span>Eumon</span></a>
+      <aside className="sidebar" inert={covered}>
+        <a className="brand" href="/"><BrandMark /><span>Eumon</span></a>
         <div className="workspace-label">{site ? new URL(site.baseUrl).hostname.toUpperCase() : "WORKSPACE"}</div>
         {NAV.map((item) => (
           <button key={item.view} className={`workspace${view === item.view && site && !adding ? " active" : ""}`} disabled={!site} onClick={() => { setAdding(false); navigate(item.view); }}>
@@ -102,14 +117,15 @@ export default function Home() {
             </>
           )}
           <button onClick={() => setAdding(true)}>Add website</button>
+          <ThemeToggle />
         </div>
       </aside>
 
-      <section className="main-area" id="top">
+      <section className="main-area" id="top" inert={covered}>
         <header className="topbar">
           <div className="breadcrumb">{site ? <>{new URL(site.baseUrl).hostname} <span>/</span> {adding ? "Add website" : NAV.find((item) => item.view === view)?.label}</> : "Welcome"}</div>
           {run && (view !== "overview" || adding) && <button className="top-actions run-chip" onClick={() => { setAdding(false); navigate("overview"); }}>{runLabel(run)}</button>}
-          {site && view !== "ask" && !adding && <button className="top-actions ask-toggle" aria-expanded={drawerOpen} onClick={() => setDrawer((value) => !value)}>Ask Eumon</button>}
+          {site && view !== "ask" && !adding && <button ref={askToggle} className="top-actions ask-toggle" aria-expanded={drawerOpen} onClick={() => setDrawer((value) => !value)}><LeafIcon />Ask Eumon</button>}
           {site && <a className="top-actions" href={site.baseUrl} target="_blank" rel="noreferrer">Open site</a>}
         </header>
         <div className="content-wrap">
@@ -120,17 +136,18 @@ export default function Home() {
               repositories={repositories}
               githubInstalled={githubInstalled}
               onCancel={sites.length ? () => setAdding(false) : undefined}
-              onAdded={async (created) => { setAdding(false); await loadSites(created.id); setView("overview"); }}
+              onAdded={async (siteId) => { setAdding(false); await loadSites(siteId); setView("overview"); }}
             />
           ) : (
-            <>
-              {view === "overview" && <OverviewView site={site} repositories={repositories} githubInstalled={githubInstalled} onSiteChanged={(updated) => setSites((items) => items?.map((item) => (item.id === updated.id ? updated : item)) ?? null)} onNavigate={navigate} />}
+            <div key={`${site.id}:${view}`} className="view-enter">
+              {view === "overview" && <OverviewView site={site} onNavigate={navigate} />}
+              {view === "connections" && <ConnectionsView site={site} repositories={repositories} githubInstalled={githubInstalled} onSiteChanged={(updated) => setSites((items) => items?.map((item) => (item.id === updated.id ? updated : item)) ?? null)} />}
               {view === "ask" && <AskView key={site.id} site={site} threadId={askThread} onThreadChange={setAskThread} />}
               {view === "data" && <DataView site={site} onNavigate={navigate} />}
               {view === "pages" && <PagesView site={site} onNavigate={navigate} />}
               {view === "performance" && <PerformanceView site={site} onNavigate={navigate} />}
               {view === "setup" && <SetupView site={site} />}
-            </>
+            </div>
           )}
           <footer>Eumon <span>•</span> Landing pages from real data, measured by real outcomes</footer>
         </div>
@@ -140,6 +157,7 @@ export default function Home() {
           site={site}
           view={NAV.find((item) => item.view === view)?.label ?? "Overview"}
           open={drawerOpen}
+          modal={covered}
           onClose={closeDrawer}
           onOpenInAsk={(threadId) => { setAskThread(threadId); setDrawer(false); navigate("ask"); }}
         />
@@ -153,13 +171,24 @@ function AddSite({ hasSites, repositories, githubInstalled, onAdded, onCancel }:
   hasSites: boolean;
   repositories: Repository[];
   githubInstalled: boolean;
-  onAdded: (site: SiteRecord) => Promise<void>;
+  onAdded: (siteId: string) => Promise<void>;
   onCancel?: () => void;
 }) {
   const [websiteUrl, setWebsiteUrl] = useState("");
   const [repositoryId, setRepositoryId] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  // The demo site (fictional data, served from memory) is offered only on this machine.
+  const [local, setLocal] = useState(false);
+  useEffect(() => setLocal(["localhost", "127.0.0.1", "[::1]"].includes(window.location.hostname)), []);
+
+  async function loadDemo() {
+    setBusy(true); setError("");
+    try {
+      const data = await api<{ siteId: string }>("/api/dev/demo-site", { method: "POST" });
+      await onAdded(data.siteId);
+    } catch (cause) { setError(errorMessage(cause)); } finally { setBusy(false); }
+  }
 
   async function add(event: React.FormEvent) {
     event.preventDefault();
@@ -169,7 +198,7 @@ function AddSite({ hasSites, repositories, githubInstalled, onAdded, onCancel }:
         method: "POST",
         json: { websiteUrl, ...(repositoryId ? { repositoryId: Number(repositoryId) } : {}) },
       });
-      await onAdded(data.site);
+      await onAdded(data.site.id);
     } catch (cause) { setError(errorMessage(cause)); } finally { setBusy(false); }
   }
 
@@ -199,6 +228,7 @@ function AddSite({ hasSites, repositories, githubInstalled, onAdded, onCancel }:
         <div className="row" style={{ marginTop: 14 }}>
           <Button busy={busy} disabled={!websiteUrl.trim()} onClick={undefined} type="submit">Add website</Button>
           {onCancel && <Button variant="ghost" onClick={onCancel}>Cancel</Button>}
+          {local && <Button variant="ghost" disabled={busy} onClick={loadDemo}>Load demo site</Button>}
         </div>
       </form>
       {!hasSites && (

@@ -26,6 +26,7 @@ export async function GET(request: Request) {
     const signed = await signToken({ id: installationId }, 604_800_000, env.SESSION_SECRET);
     headers.set("Set-Cookie", `og_installation=${signed}; HttpOnly${secure}; SameSite=Lax; Path=/; Max-Age=604800`);
     destination.searchParams.set("github", "connected");
+    destination.searchParams.set("view", "connections");
     headers.set("Location", destination.toString());
     return new Response(null, { status: 303, headers });
   } catch {

@@ -23,7 +23,7 @@ function display(value: unknown): string {
   return String(value);
 }
 
-export function DataView({ site, onNavigate }: { site: SiteRecord; onNavigate: (view: "pages") => void }) {
+export function DataView({ site, onNavigate }: { site: SiteRecord; onNavigate: (view: "pages" | "performance") => void }) {
   const [datasets, setDatasets] = useState<DatasetWithDetails[]>([]);
   const [scope, setScope] = useState<Scope>(null);
   const [goal, setGoal] = useState("");
@@ -31,6 +31,7 @@ export function DataView({ site, onNavigate }: { site: SiteRecord; onNavigate: (
   const [scoping, setScoping] = useState(false);
   const [error, setError] = useState("");
   const [showNew, setShowNew] = useState(false);
+  const [conversions, setConversions] = useState<{ totalEvents: number; last28Days: number } | null>(null);
 
   const reload = useCallback(async () => {
     try {
@@ -42,6 +43,9 @@ export function DataView({ site, onNavigate }: { site: SiteRecord; onNavigate: (
   }, [site.id]);
 
   useEffect(() => { setLoading(true); setDatasets([]); setGoal(""); void reload(); }, [reload]);
+  useEffect(() => {
+    api<{ totalEvents: number; last28Days: number }>(`/api/sites/${site.id}/events/summary`).then(setConversions).catch(() => setConversions(null));
+  }, [site.id]);
 
   async function runScope() {
     setScoping(true); setError("");
@@ -61,6 +65,20 @@ export function DataView({ site, onNavigate }: { site: SiteRecord; onNavigate: (
         actions={withRecords > 0 && <Button variant="secondary" onClick={() => onNavigate("pages")}>Design pages</Button>}
       />
       {error && <div className="callout error" role="alert" style={{ marginBottom: 14 }}>{error}</div>}
+
+      <Card title="Landing page engine" subtitle="Turn what you sell into one high-intent landing page per thing people search for.">
+        <ol className="small steps-list">
+          <li>Scope the data that matters (doctors, procedures, malls, products…)</li>
+          <li>Find and collect it from your site or public sources</li>
+          <li>Generate a landing page per record, with a clear call to action</li>
+          <li>Serve real HTML on your domain, crawlable by Google</li>
+          <li>Track which pages bring visits, clicks, and conversions, then improve them</li>
+        </ol>
+        <div className="row">
+          <Button variant="secondary" onClick={() => onNavigate("performance")}>See performance</Button>
+          {conversions && <span className="small muted">Conversion events: {formatNumber(conversions.totalEvents)} total · {formatNumber(conversions.last28Days)} in the last 28 days</span>}
+        </div>
+      </Card>
 
       <Card
         title="Scope the opportunity"

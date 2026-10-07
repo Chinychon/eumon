@@ -22,7 +22,7 @@ export async function POST(request: Request, context: { params: Promise<{ siteId
   let thread = typeof body?.threadId === "string" && body.threadId ? await getAssistantThread(env.DB, siteId, body.threadId) : null;
   if (body?.threadId && !thread) return fail("That conversation no longer exists.", 404);
   const history = thread ? historyMessages(await listAssistantMessages(env.DB, thread.id)) : [];
-  thread ??= await createAssistantThread(env.DB, { id: createId("thread"), siteId, title: question.replace(/\s+/g, " ").slice(0, 80) });
+  thread ??= await createAssistantThread(env.DB, { id: createId("thread"), siteId, title: question.replace(/\s+/g, " ").slice(0, 300) });
   await appendAssistantMessage(env.DB, { id: createId("msg"), threadId: thread.id, role: "user", content: { text: question } });
 
   const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();

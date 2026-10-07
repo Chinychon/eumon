@@ -9,16 +9,18 @@ import { api, errorMessage } from "./components/api";
 import { DataView } from "./components/DataView";
 import { OverviewView, type Repository } from "./components/OverviewView";
 import { PagesView } from "./components/PagesView";
+import { ResultsView } from "./components/ResultsView";
 import { PerformanceView } from "./components/PerformanceView";
 import { SetupView } from "./components/SetupView";
 import { BrandMark } from "./components/pixel";
 import { Button, LeafIcon, ThemeToggle } from "./components/ui";
 
-type View = "overview" | "ask" | "connections" | "data" | "pages" | "performance" | "setup";
+type View = "overview" | "results" | "ask" | "connections" | "data" | "pages" | "performance" | "setup";
 
 /** `steps` are the pipeline steps (README) a view covers. */
 const NAV: Array<{ view: View; label: string; steps?: string }> = [
   { view: "overview", label: "Overview" },
+  { view: "results", label: "Results" },
   { view: "ask", label: "Ask" },
   { view: "connections", label: "Connections" },
   { view: "data", label: "Data", steps: "1–3" },
@@ -142,6 +144,7 @@ export default function Home() {
             <div key={`${site.id}:${view}`} className="view-enter">
               {view === "overview" && <OverviewView site={site} onNavigate={navigate} />}
               {view === "connections" && <ConnectionsView site={site} repositories={repositories} githubInstalled={githubInstalled} onSiteChanged={(updated) => setSites((items) => items?.map((item) => (item.id === updated.id ? updated : item)) ?? null)} />}
+              {view === "results" && <ResultsView endpoint={`/api/sites/${site.id}/results`} operator onNavigate={navigate} />}
               {view === "ask" && <AskView key={site.id} site={site} threadId={askThread} onThreadChange={setAskThread} />}
               {view === "data" && <DataView site={site} onNavigate={navigate} />}
               {view === "pages" && <PagesView site={site} onNavigate={navigate} />}

@@ -59,13 +59,22 @@ const TODAY = () => new Date().toISOString().slice(0, 10);
  * A trend over days. The segment into today is dashed because today is still
  * filling in; hovering reads out every series for the nearest day.
  */
-export function LineChart({ points, series }: { points: Array<{ x: string; values: Array<number | null> }>; series: string[] }) {
+export function LineChart({ points, series, marker, partialFrom }: {
+  points: Array<{ x: string; values: Array<number | null> }>;
+  series: string[];
+  /** A vertical hairline at the first point on or after `x`, labeled (e.g. go-live). */
+  marker?: { x: string; label: string };
+  /** Points from this x on are still filling in and draw dashed. */
+  partialFrom?: string;
+}) {
   const [hover, setHover] = useState<number | null>(null);
   const max = Math.max(...points.flatMap((point) => point.values.filter((value): value is number => value !== null)), 0);
   const top = max > 0 ? niceCeiling(max) : 1;
   const x = (index: number) => (points.length > 1 ? (index / (points.length - 1)) * 100 : 50);
   const y = (value: number) => 100 - (value / top) * 100;
-  const incomplete = points.length > 1 && points.at(-1)?.x === TODAY();
+  const firstPartial = partialFrom ? points.findIndex((point) => point.x >= partialFrom) : points.at(-1)?.x === TODAY() ? points.length - 1 : -1;
+  const incomplete = points.length > 1 && firstPartial > 0;
+  const markerAt = marker ? points.findIndex((point) => point.x >= marker.x) : -1;
   const path = (pairs: Array<[number, number]>) => pairs.map(([px, py], index) => `${index ? "L" : "M"}${px},${py}`).join("");
   const current = hover === null ? undefined : points[hover];
   const last = points.at(-1);
@@ -97,16 +106,20 @@ export function LineChart({ points, series }: { points: Array<{ x: string; value
           {[0, 0.5, 1].map((fraction) => <line key={fraction} x1="0" x2="100" y1={y(top * fraction)} y2={y(top * fraction)} className="chart-grid" />)}
           {series.map((name, index) => {
             const pairs = points.flatMap((point, at): Array<[number, number]> => (point.values[index] === null || point.values[index] === undefined ? [] : [[x(at), y(point.values[index]!)]]));
+            const solid = incomplete ? pairs.filter(([px]) => px <= x(firstPartial - 1)) : pairs;
+            const tail = incomplete ? pairs.filter(([px]) => px >= x(firstPartial - 1)) : [];
             return (
               <g key={name} className={`chart-series s${index}`}>
-                <path d={path(incomplete ? pairs.slice(0, -1) : pairs)} />
-                {incomplete && pairs.length > 1 && <path d={path(pairs.slice(-2))} className="chart-tail" />}
+                <path d={path(solid)} />
+                {tail.length > 1 && <path d={path(tail)} className="chart-tail" />}
               </g>
             );
           })}
+          {markerAt >= 0 && <line x1={x(markerAt)} x2={x(markerAt)} y1="0" y2="100" className="chart-marker" />}
           {hover !== null && <line x1={x(hover)} x2={x(hover)} y1="0" y2="100" className="chart-cursor" />}
         </svg>
         {[1, 0.5, 0].map((fraction) => <span key={fraction} className="chart-tick" style={{ top: `${y(top * fraction)}%` }}>{compact(top * fraction)}</span>)}
+        {markerAt >= 0 && <span className="chart-marker-label" style={{ left: `${x(markerAt)}%` }}>{marker!.label}</span>}
         {current && (
           <div className={`chart-readout${hover! > points.length / 2 ? " left" : ""}`} style={{ left: `${x(hover!)}%` }} aria-live="polite">
             <strong>{current.x}{current.x === TODAY() ? " · so far" : ""}</strong>

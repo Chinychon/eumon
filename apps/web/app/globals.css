@@ -621,6 +621,18 @@ details.disclosure[open] > summary { margin-bottom: 10px; }
 :is(.link-edge, .link-node).dim { opacity: .18; }
 .link-legend .s0 { --c: var(--ink-2); }
 .link-legend .eumon { --c: var(--green); }
+/* Results */
+.chart-marker { stroke: var(--green); stroke-width: 1; stroke-dasharray: 2 3; vector-effect: non-scaling-stroke; }
+.chart-marker-label { position: absolute; top: -18px; transform: translateX(-50%); font-family: var(--mono); font-size: 11px; color: var(--green-ink); white-space: nowrap; }
+.results-pair { gap: 0 24px; margin-bottom: 14px; }
+.results-inline { margin: 6px 0 14px; }
+.rank-buckets { margin: 0 calc(-1 * var(--pad)); padding: 0; list-style: none; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.rank-buckets li { display: grid; gap: 4px; padding: 12px var(--pad); border-right: 1px solid var(--line); }
+.rank-buckets li:last-child { border-right: 0; }
+.rank-label { font-family: var(--mono); font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--soft); }
+.rank-buckets strong { font-size: 24px; font-weight: 400; font-variant-numeric: tabular-nums; }
+.rank-change { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+@media (max-width: 760px) { .rank-buckets { grid-template-columns: repeat(2, minmax(0, 1fr)); } .results-pair { grid-template-columns: minmax(0, 1fr); } }
 /* Heatmap: a ruled grid; ink density says how much of a page type has the problem. */
 .heatmap { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 .heatmap th { padding: 8px 12px; font-family: var(--mono); font-size: 11px; font-weight: 400; letter-spacing: .08em; text-transform: uppercase; color: var(--soft); text-align: right; white-space: nowrap; border-bottom: 1px solid var(--line); }

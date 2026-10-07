@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { listGa4Properties } from "@organic-growth/agents";
-import { getSite, updateSiteGa4Property } from "@organic-growth/db";
+import { clearMetricPoints, GA4_METRIC_PATTERNS, getSite, updateSiteGa4Property } from "@organic-growth/db";
 import { ANALYTICS_SCOPE, googleAccessToken, googleScopes } from "../../../../../../src/gsc-auth";
 import { fail, json, readJson } from "../../../../../../src/server";
 
@@ -18,9 +18,12 @@ export async function GET(_request: Request, context: { params: Promise<{ siteId
 
 export async function POST(request: Request, context: { params: Promise<{ siteId: string }> }) {
   const { siteId } = await context.params;
-  if (!(await getSite(env.DB, siteId))) return fail("Site not found.", 404);
+  const site = await getSite(env.DB, siteId);
+  if (!site) return fail("Site not found.", 404);
   const property = (await readJson<{ property?: unknown }>(request))?.property;
   if (property !== null && (typeof property !== "string" || !/^properties\/\d+$/.test(property))) return fail("Choose a GA4 property.");
+  // A different property's sessions are not this site's baseline: clear them so the next sync backfills.
+  if (site.ga4Property && site.ga4Property !== property) await clearMetricPoints(env.DB, siteId, GA4_METRIC_PATTERNS);
   await updateSiteGa4Property(env.DB, siteId, property);
   return json({ property });
 }

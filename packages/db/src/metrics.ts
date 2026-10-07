@@ -80,24 +80,42 @@ export async function publishedPages(db: D1Like, siteId: string): Promise<{ publ
 export async function syncFirstPartyResults(db: D1Like, siteId: string, now = new Date()): Promise<void> {
   const today = now.toISOString().slice(0, 10);
   const since = (await firstMetricDay(db, siteId, "published_pages")) ? addDays(today, -7) : "2000-01-01";
-  const [leads, activity, pages] = await Promise.all([
+  const [leads, activity, pages, firsts] = await Promise.all([
     dailyLeads(db, siteId, since),
     db.prepare(
       `SELECT day, SUM(googlebot_hits) AS googlebot, SUM(views) AS views, SUM(cta_clicks) AS cta
        FROM page_metrics_daily WHERE site_id = ? AND day >= ? GROUP BY day`,
     ).bind(siteId, since).all<{ day: string; googlebot: number; views: number; cta: number }>(),
     publishedPages(db, siteId),
+    db.prepare(
+      `SELECT (SELECT substr(MIN(occurred_at), 1, 10) FROM conversion_events WHERE site_id = ?1) AS events,
+              (SELECT MIN(day) FROM page_metrics_daily WHERE site_id = ?1) AS activity`,
+    ).bind(siteId).first<{ events: string | null; activity: string | null }>(),
   ]);
+  // Once tracking has started, a day with nothing is a real 0, not missing data.
+  const yesterday = addDays(today, -1);
+  const daysFrom = (first: string | null | undefined) => {
+    const days: string[] = [];
+    if (first) for (let day = first > since ? first : since; day <= yesterday; day = addDays(day, 1)) days.push(day);
+    return days;
+  };
+  const leadsByDay = new Map(leads.map((row) => [row.day, row]));
+  const activityByDay = new Map(activity.results.map((row) => [row.day, row]));
+  const leadDays = [...new Set([...daysFrom(firsts?.events), ...leadsByDay.keys()])];
+  const activityDays = [...new Set([...daysFrom(firsts?.activity), ...activityByDay.keys()])];
   await upsertMetricPoints(db, siteId, [
-    ...leads.flatMap((row) => [
-      { metric: "leads", day: row.day, value: row.leads },
-      { metric: "leads_eumon", day: row.day, value: row.eumonLeads },
+    ...leadDays.flatMap((day) => [
+      { metric: "leads", day, value: leadsByDay.get(day)?.leads ?? 0 },
+      { metric: "leads_eumon", day, value: leadsByDay.get(day)?.eumonLeads ?? 0 },
     ]),
-    ...activity.results.flatMap((row) => [
-      { metric: "googlebot_fetches", day: row.day, value: Number(row.googlebot) },
-      { metric: "eumon_page_views", day: row.day, value: Number(row.views) },
-      { metric: "eumon_cta_clicks", day: row.day, value: Number(row.cta) },
-    ]),
+    ...activityDays.flatMap((day) => {
+      const row = activityByDay.get(day);
+      return [
+        { metric: "googlebot_fetches", day, value: Number(row?.googlebot ?? 0) },
+        { metric: "eumon_page_views", day, value: Number(row?.views ?? 0) },
+        { metric: "eumon_cta_clicks", day, value: Number(row?.cta ?? 0) },
+      ];
+    }),
     { metric: "published_pages", day: today, value: pages.published },
   ]);
 }
@@ -142,12 +160,12 @@ export async function saveIndexStatus(
   for (const group of chunks(statements, 100)) await runStatements(db, group);
 }
 
-/** Published pages by their latest inspection: indexed (PASS), not indexed (any other verdict), never checked. */
+/** Published pages by their latest inspection: indexed (PASS), not indexed (a verdict other than PASS), and not checked yet (never inspected, or Google gave no verdict). */
 export async function indexStatusCounts(db: D1Like, siteId: string): Promise<{ indexed: number; notIndexed: number; unchecked: number }> {
   const row = await db.prepare(
     `SELECT SUM(CASE WHEN s.verdict = 'PASS' THEN 1 ELSE 0 END) AS indexed,
-            SUM(CASE WHEN s.verdict IS NOT NULL AND s.verdict != 'PASS' THEN 1 ELSE 0 END) AS not_indexed,
-            SUM(CASE WHEN s.verdict IS NULL THEN 1 ELSE 0 END) AS unchecked
+            SUM(CASE WHEN s.verdict IS NOT NULL AND s.verdict NOT IN ('PASS', 'VERDICT_UNSPECIFIED') THEN 1 ELSE 0 END) AS not_indexed,
+            SUM(CASE WHEN s.verdict IS NULL OR s.verdict = 'VERDICT_UNSPECIFIED' THEN 1 ELSE 0 END) AS unchecked
      FROM generated_pages g LEFT JOIN page_index_status s ON s.page_id = g.id
      WHERE g.site_id = ? AND g.status = 'published'`,
   ).bind(siteId).first<{ indexed: number | null; not_indexed: number | null; unchecked: number | null }>();
@@ -161,4 +179,14 @@ export async function listSitesForResults(db: D1Like): Promise<string[]> {
        OR id IN (SELECT site_id FROM generated_pages WHERE status = 'published') ORDER BY id`,
   ).all<{ id: string }>();
   return results.map((row) => row.id);
+}
+
+/** Every Search Console metric, as `LIKE` patterns (a property change starts their history over). */
+export const SEARCH_METRIC_PATTERNS = ["search\\_%", "eumon\\_search\\_%", "queries\\_%", "pages\\_indexed", "pages\\_not\\_indexed"];
+/** Every GA4 metric. */
+export const GA4_METRIC_PATTERNS = ["ga4\\_%"];
+
+/** Deletes a source's points (by `LIKE` pattern), so the next sync backfills them from the new source. */
+export async function clearMetricPoints(db: D1Like, siteId: string, patterns: string[]): Promise<void> {
+  await runStatements(db, patterns.map((pattern) => db.prepare("DELETE FROM metric_points WHERE site_id = ? AND metric LIKE ? ESCAPE '\\'").bind(siteId, pattern)));
 }

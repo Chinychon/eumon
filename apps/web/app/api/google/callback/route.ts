@@ -4,7 +4,9 @@ import { saveGoogleRefreshToken } from "../../../../src/gsc-auth";
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
-  const siteId = (await verifyToken<{ siteId: string }>(url.searchParams.get("state") ?? "", env.SESSION_SECRET))?.siteId;
+  // Only the state the connect route signed (it carries a nonce) counts; a client link also names a site.
+  const state = await verifyToken<{ siteId: string; nonce?: string }>(url.searchParams.get("state") ?? "", env.SESSION_SECRET);
+  const siteId = state?.nonce ? state.siteId : undefined;
   if (!siteId || url.searchParams.has("error")) return Response.redirect(new URL("/?gsc=error", url.origin), 303);
   const code = url.searchParams.get("code");
   if (!code) return Response.json({ error: "Google did not return an authorization code." }, { status: 400 });

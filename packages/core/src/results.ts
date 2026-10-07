@@ -111,6 +111,8 @@ export type ResultsView = {
   search: {
     weeks: Array<{ week: string; clicks: number | null; impressions: number | null; partial: boolean }>;
     clicksAllCountries: Compare | null;
+    /** True when the figures are the target-market series, not every country. */
+    scoped: boolean;
     ctr: Compare;
     position: Compare;
     buckets: Array<{ top: number; queries: number | null; added: number | null; lost: number | null }>;
@@ -149,6 +151,7 @@ export function resultsView(input: ResultsInput): ResultsView {
       week: week.week, clicks: week.value, partial: week.partial, impressions: impressionWeeks[index]!.value,
     })),
     clicksAllCountries: clicksMetric === "search_clicks" ? null : compare(series.search_clicks, google),
+    scoped: clicksMetric !== "search_clicks",
     ctr: ratio(series[clicksMetric], series[scoped("search_impressions")], google),
     position: ratio(series[scoped("search_position_weight")], series[scoped("search_impressions")], google),
     buckets: RANK_BUCKETS.map((top) => ({

@@ -78,10 +78,10 @@ export function ResultsView({ endpoint, operator, onNavigate }: { endpoint: stri
           <Kpi label="Google clicks · 28 days" value={results.numbers.clicks.current === null ? "—" : formatNumber(results.numbers.clicks.current)} caption={versus(results.numbers.clicks)} />
           <Kpi label="Enquiries · 28 days" value={results.numbers.leads.current === null ? "—" : formatNumber(results.numbers.leads.current)} caption={versus(results.numbers.leads)} />
           <Kpi label="Organic sessions · 28 days" value={results.numbers.organicSessions?.current == null ? "—" : formatNumber(results.numbers.organicSessions.current)} caption={results.numbers.organicSessions ? versus(results.numbers.organicSessions) : "Connect Google Analytics"} />
-          <Kpi label="Pages live" value={formatNumber(pages.live)} caption={pages.live ? `${formatNumber(pages.indexed)} indexed · ${formatNumber(pages.notIndexed)} not · ${formatNumber(pages.unchecked)} not checked yet` : "was 0 before Eumon"} />
+          <Kpi label="Pages live" value={formatNumber(pages.live)} caption={pages.live ? `${formatNumber(pages.indexed)} indexed · ${formatNumber(pages.notIndexed)} not · ${formatNumber(pages.unchecked)} not checked yet` : "No Eumon pages published yet"} />
         </div>
 
-        <Card title="Are more people finding you on Google?" subtitle={results.markets.length ? `Scoped to your target markets: ${results.markets.join(", ").toUpperCase()}.` : "Every country. Set target markets in Connections to focus this section."}>
+        <Card title="Are more people finding you on Google?" subtitle={results.search?.scoped ? `Scoped to your target markets: ${results.markets.join(", ").toUpperCase()}.` : results.markets.length ? "Every country, until your target markets' history is synced." : "Every country. Set target markets in Connections to focus this section."}>
           {results.search ? (
             <>
               <div className="ruled-grid c11 results-pair">
@@ -118,7 +118,7 @@ export function ResultsView({ endpoint, operator, onNavigate }: { endpoint: stri
           {results.leads.funnel ? <Funnel steps={results.leads.funnel} /> : <p className="empty-state">The funnel appears once Eumon's pages have Google impressions.</p>}
           <div className="section-title">Enquiries per week</div>
           {results.leads.weeks.some((week) => week.other !== null || week.eumon !== null)
-            ? <LineChart series={["from eumon pages", "everything else"]} marker={goLive} points={results.leads.weeks.map((week) => ({ x: week.week, values: [week.eumon, week.other] }))} />
+            ? <LineChart series={["from eumon pages", "everything else"]} marker={goLive} partialFrom={results.leads.weeks.find((week) => week.partial)?.week} points={results.leads.weeks.map((week) => ({ x: week.week, values: [week.eumon, week.other] }))} />
             : <p className="empty-state">No enquiries tracked yet. Install tracking in Setup to count WhatsApp taps, calls, and forms.</p>}
         </Card>
 

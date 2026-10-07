@@ -55,4 +55,10 @@ describe("results math", () => {
     assert.equal(view.numbers.leads.current, null, "no lead points is 'collecting', not 0");
     assert.equal(view.numbers.organicSessions, null, "GA4 not connected");
   });
+
+  it("says the section is scoped to markets only when the market series is the one shown", () => {
+    const clicks = days("2026-09-01", 40, () => 2);
+    assert.equal(resultsView(base({ markets: ["mys"], series: { search_clicks: clicks } })).search?.scoped, false, "markets set, no market history yet");
+    assert.equal(resultsView(base({ markets: ["mys"], series: { search_clicks: clicks, "search_clicks@markets": clicks } })).search?.scoped, true);
+  });
 });

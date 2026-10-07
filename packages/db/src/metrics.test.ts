@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { analysisHealthPoints, indexStatusCounts, listSitesForResults, pagesToInspect, saveIndexStatus, bumpReportShareVersion, createAnalysis, dailyLeads, firstMetricDay, getSite, insertConversionEvent, listMetricSeries, publishedPages, recordLandingSession, saveAnalysisReport, syncFirstPartyResults, updateSiteGa4Property, upsertMetricPoints, upsertSite } from "./index.js";
+import { analysisHealthPoints, clearMetricPoints, SEARCH_METRIC_PATTERNS, indexStatusCounts, listSitesForResults, pagesToInspect, saveIndexStatus, bumpReportShareVersion, createAnalysis, dailyLeads, firstMetricDay, getSite, insertConversionEvent, listMetricSeries, publishedPages, recordLandingSession, saveAnalysisReport, syncFirstPartyResults, updateSiteGa4Property, upsertMetricPoints, upsertSite } from "./index.js";
 import { openSqliteD1 } from "./sqlite.js";
 
 const now = "2026-10-07T00:00:00.000Z";
@@ -53,8 +53,8 @@ describe("first-party results", async () => {
     await syncFirstPartyResults(db, "s", new Date("2026-10-07T04:15:00Z"));
     await syncFirstPartyResults(db, "s", new Date("2026-10-07T04:15:00Z"));
     const series = await listMetricSeries(db, "s", ["leads", "leads_eumon", "published_pages"], "2026-09-01", "2026-10-31");
-    assert.deepEqual(series.leads, [{ day: "2026-10-01", value: 2 }, { day: "2026-10-02", value: 1 }]);
-    assert.deepEqual(series.leads_eumon, [{ day: "2026-10-01", value: 1 }, { day: "2026-10-02", value: 1 }]);
+    assert.deepEqual(series.leads!.map((point) => point.value), [2, 1, 0, 0, 0, 0], "event days, then zeros through yesterday");
+    assert.deepEqual(series.leads_eumon!.slice(0, 2), [{ day: "2026-10-01", value: 1 }, { day: "2026-10-02", value: 1 }]);
     assert.deepEqual(series.published_pages, [{ day: "2026-10-07", value: 0 }]);
     assert.deepEqual(await publishedPages(db, "s"), { published: 0, goLive: null });
   });
@@ -96,9 +96,36 @@ describe("index status", async () => {
     assert.deepEqual((await pagesToInspect(db, "s", 2)).map((page) => page.path), ["/guides/b", "/guides/c"]);
     await saveIndexStatus(db, "s", [{ pageId: "p_b", verdict: "NEUTRAL", coverageState: "Discovered - currently not indexed", lastCrawlTime: null }]);
     assert.deepEqual(await indexStatusCounts(db, "s"), { indexed: 1, notIndexed: 1, unchecked: 1 });
+    await saveIndexStatus(db, "s", [{ pageId: "p_c", verdict: "VERDICT_UNSPECIFIED", coverageState: null, lastCrawlTime: null }]);
+    assert.deepEqual(await indexStatusCounts(db, "s"), { indexed: 1, notIndexed: 1, unchecked: 1 }, "no verdict from Google is not checked yet, not 'not indexed'");
   });
 
   it("syncs only sites with something to sync", async () => {
     assert.deepEqual(await listSitesForResults(db), ["s"]);
+  });
+});
+
+describe("review fixes", async () => {
+  it("stores days without enquiries as 0 from the first tracked day, so a drop to zero shows", async () => {
+    const db = openSqliteD1();
+    await upsertSite(db, { id: "s", name: "x.com", baseUrl: "https://x.com", createdAt: now, updatedAt: now });
+    await insertConversionEvent(db, { id: "e1", siteId: "s", event: "whatsapp_click", occurredAt: "2026-10-01T02:00:00Z", sessionId: "x" });
+    await insertConversionEvent(db, { id: "e2", siteId: "s", event: "whatsapp_click", occurredAt: "2026-10-03T02:00:00Z", sessionId: "y" });
+    await db.prepare("INSERT INTO page_metrics_daily (site_id, page_id, day, views) VALUES ('s', 'p', '2026-10-02', 5)").run();
+    await syncFirstPartyResults(db, "s", new Date("2026-10-05T04:00:00Z"));
+    const series = await listMetricSeries(db, "s", ["leads", "eumon_page_views"], "2026-09-01", "2026-10-31");
+    assert.deepEqual(series.leads!.map((point) => [point.day, point.value]), [["2026-10-01", 1], ["2026-10-02", 0], ["2026-10-03", 1], ["2026-10-04", 0]]);
+    assert.deepEqual(series.eumon_page_views!.map((point) => point.value), [5, 0, 0], "page activity zero-fills from its first day");
+  });
+
+  it("clears one source's history, so a new property backfills its own", async () => {
+    const db = openSqliteD1();
+    await upsertSite(db, { id: "s", name: "x.com", baseUrl: "https://x.com", createdAt: now, updatedAt: now });
+    await upsertMetricPoints(db, "s", ["search_clicks", "search_clicks@markets", "eumon_search_clicks", "queries_top10", "ga4_sessions", "leads"].map((metric) => ({ metric, day: "2026-10-01", value: 1 })));
+    await clearMetricPoints(db, "s", ["%@markets"]);
+    assert.equal(await firstMetricDay(db, "s", "search_clicks@markets"), null);
+    await clearMetricPoints(db, "s", SEARCH_METRIC_PATTERNS);
+    const left = await listMetricSeries(db, "s", ["search_clicks", "eumon_search_clicks", "queries_top10", "ga4_sessions", "leads"], "2026-01-01", "2026-12-31");
+    assert.deepEqual(Object.entries(left).filter(([, points]) => points.length).map(([metric]) => metric), ["ga4_sessions", "leads"]);
   });
 });

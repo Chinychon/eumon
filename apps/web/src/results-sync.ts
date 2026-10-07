@@ -65,10 +65,13 @@ async function syncSearch(db: D1Like, site: SiteRecord, property: string, token:
   const settings = (await getPageSettings(db, site.id)) ?? defaultPageSettings(site.id, site.name, site.baseUrl);
   const origin = new URL(settings.publicOrigin).origin;
   const markets = await listSiteMarkets(db, site.id);
+  // Markets can be set (or changed, which clears them) after the first sync, so their history backfills on its own.
+  const marketSpan = markets.length && !(await firstMetricDay(db, site.id, "search_clicks@markets")) ? BACKFILL_DAYS : 7;
+  const marketRange = { startDate: addDays(today, -marketSpan), endDate: range.endDate };
   const [all, eumon, ...perMarket] = await Promise.all([
     fetchSearchDaily(token, property, range, fetchFn),
     fetchSearchDaily(token, property, { ...range, pageContains: `${origin}${settings.mountPath}/` }, fetchFn),
-    ...markets.map((country) => fetchSearchDaily(token, property, { ...range, country }, fetchFn)),
+    ...markets.map((country) => fetchSearchDaily(token, property, { ...marketRange, country }, fetchFn)),
   ]);
   const points: MetricPoint[] = [
     ...searchDayPoints(all),
@@ -94,12 +97,16 @@ async function syncSearch(db: D1Like, site: SiteRecord, property: string, token:
   // Index status: a rolling sample of published Eumon pages each day.
   const pages = await pagesToInspect(db, site.id, INSPECTIONS_PER_DAY);
   const inspected = [];
-  for (const page of pages) {
-    try {
-      inspected.push({ pageId: page.pageId, ...await inspectUrl(token, property, `${origin}${page.path}`, fetchFn) });
-    } catch {
-      // One page's failure (quota, a transient error) leaves it for tomorrow.
-    }
+  // Ten at a time: well under the API's 600 a minute, and "Sync now" answers in seconds rather than minutes.
+  for (let start = 0; start < pages.length; start += 10) {
+    const batch = await Promise.all(pages.slice(start, start + 10).map(async (page) => {
+      try {
+        return { pageId: page.pageId, ...await inspectUrl(token, property, `${origin}${page.path}`, fetchFn) };
+      } catch {
+        return null; // One page's failure (quota, a transient error) leaves it for tomorrow.
+      }
+    }));
+    inspected.push(...batch.filter((result) => result !== null));
   }
   await saveIndexStatus(db, site.id, inspected);
   if (pages.length) {
@@ -107,5 +114,5 @@ async function syncSearch(db: D1Like, site: SiteRecord, property: string, token:
     points.push({ metric: "pages_indexed", day: today, value: counts.indexed }, { metric: "pages_not_indexed", day: today, value: counts.notIndexed });
   }
   await upsertMetricPoints(db, site.id, points);
-  return [`search: ${span} days`, `inspected ${inspected.length} pages`];
+  return [`search: ${span} days`, ...(markets.length ? [`markets: ${marketSpan} days`] : []), `inspected ${inspected.length} pages`];
 }

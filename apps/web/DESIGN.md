@@ -380,6 +380,9 @@ Plain SVG and CSS from tool rows, in the series colours.
 - **Paired bars:** one row per section, one 8px bar per site on a shared scale (Sprout for you, then Sky, Clay, Sun), legend below.
 - **Line:** up to three series (Sprout, Sun, Sky) at 2px, Line gridlines, mono ticks; the segment into today is dashed (3 4). The plot wipes in left to right (.9s). Hover or keyboard focus draws a Control Line cursor and a floating readout with series squares.
 
+### Results
+Results answers "is it working?" for one site. A headline card holds weekly Google clicks over 16 months: the whole site and Eumon's pages, with the go-live as a dashed Green hairline and a mono Green Ink label ("Eumon live Jul 19"). Weeks start on the first full Monday; the current, still-filling week draws as a dashed tail. Under it, a four-cell KPI strip (Google clicks, enquiries, organic sessions, pages live) whose captions compare with the 28 days before go-live ("was 1,580 before Eumon"), or with the previous 28 days when there is no go-live. Sections are titled as questions. Ranking buckets are a ruled four-cell strip (Top 3, 10, 20, 100) with "+N new · N lost" in mono. Missing data reads "Collecting data" or a connect prompt, never 0. The client link (`/r/<token>`) renders the same view without the console, the health card, or any controls, with a mono "Report by Eumon" credit under a top rule.
+
 ### Why rows
 Every finding, opportunity, and insight is one 46px line: an optional severity or mark, the title (13.5px medium), an aside (impact, priority, CTR), and a green-ink mono "Why" with a chevron. It opens in place to the explanation and next step (13px Muted, max 76ch). Rows bleed to the card's edges and share rules. "Do first" is the same idea as three ranked buttons, each opening the tab that explains it.
 

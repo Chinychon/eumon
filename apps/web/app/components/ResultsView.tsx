@@ -58,7 +58,7 @@ export function ResultsView({ endpoint, operator, onNavigate }: { endpoint: stri
   return (
     <div>
       <ViewHeader
-        title={operator ? "Results" : site.name}
+        title={operator ? "Performance" : site.name}
         description={<>Is Eumon working for {host}? {results.searchThrough ? `Google data through ${day(results.searchThrough)}.` : "Google data appears after the first sync."}</>}
         actions={operator && (
           <div className="row">
@@ -82,7 +82,7 @@ export function ResultsView({ endpoint, operator, onNavigate }: { endpoint: stri
           <Kpi label="Pages live" value={formatNumber(pages.live)} caption={pages.live ? `${formatNumber(pages.indexed)} indexed · ${formatNumber(pages.notIndexed)} not · ${formatNumber(pages.unchecked)} not checked yet` : "No Eumon pages published yet"} />
         </div>
 
-        <Card title="Are more people finding you on Google?" subtitle={results.search?.scoped ? `Scoped to your target markets: ${results.markets.map(countryName).join(", ")}.` : results.markets.length ? "Every country, until your target markets' history is synced." : operator ? "Every country. Set target markets in Connections to focus this section." : "Every country."}>
+        <Card title="Are more people finding you on Google?" subtitle={results.search?.scoped ? `Scoped to your target markets: ${results.markets.map(countryName).join(", ")}.` : results.markets.length ? "Every country, until your target markets' history is synced." : operator ? "Every country. Set target markets in Setup to focus this section." : "Every country."}>
           {results.search ? (
             <>
               <div className="ruled-grid c11 results-pair">
@@ -160,7 +160,7 @@ function TopQueries({ rows }: { rows: TopQuery[] }) {
 
 /** Why organic sessions are missing: never connected, needs the Analytics permission, or not synced yet. */
 function analyticsState(analytics: Payload["site"]["analytics"], operator: boolean) {
-  if (analytics === "reconnect") return operator ? "Reconnect Google in Connections to add Analytics" : "Analytics not connected yet";
+  if (analytics === "reconnect") return operator ? "Reconnect Google in Setup to add Analytics" : "Analytics not connected yet";
   if (analytics === "connected") return "Collecting data";
   return operator ? "Connect Google Analytics" : "Analytics not connected yet";
 }
@@ -168,7 +168,7 @@ function analyticsState(analytics: Payload["site"]["analytics"], operator: boole
 function ConnectPrompt({ operator, what, onNavigate }: { operator: boolean; what: string; onNavigate?: (view: "connections") => void }) {
   return (
     <div className="empty-state">
-      {operator ? <>Connect {what} to see 16 months of history. <Button small variant="secondary" onClick={() => onNavigate?.("connections")}>Open Connections</Button></> : `${what} is not connected yet.`}
+      {operator ? <>Connect {what} to see 16 months of history. <Button small variant="secondary" onClick={() => onNavigate?.("connections")}>Open Setup</Button></> : `${what} is not connected yet.`}
     </div>
   );
 }

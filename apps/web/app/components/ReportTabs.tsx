@@ -143,7 +143,7 @@ export function SearchTab({ report, onNavigate }: { report: Report; onNavigate: 
     <div className="results">
       <div className="metrics-grid">
         <Kpi label="Clicks" value={formatNumber(search.totals.clicks)} caption={`${formatNumber(search.totals.impressions)} impressions · ${(search.totals.ctr * 100).toFixed(1)}% CTR`} />
-        <Kpi label="From target markets" value={search.targetShare ? share(search.targetShare.impressions) : "—"} caption={search.targetShare ? search.targetMarkets.map(countryName).join(", ") : "Set markets in Connections"} />
+        <Kpi label="From target markets" value={search.targetShare ? share(search.targetShare.impressions) : "—"} caption={search.targetShare ? search.targetMarkets.map(countryName).join(", ") : "Set markets in Setup"} />
         <Kpi label="Commercial searches" value={share(search.commercialShare)} caption="of clicks: cost, price, best, booking…" />
         <Kpi label={entity ? `Looking up a ${entity.entityType}` : "Branded searches"} value={share(entity ? search.entityQueries!.share : search.brandedShare)} caption={entity ? "of clicks name one record" : "of clicks include your brand"} />
       </div>

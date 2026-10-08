@@ -17,17 +17,22 @@ import { Button, LeafIcon, ThemeToggle } from "./components/ui";
 
 type View = "overview" | "results" | "ask" | "connections" | "data" | "pages" | "performance" | "setup";
 
-/** `steps` are the pipeline steps (README) a view covers. */
-const NAV: Array<{ view: View; label: string; steps?: string }> = [
+/**
+ * `steps` are the pipeline steps (README) a view covers; `group` labels the run of views it starts.
+ * View keys stay as they were when labels changed, so saved and shared links keep working.
+ */
+const NAV: Array<{ view: View; label: string; steps?: string; group?: string }> = [
   { view: "overview", label: "Overview" },
-  { view: "results", label: "Results" },
+  { view: "results", label: "Performance" },
   { view: "ask", label: "Ask" },
-  { view: "connections", label: "Connections" },
-  { view: "data", label: "Data", steps: "1–3" },
+  { view: "data", label: "Data", steps: "1–3", group: "Landing page engine" },
   { view: "pages", label: "Landing pages", steps: "4–5" },
-  { view: "performance", label: "Performance", steps: "6–7" },
+  { view: "performance", label: "Page performance", steps: "6–7" },
   { view: "setup", label: "Setup" },
 ];
+
+/** Connections now live at the top of Setup. */
+const resolveView = (view: View): View => (view === "connections" ? "setup" : view);
 
 function setQuery(params: Record<string, string | null>) {
   const url = new URL(window.location.href);
@@ -73,13 +78,13 @@ export default function Home() {
   useEffect(() => {
     const query = new URLSearchParams(window.location.search);
     const requestedView = query.get("view") as View | null;
-    if (requestedView && NAV.some((item) => item.view === requestedView)) setView(requestedView);
+    if (requestedView && NAV.some((item) => item.view === resolveView(requestedView))) setView(resolveView(requestedView));
     setAskThread(query.get("thread") ?? "");
-    if (query.get("github") === "connected") setNotice("GitHub connected. Choose a repository in Connections.");
+    if (query.get("github") === "connected") setNotice("GitHub connected. Choose a repository in Setup.");
     if (query.get("github_error") === "installation_invalid") setError("GitHub returned without a valid install session. Start “Connect GitHub” from this tab and use the same address for the callback.");
     if (query.get("github_error") === "installation_failed") setError("GitHub installed the app, but Eumon couldn't save the connection. Check that SESSION_SECRET is at least 32 characters, then try again.");
     const gsc = query.get("gsc");
-    if (gsc === "connected") setNotice("Google connected. Choose a Search Console property in Connections.");
+    if (gsc === "connected") setNotice("Google connected. Choose a Search Console property in Setup.");
     else if (gsc) setError("The Google Search Console connection needs attention — try connecting again.");
     setQuery({ github: null, github_error: null, gsc: null });
 
@@ -94,7 +99,7 @@ export default function Home() {
 
   const site = sites?.find((entry) => entry.id === siteId) ?? null;
   const run = useSiteRun(siteId);
-  const navigate = (next: View) => { setView(next); window.scrollTo({ top: 0 }); };
+  const navigate = (next: View) => { setView(resolveView(next)); window.scrollTo({ top: 0 }); };
   const drawerOpen = drawer && Boolean(site) && view !== "ask" && !adding;
   // On phones the drawer covers the page, so the page behind it is taken out of reach.
   const covered = drawerOpen && narrow;
@@ -105,9 +110,12 @@ export default function Home() {
         <a className="brand" href="/"><BrandMark /><span>Eumon</span></a>
         <div className="workspace-label">{site ? new URL(site.baseUrl).hostname.toUpperCase() : "WORKSPACE"}</div>
         {NAV.map((item) => (
-          <button key={item.view} className={`workspace${view === item.view && site && !adding ? " active" : ""}`} disabled={!site} onClick={() => { setAdding(false); navigate(item.view); }}>
-            <span>{item.label}</span>{item.steps && <small>{item.steps}</small>}
-          </button>
+          <div key={item.view} className="workspace-item">
+            {item.group && <div className="workspace-group">{item.group}</div>}
+            <button className={`workspace${view === item.view && site && !adding ? " active" : ""}`} disabled={!site} onClick={() => { setAdding(false); navigate(item.view); }}>
+              <span>{item.label}</span>{item.steps && <small>{item.steps}</small>}
+            </button>
+          </div>
         ))}
         <div className="site-switcher">
           {sites && sites.length > 0 && (
@@ -143,13 +151,17 @@ export default function Home() {
           ) : (
             <div key={`${site.id}:${view}`} className="view-enter">
               {view === "overview" && <OverviewView site={site} onNavigate={navigate} />}
-              {view === "connections" && <ConnectionsView site={site} repositories={repositories} githubInstalled={githubInstalled} onSiteChanged={(updated) => setSites((items) => items?.map((item) => (item.id === updated.id ? updated : item)) ?? null)} />}
               {view === "results" && <ResultsView endpoint={`/api/sites/${site.id}/results`} operator onNavigate={navigate} />}
               {view === "ask" && <AskView key={site.id} site={site} threadId={askThread} onThreadChange={setAskThread} />}
               {view === "data" && <DataView site={site} onNavigate={navigate} />}
               {view === "pages" && <PagesView site={site} onNavigate={navigate} />}
               {view === "performance" && <PerformanceView site={site} onNavigate={navigate} />}
-              {view === "setup" && <SetupView site={site} />}
+              {view === "setup" && (
+                <>
+                  <ConnectionsView site={site} repositories={repositories} githubInstalled={githubInstalled} onSiteChanged={(updated) => setSites((items) => items?.map((item) => (item.id === updated.id ? updated : item)) ?? null)} />
+                  <SetupView site={site} />
+                </>
+              )}
             </div>
           )}
           <footer>Eumon <span>•</span> Landing pages from real data, measured by real outcomes</footer>

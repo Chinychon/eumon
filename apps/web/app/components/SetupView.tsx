@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import type { PageSettings, SiteRecord } from "@organic-growth/core";
 import { PAGE_LANGUAGES } from "@organic-growth/pages/labels";
 import { api, errorMessage } from "./api";
-import { Button, Card, CheckIcon, CopyBlock, CrossIcon, Field, ViewHeader } from "./ui";
+import { Button, Card, CheckIcon, CopyBlock, CrossIcon, Field, PartHead } from "./ui";
 
 type Snippet = { id: string; label: string; when: string; language: string; code: string };
 type Integration = {
@@ -71,8 +71,9 @@ export function SetupView({ site }: { site: SiteRecord }) {
 
   return (
     <div>
-      <ViewHeader
-        title="Put the pages on your domain"
+      <PartHead
+        id="on-your-site"
+        title="On your site"
         description="Eumon renders every landing page as complete HTML. A small proxy rule on your domain forwards one path to Eumon, so Google sees real pages on your site — no JavaScript rendering, no CMS changes."
       />
       {error && <div className="callout error" role="alert" style={{ marginBottom: 14 }}>{error}</div>}

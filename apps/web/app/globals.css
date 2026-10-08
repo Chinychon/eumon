@@ -133,6 +133,12 @@ code { font-family: var(--mono); }
 .brand { height: 59px; flex: none; display: flex; align-items: center; gap: 10px; padding: 0 20px; border-bottom: 1px solid var(--line); color: var(--ink); text-decoration: none; font-family: var(--mono); font-size: 13px; font-weight: 500; letter-spacing: .14em; text-transform: uppercase; }
 .brand-mark { width: 26px; height: 26px; display: grid; place-items: center; background: var(--primary); transition: transform .3s var(--ease); }
 .brand:hover .brand-mark { transform: rotate(-6deg) scale(1.06); }
+.workspace-group { margin: 16px 22px 6px; padding-top: 14px; border-top: 1px solid var(--line); font-family: var(--mono); font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--soft); }
+.part-head { margin: 0 0 14px; scroll-margin-top: 80px; }
+.part-head + * { margin-top: 0; }
+.part-head h2 { margin: 0; font-size: 20px; font-weight: 400; letter-spacing: -.015em; }
+.part-head p { margin: 6px 0 0; max-width: 640px; color: var(--muted); font-size: 14px; line-height: 1.6; }
+* + .part-head, .view-enter > * + * > .part-head:first-child { margin-top: 44px; }
 .workspace-label { margin: 18px 20px 8px; font-family: var(--mono); font-size: 11px; letter-spacing: .12em; color: var(--soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .workspace { position: relative; height: 36px; display: flex; align-items: center; gap: 10px; margin: 0 10px 2px; padding: 0 12px; border: 0; background: transparent; color: var(--muted); font-family: var(--mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; text-align: left; transition: color .2s, background-color .2s, box-shadow .2s, transform .12s; }
 .workspace::before { content: ""; width: 6px; height: 6px; flex: none; background: transparent; transition: background-color .2s, transform .3s var(--ease); }
@@ -747,7 +753,8 @@ details.disclosure[open] > summary { margin-bottom: 10px; }
   .brand { position: sticky; left: 0; flex: none; height: 52px; padding: 0 10px 0 8px; }
   .brand > span:last-child { display: none; }
   .workspace { flex: none; margin: 0; height: 34px; padding: 0 10px; }
-  .workspace small, .workspace-label { display: none; }
+  .workspace small, .workspace-label, .workspace-group { display: none; }
+  .workspace-item { display: contents; }
   .site-switcher { flex: none; flex-direction: row; align-items: center; margin: 0 0 0 auto; padding: 0 0 0 8px; }
   /* The client switcher stays reachable on phones, at the end of the scrolling strip. */
   .site-switcher label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }

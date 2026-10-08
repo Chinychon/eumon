@@ -195,7 +195,7 @@ export function OverviewView({ site, onNavigate }: {
         <span className={site.gscProperty ? "on" : ""}>{site.gscProperty ? "Search Console" : "Search Console missing"}</span>
         <span className={markets ? "on" : ""}>{markets ? `${markets} ${markets === 1 ? "market" : "markets"}` : "No markets"}</span>
         <span className={competitorCount ? "on" : ""}>{competitorCount ? `${competitorCount} ${competitorCount === 1 ? "competitor" : "competitors"}` : "No competitors"}</span>
-        <span className="connections-open">Open Connections →</span>
+        <span className="connections-open">Open Setup →</span>
       </button>
 
       {report && (

@@ -121,6 +121,16 @@ export function Card({ title, subtitle, actions, children, id }: { title?: React
   );
 }
 
+/** A titled part of a longer view, such as Connections and On your site within Setup. */
+export function PartHead({ id, title, description }: { id: string; title: string; description?: ReactNode }) {
+  return (
+    <div className="part-head" id={id}>
+      <h2>{title}</h2>
+      {description && <p>{description}</p>}
+    </div>
+  );
+}
+
 export function ViewHeader({ title, description, actions }: { title: string; description?: ReactNode; actions?: ReactNode }) {
   return (
     <div className="view-header">

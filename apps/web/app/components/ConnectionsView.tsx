@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { COUNTRIES, countryName, type SiteRecord } from "@organic-growth/core";
 import { api, errorMessage } from "./api";
 import type { Repository } from "./OverviewView";
-import { Badge, Button, Card, CrossIcon, ViewHeader } from "./ui";
+import { Badge, Button, Card, CrossIcon, PartHead, ViewHeader } from "./ui";
 
 const domainsOf = (text: string) => text.split(/[\n,]/).map((value) => value.trim()).filter(Boolean);
 
@@ -65,7 +65,7 @@ export function ConnectionsView({ site, repositories, githubInstalled, onSiteCha
     try {
       await api(`/api/sites/${site.id}/ga4/properties`, { method: "POST", json: { property: property || null } });
       setGa4((current) => (current ? { ...current, selected: property || null } : current));
-      setGa4Message(property ? "Google Analytics property saved. Results fills in on the next sync." : "Google Analytics disconnected.");
+      setGa4Message(property ? "Google Analytics property saved. Performance fills in on the next sync." : "Google Analytics disconnected.");
       onSiteChanged({ ...site, ga4Property: property || undefined });
     } catch (cause) { setGa4Message(errorMessage(cause)); }
   }
@@ -84,7 +84,8 @@ export function ConnectionsView({ site, repositories, githubInstalled, onSiteCha
 
   return (
     <div>
-      <ViewHeader title="Connections" description="Each connection adds evidence to the analysis. Only the website is required." />
+      <ViewHeader title="Setup" description="What Eumon reads from, then what goes on your site. Only the website is required." />
+      <PartHead id="connections" title="Connections" description="Each connection adds evidence to the analysis." />
       {error && <div className="callout error" role="alert" style={{ marginBottom: 14 }}>{error}</div>}
       <Card>
         <div className="list-row">
@@ -111,7 +112,7 @@ export function ConnectionsView({ site, repositories, githubInstalled, onSiteCha
           <Badge tone={site.gscProperty || site.ga4Property ? "green" : "gray"}>{site.gscProperty || site.ga4Property ? "Google" : "Recommended"}</Badge>
           <div className="grow">
             <h3>Google Search Console and Analytics</h3>
-            <p>One sign-in covers both. Search Console: queries, impressions, and rankings. Analytics: organic sessions and key events, the "before Eumon" baseline Results compares against.</p>
+            <p>One sign-in covers both. Search Console: queries, impressions, and rankings. Analytics: organic sessions and key events, the "before Eumon" baseline Performance compares against.</p>
             <div className="row" style={{ marginTop: 8 }}>
               <a className="btn btn-secondary btn-small" href={`/api/sites/${site.id}/gsc/connect`}>
                 {ga4?.needsReconnect ? "Reconnect Google to add Analytics" : ga4?.connected ? "Reconnect Google" : "Connect Google"}

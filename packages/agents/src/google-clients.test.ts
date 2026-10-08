@@ -38,4 +38,15 @@ describe("Google clients", () => {
     ] };
     assert.deepEqual(ga4Days(report), [{ day: "2026-10-01", sessions: 100, organicSessions: 40, organicEngagedSessions: 30, organicKeyEvents: 4 }]);
   });
+
+  it("lists GA4 properties across every page of accounts", async () => {
+    const pages = [
+      { accountSummaries: [{ displayName: "A", propertySummaries: [{ property: "properties/1", displayName: "One" }] }], nextPageToken: "p2" },
+      { accountSummaries: [{ displayName: "B", propertySummaries: [{ property: "properties/2", displayName: "Two" }] }] },
+    ];
+    const urls: string[] = [];
+    const fetchFn = (async (url: string) => { urls.push(url); return new Response(JSON.stringify(pages[urls.length - 1])); }) as typeof fetch;
+    assert.deepEqual((await listGa4Properties("t", fetchFn)).map((entry) => entry.property), ["properties/1", "properties/2"]);
+    assert.ok(urls[1]!.includes("pageToken=p2"));
+  });
 });

@@ -6,15 +6,22 @@
 export type Ga4Day = { day: string; sessions: number; organicSessions: number; organicEngagedSessions: number; organicKeyEvents: number };
 
 export async function listGa4Properties(accessToken: string, fetchFn: typeof fetch = fetch): Promise<Array<{ property: string; name: string }>> {
-  const response = await fetchFn("https://analyticsadmin.googleapis.com/v1beta/accountSummaries?pageSize=200", {
-    headers: { Authorization: `Bearer ${accessToken}` },
-  });
-  if (!response.ok) throw new Error(`Google Analytics properties request failed (${response.status}).`);
-  const json = await response.json() as { accountSummaries?: Array<{ displayName?: string; propertySummaries?: Array<{ property: string; displayName?: string }> }> };
-  return (json.accountSummaries ?? []).flatMap((account) => (account.propertySummaries ?? []).map((summary) => ({
-    property: summary.property,
-    name: `${account.displayName ?? "Account"} · ${summary.displayName ?? summary.property}`,
-  })));
+  const properties: Array<{ property: string; name: string }> = [];
+  let pageToken = "";
+  do {
+    const response = await fetchFn(`https://analyticsadmin.googleapis.com/v1beta/accountSummaries?pageSize=200${pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : ""}`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!response.ok) throw new Error(`Google Analytics properties request failed (${response.status}).`);
+    const json = await response.json() as { accountSummaries?: Array<{ displayName?: string; propertySummaries?: Array<{ property: string; displayName?: string }> }>; nextPageToken?: string };
+    for (const account of json.accountSummaries ?? []) {
+      for (const summary of account.propertySummaries ?? []) {
+        properties.push({ property: summary.property, name: `${account.displayName ?? "Account"} · ${summary.displayName ?? summary.property}` });
+      }
+    }
+    pageToken = json.nextPageToken ?? "";
+  } while (pageToken);
+  return properties;
 }
 
 /** Folds a `date` × `sessionDefaultChannelGroup` report into one row per day. */

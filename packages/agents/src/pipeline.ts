@@ -88,8 +88,9 @@ export async function queueFullCrawl(
   const prior = new Map<string, { state: string; crawledAt: string | null; from: string }>();
   for (const source of sources) {
     for (const [url, state] of await listCrawlStates(db, source.id)) {
-      // A later run's fetch replaces an earlier one; its unfetched URLs don't.
-      if (state.crawledAt || !prior.has(url)) prior.set(url, { ...state, from: source.id });
+      // The newest fetch of each URL wins. A later run's copy of an older result keeps its original date, so it doesn't.
+      const known = prior.get(url);
+      if (!known || (state.crawledAt && state.crawledAt > (known.crawledAt ?? ""))) prior.set(url, { ...state, from: source.id });
     }
   }
   const now = input.now ?? Date.now();

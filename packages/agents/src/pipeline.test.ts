@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { CrawlPageResult } from "@organic-growth/core";
 import type { Fetcher } from "@organic-growth/crawler";
-import { createAnalysis, getCrawlProgress, saveCrawlBatch, updateAnalysisStatus, upsertSite, enqueueAnalysisCrawlUrls } from "@organic-growth/db";
+import { createAnalysis, getCrawlProgress, reuseCrawlResults, saveCrawlBatch, updateAnalysisStatus, upsertSite, enqueueAnalysisCrawlUrls } from "@organic-growth/db";
 import { openSqliteD1 } from "@organic-growth/db/sqlite";
 import { queueFullCrawl, shouldReuse } from "./pipeline.js";
 
@@ -75,6 +75,23 @@ describe("queueFullCrawl", async () => {
     const queued = await queueFullCrawl(db, { analysisId: "after", siteId: "s", baseUrl: origin, maxUrls: 100, fetcher, now: Date.now() + 2 * DAY });
     assert.equal(queued.reused, 3, "blog/a and blog/b from the finished run, doctors/x from the cancelled one");
     assert.equal(queued.queued, 2, "only the changed and the never-fetched URL");
+  });
+
+  it("takes each page's newest fetch, not the newest run's copy of an older one", async () => {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    // A stopped run fetches /blog/a again; a later stopped run only copied the first crawl's older /blog/a.
+    await createAnalysis(db, { id: "refetch", siteId: "s", status: "running", createdAt: new Date(Date.now() + 1900).toISOString() });
+    await enqueueAnalysisCrawlUrls(db, { analysisId: "refetch", siteId: "s", urls: [{ url: `${origin}/blog/a`, routeFamily: "blog" }] });
+    await saveCrawlBatch(db, { analysisId: "refetch", outcomes: [{ url: `${origin}/blog/a`, page: page(`${origin}/blog/a`) }] });
+    await updateAnalysisStatus(db, "refetch", "cancelled", { completedAt: new Date().toISOString() });
+    await createAnalysis(db, { id: "copier", siteId: "s", status: "running", createdAt: new Date(Date.now() + 1950).toISOString() });
+    await reuseCrawlResults(db, { analysisId: "copier", previousAnalysisId: "first", urls: [`${origin}/blog/a`] });
+    await updateAnalysisStatus(db, "copier", "cancelled", { completedAt: new Date().toISOString() });
+
+    await createAnalysis(db, { id: "later", siteId: "s", status: "running", createdAt: new Date(Date.now() + 1980).toISOString() });
+    await queueFullCrawl(db, { analysisId: "later", siteId: "s", baseUrl: origin, maxUrls: 100, fetcher, now: Date.now() + 2 * DAY });
+    const row = await db.prepare("SELECT json_extract(result_json, '$.reusedFrom') AS source FROM pages WHERE analysis_id = 'later' AND url = ?").bind(`${origin}/blog/a`).first<{ source: string }>();
+    assert.equal(row?.source, "refetch");
   });
 
   it("re-crawls everything on a full run", async () => {

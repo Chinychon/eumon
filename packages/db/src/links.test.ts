@@ -86,4 +86,17 @@ describe("link graph before every page's links are known", async () => {
     assert.equal(graph.orphans, null, "an orphan count from 1 page's links would be wrong");
     assert.deepEqual(graph.linkCoverage, { recorded: 1, pages: 5 });
   });
+
+  it("counts pages whose links were saved before the 'recorded' marker existed", async () => {
+    const db = openSqliteD1();
+    const now = new Date().toISOString();
+    await upsertSite(db, { id: "s", name: "x.com", baseUrl: "https://x.com", createdAt: now, updatedAt: now });
+    await createAnalysis(db, { id: "a1", siteId: "s", status: "running", createdAt: now });
+    const paths = ["/", "/blog/a"];
+    await enqueueAnalysisCrawlUrls(db, { analysisId: "a1", siteId: "s", urls: paths.map((path) => ({ url: u(path), routeFamily: family(path) })) });
+    await saveCrawlBatch(db, { analysisId: "a1", outcomes: [{ url: u("/"), page: page("/", ["/blog/a"]) }, { url: u("/blog/a"), page: page("/blog/a", [""]) }] });
+    await db.prepare("UPDATE pages SET result_json = json_remove(result_json, '$.linksRecorded')").run();
+    await updateAnalysisStatus(db, "a1", "completed", { completedAt: now });
+    assert.deepEqual((await getLinkGraph(db, "s")).linkCoverage, { recorded: 2, pages: 2 });
+  });
 });

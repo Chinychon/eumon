@@ -563,9 +563,10 @@ export async function getLinkGraph(db: D1Like, siteId: string): Promise<LinkGrap
     ).bind(siteId, latest.id).all<{ source_family: string; target_family: string; links: number }>() : { results: [] },
     latest ? db.prepare(
       `SELECT SUM(CASE WHEN ${SERVED} THEN 1 ELSE 0 END) AS pages,
-              SUM(CASE WHEN ${SERVED} AND ${crawlField("linksRecorded")} = 1 THEN 1 ELSE 0 END) AS recorded
+              SUM(CASE WHEN ${SERVED} AND (${crawlField("linksRecorded")} = 1
+                OR EXISTS (SELECT 1 FROM page_links l WHERE l.site_id = ? AND l.source_url = pages.url)) THEN 1 ELSE 0 END) AS recorded
        FROM pages WHERE analysis_id = ?`,
-    ).bind(latest.id).first<{ pages: number | null; recorded: number | null }>() : null,
+    ).bind(siteId, latest.id).first<{ pages: number | null; recorded: number | null }>() : null,
     db.prepare("SELECT path, template_id, content_json FROM generated_pages WHERE site_id = ? AND status = 'published'")
       .bind(siteId).all<{ path: string; template_id: string; content_json: string }>(),
     db.prepare("SELECT id, name FROM page_templates WHERE site_id = ?").bind(siteId).all<{ id: string; name: string }>(),

@@ -29,7 +29,7 @@ import {
   type SiteResearch,
 } from "@organic-growth/crawler";
 import type { JsonLlm } from "@organic-growth/ai";
-import { enqueueAnalysisCrawlUrls, getPreviousCompletedAnalysis, listCrawlStates, reuseCrawlResults, type D1Like } from "@organic-growth/db";
+import { enqueueAnalysisCrawlUrls, listCrawlStates, listReusableAnalyses, reuseCrawlResults, type D1Like } from "@organic-growth/db";
 import {
   analyzeRepository,
   type RepoSnapshot,
@@ -73,8 +73,9 @@ export function shouldReuse(previous: { state: string; crawledAt: string | null 
 /**
  * Queues every sitemap URL (up to `maxUrls`) for the Googlebot crawl. URLs
  * robots.txt blocks for Googlebot are recorded but will not be fetched. Unless
- * `full`, results from the site's last finished crawl that still stand
- * (`shouldReuse`) are copied over instead of being fetched again.
+ * `full`, results that still stand (`shouldReuse`) are copied over instead of
+ * being fetched again: from the last finished crawl, or a newer one that
+ * stopped part-way, whichever fetched the page last.
  */
 export async function queueFullCrawl(
   db: D1Like,
@@ -83,24 +84,32 @@ export async function queueFullCrawl(
   const fetcher = input.fetcher ?? defaultFetcher;
   const { urls, lastmod } = await auditSitemap(input.baseUrl, fetcher, { maxUrls: 1 });
   const robots = await fetchRobots(input.baseUrl, GOOGLEBOT_TOKEN, GOOGLEBOT_UA, fetcher).catch(() => null);
-  const previous = input.full ? null : await getPreviousCompletedAnalysis(db, input.siteId, input.analysisId);
-  const prior = previous ? await listCrawlStates(db, previous.id) : new Map<string, { state: string; crawledAt: string | null }>();
+  const sources = input.full ? [] : await listReusableAnalyses(db, input.siteId, input.analysisId);
+  const prior = new Map<string, { state: string; crawledAt: string | null; from: string }>();
+  for (const source of sources) {
+    for (const [url, state] of await listCrawlStates(db, source.id)) {
+      // A later run's fetch replaces an earlier one; its unfetched URLs don't.
+      if (state.crawledAt || !prior.has(url)) prior.set(url, { ...state, from: source.id });
+    }
+  }
   const now = input.now ?? Date.now();
-  const reuse: string[] = [];
+  const reuse = new Map<string, string[]>();
   const toFetch: Array<{ url: string; routeFamily: string; blocked: boolean }> = [];
   for (const url of urls.slice(0, input.maxUrls)) {
     const { pathname, search } = new URL(url);
     const blocked = robots ? !robots.isAllowed(`${pathname}${search}`) : false;
-    if (!blocked && shouldReuse(prior.get(url), lastmod.get(url), now)) reuse.push(url);
+    const previous = prior.get(url);
+    if (!blocked && previous && shouldReuse(previous, lastmod.get(url), now)) reuse.set(previous.from, reuse.get(previous.from) ?? []).get(previous.from)!.push(url);
     else toFetch.push({ url, routeFamily: classifyUrlType(url), blocked });
   }
-  if (previous && reuse.length) await reuseCrawlResults(db, { analysisId: input.analysisId, previousAnalysisId: previous.id, urls: reuse });
+  for (const [previousAnalysisId, urls] of reuse) await reuseCrawlResults(db, { analysisId: input.analysisId, previousAnalysisId, urls });
+  const reused = [...reuse.values()].reduce((sum, urls) => sum + urls.length, 0);
   await enqueueAnalysisCrawlUrls(db, { analysisId: input.analysisId, siteId: input.siteId, urls: toFetch });
   return {
     declared: urls.length,
     queued: toFetch.filter((entry) => !entry.blocked).length,
-    reused: reuse.length,
-    ...(previous && reuse.length ? { reusedFrom: previous.completedAt } : {}),
+    reused,
+    ...(reused ? { reusedFrom: sources[0]!.completedAt } : {}),
   };
 }
 

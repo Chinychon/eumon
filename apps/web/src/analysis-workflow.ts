@@ -56,10 +56,15 @@ export class SiteAnalysisWorkflow extends WorkflowEntrypoint<AppEnv, AnalysisPay
   async run(event: WorkflowEvent<AnalysisPayload>, step: WorkflowStep) {
     const { analysisId, siteId, full } = event.payload;
     const db = this.env.DB;
+    // Progress writes double as the cancel check: a cancelled run stops at its next update,
+    // even when ending its Workflow instance didn't work.
+    const progress = async (stage: string, message: string, detail?: Record<string, string | number>) => {
+      if (!(await updateAnalysisProgress(db, analysisId, stage, message, detail))) throw new NonRetryableError("The analysis was cancelled.");
+    };
     try {
       const site = await step.do("load-site", async () => {
         await updateAnalysisStatus(db, analysisId, "running", { startedAt: new Date().toISOString() });
-        await updateAnalysisProgress(db, analysisId, "sitemap", "Reading the sitemap");
+        await progress("sitemap", "Reading the sitemap");
         const record = await getSite(db, siteId);
         if (!record) throw new NonRetryableError("The site no longer exists.");
         // Only plain connection fields cross the step boundary.
@@ -79,7 +84,7 @@ export class SiteAnalysisWorkflow extends WorkflowEntrypoint<AppEnv, AnalysisPay
       // Results from the last crawl that still stand are reused unless `full`.
       const queued = await step.do("enqueue-full-crawl", async () => {
         const result = await queueFullCrawl(db, { analysisId, siteId, baseUrl: site.baseUrl, maxUrls: MAX_FULL_CRAWL_URLS, full });
-        await updateAnalysisProgress(db, analysisId, "crawl", `Crawling ${result.queued.toLocaleString()} sitemap URLs as Googlebot`);
+        await progress("crawl", `Crawling ${result.queued.toLocaleString()} sitemap URLs as Googlebot`);
         return result;
       });
 
@@ -90,7 +95,7 @@ export class SiteAnalysisWorkflow extends WorkflowEntrypoint<AppEnv, AnalysisPay
           const outcomes = await crawlGooglebotBatch(urls, undefined, CRAWL_CONCURRENCY);
           await saveCrawlBatch(db, { analysisId, outcomes: outcomes.map((outcome) => ("page" in outcome ? outcome : { url: outcome.url, error: outcome.error })) });
           const done = Math.min((batch + 1) * CRAWL_BATCH_SIZE, queued.queued);
-          await updateAnalysisProgress(db, analysisId, "crawl", `Crawled ${done.toLocaleString()} of ${queued.queued.toLocaleString()} sitemap URLs as Googlebot`);
+          await progress("crawl", `Crawled ${done.toLocaleString()} of ${queued.queued.toLocaleString()} sitemap URLs as Googlebot`);
           return urls.length;
         });
         if (crawled === 0) break;
@@ -99,13 +104,13 @@ export class SiteAnalysisWorkflow extends WorkflowEntrypoint<AppEnv, AnalysisPay
       // Each competitor is researched in its own step (sitemaps and a few sample
       // pages, fetched as EumonBot), so one slow site can retry on its own.
       const competitorDomains = await step.do("list-competitors", async () => {
-        await updateAnalysisProgress(db, analysisId, "competitors", "Reading competitor sitemaps and sample pages");
+        await progress("competitors", "Reading competitor sitemaps and sample pages");
         return (await listSiteCompetitorDomains(db, siteId)).slice(0, MAX_COMPETITORS);
       });
       const competitorResearch: SiteResearch[] = [];
       for (const [index, domain] of competitorDomains.entries()) {
         competitorResearch.push(await step.do(`research-${domain}`, { retries: { limit: 1, delay: "10 seconds" } }, async () => {
-          await updateAnalysisProgress(db, analysisId, "competitors", `Reading ${domain}`, { competitor: domain, done: index, of: competitorDomains.length });
+          await progress("competitors", `Reading ${domain}`, { competitor: domain, done: index, of: competitorDomains.length });
           const research = await researchSite(domain, undefined, { maxFiles: 15, maxUrls: 50_000 });
           // Keep the step output small: the largest families are what the comparison uses.
           return { ...research, sitemap: { ...research.sitemap, families: research.sitemap.families.slice(0, 40) } };
@@ -118,7 +123,7 @@ export class SiteAnalysisWorkflow extends WorkflowEntrypoint<AppEnv, AnalysisPay
         "analyze-repository-and-site",
         { retries: { limit: 2, delay: "5 seconds", backoff: "exponential" } },
         async () => {
-          await updateAnalysisProgress(db, analysisId, "analysis", "Checking rendering, indexing, and search data");
+          await progress("analysis", "Checking rendering, indexing, and search data");
           const repoSnapshot = site.githubInstallationId && site.githubOwner && site.githubRepo
             ? await buildRepoSnapshotFromGitHub(
               createGitHubApiClient(await createInstallationToken(this.env.GITHUB_APP_ID, this.env.GITHUB_APP_PRIVATE_KEY, site.githubInstallationId)),
@@ -171,7 +176,7 @@ export class SiteAnalysisWorkflow extends WorkflowEntrypoint<AppEnv, AnalysisPay
           });
           const plan = llm ? await synthesizePlanNarrative(llm, raw.plan, raw.findings) : raw.plan;
           if (raw.site.fingerprint) await updateSiteFingerprint(db, siteId, raw.site.fingerprint);
-          await updateAnalysisProgress(db, analysisId, "saving", "Saving findings and growth plan");
+          await progress("saving", "Saving findings and growth plan");
           await saveAnalysisReport(db, analysisId, {
             ...raw, plan, sitemapUrlsDeclared: queued.declared,
             ...(queued.reused ? { crawlReuse: { urls: queued.reused, from: queued.reusedFrom } } : {}),

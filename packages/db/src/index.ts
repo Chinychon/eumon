@@ -201,14 +201,20 @@ const STALL_MS = 45 * 60_000;
 export const analysisStalled = (job: { status: string; createdAt: string; progress?: AnalysisProgress }, now = Date.now()) =>
   (job.status === "queued" || job.status === "running") && now - Date.parse(job.progress?.updatedAt ?? job.createdAt) > STALL_MS;
 
-/** Records the current stage, keeping when each stage began so the dashboard can time them. */
+/** A run that hasn't finished. Once completed, failed, or cancelled, a run never changes again. */
+const OPEN = "status IN ('queued', 'running')";
+
+/**
+ * Records the current stage, keeping when each stage began so the dashboard can time them.
+ * Returns false once the run has finished (cancelled, say), so the run knows to stop.
+ */
 export async function updateAnalysisProgress(
   db: D1Like,
   id: string,
   stage: string,
   message: string,
   detail?: Record<string, string | number>,
-): Promise<void> {
+): Promise<boolean> {
   const row = await db.prepare("SELECT progress_json FROM analyses WHERE id = ?").bind(id).first<{ progress_json: string | null }>();
   let history: NonNullable<AnalysisProgress["history"]> = [];
   try {
@@ -217,7 +223,8 @@ export async function updateAnalysisProgress(
   const at = nowIso();
   if (history.at(-1)?.stage !== stage) history = [...history, { stage, at }].slice(-12);
   const progress: AnalysisProgress = { stage, message, ...(detail ? { detail } : {}), history, updatedAt: at };
-  await db.prepare("UPDATE analyses SET progress_json = ? WHERE id = ?").bind(JSON.stringify(progress), id).run();
+  return Boolean(await db.prepare(`UPDATE analyses SET progress_json = ? WHERE id = ? AND ${OPEN} RETURNING id`)
+    .bind(JSON.stringify(progress), id).first());
 }
 
 /** The most recent finished analysis of a site other than `excludeId`: the crawl a re-run can reuse. */
@@ -231,6 +238,25 @@ export async function getPreviousCompletedAnalysis(
      WHERE site_id = ? AND id != ? AND status = 'completed' ORDER BY created_at DESC LIMIT 1`,
   ).bind(siteId, excludeId).first<{ id: string; completed_at: string }>();
   return row ? { id: String(row.id), completedAt: String(row.completed_at) } : null;
+}
+
+/**
+ * The runs a re-run can reuse crawl results from, oldest first: the last
+ * finished analysis, and any newer one that stopped part-way (cancelled or
+ * failed), so pages it already fetched aren't fetched again.
+ */
+export async function listReusableAnalyses(
+  db: D1Like,
+  siteId: string,
+  excludeId: string,
+): Promise<Array<{ id: string; completedAt: string }>> {
+  const finished = await getPreviousCompletedAnalysis(db, siteId, excludeId);
+  const since = finished ? (await db.prepare("SELECT created_at FROM analyses WHERE id = ?").bind(finished.id).first<{ created_at: string }>())?.created_at ?? "" : "";
+  const { results } = await db.prepare(
+    `SELECT id, COALESCE(completed_at, created_at) AS completed_at FROM analyses
+     WHERE site_id = ? AND id != ? AND status IN ('cancelled', 'failed') AND created_at > ? ORDER BY created_at DESC LIMIT 3`,
+  ).bind(siteId, excludeId, since).all<{ id: string; completed_at: string }>();
+  return [...(finished ? [finished] : []), ...results.reverse().map((row) => ({ id: String(row.id), completedAt: String(row.completed_at) }))];
 }
 
 /** Per URL, how an analysis's crawl ended and when. Paged, so a 25,000-URL crawl stays within D1's response size. */
@@ -309,11 +335,10 @@ export async function saveAnalysisReport(
   summary: string,
 ): Promise<void> {
   const completedAt = new Date().toISOString();
-  await db.prepare("UPDATE analyses SET report_json = ?, summary = ?, status = 'completed', completed_at = ? WHERE id = ?")
-    .bind(compactReport(report), summary, completedAt, id).run();
+  const site = await db.prepare(`UPDATE analyses SET report_json = ?, summary = ?, status = 'completed', completed_at = ? WHERE id = ? AND ${OPEN} RETURNING site_id`)
+    .bind(compactReport(report), summary, completedAt, id).first<{ site_id: string }>();
   // Every finished analysis adds a site-health point to Results.
-  const points = analysisHealthPoints(report, completedAt.slice(0, 10));
-  const site = points.length ? await db.prepare("SELECT site_id FROM analyses WHERE id = ?").bind(id).first<{ site_id: string }>() : null;
+  const points = site ? analysisHealthPoints(report, completedAt.slice(0, 10)) : [];
   try {
     if (site) await upsertMetricPoints(db, site.site_id, points);
   } catch {
@@ -393,13 +418,13 @@ export async function updateAnalysisStatus(
   id: string,
   status: string,
   extra?: { summary?: string; error?: string; completedAt?: string; startedAt?: string },
-): Promise<void> {
-  await db
+): Promise<boolean> {
+  return Boolean(await db
     .prepare(
       `UPDATE analyses SET status = ?, summary = COALESCE(?, summary),
        error = COALESCE(?, error), completed_at = COALESCE(?, completed_at),
        started_at = COALESCE(?, started_at)
-       WHERE id = ?`,
+       WHERE id = ? AND ${OPEN} RETURNING id`,
     )
     .bind(
       status,
@@ -409,7 +434,7 @@ export async function updateAnalysisStatus(
       extra?.startedAt ?? null,
       id,
     )
-    .run();
+    .first());
 }
 
 /**

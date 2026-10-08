@@ -215,8 +215,9 @@ export function AnalysisProgress({ run, analysisId, finish, onDismiss }: {
       pace.push(`${formatNumber(crawl.perMinute)} pages a minute`, crawl.secondsLeft < 60 ? "under a minute left" : `about ${duration(crawl.secondsLeft * 1000)} left`);
     } else if (crawl.crawled + crawl.pending > 0) pace.push("measuring the pace");
   }
-  // Crawl batches report every few seconds, so a quiet crawl is worth saying; other stages can be quiet for minutes.
-  if (stage?.key === "crawl" && !run.stalled && quiet > 3 * 60_000) pace.push(`last update ${duration(quiet)} ago`);
+  // Crawl batches report every few seconds; other stages can be quiet for a few minutes. Past that, say so in any stage.
+  const quietLimit = stage?.key === "crawl" ? 3 * 60_000 : 10 * 60_000;
+  const quietNote = !run.stalled && quiet > quietLimit ? `No update for ${duration(quiet)}. If it stays quiet, cancel and run again: pages already fetched are kept.` : null;
   const errors = crawl.failed + crawl.httpErrors + crawl.challenges;
   const gardenLabel = `Crawl garden: ${formatNumber(done)} of ${formatNumber(crawl.total)} sitemap URLs checked; ${formatNumber(crawl.emptyShells)} with empty HTML, ${formatNumber(errors)} errors, ${formatNumber(crawl.blocked)} blocked.`;
 
@@ -248,7 +249,7 @@ export function AnalysisProgress({ run, analysisId, finish, onDismiss }: {
           </div>
           {confirming && !run.stalled && (
             <div className="run-confirm" role="alertdialog" aria-label="Cancel this analysis?">
-              <span>Stop this analysis? The pages it has fetched so far won't be reused by the next run.</span>
+              <span>Stop this analysis? Pages it has already fetched are kept, so the next run won't fetch them again.</span>
               <span className="row">
                 <Button small variant="danger" busy={cancelling} onClick={() => void cancel()}>Stop analysis</Button>
                 <Button small variant="secondary" disabled={cancelling} onClick={() => setConfirming(false)}>Keep running</Button>
@@ -256,9 +257,10 @@ export function AnalysisProgress({ run, analysisId, finish, onDismiss }: {
             </div>
           )}
           {cancelError && <div className="callout error" role="alert">{cancelError}</div>}
+          {quietNote && !confirming && <div className="callout warn">{quietNote}</div>}
           {run.stalled && (
             <div className="callout warn" role="alert">
-              Nothing has moved for {duration(quiet)}, so this run has most likely stopped, for example because the server restarted. Start a new run to continue.
+              Nothing has moved for {duration(quiet)}, so this run has most likely stopped, for example because the server restarted. Start a new run to continue: pages it already fetched are kept.
             </div>
           )}
         </div>

@@ -31,8 +31,11 @@ export async function POST(request: Request, context: { params: Promise<{ siteId
   const site = await getSite(env.DB, siteId);
   if (!site) return Response.json({ error: "Site not found." }, { status: 404 });
   const latest = await getLatestAnalysisForSite(env.DB, siteId);
-  if (latest && (latest.status === "queued" || latest.status === "running") && !analysisStalled(latest)) {
-    return Response.json({ error: "An analysis is already running for this site." }, { status: 409 });
+  if (latest && (latest.status === "queued" || latest.status === "running")) {
+    if (!analysisStalled(latest)) return Response.json({ error: "An analysis is already running for this site." }, { status: 409 });
+    // A stalled run is closed before the new one starts, so it can't come back and write alongside it.
+    await env.ANALYSIS_WORKFLOW.get(latest.id).then((instance) => instance.terminate()).catch(() => undefined);
+    await updateAnalysisStatus(env.DB, latest.id, "failed", { error: "It stopped making progress, so a new run replaced it.", completedAt: new Date().toISOString() });
   }
 
   const analysisId = createId("analysis");

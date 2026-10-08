@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import type { CrawlPageResult } from "@organic-growth/core";
 import {
   analysisStalled, compactReport, createAnalysis, enqueueAnalysisCrawlUrls, estimateCrawl, getAnalysisJob, getCrawlCoverage, getCrawlProgress, getPreviousCompletedAnalysis,
-  listCrawlStates, listPendingCrawlUrls, reuseCrawlResults, saveCrawlBatch, updateAnalysisProgress, updateAnalysisStatus, upsertSite,
+  listCrawlStates, listPendingCrawlUrls, reuseCrawlResults, saveAnalysisReport, saveCrawlBatch, updateAnalysisProgress, updateAnalysisStatus, upsertSite,
 } from "./index.js";
 import { openSqliteD1 } from "./sqlite.js";
 
@@ -188,5 +188,27 @@ describe("live crawl progress", async () => {
     assert.equal(progress.crawled, 0, "reused results do not count as fetched in this run");
     const coverage = await getCrawlCoverage(db, "p2");
     assert.equal(coverage.emptyShellUrls, 1, "reused results still count toward the analysis");
+  });
+});
+
+describe("run lifecycle", () => {
+  it("never changes a finished run again: a dying run can't overwrite a cancel", async () => {
+    const db = openSqliteD1();
+    const now = new Date().toISOString();
+    await upsertSite(db, { id: "site", name: "z.com", baseUrl: "https://z.com", createdAt: now, updatedAt: now });
+    await createAnalysis(db, { id: "r1", siteId: "site", status: "queued", createdAt: now });
+    assert.equal(await updateAnalysisStatus(db, "r1", "running", { startedAt: now }), true);
+    assert.equal(await updateAnalysisProgress(db, "r1", "crawl", "Crawled 100"), true, "an open run takes progress");
+    assert.equal(await updateAnalysisStatus(db, "r1", "cancelled", { completedAt: now }), true);
+
+    assert.equal(await updateAnalysisStatus(db, "r1", "failed", { error: "boom" }), false);
+    assert.equal(await updateAnalysisStatus(db, "r1", "running"), false, "a retried first step can't reopen it");
+    assert.equal(await updateAnalysisProgress(db, "r1", "competitors", "Reading x.com"), false, "tells the run to stop");
+    await saveAnalysisReport(db, "r1", { findings: [] }, "late report");
+    const job = await getAnalysisJob(db, "r1");
+    assert.equal(job?.status, "cancelled");
+    assert.equal(job?.error, undefined);
+    assert.equal(job?.progress?.message, "Crawled 100");
+    assert.equal(job?.report, undefined);
   });
 });

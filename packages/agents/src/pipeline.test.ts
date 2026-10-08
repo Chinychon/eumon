@@ -66,6 +66,17 @@ describe("queueFullCrawl", async () => {
     assert.equal(progress.pending, 3, "the failed, the changed, and the new URL");
   });
 
+  it("reuses pages a cancelled run fetched after the last finished one", async () => {
+    await createAnalysis(db, { id: "stopped", siteId: "s", status: "running", createdAt: new Date(Date.now() + 1500).toISOString() });
+    await enqueueAnalysisCrawlUrls(db, { analysisId: "stopped", siteId: "s", urls: [{ url: `${origin}/doctors/x`, routeFamily: "doctors" }, { url: `${origin}/doctors/new`, routeFamily: "doctors" }] });
+    await saveCrawlBatch(db, { analysisId: "stopped", outcomes: [{ url: `${origin}/doctors/x`, page: page(`${origin}/doctors/x`) }] });
+    await updateAnalysisStatus(db, "stopped", "cancelled", { completedAt: new Date().toISOString() });
+    await createAnalysis(db, { id: "after", siteId: "s", status: "running", createdAt: new Date(Date.now() + 1800).toISOString() });
+    const queued = await queueFullCrawl(db, { analysisId: "after", siteId: "s", baseUrl: origin, maxUrls: 100, fetcher, now: Date.now() + 2 * DAY });
+    assert.equal(queued.reused, 3, "blog/a and blog/b from the finished run, doctors/x from the cancelled one");
+    assert.equal(queued.queued, 2, "only the changed and the never-fetched URL");
+  });
+
   it("re-crawls everything on a full run", async () => {
     await createAnalysis(db, { id: "third", siteId: "s", status: "running", createdAt: new Date(Date.now() + 2000).toISOString() });
     const queued = await queueFullCrawl(db, { analysisId: "third", siteId: "s", baseUrl: origin, maxUrls: 100, fetcher, full: true });

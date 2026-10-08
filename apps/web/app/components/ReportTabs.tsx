@@ -1,8 +1,9 @@
 "use client";
 
-import type { ReactNode } from "react";
-import { countryName, type SiteRecord } from "@organic-growth/core";
-import { formatNumber } from "./api";
+import { useEffect, useState, type ReactNode } from "react";
+import { COVERAGE_CLASSES, countryName, type CoverageClass, type SiteRecord } from "@organic-growth/core";
+import type { IndexCoverage } from "@organic-growth/db";
+import { api, formatNumber } from "./api";
 import { BarList, Funnel, Heatmap, PairedBars, Scatter } from "./charts";
 import { CrawlGarden } from "./pixel";
 import { SiteGraph } from "./SiteGraph";
@@ -126,13 +127,67 @@ export function searchPoints(search: NonNullable<Report["search"]>) {
   ];
 }
 
-export function SearchTab({ report, onNavigate }: { report: Report; onNavigate: Navigate }) {
+const COVERAGE_LABEL: Record<CoverageClass, string> = {
+  indexed: "Indexed", crawled: "Crawled, not indexed", discovered: "Discovered, not crawled", unknown: "Unknown to Google", excluded: "Excluded",
+};
+
+/** A stacked bar of what Google did with checked URLs, in the class order. */
+function CoverageBar({ byClass, checked }: { byClass: Record<CoverageClass, number>; checked: number }) {
+  return (
+    <span className="coverage-bar" role="img" aria-label={COVERAGE_CLASSES.map((name) => `${COVERAGE_LABEL[name]} ${byClass[name]}`).join(", ")}>
+      {checked > 0 && COVERAGE_CLASSES.map((name) => byClass[name] > 0 && <i key={name} className={`cov-${name}`} style={{ width: `${(byClass[name] / checked) * 100}%` }} title={`${COVERAGE_LABEL[name]}: ${formatNumber(byClass[name])}`} />)}
+    </span>
+  );
+}
+
+/** How many sitemap URLs Google has crawled and indexed, from URL Inspection a few hundred a day. */
+function IndexCoverageCard({ siteId, onNavigate }: { siteId: string; onNavigate: Navigate }) {
+  const [data, setData] = useState<{ coverage: IndexCoverage | null; connected: boolean } | null>(null);
+  useEffect(() => { api<{ coverage: IndexCoverage | null; connected: boolean }>(`/api/sites/${siteId}/index-coverage`).then(setData).catch(() => setData(null)); }, [siteId]);
+  if (!data) return null;
+  const title = "Google crawl coverage";
+  if (!data.connected) {
+    return <Card title={title}><p className="empty-state">Connect Search Console to ask Google about each sitemap URL.</p><Button small variant="secondary" onClick={() => onNavigate("connections")}>Open Setup</Button></Card>;
+  }
+  const coverage = data.coverage;
+  if (!coverage || coverage.checked === 0) {
+    return <Card title={title} subtitle="Google is asked about a few hundred sitemap URLs a day."><p className="empty-state">No URLs checked yet. The first ones are checked on the next sync.</p></Card>;
+  }
+  const days = Math.ceil((coverage.total - coverage.checked) / 1800);
+  const share = (n: number) => `${Math.round((n / coverage.checked) * 100)}%`;
+  return (
+    <Card title={title} subtitle={`Checked ${formatNumber(coverage.checked)} of ${formatNumber(coverage.total)} sitemap URLs with Google.${days > 0 ? ` About ${days} more day${days === 1 ? "" : "s"} until every URL is checked once.` : " Every URL has been checked; each is checked again after 30 days."}`}>
+      <CoverageBar byClass={coverage.byClass} checked={coverage.checked} />
+      <div className="chart-legend coverage-legend">
+        {COVERAGE_CLASSES.map((name) => <span key={name} className={`cov-${name}`}>{COVERAGE_LABEL[name]} {formatNumber(coverage.byClass[name])} · {share(coverage.byClass[name])}</span>)}
+      </div>
+      <p className="small muted">{formatNumber(coverage.recentlyCrawled)} of the checked URLs ({share(coverage.recentlyCrawled)}) were crawled by Google in the last 30 days. Shares are of checked URLs.</p>
+      <div className="table-wrap">
+        <table className="table coverage-table">
+          <thead><tr><th>Page type</th><th className="num">Checked</th><th>What Google did</th></tr></thead>
+          <tbody>{coverage.families.map((family) => (
+            <tr key={family.family}>
+              <td><code>{familyLabel(family.family)}</code></td>
+              <td className="num">{formatNumber(family.checked)} of {formatNumber(family.total)}</td>
+              <td><CoverageBar byClass={family.byClass} checked={family.checked} /></td>
+            </tr>
+          ))}</tbody>
+        </table>
+      </div>
+    </Card>
+  );
+}
+
+export function SearchTab({ siteId, report, onNavigate }: { siteId: string; report: Report; onNavigate: Navigate }) {
   const search = report.search;
   if (!search) {
     return (
-      <Card title="No search data yet" subtitle="Connect Search Console to see which searches find this site, the queries closest to page one, and pages searchers skip.">
-        <Button onClick={() => onNavigate("connections")}>Connect Search Console</Button>
-      </Card>
+      <div className="results">
+        <IndexCoverageCard siteId={siteId} onNavigate={onNavigate} />
+        <Card title="No search data yet" subtitle="Connect Search Console to see which searches find this site, the queries closest to page one, and pages searchers skip.">
+          <Button onClick={() => onNavigate("connections")}>Connect Search Console</Button>
+        </Card>
+      </div>
     );
   }
   const entity = search.entityQueries?.byType[0];
@@ -141,6 +196,7 @@ export function SearchTab({ report, onNavigate }: { report: Report; onNavigate: 
   const findings = search.lowCtrPages.length || search.cannibalized.length ? [] : report.findings.filter((finding) => finding.category === "search");
   return (
     <div className="results">
+      <IndexCoverageCard siteId={siteId} onNavigate={onNavigate} />
       <div className="metrics-grid">
         <Kpi label="Clicks" value={formatNumber(search.totals.clicks)} caption={`${formatNumber(search.totals.impressions)} impressions · ${(search.totals.ctr * 100).toFixed(1)}% CTR`} />
         <Kpi label="From target markets" value={search.targetShare ? share(search.targetShare.impressions) : "—"} caption={search.targetShare ? search.targetMarkets.map(countryName).join(", ") : "Set markets in Setup"} />

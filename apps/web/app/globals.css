@@ -679,6 +679,15 @@ details.disclosure[open] > summary { margin-bottom: 10px; }
 .results-pair { gap: 0 24px; margin-bottom: 14px; }
 .results-inline { margin: 6px 0 14px; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
 .rank-buckets + p { margin-top: 10px; }
+.coverage-bar { display: flex; height: 10px; width: 100%; min-width: 120px; background: var(--track); }
+.coverage-bar i { display: block; height: 100%; }
+.cov-indexed { --c: var(--green); } .coverage-bar .cov-indexed { background: var(--green); }
+.cov-crawled { --c: var(--amber-fill); } .coverage-bar .cov-crawled { background: var(--amber-fill); }
+.cov-discovered { --c: var(--s3); } .coverage-bar .cov-discovered { background: var(--s3); }
+.cov-unknown { --c: var(--line-strong); } .coverage-bar .cov-unknown { background: var(--line-strong); }
+.cov-excluded { --c: var(--soft); } .coverage-bar .cov-excluded { background: var(--soft); }
+.coverage-legend { margin: 10px 0 6px; }
+.coverage-table td:last-child { width: 50%; }
 .speed-tiles { margin: 0 calc(-1 * var(--pad)) 16px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
 .speed-tile { padding: 14px var(--pad) 10px; min-width: 0; }
 .speed-tile + .speed-tile { border-left: 1px solid var(--line); }

@@ -182,9 +182,9 @@ export async function listSitesForResults(db: D1Like): Promise<string[]> {
 }
 
 /** Every Search Console metric, as `LIKE` patterns (a property change starts their history over). */
-export const SEARCH_METRIC_PATTERNS = ["search\\_%", "eumon\\_search\\_%", "queries\\_%", "pages\\_indexed", "pages\\_not\\_indexed"];
+export const SEARCH_METRIC_PATTERNS = ["search\\_%", "eumon\\_search\\_%", "queries\\_%", "pages\\_indexed", "pages\\_not\\_indexed", "sync.search%"];
 /** Every GA4 metric. */
-export const GA4_METRIC_PATTERNS = ["ga4\\_%"];
+export const GA4_METRIC_PATTERNS = ["ga4\\_%", "sync.ga4"];
 
 /** Deletes a source's points (by `LIKE` pattern), so the next sync backfills them from the new source. */
 export async function clearMetricPoints(db: D1Like, siteId: string, patterns: string[]): Promise<void> {

@@ -92,4 +92,14 @@ describe("results sync", () => {
     assert.ok(inspections <= 10, `${inspections} inspections after the first refusal`);
     assert.ok(notes.some((note) => note.startsWith("inspection stopped")), notes.join("; "));
   });
+
+  it("backfills once even when a property has no data yet", async () => {
+    const { db, site: record } = await site();
+    const fetchFn = (async () => new Response(JSON.stringify({ rows: [] }))) as unknown as typeof fetch;
+    const google = { connect: async () => ({ token: "t", scopes: [SEARCH_CONSOLE_SCOPE, ANALYTICS_SCOPE] }), fetchFn };
+    const first = await syncResults(db, record, now, google);
+    assert.ok(first.includes("search: 486 days") && first.includes("analytics: 486 days"), first.join("; "));
+    const second = await syncResults(db, record, now, google);
+    assert.ok(second.includes("search: 7 days") && second.includes("analytics: 7 days"), second.join("; "));
+  });
 });

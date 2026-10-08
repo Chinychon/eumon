@@ -43,15 +43,15 @@ export async function syncResults(db: D1Like, site: SiteRecord, now: Date, googl
     if (!scopes.includes(ANALYTICS_SCOPE)) notes.push("analytics: reconnect Google");
     else {
       try {
-        const backfill = !(await firstMetricDay(db, site.id, "ga4_sessions"));
-        const days = await fetchGa4Daily(token, site.ga4Property, addDays(today, backfill ? -BACKFILL_DAYS : -7), addDays(today, -1), google.fetchFn);
-        await upsertMetricPoints(db, site.id, days.flatMap((day) => [
+        const span = (await synced(db, site.id, "sync.ga4", "ga4_sessions")) ? 7 : BACKFILL_DAYS;
+        const days = await fetchGa4Daily(token, site.ga4Property, addDays(today, -span), addDays(today, -1), google.fetchFn);
+        await upsertMetricPoints(db, site.id, [...days.flatMap((day) => [
           { metric: "ga4_sessions", day: day.day, value: day.sessions },
           { metric: "ga4_organic_sessions", day: day.day, value: day.organicSessions },
           { metric: "ga4_organic_engaged_sessions", day: day.day, value: day.organicEngagedSessions },
           { metric: "ga4_organic_key_events", day: day.day, value: day.organicKeyEvents },
-        ]));
-        notes.push(`analytics: ${days.length} days`);
+        ]), { metric: "sync.ga4", day: today, value: days.length }]);
+        notes.push(`analytics: ${span} days`);
       } catch (error) {
         notes.push(`analytics failed: ${error instanceof Error ? error.message : String(error)}`);
       }
@@ -60,15 +60,19 @@ export async function syncResults(db: D1Like, site: SiteRecord, now: Date, googl
   return notes;
 }
 
+/** Whether a source has synced before: its marker, or (for sites synced before markers existed) its data. */
+async function synced(db: D1Like, siteId: string, marker: string, data: string): Promise<boolean> {
+  return Boolean((await firstMetricDay(db, siteId, marker)) ?? (await firstMetricDay(db, siteId, data)));
+}
+
 async function syncSearch(db: D1Like, site: SiteRecord, property: string, token: string, today: string, now: Date, fetchFn?: typeof fetch): Promise<string[]> {
-  const backfill = !(await firstMetricDay(db, site.id, "search_clicks"));
-  const span = backfill ? BACKFILL_DAYS : 7;
+  const span = (await synced(db, site.id, "sync.search", "search_clicks")) ? 7 : BACKFILL_DAYS;
   const range = { startDate: addDays(today, -span), endDate: addDays(today, -1) };
   const settings = (await getPageSettings(db, site.id)) ?? defaultPageSettings(site.id, site.name, site.baseUrl);
   const origin = new URL(settings.publicOrigin).origin;
   const markets = await listSiteMarkets(db, site.id);
   // Markets can be set (or changed, which clears them) after the first sync, so their history backfills on its own.
-  const marketSpan = markets.length && !(await firstMetricDay(db, site.id, "search_clicks@markets")) ? BACKFILL_DAYS : 7;
+  const marketSpan = markets.length && !(await synced(db, site.id, "sync.search@markets", "search_clicks@markets")) ? BACKFILL_DAYS : 7;
   const marketRange = { startDate: addDays(today, -marketSpan), endDate: range.endDate };
   const [all, eumon, ...perMarket] = await Promise.all([
     fetchSearchDaily(token, property, range, fetchFn),
@@ -76,6 +80,9 @@ async function syncSearch(db: D1Like, site: SiteRecord, property: string, token:
     ...markets.map((country) => fetchSearchDaily(token, property, { ...marketRange, country }, fetchFn)),
   ]);
   const points: MetricPoint[] = [
+    // "Synced" markers, so a property with no rows yet doesn't re-run the 16-month backfill every day.
+    { metric: "sync.search", day: today, value: all.length },
+    ...(markets.length ? [{ metric: "sync.search@markets", day: today, value: perMarket.flat().length }] : []),
     ...searchDayPoints(all),
     ...searchDayPoints(eumon, "eumon_"),
     ...(markets.length ? searchDayPoints(perMarket.flat(), "", "@markets") : []),

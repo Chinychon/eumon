@@ -1,12 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import type { Compare, ResultsView as Results } from "@organic-growth/core";
+import { countryName, type Compare, type ResultsView as Results } from "@organic-growth/core";
 import { api, errorMessage, formatNumber } from "./api";
 import { Funnel, LineChart } from "./charts";
 import { Button, Card, Kpi, ViewHeader } from "./ui";
 
-type Payload = { site: { name: string; baseUrl: string; gscProperty: string | null; ga4Property: string | null }; results: Results };
+type Payload = { site: { name: string; baseUrl: string; searchConnected: boolean; analytics: "connected" | "reconnect" | "none" }; results: Results };
 
 const day = (value: string) => new Date(`${value}T00:00:00Z`).toLocaleDateString("en", { day: "numeric", month: "short", timeZone: "UTC" });
 const pct = (value: number | null, digits = 1) => (value === null ? "—" : `${(value * 100).toFixed(digits)}%`);
@@ -69,7 +69,7 @@ export function ResultsView({ endpoint, operator, onNavigate }: { endpoint: stri
       />
       <div className="results">
         <Card title="Google clicks per week" subtitle={results.goLive ? "The whole site, and Eumon's pages since they went live." : "The whole site. Eumon's pages appear once the first one is published."}>
-          {site.gscProperty && results.headline.some((week) => week.site !== null)
+          {site.searchConnected && results.headline.some((week) => week.site !== null)
             ? <LineChart series={results.goLive ? ["whole site", "eumon pages"] : ["whole site"]} marker={goLive} partialFrom={partialFrom}
                 points={results.headline.map((week) => ({ x: week.week, values: results.goLive ? [week.site, week.eumon] : [week.site] }))} />
             : <ConnectPrompt operator={operator} what="Search Console" onNavigate={onNavigate} />}
@@ -77,11 +77,11 @@ export function ResultsView({ endpoint, operator, onNavigate }: { endpoint: stri
         <div className="metrics-grid">
           <Kpi label="Google clicks · 28 days" value={results.numbers.clicks.current === null ? "—" : formatNumber(results.numbers.clicks.current)} caption={versus(results.numbers.clicks)} />
           <Kpi label="Enquiries · 28 days" value={results.numbers.leads.current === null ? "—" : formatNumber(results.numbers.leads.current)} caption={versus(results.numbers.leads)} />
-          <Kpi label="Organic sessions · 28 days" value={results.numbers.organicSessions?.current == null ? "—" : formatNumber(results.numbers.organicSessions.current)} caption={results.numbers.organicSessions ? versus(results.numbers.organicSessions) : "Connect Google Analytics"} />
+          <Kpi label="Organic sessions · 28 days" value={results.numbers.organicSessions?.current == null ? "—" : formatNumber(results.numbers.organicSessions.current)} caption={results.numbers.organicSessions ? versus(results.numbers.organicSessions) : analyticsState(site.analytics, operator)} />
           <Kpi label="Pages live" value={formatNumber(pages.live)} caption={pages.live ? `${formatNumber(pages.indexed)} indexed · ${formatNumber(pages.notIndexed)} not · ${formatNumber(pages.unchecked)} not checked yet` : "No Eumon pages published yet"} />
         </div>
 
-        <Card title="Are more people finding you on Google?" subtitle={results.search?.scoped ? `Scoped to your target markets: ${results.markets.join(", ").toUpperCase()}.` : results.markets.length ? "Every country, until your target markets' history is synced." : "Every country. Set target markets in Connections to focus this section."}>
+        <Card title="Are more people finding you on Google?" subtitle={results.search?.scoped ? `Scoped to your target markets: ${results.markets.map(countryName).join(", ")}.` : results.markets.length ? "Every country, until your target markets' history is synced." : operator ? "Every country. Set target markets in Connections to focus this section." : "Every country."}>
           {results.search ? (
             <>
               <div className="ruled-grid c11 results-pair">
@@ -119,7 +119,7 @@ export function ResultsView({ endpoint, operator, onNavigate }: { endpoint: stri
           <div className="section-title">Enquiries per week</div>
           {results.leads.weeks.some((week) => week.other !== null || week.eumon !== null)
             ? <LineChart series={["from eumon pages", "everything else"]} marker={goLive} partialFrom={results.leads.weeks.find((week) => week.partial)?.week} points={results.leads.weeks.map((week) => ({ x: week.week, values: [week.eumon, week.other] }))} />
-            : <p className="empty-state">No enquiries tracked yet. Install tracking in Setup to count WhatsApp taps, calls, and forms.</p>}
+            : <p className="empty-state">{operator ? "No enquiries tracked yet. Install tracking in Setup to count WhatsApp taps, calls, and forms." : "No enquiries tracked yet."}</p>}
         </Card>
 
         {operator && (
@@ -131,6 +131,13 @@ export function ResultsView({ endpoint, operator, onNavigate }: { endpoint: stri
       </div>
     </div>
   );
+}
+
+/** Why organic sessions are missing: never connected, needs the Analytics permission, or not synced yet. */
+function analyticsState(analytics: Payload["site"]["analytics"], operator: boolean) {
+  if (analytics === "reconnect") return operator ? "Reconnect Google in Connections to add Analytics" : "Analytics not connected yet";
+  if (analytics === "connected") return "Collecting data";
+  return operator ? "Connect Google Analytics" : "Analytics not connected yet";
 }
 
 function ConnectPrompt({ operator, what, onNavigate }: { operator: boolean; what: string; onNavigate?: (view: "connections") => void }) {

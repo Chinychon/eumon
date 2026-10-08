@@ -46,11 +46,12 @@ export const worker = defineWorker({
       // Optional: real-user speed and lab scores (Google API key with the CrUX and PageSpeed Insights APIs), and authority (Open PageRank).
       GOOGLE_API_KEY: bindings.secret(),
       OPEN_PAGERANK_KEY: bindings.secret(),
-      // Optional language model keys, used in this order: DeepSeek, Claude, then Workers AI.
+      // Language model key: DeepSeek is used first, then Claude, then Workers AI.
+      // Every secret declared here must be set before a deploy (Cloudflare has no optional secrets),
+      // and local dev loads only declared keys from .dev.vars. ANTHROPIC_API_KEY and LLM_MODEL are
+      // left undeclared so they stay optional: set them with `wrangler secret put` in production,
+      // and declare them here again to use them in local dev.
       DEEPSEEK_API_KEY: bindings.secret(),
-      ANTHROPIC_API_KEY: bindings.secret(),
-      // Optional model override for the active provider, e.g. "deepseek-v4-pro".
-      LLM_MODEL: bindings.secret(),
     },
   });
 

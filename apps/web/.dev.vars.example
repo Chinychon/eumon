@@ -11,6 +11,7 @@ GOOGLE_API_KEY=
 OPEN_PAGERANK_KEY=
 # Optional language model for scoping, extraction, and page copy. The first key that is set wins:
 # DEEPSEEK_API_KEY (default model deepseek-flash), then ANTHROPIC_API_KEY (claude-opus-5-5), then Workers AI.
+# ANTHROPIC_API_KEY and LLM_MODEL are only loaded locally once declared in cloudflare.config.ts (see the note there).
 # Workers AI needs Cloudflare credentials in local development, so set one of these keys to use the AI steps locally.
 DEEPSEEK_API_KEY=
 ANTHROPIC_API_KEY=

@@ -3,6 +3,8 @@
  * sessions with the Organic Search share, for the Results ledger.
  */
 
+import { googleError } from "./google-search-console.js";
+
 export type Ga4Day = { day: string; sessions: number; organicSessions: number; organicEngagedSessions: number; organicKeyEvents: number };
 
 export async function listGa4Properties(accessToken: string, fetchFn: typeof fetch = fetch): Promise<Array<{ property: string; name: string }>> {
@@ -12,7 +14,7 @@ export async function listGa4Properties(accessToken: string, fetchFn: typeof fet
     const response = await fetchFn(`https://analyticsadmin.googleapis.com/v1beta/accountSummaries?pageSize=200${pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : ""}`, {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
-    if (!response.ok) throw new Error(`Google Analytics properties request failed (${response.status}).`);
+    if (!response.ok) throw await googleError(response, "Google Analytics properties request");
     const json = await response.json() as { accountSummaries?: Array<{ displayName?: string; propertySummaries?: Array<{ property: string; displayName?: string }> }>; nextPageToken?: string };
     for (const account of json.accountSummaries ?? []) {
       for (const summary of account.propertySummaries ?? []) {
@@ -55,6 +57,6 @@ export async function fetchGa4Daily(accessToken: string, property: string, start
       limit: 100_000,
     }),
   });
-  if (!response.ok) throw new Error(`Google Analytics report request failed (${response.status}).`);
+  if (!response.ok) throw await googleError(response, "Google Analytics report request");
   return ga4Days(await response.json());
 }

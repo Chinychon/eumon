@@ -1,6 +1,13 @@
 import type { SearchMetricRow } from "@organic-growth/core";
 import type { QueryPosition, SearchDay } from "./results-points.js";
 
+/** A failed Google API call, carrying the HTTP status and Google's own explanation (e.g. "… API has not been used in project …"). */
+export async function googleError(response: Response, what: string): Promise<Error & { status: number }> {
+  const body = await response.json().catch(() => null) as { error?: { message?: string } } | null;
+  const reason = body?.error?.message;
+  return Object.assign(new Error(`${what} failed (${response.status})${reason ? `: ${reason}` : "."}`), { status: response.status });
+}
+
 interface SearchAnalyticsResponse {
   rows?: Array<{ keys: string[]; clicks: number; impressions: number; ctr: number; position: number }>;
 }
@@ -9,7 +16,7 @@ export async function listSearchConsoleProperties(accessToken: string): Promise<
   const response = await fetch("https://www.googleapis.com/webmasters/v3/sites", {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
-  if (!response.ok) throw new Error(`Search Console properties request failed (${response.status}).`);
+  if (!response.ok) throw await googleError(response, "Search Console properties request");
   const result = await response.json() as { siteEntry?: Array<{ siteUrl: string; permissionLevel: string }> };
   return result.siteEntry ?? [];
 }
@@ -44,7 +51,7 @@ export async function fetchSearchConsoleMetrics(
         }),
       },
     );
-    if (!response.ok) throw new Error(`Search Console metrics request failed (${response.status}).`);
+    if (!response.ok) throw await googleError(response, "Search Console metrics request");
     const result = await response.json() as SearchAnalyticsResponse;
     const resultRows = result.rows ?? [];
     for (const row of resultRows) {
@@ -103,7 +110,7 @@ async function querySearchAnalytics(accessToken: string, property: string, optio
         }),
       },
     );
-    if (!response.ok) throw new Error(`Search Console metrics request failed (${response.status}).`);
+    if (!response.ok) throw await googleError(response, "Search Console metrics request");
     const batch = ((await response.json()) as SearchAnalyticsResponse).rows ?? [];
     rows.push(...batch);
     if (batch.length < pageSize) break;
@@ -188,6 +195,6 @@ export async function inspectUrl(accessToken: string, property: string, url: str
     headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
     body: JSON.stringify({ inspectionUrl: url, siteUrl: property }),
   });
-  if (!response.ok) throw Object.assign(new Error(`URL Inspection request failed (${response.status}).`), { status: response.status });
+  if (!response.ok) throw await googleError(response, "URL Inspection request");
   return inspectionResult(await response.json());
 }

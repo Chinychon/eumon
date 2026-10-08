@@ -20,7 +20,7 @@ export function ConnectionsView({ site, repositories, githubInstalled, onSiteCha
   const [gscProperties, setGscProperties] = useState<Array<{ siteUrl: string }>>([]);
   const [gscSelected, setGscSelected] = useState(site.gscProperty ?? "");
   const [gscMessage, setGscMessage] = useState("");
-  const [ga4, setGa4] = useState<{ properties: Array<{ property: string; name: string }>; selected: string | null; needsReconnect: boolean; connected: boolean } | null>(null);
+  const [ga4, setGa4] = useState<{ properties: Array<{ property: string; name: string }>; selected: string | null; needsReconnect: boolean; connected: boolean; error?: string } | null>(null);
   const [ga4Message, setGa4Message] = useState("");
   const [competitors, setCompetitors] = useState("");
   const [savedCompetitors, setSavedCompetitors] = useState("");
@@ -33,7 +33,7 @@ export function ConnectionsView({ site, repositories, githubInstalled, onSiteCha
     api<{ properties: Array<{ siteUrl: string }>; selected: string | null }>(`/api/sites/${site.id}/gsc/properties`)
       .then((data) => { setGscProperties(data.properties); if (data.selected) setGscSelected(data.selected); })
       .catch(() => setGscProperties([]));
-    api<{ properties: Array<{ property: string; name: string }>; selected: string | null; needsReconnect: boolean; connected: boolean }>(`/api/sites/${site.id}/ga4/properties`)
+    api<NonNullable<typeof ga4>>(`/api/sites/${site.id}/ga4/properties`)
       .then(setGa4).catch(() => setGa4(null));
   }, [site.id]);
 
@@ -74,7 +74,7 @@ export function ConnectionsView({ site, repositories, githubInstalled, onSiteCha
     setGscSelected(property);
     try {
       await api(`/api/sites/${site.id}/gsc/properties`, { method: "POST", json: { property } });
-      setGscMessage("Search Console property saved.");
+      setGscMessage("Search Console property saved. The Search tab now shows the last 28 days.");
       onSiteChanged({ ...site, gscProperty: property });
     } catch (cause) { setGscMessage(errorMessage(cause)); }
   }
@@ -108,37 +108,35 @@ export function ConnectionsView({ site, repositories, githubInstalled, onSiteCha
           </div>
         </div>
         <div className="list-row">
-          <Badge tone={site.gscProperty ? "green" : "gray"}>{site.gscProperty ? "Search Console" : "Recommended"}</Badge>
+          <Badge tone={site.gscProperty || site.ga4Property ? "green" : "gray"}>{site.gscProperty || site.ga4Property ? "Google" : "Recommended"}</Badge>
           <div className="grow">
-            <h3>{site.gscProperty ?? "Google Search Console"}</h3>
-            <p>Queries, impressions, and rankings: the evidence behind page opportunities and the performance loop.</p>
+            <h3>Google Search Console and Analytics</h3>
+            <p>One sign-in covers both. Search Console: queries, impressions, and rankings. Analytics: organic sessions and key events, the "before Eumon" baseline Results compares against.</p>
             <div className="row" style={{ marginTop: 8 }}>
-              <a className="btn btn-secondary btn-small" href={`/api/sites/${site.id}/gsc/connect`}>{gscProperties.length || site.gscProperty ? "Reconnect Google" : "Connect Google"}</a>
-              {gscProperties.length > 0 && (
+              <a className="btn btn-secondary btn-small" href={`/api/sites/${site.id}/gsc/connect`}>
+                {ga4?.needsReconnect ? "Reconnect Google to add Analytics" : ga4?.connected ? "Reconnect Google" : "Connect Google"}
+              </a>
+            </div>
+            {gscProperties.length > 0 && (
+              <label className="row small" style={{ marginTop: 8 }}>
+                <span style={{ minWidth: 120 }}>Search Console</span>
                 <select className="select" style={{ maxWidth: 320 }} value={gscSelected} onChange={(event) => void chooseProperty(event.target.value)}>
                   <option value="">Choose a property</option>
                   {gscProperties.map((property) => <option key={property.siteUrl} value={property.siteUrl}>{property.siteUrl}</option>)}
                 </select>
-              )}
-            </div>
+              </label>
+            )}
             {gscMessage && <p className="small">{gscMessage}</p>}
-          </div>
-        </div>
-        <div className="list-row">
-          <Badge tone={site.ga4Property ? "green" : "gray"}>{site.ga4Property ? "Analytics" : "Recommended"}</Badge>
-          <div className="grow">
-            <h3>{ga4?.properties.find((entry) => entry.property === site.ga4Property)?.name ?? site.ga4Property ?? "Google Analytics 4"}</h3>
-            <p>Organic sessions and key events, with 16 months of history: the "before Eumon" baseline Results compares against.</p>
-            <div className="row" style={{ marginTop: 8 }}>
-              {!ga4?.connected || ga4.needsReconnect
-                ? <a className="btn btn-secondary btn-small" href={`/api/sites/${site.id}/gsc/connect`}>{ga4?.needsReconnect ? "Reconnect Google to add Analytics" : "Connect Google"}</a>
-                : (
-                  <select className="select" style={{ maxWidth: 360 }} value={ga4.selected ?? ""} onChange={(event) => void chooseGa4(event.target.value)}>
-                    <option value="">Choose a property</option>
-                    {ga4.properties.map((entry) => <option key={entry.property} value={entry.property}>{entry.name}</option>)}
-                  </select>
-                )}
-            </div>
+            {ga4?.connected && !ga4.needsReconnect && !ga4.error && (
+              <label className="row small" style={{ marginTop: 8 }}>
+                <span style={{ minWidth: 120 }}>Analytics</span>
+                <select className="select" style={{ maxWidth: 360 }} value={ga4.selected ?? ""} onChange={(event) => void chooseGa4(event.target.value)}>
+                  <option value="">Choose a property</option>
+                  {ga4.properties.map((entry) => <option key={entry.property} value={entry.property}>{entry.name}</option>)}
+                </select>
+              </label>
+            )}
+            {ga4?.error && <p className="small">Google Analytics: {ga4.error}</p>}
             {ga4Message && <p className="small">{ga4Message}</p>}
           </div>
         </div>

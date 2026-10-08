@@ -49,4 +49,10 @@ describe("Google clients", () => {
     assert.deepEqual((await listGa4Properties("t", fetchFn)).map((entry) => entry.property), ["properties/1", "properties/2"]);
     assert.ok(urls[1]!.includes("pageToken=p2"));
   });
+
+  it("says why Google refused, so a disabled API can be fixed", async () => {
+    const body = { error: { code: 403, message: "Google Analytics Admin API has not been used in project 1 before or it is disabled.", status: "PERMISSION_DENIED" } };
+    const fetchFn = (async () => new Response(JSON.stringify(body), { status: 403 })) as unknown as typeof fetch;
+    await assert.rejects(listGa4Properties("t", fetchFn), /Admin API has not been used in project 1 before or it is disabled/);
+  });
 });

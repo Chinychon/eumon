@@ -113,6 +113,12 @@ export async function queueFullCrawl(
   };
 }
 
+/** Words that make a search branded: the site's name, repository, and domain. */
+export function siteBrandTerms(site: { name: string; baseUrl: string; githubRepo?: string }): string[] {
+  return [site.name, site.githubRepo, new URL(site.baseUrl).hostname.replace(/^www\./, "").split(".")[0]]
+    .filter((term): term is string => Boolean(term));
+}
+
 export interface RunAnalysisInput {
   /** The persisted analysis this run belongs to, so findings link back to it. */
   analysisId: string;
@@ -311,11 +317,7 @@ export async function runFullAnalysis(input: RunAnalysisInput) {
   );
 
   const searchMetrics = input.searchMetrics ?? [];
-  const brandTerms = [
-    input.name,
-    input.githubRepo,
-    new URL(input.baseUrl).hostname.replace(/^www\./, "").split(".")[0],
-  ].filter((term): term is string => Boolean(term));
+  const brandTerms = siteBrandTerms(input);
   const search = analyzeSearch(searchMetrics, { brandTerms, targetMarkets: input.targetMarkets, entityKeys: input.entityKeys });
   if (searchMetrics.length) findings.push(...findingsFromSearch(search, input.siteId, analysisId));
 

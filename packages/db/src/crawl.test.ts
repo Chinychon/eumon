@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import type { CrawlPageResult } from "@organic-growth/core";
 import {
   analysisStalled, compactReport, createAnalysis, enqueueAnalysisCrawlUrls, estimateCrawl, getAnalysisJob, getCrawlCoverage, getCrawlProgress, getPreviousCompletedAnalysis,
-  listCrawlStates, listPendingCrawlUrls, reuseCrawlResults, saveAnalysisReport, saveCrawlBatch, updateAnalysisProgress, updateAnalysisStatus, upsertSite,
+  listCrawlStates, listPendingCrawlUrls, reuseCrawlResults, saveAnalysisReport, saveCrawlBatch, setLatestReportSearch, updateAnalysisProgress, updateAnalysisStatus, upsertSite,
 } from "./index.js";
 import { openSqliteD1 } from "./sqlite.js";
 
@@ -210,5 +210,22 @@ describe("run lifecycle", () => {
     assert.equal(job?.error, undefined);
     assert.equal(job?.progress?.message, "Crawled 100");
     assert.equal(job?.report, undefined);
+  });
+});
+
+describe("search section on the last report", () => {
+  it("fills in the latest finished report's search data without a new run", async () => {
+    const db = openSqliteD1();
+    const now = new Date().toISOString();
+    await upsertSite(db, { id: "site", name: "z.com", baseUrl: "https://z.com", createdAt: now, updatedAt: now });
+    await createAnalysis(db, { id: "old", siteId: "site", status: "running", createdAt: "2026-10-01T00:00:00.000Z" });
+    await saveAnalysisReport(db, "old", { findings: [], search: null }, "old");
+    await createAnalysis(db, { id: "new", siteId: "site", status: "running", createdAt: "2026-10-02T00:00:00.000Z" });
+    await saveAnalysisReport(db, "new", { findings: [1], search: null }, "new");
+    await createAnalysis(db, { id: "live", siteId: "site", status: "running", createdAt: "2026-10-03T00:00:00.000Z" });
+
+    assert.equal(await setLatestReportSearch(db, "site", { totals: { clicks: 5 } }), true);
+    assert.deepEqual((await getAnalysisJob(db, "new"))?.report, { findings: [1], search: { totals: { clicks: 5 } } });
+    assert.deepEqual((await getAnalysisJob(db, "old"))?.report, { findings: [], search: null }, "older reports keep their own data");
   });
 });

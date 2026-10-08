@@ -295,6 +295,18 @@ export async function reuseCrawlResults(
   for (const group of chunks(statements, 50)) await runStatements(db, group);
 }
 
+/**
+ * Replaces the search section of the site's latest finished report, so
+ * connecting Search Console shows search data without waiting for a new run.
+ */
+export async function setLatestReportSearch(db: D1Like, siteId: string, search: unknown): Promise<boolean> {
+  return Boolean(await db.prepare(
+    `UPDATE analyses SET report_json = json_set(report_json, '$.search', json(?))
+     WHERE id = (SELECT id FROM analyses WHERE site_id = ? AND status = 'completed' AND report_json IS NOT NULL ORDER BY created_at DESC LIMIT 1)
+     RETURNING id`,
+  ).bind(JSON.stringify(search), siteId).first());
+}
+
 /** Stay well under D1's 2 MB row limit, leaving room for the other columns. */
 const MAX_REPORT_BYTES = 1_500_000;
 

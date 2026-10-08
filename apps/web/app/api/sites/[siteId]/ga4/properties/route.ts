@@ -12,8 +12,13 @@ export async function GET(_request: Request, context: { params: Promise<{ siteId
   const scopes = await googleScopes(env.DB, siteId);
   if (!scopes.length) return json({ properties: [], selected: site.ga4Property ?? null, needsReconnect: false, connected: false });
   if (!scopes.includes(ANALYTICS_SCOPE)) return json({ properties: [], selected: site.ga4Property ?? null, needsReconnect: true, connected: true });
-  const token = await googleAccessToken(env.DB, siteId, env.GOOGLE_CLIENT_ID, env.GOOGLE_CLIENT_SECRET, env.OAUTH_ENCRYPTION_KEY);
-  return json({ properties: await listGa4Properties(token), selected: site.ga4Property ?? null, needsReconnect: false, connected: true });
+  try {
+    const token = await googleAccessToken(env.DB, siteId, env.GOOGLE_CLIENT_ID, env.GOOGLE_CLIENT_SECRET, env.OAUTH_ENCRYPTION_KEY);
+    return json({ properties: await listGa4Properties(token), selected: site.ga4Property ?? null, needsReconnect: false, connected: true });
+  } catch (cause) {
+    // Connected, but Google refused (often an API not enabled in the Cloud project): say why rather than offering to connect again.
+    return json({ properties: [], selected: site.ga4Property ?? null, needsReconnect: false, connected: true, error: cause instanceof Error ? cause.message : String(cause) });
+  }
 }
 
 export async function POST(request: Request, context: { params: Promise<{ siteId: string }> }) {

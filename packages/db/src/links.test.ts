@@ -66,3 +66,24 @@ describe("link graph", async () => {
     assert.deepEqual(graph.nodes.find((node) => node.id === "t:t"), { id: "t:t", label: "Treatment guides", kind: "eumon", pages: 2 });
   });
 });
+
+describe("link graph before every page's links are known", async () => {
+  it("holds back the orphan count until most of the crawl's pages have their links recorded", async () => {
+    const db = openSqliteD1();
+    const now = new Date().toISOString();
+    await upsertSite(db, { id: "s", name: "x.com", baseUrl: "https://x.com", createdAt: now, updatedAt: now });
+    await createAnalysis(db, { id: "a1", siteId: "s", status: "running", createdAt: now });
+    const paths = ["/", "/blog/a", "/blog/b", "/doctors/amy", "/doctors/ben"];
+    await enqueueAnalysisCrawlUrls(db, { analysisId: "a1", siteId: "s", urls: paths.map((path) => ({ url: u(path), routeFamily: family(path) })) });
+    // Crawled before links were kept: four pages have no recorded links.
+    const old = (path: string) => { const { internalLinks: _links, ...rest } = page(path, []); return rest; };
+    await saveCrawlBatch(db, { analysisId: "a1", outcomes: [
+      { url: u("/"), page: page("/", ["/blog/a"]) },
+      ...paths.slice(1).map((path) => ({ url: u(path), page: old(path) })),
+    ] });
+    await updateAnalysisStatus(db, "a1", "completed", { completedAt: now });
+    const graph = await getLinkGraph(db, "s");
+    assert.equal(graph.orphans, null, "an orphan count from 1 page's links would be wrong");
+    assert.deepEqual(graph.linkCoverage, { recorded: 1, pages: 5 });
+  });
+});

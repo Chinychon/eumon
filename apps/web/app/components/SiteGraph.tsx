@@ -53,7 +53,8 @@ export function SiteGraph({ siteId }: { siteId: string }) {
 
   if (error) return <Card title="How pages link"><p className="empty-state">{error}</p></Card>;
   if (!graph) return <Card title="How pages link"><p className="empty-state">Loading…</p></Card>;
-  if (!graph.orphans) {
+  const coverage = graph.linkCoverage;
+  if (!coverage?.recorded) {
     return <Card title="How pages link" subtitle="Run an analysis to record which pages link to which. Earlier crawls didn't keep links."><p className="empty-state">No links recorded yet.</p></Card>;
   }
 
@@ -62,15 +63,17 @@ export function SiteGraph({ siteId }: { siteId: string }) {
   const touches = (edge: LinkGraph["edges"][number]) => !active || edge.source === active || edge.target === active;
   const neighbours = new Set(graph.edges.filter((edge) => active && touches(edge)).flatMap((edge) => [edge.source, edge.target]));
   const maxLinks = Math.max(1, ...graph.edges.map((edge) => edge.links));
-  const summary = `${graph.nodes.length} page types and ${graph.edges.length} links between them. ${graph.orphans.count} of ${sitePages} sitemap pages have no links from other pages.`;
+  const summary = `${graph.nodes.length} page types and ${graph.edges.length} links between them.${graph.orphans ? ` ${graph.orphans.count} of ${sitePages} sitemap pages have no links from other pages.` : ""}`;
 
   return (
     <Card title="How pages link" subtitle="Google finds pages by following links. Pages nothing links to are found late, or not at all.">
       <div className="kpi-grid link-kpis">
-        <Kpi label="Pages nothing links to" value={formatNumber(graph.orphans.count)} caption={`of ${formatNumber(sitePages)} sitemap pages`} />
+        {graph.orphans
+          ? <Kpi label="Pages nothing links to" value={formatNumber(graph.orphans.count)} caption={`of ${formatNumber(sitePages)} sitemap pages`} />
+          : <Kpi label="Pages nothing links to" value="—" caption={`Links known for ${formatNumber(coverage.recorded)} of ${formatNumber(coverage.pages)} pages. Re-crawl every page to map them all.`} />}
         <Kpi label="Landing pages your site links to" value={published ? `${formatNumber(linkedFromSite)}/${formatNumber(published)}` : "—"} caption={!published ? "No landing pages published yet" : linkedFromSite < published ? "Link the rest from related pages" : "All linked from your pages"} />
       </div>
-      {graph.orphans.examples.length > 0 && (
+      {graph.orphans && graph.orphans.examples.length > 0 && (
         <p className="small muted link-examples">For example: {graph.orphans.examples.map((url) => new URL(url).pathname).join(", ")}</p>
       )}
       {placed && (

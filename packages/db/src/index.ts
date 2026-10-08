@@ -501,6 +501,8 @@ export async function saveCrawlBatch(
       googlebotBlockedStatus: page.googlebotBlockedStatus,
       botChallenge: page.botChallenge,
       metaRefresh: page.metaRefresh,
+      // Whether this fetch recorded the page's links (crawls before link tracking didn't).
+      linksRecorded: page.internalLinks ? true : undefined,
     };
     return db.prepare(
       `UPDATE pages SET status = ?, title = ?, is_empty_shell = ?, result_json = ?,
@@ -538,6 +540,8 @@ export type LinkGraph = {
   edges: Array<{ source: string; target: string; links: number }>;
   /** Sitemap pages no other page links to; null until a crawl has recorded links. */
   orphans: { count: number; examples: string[] } | null;
+  /** Served pages in the latest crawl, and how many of them had their links recorded. */
+  linkCoverage: { recorded: number; pages: number } | null;
   landingPages: { published: number; linkedFromSite: number };
 };
 
@@ -548,7 +552,7 @@ export type LinkGraph = {
  */
 export async function getLinkGraph(db: D1Like, siteId: string): Promise<LinkGraph> {
   const latest = await getPreviousCompletedAnalysis(db, siteId, "");
-  const [families, familyEdges, anyLinks, published, templates] = await Promise.all([
+  const [families, familyEdges, coverageRow, published, templates] = await Promise.all([
     latest ? db.prepare(
       `SELECT COALESCE(${crawlField("routeFamily")}, 'other') AS family, COUNT(*) AS pages FROM pages WHERE analysis_id = ? GROUP BY family`,
     ).bind(latest.id).all<{ family: string; pages: number }>() : { results: [] },
@@ -557,7 +561,11 @@ export async function getLinkGraph(db: D1Like, siteId: string): Promise<LinkGrap
        WHERE site_id = ? AND source_family != target_family AND source_url IN (SELECT url FROM pages WHERE analysis_id = ?)
        GROUP BY source_family, target_family`,
     ).bind(siteId, latest.id).all<{ source_family: string; target_family: string; links: number }>() : { results: [] },
-    db.prepare("SELECT 1 AS found FROM page_links WHERE site_id = ? LIMIT 1").bind(siteId).first<{ found: number }>(),
+    latest ? db.prepare(
+      `SELECT SUM(CASE WHEN ${SERVED} THEN 1 ELSE 0 END) AS pages,
+              SUM(CASE WHEN ${SERVED} AND ${crawlField("linksRecorded")} = 1 THEN 1 ELSE 0 END) AS recorded
+       FROM pages WHERE analysis_id = ?`,
+    ).bind(latest.id).first<{ pages: number | null; recorded: number | null }>() : null,
     db.prepare("SELECT path, template_id, content_json FROM generated_pages WHERE site_id = ? AND status = 'published'")
       .bind(siteId).all<{ path: string; template_id: string; content_json: string }>(),
     db.prepare("SELECT id, name FROM page_templates WHERE site_id = ?").bind(siteId).all<{ id: string; name: string }>(),
@@ -612,8 +620,10 @@ export async function getLinkGraph(db: D1Like, siteId: string): Promise<LinkGrap
     }
   }
 
+  // Orphans are only meaningful once nearly every page's links are known; otherwise most pages would read as orphans.
+  const linkCoverage = coverageRow ? { recorded: Number(coverageRow.recorded ?? 0), pages: Number(coverageRow.pages ?? 0) } : null;
   let orphans: LinkGraph["orphans"] = null;
-  if (latest && anyLinks) {
+  if (latest && linkCoverage && linkCoverage.pages && linkCoverage.recorded >= linkCoverage.pages * 0.9) {
     const orphan = `FROM pages p WHERE p.analysis_id = ? AND p.crawl_state = 'complete' AND p.status < 400
       AND COALESCE(json_extract(p.result_json, '$.routeFamily'), '') != 'home'
       AND NOT EXISTS (SELECT 1 FROM page_links l WHERE l.site_id = ? AND l.target_path = ${URL_PATH("p.url")} AND l.source_url != p.url)`;
@@ -623,7 +633,7 @@ export async function getLinkGraph(db: D1Like, siteId: string): Promise<LinkGrap
     ]);
     orphans = { count: Number(count?.n ?? 0), examples: examples.results.map((row) => row.url) };
   }
-  return { nodes, edges, orphans, landingPages: { published: published.results.length, linkedFromSite } };
+  return { nodes, edges, orphans, linkCoverage, landingPages: { published: published.results.length, linkedFromSite } };
 }
 
 const crawlField = (path: string) => `json_extract(result_json, '$.${path}')`;

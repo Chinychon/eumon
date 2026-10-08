@@ -83,6 +83,15 @@ export const RESULT_METRICS = [
   "site_health", "crawl_urls", "crawl_empty_shells", "crawl_http_errors", "crawl_noindex",
 ];
 
+/** A query's last 28 days of Search Console data, beside the 28 before (null when it had no impressions then). */
+export type TopQuery = {
+  query: string;
+  clicks: number;
+  impressions: number;
+  position: number;
+  before: { clicks: number; impressions: number; position: number } | null;
+};
+
 export type ResultsInput = {
   today: string;
   goLive: string | null;
@@ -93,6 +102,8 @@ export type ResultsInput = {
   published: number;
   searchConnected: boolean;
   ga4Connected: boolean;
+  /** The latest sync's top queries, for the current property and markets. */
+  topQueries?: { periodEnd: string; rows: TopQuery[] } | null;
 };
 
 export type ResultsView = {
@@ -105,6 +116,10 @@ export type ResultsView = {
   numbers: {
     clicks: Compare;
     leads: Compare;
+    /** The first day enquiries were tracked: "since" this when tracking began after go-live. */
+    leadsSince: string | null;
+    /** Googlebot requests to Eumon's pages. */
+    googlebot: Compare;
     organicSessions: Compare | null;
     pages: { live: number; indexed: number; notIndexed: number; unchecked: number };
   };
@@ -116,6 +131,7 @@ export type ResultsView = {
     ctr: Compare;
     position: Compare;
     buckets: Array<{ top: number; queries: number | null; added: number | null; lost: number | null }>;
+    topQueries: { periodEnd: string; rows: TopQuery[] } | null;
   } | null;
   organic: Array<{ week: string; sessions: number | null; keyEvents: number | null; partial: boolean }> | null;
   leads: {
@@ -160,6 +176,7 @@ export function resultsView(input: ResultsInput): ResultsView {
       added: latest(series[scoped(`queries_top${top}.new`)], today),
       lost: latest(series[scoped(`queries_top${top}.lost`)], today),
     })),
+    topQueries: input.topQueries ?? null,
   } : null;
 
   const leadsWeeks = weekly(series.leads, from, today, addDays(today, -1));
@@ -181,6 +198,8 @@ export function resultsView(input: ResultsInput): ResultsView {
     numbers: {
       clicks: compare(series[clicksMetric], google),
       leads: compare(series.leads, firstParty),
+      leadsSince: series.leads?.[0]?.day ?? null,
+      googlebot: compare(series.googlebot_fetches, firstParty),
       organicSessions: input.ga4Connected && series.ga4_organic_sessions?.length ? compare(series.ga4_organic_sessions, google) : null,
       pages: { live: input.published, ...input.index },
     },

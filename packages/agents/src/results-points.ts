@@ -1,8 +1,8 @@
-import { RANK_BUCKETS } from "@organic-growth/core";
+import { RANK_BUCKETS, type TopQuery } from "@organic-growth/core";
 import type { MetricPoint } from "@organic-growth/db";
 
 export type SearchDay = { day: string; clicks: number; impressions: number; positionWeight: number };
-export type QueryPosition = { query: string; position: number; impressions: number };
+export type QueryPosition = { query: string; position: number; impressions: number; clicks: number };
 
 /** Daily Search Console totals as ledger points; rows for the same day (one per country) are summed. */
 export function searchDayPoints(rows: SearchDay[], prefix = "", suffix = ""): MetricPoint[] {
@@ -23,14 +23,15 @@ export function searchDayPoints(rows: SearchDay[], prefix = "", suffix = ""): Me
 
 /** One row per query, its position weighted by impressions (for queries fetched per country). */
 export function mergePositions(rows: QueryPosition[]): QueryPosition[] {
-  const merged = new Map<string, { weight: number; impressions: number }>();
+  const merged = new Map<string, { weight: number; impressions: number; clicks: number }>();
   for (const row of rows) {
-    const entry = merged.get(row.query) ?? { weight: 0, impressions: 0 };
+    const entry = merged.get(row.query) ?? { weight: 0, impressions: 0, clicks: 0 };
     entry.weight += row.position * row.impressions;
     entry.impressions += row.impressions;
+    entry.clicks += row.clicks;
     merged.set(row.query, entry);
   }
-  return [...merged].map(([query, entry]) => ({ query, position: entry.impressions ? entry.weight / entry.impressions : 0, impressions: entry.impressions }));
+  return [...merged].map(([query, entry]) => ({ query, position: entry.impressions ? entry.weight / entry.impressions : 0, impressions: entry.impressions, clicks: entry.clicks }));
 }
 
 /** Queries in each top-N bucket now, and how many entered or left it since the previous window. */
@@ -44,4 +45,20 @@ export function rankingPoints(current: QueryPosition[], previous: QueryPosition[
       { metric: `queries_top${top}.lost${suffix}`, day, value: [...before].filter((query) => !now.has(query)).length },
     ];
   });
+}
+
+/** The queries with the most clicks (then impressions), each beside the same query in the previous window. */
+export function topQueries(current: QueryPosition[], previous: QueryPosition[], limit = 25): TopQuery[] {
+  const before = new Map(previous.map((row) => [row.query, row]));
+  return [...current]
+    .filter((row) => row.clicks > 0)
+    .sort((a, b) => b.clicks - a.clicks || b.impressions - a.impressions || a.query.localeCompare(b.query))
+    .slice(0, limit)
+    .map((row) => {
+      const was = before.get(row.query);
+      return {
+        query: row.query, clicks: row.clicks, impressions: row.impressions, position: row.position,
+        before: was ? { clicks: was.clicks, impressions: was.impressions, position: was.position } : null,
+      };
+    });
 }

@@ -1,9 +1,9 @@
 import type { SiteRecord } from "@organic-growth/core";
-import { fetchGa4Daily, fetchQueryPositions, fetchSearchDaily, inspectUrl, mergePositions, rankingPoints, searchDayPoints } from "@organic-growth/agents";
+import { fetchGa4Daily, fetchQueryPositions, fetchSearchDaily, inspectUrl, mergePositions, rankingPoints, searchDayPoints, topQueries, type QueryPosition } from "@organic-growth/agents";
 import { addDays } from "@organic-growth/core";
 import {
   defaultPageSettings, firstMetricDay, getPageSettings, indexStatusCounts, listSiteMarkets, pagesToInspect,
-  saveIndexStatus, syncFirstPartyResults, upsertMetricPoints, type D1Like, type MetricPoint,
+  saveIndexStatus, saveTopQueriesSnapshot, syncFirstPartyResults, upsertMetricPoints, type D1Like, type MetricPoint,
 } from "@organic-growth/db";
 import { ANALYTICS_SCOPE } from "./gsc-auth.ts";
 
@@ -102,6 +102,15 @@ async function syncSearch(db: D1Like, site: SiteRecord, property: string, token:
       points.push(...rankingPoints(mergePositions(scoped.filter((_, index) => index % 2 === 0).flat()), mergePositions(scoped.filter((_, index) => index % 2 === 1).flat()), today, "@markets"));
     }
   }
+
+  // Top queries: the last 28 finalized days beside the 28 before, scoped to target markets when set.
+  const last28 = { startDate: addDays(today, -30), endDate: addDays(today, -3) };
+  const prior28 = { startDate: addDays(today, -58), endDate: addDays(today, -31) };
+  const queriesIn = async (range: typeof last28): Promise<QueryPosition[]> => (markets.length
+    ? mergePositions((await Promise.all(markets.map((country) => fetchQueryPositions(token, property, { ...range, country }, fetchFn)))).flat())
+    : fetchQueryPositions(token, property, range, fetchFn));
+  const [recent, earlier] = await Promise.all([queriesIn(last28), queriesIn(prior28)]);
+  await saveTopQueriesSnapshot(db, site.id, { property, markets, periodEnd: last28.endDate, rows: topQueries(recent, earlier) });
 
   // Index status: a rolling sample of published Eumon pages each day.
   // Pages already checked today are skipped, so a second Sync now spends no quota.

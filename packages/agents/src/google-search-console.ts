@@ -178,7 +178,7 @@ export async function fetchQueryPositions(
   fetchFn: typeof fetch = fetch,
 ): Promise<QueryPosition[]> {
   const rows = await querySearchAnalytics(accessToken, property, { ...options, dimensions: ["query"], maxRows: 25_000 }, fetchFn);
-  return rows.map((row) => ({ query: row.keys[0] ?? "", position: row.position, impressions: row.impressions }));
+  return rows.map((row) => ({ query: row.keys[0] ?? "", position: row.position, impressions: row.impressions, clicks: row.clicks }));
 }
 
 export type IndexInspection = { verdict: string; coverageState: string | null; lastCrawlTime: string | null };

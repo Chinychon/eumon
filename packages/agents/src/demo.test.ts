@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { addDays, RESULT_METRICS, resultsView } from "@organic-growth/core";
-import { getAnalysisJob, getCrawlProgress, getLinkGraph, getSite, indexStatusCounts, listMetricSeries, publishedPages } from "@organic-growth/db";
+import { getAnalysisJob, getCrawlProgress, getLinkGraph, getSite, getTopQueriesSnapshot, indexStatusCounts, listMetricSeries, publishedPages } from "@organic-growth/db";
 import { openSqliteD1 } from "@organic-growth/db/sqlite";
 import { advanceDemoRun, DEMO_SITE_ID, isLocalHost, seedDemoSite, startDemoRun } from "./demo.js";
 
@@ -68,5 +68,7 @@ describe("demo site", () => {
     assert.deepEqual(view.numbers.pages, { live: 60, indexed: 40, notIndexed: 12, unchecked: 8 });
     assert.ok(view.search!.buckets[1]!.queries! > 0);
     assert.ok(view.organic!.length > 60);
+    const top = await getTopQueriesSnapshot(db, DEMO_SITE_ID, { property: "sc-domain:demo-clinic.example", markets: ["mys", "sgp"] });
+    assert.ok(top && top.rows.length >= 8 && top.rows.some((row) => row.before === null), "a top-queries table with a new query");
   });
 });

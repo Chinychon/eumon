@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { listMetricSeries, setSiteMarkets, updateSiteGa4Property, updateSiteGscProperty, upsertSite, getSite } from "@organic-growth/db";
+import { getTopQueriesSnapshot, listMetricSeries, setSiteMarkets, updateSiteGa4Property, updateSiteGscProperty, upsertSite, getSite } from "@organic-growth/db";
 import { openSqliteD1 } from "@organic-growth/db/sqlite";
 import { ANALYTICS_SCOPE, SEARCH_CONSOLE_SCOPE } from "./gsc-auth.ts";
 import { syncResults } from "./results-sync.ts";
@@ -101,5 +101,21 @@ describe("results sync", () => {
     assert.ok(first.includes("search: 486 days") && first.includes("analytics: 486 days"), first.join("; "));
     const second = await syncResults(db, record, now, google);
     assert.ok(second.includes("search: 7 days") && second.includes("analytics: 7 days"), second.join("; "));
+  });
+
+  it("keeps the top queries of the last 28 finalized days, each beside the 28 before", async () => {
+    const { db, site: record } = await site();
+    const fetchFn = (async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { dimensions?: string[]; startDate?: string; endDate?: string };
+      if (body.dimensions?.join() !== "query") return new Response(JSON.stringify({ rows: [] }));
+      const window = `${body.startDate}..${body.endDate}`;
+      const clicks = window === "2026-09-07..2026-10-04" ? 10 : window === "2026-08-10..2026-09-06" ? 4 : null;
+      return new Response(JSON.stringify({ rows: clicks === null ? [] : [{ keys: ["dentist kl"], clicks, impressions: clicks * 20, ctr: 0.05, position: 6 }] }));
+    }) as typeof fetch;
+    await syncResults(db, record, now, { connect: async () => ({ token: "t", scopes: [SEARCH_CONSOLE_SCOPE] }), fetchFn });
+    assert.deepEqual(await getTopQueriesSnapshot(db, "s", { property: "sc-domain:x.com", markets: [] }), {
+      periodEnd: "2026-10-04",
+      rows: [{ query: "dentist kl", clicks: 10, impressions: 200, position: 6, before: { clicks: 4, impressions: 80, position: 6 } }],
+    });
   });
 });

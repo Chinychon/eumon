@@ -61,4 +61,17 @@ describe("results math", () => {
     assert.equal(resultsView(base({ markets: ["mys"], series: { search_clicks: clicks } })).search?.scoped, false, "markets set, no market history yet");
     assert.equal(resultsView(base({ markets: ["mys"], series: { search_clicks: clicks, "search_clicks@markets": clicks } })).search?.scoped, true);
   });
+
+  it("adds the top queries, Googlebot fetches, and the day enquiry tracking began", () => {
+    const days = (from: string, n: number, value: number) => Array.from({ length: n }, (_, index) => ({ day: addDays(from, index), value }));
+    const rows = [{ query: "q", clicks: 3, impressions: 40, position: 6, before: null }];
+    const view = resultsView(base({
+      series: { search_clicks: days("2026-09-01", 30, 1), googlebot_fetches: days("2026-09-20", 17, 2), leads: days("2026-09-25", 12, 0) },
+      topQueries: { periodEnd: "2026-10-04", rows },
+    }));
+    assert.deepEqual(view.search?.topQueries, { periodEnd: "2026-10-04", rows });
+    assert.equal(view.numbers.googlebot.current, 34, "two a day for the 17 days in the last 28");
+    assert.equal(view.numbers.leadsSince, "2026-09-25");
+    assert.equal(resultsView(base()).numbers.leadsSince, null);
+  });
 });

@@ -4,7 +4,7 @@ import { crawlGooglebotBatch, researchSite, type Fetcher, type SiteResearch } fr
 import {
   chunks, createAnalysis, datasetCoverage, deleteSite, getAnalysisJob, getCrawlCoverage, getCrawlProgress, insertConversionEvent, listAllRecords,
   listCrawlPageResults, listPendingCrawlUrls, recordLandingSession, replaceCurrentSearchMetrics, replacePageSearchMetrics, runStatements, saveAnalysisReport, saveCrawlBatch,
-  saveIndexStatus, saveSiteScope, setSiteCompetitorDomains, syncFirstPartyResults, updateSiteGa4Property, upsertMetricPoints, type MetricPoint, setSiteMarkets, setTemplatePublication, syncTemplatePages, updateAnalysisProgress,
+  saveIndexStatus, saveSiteScope, saveTopQueriesSnapshot, setSiteCompetitorDomains, syncFirstPartyResults, updateSiteGa4Property, upsertMetricPoints, type MetricPoint, setSiteMarkets, setTemplatePublication, syncTemplatePages, updateAnalysisProgress,
   updateAnalysisStatus, upsertDataset, upsertRecords, upsertSite, upsertTemplate, type D1Like,
 } from "@organic-growth/db";
 import { generatePages } from "@organic-growth/pages";
@@ -527,5 +527,24 @@ async function seedDemoResults(db: D1Like, now: number) {
     coverageState: index < 40 ? "Submitted and indexed" : "Discovered - currently not indexed",
     lastCrawlTime: index < 40 ? `${addDays(today, -(index % 9) - 1)}T03:00:00Z` : null,
   })));
+  // Fictional top queries over the last 28 finalized days, each beside the 28 before.
+  const queries: Array<[string, number, number, number, [number, number, number] | null]> = [
+    ["dental implants kuala lumpur", 64, 1830, 4.2, [41, 1650, 5.6]],
+    ["braces price malaysia", 52, 2410, 6.1, [47, 2290, 6.4]],
+    ["demo dental clinic", 48, 310, 1.1, [44, 290, 1.2]],
+    ["scaling and polishing cost", 37, 1480, 5.3, [22, 1210, 7.9]],
+    ["invisalign singapore price", 29, 2050, 8.7, [33, 2120, 8.1]],
+    ["dentist penang", 24, 960, 6.8, [15, 820, 9.4]],
+    ["wisdom tooth removal cost kl", 21, 770, 5.9, null],
+    ["root canal treatment price", 18, 690, 7.2, [19, 640, 7.0]],
+    ["teeth whitening johor bahru", 12, 540, 9.6, null],
+    ["paediatric dentist petaling jaya", 9, 330, 8.3, [4, 260, 12.5]],
+  ];
+  await saveTopQueriesSnapshot(db, DEMO_SITE_ID, {
+    property: "sc-domain:demo-clinic.example", markets: ["mys", "sgp"], periodEnd: addDays(today, -3),
+    rows: queries.map(([query, clicks, impressions, position, was]) => ({
+      query, clicks, impressions, position, before: was ? { clicks: was[0], impressions: was[1], position: was[2] } : null,
+    })),
+  });
   await syncFirstPartyResults(db, DEMO_SITE_ID, new Date(now));
 }

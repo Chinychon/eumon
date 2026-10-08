@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { countryName, type Compare, type ResultsView as Results } from "@organic-growth/core";
+import { countryName, type Compare, type ResultsView as Results, type TopQuery } from "@organic-growth/core";
 import { api, errorMessage, formatNumber } from "./api";
 import { Funnel, LineChart } from "./charts";
 import { Button, Card, Kpi, ViewHeader } from "./ui";
@@ -76,7 +76,8 @@ export function ResultsView({ endpoint, operator, onNavigate }: { endpoint: stri
         </Card>
         <div className="metrics-grid">
           <Kpi label="Google clicks · 28 days" value={results.numbers.clicks.current === null ? "—" : formatNumber(results.numbers.clicks.current)} caption={versus(results.numbers.clicks)} />
-          <Kpi label="Enquiries · 28 days" value={results.numbers.leads.current === null ? "—" : formatNumber(results.numbers.leads.current)} caption={versus(results.numbers.leads)} />
+          <Kpi label="Enquiries · 28 days" value={results.numbers.leads.current === null ? "—" : formatNumber(results.numbers.leads.current)}
+            caption={results.numbers.leads.before === null && results.numbers.leadsSince ? `tracked since ${day(results.numbers.leadsSince)}` : versus(results.numbers.leads)} />
           <Kpi label="Organic sessions · 28 days" value={results.numbers.organicSessions?.current == null ? "—" : formatNumber(results.numbers.organicSessions.current)} caption={results.numbers.organicSessions ? versus(results.numbers.organicSessions) : analyticsState(site.analytics, operator)} />
           <Kpi label="Pages live" value={formatNumber(pages.live)} caption={pages.live ? `${formatNumber(pages.indexed)} indexed · ${formatNumber(pages.notIndexed)} not · ${formatNumber(pages.unchecked)} not checked yet` : "No Eumon pages published yet"} />
         </div>
@@ -92,6 +93,7 @@ export function ResultsView({ endpoint, operator, onNavigate }: { endpoint: stri
                 <Kpi label="Click-through rate" value={pct(results.search.ctr.current)} caption={versus(results.search.ctr, (value) => pct(value))} />
                 <Kpi label="Average position" value={results.search.position.current === null ? "—" : results.search.position.current.toFixed(1)} caption={versus(results.search.position, (value) => value.toFixed(1))} />
                 {results.search.clicksAllCountries && <Kpi label="Clicks · every country" value={results.search.clicksAllCountries.current === null ? "—" : formatNumber(results.search.clicksAllCountries.current)} caption="Beside the target-market figure above" />}
+                {pages.live > 0 && <Kpi label="Googlebot visits to Eumon pages · 28 days" value={results.numbers.googlebot.current === null ? "—" : formatNumber(results.numbers.googlebot.current)} caption={versus(results.numbers.googlebot)} />}
               </div>
               <div className="section-title">Queries by position, this week</div>
               <ol className="rank-buckets">
@@ -103,7 +105,9 @@ export function ResultsView({ endpoint, operator, onNavigate }: { endpoint: stri
                   </li>
                 ))}
               </ol>
-              <p className="small muted">Search Console leaves out anonymized queries, so query counts are lower than total clicks suggest. Data arrives two to three days late.</p>
+              <div className="section-title">{results.search.topQueries ? `Top queries, 28 days to ${day(results.search.topQueries.periodEnd)}` : "Top queries"}</div>
+              {results.search.topQueries?.rows.length ? <TopQueries rows={results.search.topQueries.rows} /> : <p className="empty-state">{results.search.topQueries ? "No query earned a click in these 28 days." : "Top queries appear after the next sync."}</p>}
+              <p className="small muted">Search Console leaves out anonymized queries, so query counts are lower than total clicks suggest. Data arrives two to three days late. "Was" is the 28 days before.</p>
             </>
           ) : <ConnectPrompt operator={operator} what="Search Console" onNavigate={onNavigate} />}
           {results.organic && (
@@ -129,6 +133,27 @@ export function ResultsView({ endpoint, operator, onNavigate }: { endpoint: stri
           </Card>
         )}
       </div>
+    </div>
+  );
+}
+
+/** The queries with the most clicks, each figure beside its value in the 28 days before. */
+function TopQueries({ rows }: { rows: TopQuery[] }) {
+  const ctr = (clicks: number, impressions: number) => (impressions ? pct(clicks / impressions) : "—");
+  return (
+    <div className="table-wrap">
+      <table className="table top-queries">
+        <thead><tr><th>Query</th><th className="num">Clicks</th><th className="num">Impressions</th><th className="num">CTR</th><th className="num">Position</th></tr></thead>
+        <tbody>{rows.map((row) => (
+          <tr key={row.query}>
+            <td>{row.query}{!row.before && <span className="was">new</span>}</td>
+            <td className="num">{formatNumber(row.clicks)}{row.before && <span className="was">was {formatNumber(row.before.clicks)}</span>}</td>
+            <td className="num">{formatNumber(row.impressions)}{row.before && <span className="was">was {formatNumber(row.before.impressions)}</span>}</td>
+            <td className="num">{ctr(row.clicks, row.impressions)}{row.before && <span className="was">was {ctr(row.before.clicks, row.before.impressions)}</span>}</td>
+            <td className="num">{row.position.toFixed(1)}{row.before && <span className="was">was {row.before.position.toFixed(1)}</span>}</td>
+          </tr>
+        ))}</tbody>
+      </table>
     </div>
   );
 }

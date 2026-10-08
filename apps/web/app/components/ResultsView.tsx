@@ -171,7 +171,13 @@ export function ResultsView({ endpoint, operator, onNavigate }: { endpoint: stri
             : (
               <>
                 <BarList format={(value) => value.toFixed(2)} rows={[{ label: host, value: results.authority.site ?? 0 }, ...results.authority.competitors.map((entry) => ({ label: entry.domain, value: entry.score ?? 0 }))]} />
-                {results.authority.history.length > 1 && <LineChart series={["authority"]} points={results.authority.history.map((point) => ({ x: point.day, values: [point.value] }))} />}
+                {results.authority.history.length > 1 && (
+                  <>
+                    {/* A snapshot, not a daily total: today's value is final, so nothing draws dashed. */}
+                    <div className="section-title">{host} over time</div>
+                    <LineChart series={["authority"]} partialFrom="9999-12-31" points={results.authority.history.map((point) => ({ x: point.day, values: [point.value] }))} />
+                  </>
+                )}
               </>
             )}
           <p className="small muted">Open PageRank: a free 0–10 estimate from public link data, updated about monthly. Not Google's own measure.</p>

@@ -570,8 +570,11 @@ async function seedDemoResults(db: D1Like, now: number) {
   ]);
   // Fictional URL Inspection results for a sample of the latest crawl's pages.
   const { results: sample } = await db.prepare(
-    `SELECT url, COALESCE(json_extract(result_json, '$.routeFamily'), 'other') AS family FROM pages
-     WHERE analysis_id = 'analysis_demo_2' AND crawl_state = 'complete' AND status < 400 ORDER BY url LIMIT 600`,
+    `SELECT url, family FROM (
+       SELECT url, COALESCE(json_extract(result_json, '$.routeFamily'), 'other') AS family,
+         ROW_NUMBER() OVER (PARTITION BY COALESCE(json_extract(result_json, '$.routeFamily'), 'other') ORDER BY url) AS turn
+       FROM pages WHERE analysis_id = 'analysis_demo_2' AND crawl_state = 'complete' AND status < 400)
+     ORDER BY turn, family LIMIT 600`,
   ).all<{ url: string; family: string }>();
   const states = ["Submitted and indexed", "Submitted and indexed", "Submitted and indexed", "Crawled - currently not indexed", "Discovered - currently not indexed", "URL is unknown to Google"];
   await saveUrlIndexStatus(db, DEMO_SITE_ID, sample.map((row, index) => {

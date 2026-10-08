@@ -8,8 +8,8 @@ import { formatNumber } from "./api";
  * data, not progress, so they never use the brand green.
  */
 
-/** 1,234 → "1.2K"; for axis ticks, where width matters more than precision. */
-const compact = (value: number) => value.toLocaleString("en", { notation: "compact", maximumFractionDigits: 1 });
+/** 1,234 → "1.2K"; for axis ticks, where width matters more than precision. Values under 1 keep two decimals, so 0.05 doesn't read as 0.1. */
+const compact = (value: number) => value.toLocaleString("en", { notation: "compact", maximumFractionDigits: Math.abs(value) < 1 ? 2 : 1 });
 
 /** A ranked comparison: one bar per row, longest first as given. */
 export function BarList({ rows, format = formatNumber }: { rows: Array<{ label: string; value: number }>; format?: (value: number) => string }) {

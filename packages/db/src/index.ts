@@ -575,8 +575,8 @@ export type LinkGraph = {
   nodes: Array<{ id: string; label: string; kind: "site" | "eumon"; pages: number }>;
   /** Links between page types (links within one type are left out), counted. */
   edges: Array<{ source: string; target: string; links: number }>;
-  /** Sitemap pages no other page links to; null until a crawl has recorded links. */
-  orphans: { count: number; examples: string[] } | null;
+  /** Sitemap pages no other page links to, in total and per page type; null until a crawl has recorded links. */
+  orphans: { count: number; examples: string[]; byFamily: Record<string, number> } | null;
   /** Served pages in the latest crawl, and how many of them had their links recorded. */
   linkCoverage: { recorded: number; pages: number } | null;
   landingPages: { published: number; linkedFromSite: number };
@@ -598,12 +598,7 @@ export async function getLinkGraph(db: D1Like, siteId: string): Promise<LinkGrap
        WHERE site_id = ? AND source_family != target_family AND source_url IN (SELECT url FROM pages WHERE analysis_id = ?)
        GROUP BY source_family, target_family`,
     ).bind(siteId, latest.id).all<{ source_family: string; target_family: string; links: number }>() : { results: [] },
-    latest ? db.prepare(
-      `SELECT SUM(CASE WHEN ${SERVED} THEN 1 ELSE 0 END) AS pages,
-              SUM(CASE WHEN ${SERVED} AND (${crawlField("linksRecorded")} = 1
-                OR EXISTS (SELECT 1 FROM page_links l WHERE l.site_id = ? AND l.source_url = pages.url)) THEN 1 ELSE 0 END) AS recorded
-       FROM pages WHERE analysis_id = ?`,
-    ).bind(siteId, latest.id).first<{ pages: number | null; recorded: number | null }>() : null,
+    latest ? linkCoverage(db, siteId, latest.id) : null,
     db.prepare("SELECT path, template_id, content_json FROM generated_pages WHERE site_id = ? AND status = 'published'")
       .bind(siteId).all<{ path: string; template_id: string; content_json: string }>(),
     db.prepare("SELECT id, name FROM page_templates WHERE site_id = ?").bind(siteId).all<{ id: string; name: string }>(),
@@ -658,20 +653,88 @@ export async function getLinkGraph(db: D1Like, siteId: string): Promise<LinkGrap
     }
   }
 
-  // Orphans are only meaningful once nearly every page's links are known; otherwise most pages would read as orphans.
-  const linkCoverage = coverageRow ? { recorded: Number(coverageRow.recorded ?? 0), pages: Number(coverageRow.pages ?? 0) } : null;
   let orphans: LinkGraph["orphans"] = null;
-  if (latest && linkCoverage && linkCoverage.pages && linkCoverage.recorded >= linkCoverage.pages * 0.9) {
+  if (latest && linksKnown(coverageRow)) {
     const orphan = `FROM pages p WHERE p.analysis_id = ? AND p.crawl_state = 'complete' AND p.status < 400
-      AND COALESCE(json_extract(p.result_json, '$.routeFamily'), '') != 'home'
-      AND NOT EXISTS (SELECT 1 FROM page_links l WHERE l.site_id = ? AND l.target_path = ${URL_PATH("p.url")} AND l.source_url != p.url)`;
-    const [count, examples] = await Promise.all([
-      db.prepare(`SELECT COUNT(*) AS n ${orphan}`).bind(latest.id, siteId).first<{ n: number }>(),
+      AND ${PAGE_FAMILY} != 'home' AND NOT EXISTS (${LINKS_IN})`;
+    const [perFamily, examples] = await Promise.all([
+      db.prepare(`SELECT ${PAGE_FAMILY} AS family, COUNT(*) AS n ${orphan} GROUP BY family`).bind(latest.id, siteId).all<{ family: string; n: number }>(),
       db.prepare(`SELECT p.url ${orphan} ORDER BY p.url LIMIT 5`).bind(latest.id, siteId).all<{ url: string }>(),
     ]);
-    orphans = { count: Number(count?.n ?? 0), examples: examples.results.map((row) => row.url) };
+    const byFamily = Object.fromEntries(perFamily.results.map((row) => [row.family, Number(row.n)]));
+    orphans = { count: Object.values(byFamily).reduce((sum, n) => sum + n, 0), examples: examples.results.map((row) => row.url), byFamily };
   }
-  return { nodes, edges, orphans, linkCoverage, landingPages: { published: published.results.length, linkedFromSite } };
+  return { nodes, edges, orphans, linkCoverage: coverageRow, landingPages: { published: published.results.length, linkedFromSite } };
+}
+
+/** A page's family, as the crawl classified it. */
+const PAGE_FAMILY = "COALESCE(json_extract(p.result_json, '$.routeFamily'), 'other')";
+/** Links into page `p` from other pages (a page linking to itself doesn't count). */
+const LINKS_IN = `SELECT 1 FROM page_links l WHERE l.site_id = ? AND l.target_path = ${URL_PATH("p.url")} AND l.source_url != p.url`;
+
+/** Served pages in a crawl, and how many of them had their links recorded. */
+async function linkCoverage(db: D1Like, siteId: string, analysisId: string): Promise<{ recorded: number; pages: number }> {
+  const row = await db.prepare(
+    `SELECT SUM(CASE WHEN ${SERVED} THEN 1 ELSE 0 END) AS pages,
+            SUM(CASE WHEN ${SERVED} AND (${crawlField("linksRecorded")} = 1
+              OR EXISTS (SELECT 1 FROM page_links l WHERE l.site_id = ? AND l.source_url = pages.url)) THEN 1 ELSE 0 END) AS recorded
+     FROM pages WHERE analysis_id = ?`,
+  ).bind(siteId, analysisId).first<{ pages: number | null; recorded: number | null }>();
+  return { recorded: Number(row?.recorded ?? 0), pages: Number(row?.pages ?? 0) };
+}
+
+/** Orphans are only meaningful once nearly every page's links are known; otherwise most pages would read as orphans. */
+const linksKnown = (coverage: { recorded: number; pages: number } | null) => Boolean(coverage?.pages && coverage.recorded >= coverage.pages * 0.9);
+
+export type LinkFamily = {
+  family: string;
+  /** Served pages of this type in the latest crawl. */
+  pages: number;
+  /** Other page types linking into this one, and this one's links out to other types, most links first. */
+  from: Array<{ family: string; links: number }>;
+  to: Array<{ family: string; links: number }>;
+  /** Links between this type's own pages. */
+  within: number;
+  /** Its pages with the most links in from other pages. */
+  topPages: Array<{ url: string; inbound: number }>;
+  /** Its pages nothing links to; null until links are known for the whole crawl (and for the homepage). */
+  orphans: { count: number; examples: string[] } | null;
+};
+
+/** One page type of the latest crawl, opened: its links in and out by type, and its pages by links in. */
+export async function getLinkFamily(db: D1Like, siteId: string, family: string): Promise<LinkFamily | null> {
+  const latest = await getPreviousCompletedAnalysis(db, siteId, "");
+  if (!latest) return null;
+  const typed = `FROM pages p WHERE p.analysis_id = ? AND p.crawl_state = 'complete' AND p.status < 400 AND ${PAGE_FAMILY} = ?`;
+  const counted = `WITH c AS (SELECT p.url, (SELECT COUNT(*) FROM (${LINKS_IN})) AS inbound ${typed})`;
+  const [links, top, totals, orphanRows, coverage] = await Promise.all([
+    db.prepare(
+      `SELECT source_family, target_family, COUNT(*) AS links FROM page_links
+       WHERE site_id = ? AND (source_family = ? OR target_family = ?) AND target_path != ${URL_PATH("source_url")}
+         AND source_url IN (SELECT url FROM pages WHERE analysis_id = ?)
+       GROUP BY source_family, target_family`,
+    ).bind(siteId, family, family, latest.id).all<{ source_family: string; target_family: string; links: number }>(),
+    db.prepare(`${counted} SELECT url, inbound FROM c ORDER BY inbound DESC, url LIMIT 8`).bind(siteId, latest.id, family).all<{ url: string; inbound: number }>(),
+    db.prepare(`${counted} SELECT COUNT(*) AS pages, SUM(inbound = 0) AS orphans FROM c`).bind(siteId, latest.id, family).first<{ pages: number; orphans: number | null }>(),
+    db.prepare(`${counted} SELECT url FROM c WHERE inbound = 0 ORDER BY url LIMIT 8`).bind(siteId, latest.id, family).all<{ url: string }>(),
+    linkCoverage(db, siteId, latest.id),
+  ]);
+  const families = new Set((await db.prepare(`SELECT DISTINCT ${PAGE_FAMILY} AS family FROM pages p WHERE p.analysis_id = ?`).bind(latest.id).all<{ family: string }>()).results.map((row) => row.family));
+  const side = (key: "source_family" | "target_family", other: "source_family" | "target_family") => links.results
+    .filter((row) => row[other] === family && row[key] !== family && families.has(row[key]))
+    .map((row) => ({ family: row[key], links: Number(row.links) }))
+    .sort((a, b) => b.links - a.links || a.family.localeCompare(b.family));
+  return {
+    family,
+    pages: Number(totals?.pages ?? 0),
+    from: side("source_family", "target_family"),
+    to: side("target_family", "source_family"),
+    within: Number(links.results.find((row) => row.source_family === family && row.target_family === family)?.links ?? 0),
+    topPages: top.results.map((row) => ({ url: row.url, inbound: Number(row.inbound) })),
+    orphans: linksKnown(coverage) && family !== "home"
+      ? { count: Number(totals?.orphans ?? 0), examples: orphanRows.results.map((row) => row.url) }
+      : null,
+  };
 }
 
 const crawlField = (path: string) => `json_extract(result_json, '$.${path}')`;

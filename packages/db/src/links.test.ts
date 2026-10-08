@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { CrawlPageResult } from "@organic-growth/core";
-import { createAnalysis, enqueueAnalysisCrawlUrls, getLinkGraph, saveCrawlBatch, updateAnalysisStatus, upsertSite } from "./index.js";
+import { createAnalysis, enqueueAnalysisCrawlUrls, getLinkFamily, getLinkGraph, saveCrawlBatch, updateAnalysisStatus, upsertSite } from "./index.js";
 import { openSqliteD1 } from "./sqlite.js";
 
 const u = (path: string) => `https://x.com${path}`;
@@ -56,7 +56,22 @@ describe("link graph", async () => {
 
   it("finds pages nothing else links to, ignoring self-links and the homepage", async () => {
     const graph = await getLinkGraph(db, "s");
-    assert.deepEqual(graph.orphans, { count: 1, examples: [u("/doctors/ben")] }, "/blog/b only links to itself, but /blog/a links to it");
+    assert.deepEqual(graph.orphans, { count: 1, examples: [u("/doctors/ben")], byFamily: { doctors: 1 } }, "/blog/b only links to itself, but /blog/a links to it");
+  });
+
+  it("opens one page type: who links in, where it links out, and its pages by links in", async () => {
+    assert.deepEqual(await getLinkFamily(db, "s", "doctors"), {
+      family: "doctors", pages: 2,
+      from: [{ family: "blog", links: 1 }, { family: "home", links: 1 }],
+      to: [{ family: "home", links: 1 }],
+      within: 0,
+      topPages: [{ url: u("/doctors/amy"), inbound: 2 }, { url: u("/doctors/ben"), inbound: 0 }],
+      orphans: { count: 1, examples: [u("/doctors/ben")] },
+    });
+    const blog = (await getLinkFamily(db, "s", "blog"))!;
+    assert.equal(blog.within, 1, "/blog/a links to /blog/b; /blog/b's link to itself doesn't count");
+    assert.deepEqual(blog.to, [{ family: "doctors", links: 1 }, { family: "home", links: 1 }]);
+    assert.deepEqual(blog.orphans, { count: 0, examples: [] });
   });
 
   it("counts Eumon's pages the site links to, as an edge into their template", async () => {

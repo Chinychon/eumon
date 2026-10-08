@@ -9,8 +9,8 @@ import { Card, Kpi } from "./ui";
 
 type Placed = LinkGraph["nodes"][number] & SimulationNodeDatum & { size: number };
 
-/** Node size from page count: square root, so a 900-page type doesn't swallow a 10-page one. */
-const sizeOf = (pages: number) => 10 + Math.sqrt(pages) * 1.6;
+/** Node size from page count: square root, capped, so a 14,000-page type doesn't swallow the map. */
+const sizeOf = (pages: number) => Math.min(64, 10 + Math.sqrt(pages) * 1.6);
 
 /**
  * Positions page types once with a force layout (a few dozen nodes, so it

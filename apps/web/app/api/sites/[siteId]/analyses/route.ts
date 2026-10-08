@@ -8,9 +8,8 @@ export async function GET(_request: Request, context: { params: Promise<{ siteId
   const { siteId } = await context.params;
   const job = await getLatestAnalysisForSite(env.DB, siteId);
   if (!job) return Response.json({ analysis: null }, { headers: { "Cache-Control": "no-store" } });
-  // While a re-run is in progress, the last finished report stays readable.
-  const running = job.status === "queued" || job.status === "running";
-  const last = running ? await getPreviousCompletedAnalysis(env.DB, siteId, job.id) : null;
+  // While a re-run is in progress, or after one was cancelled or failed, the last finished report stays readable.
+  const last = job.status === "completed" ? null : await getPreviousCompletedAnalysis(env.DB, siteId, job.id);
   const [previous, pace] = await Promise.all([last ? getAnalysisJob(env.DB, last.id) : null, crawlPace(env.DB, siteId)]);
   return Response.json({
     analysis: {

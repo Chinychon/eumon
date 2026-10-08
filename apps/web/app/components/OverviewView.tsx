@@ -77,8 +77,14 @@ export function OverviewView({ site, onNavigate }: {
             setReport(latest.previous.report);
             void loadChanges(latest.previous.analysisId);
           }
-        } else if (latest.analysis?.status === "failed") {
-          setFailure(latest.analysis.error ?? "No error was recorded.");
+        } else {
+          if (latest.analysis?.status === "failed") setFailure(latest.analysis.error ?? "No error was recorded.");
+          if (latest.analysis?.status === "cancelled") setNote("The last run was cancelled. This is the report from the run before it.");
+          // A cancelled or failed run leaves the last finished report in place.
+          if (latest.previous) {
+            setReport(latest.previous.report);
+            void loadChanges(latest.previous.analysisId);
+          }
         }
       } catch (cause) { setError(errorMessage(cause)); }
     })();

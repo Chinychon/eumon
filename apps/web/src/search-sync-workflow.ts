@@ -25,7 +25,7 @@ export class SearchSyncWorkflow extends WorkflowEntrypoint<AppEnv, Record<string
           }
         }
         try {
-          notes.push(...await syncResults(this.env.DB, site, new Date(), googleAccess(this.env, siteId)));
+          notes.push(...await syncResults(this.env.DB, site, new Date(), googleAccess(this.env, siteId), { googleApiKey: this.env.GOOGLE_API_KEY, openPageRankKey: this.env.OPEN_PAGERANK_KEY }));
         } catch (error) {
           // A database error on one site must not stop the sites after it.
           notes.push(`results failed: ${error instanceof Error ? error.message : String(error)}`);

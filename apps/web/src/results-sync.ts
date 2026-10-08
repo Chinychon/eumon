@@ -1,8 +1,8 @@
 import type { SiteRecord } from "@organic-growth/core";
-import { fetchGa4Daily, fetchQueryPositions, fetchSearchDaily, inspectUrl, mergePositions, rankingPoints, searchDayPoints, topQueries, type QueryPosition } from "@organic-growth/agents";
+import { authorityDomain, fetchAuthority, fetchCruxHistory, fetchGa4Daily, fetchLabScore, fetchQueryPositions, fetchSearchDaily, inspectUrl, mergePositions, rankingPoints, searchDayPoints, topQueries, type FormFactor, type QueryPosition } from "@organic-growth/agents";
 import { addDays } from "@organic-growth/core";
 import {
-  defaultPageSettings, firstMetricDay, getPageSettings, indexStatusCounts, listSiteMarkets, pagesToInspect,
+  defaultPageSettings, firstMetricDay, getPageSettings, indexStatusCounts, listSiteCompetitorDomains, listSiteMarkets, pagesToInspect, topEumonPage,
   saveIndexStatus, saveTopQueriesSnapshot, syncFirstPartyResults, upsertMetricPoints, type D1Like, type MetricPoint,
 } from "@organic-growth/db";
 import { ANALYTICS_SCOPE } from "./gsc-auth.ts";
@@ -20,8 +20,9 @@ const INSPECTIONS_PER_DAY = 100;
  * Console (daily series, Monday ranking buckets, index status) and GA4.
  * Each Google step fails on its own; the notes say what ran.
  */
-export async function syncResults(db: D1Like, site: SiteRecord, now: Date, google: GoogleAccess): Promise<string[]> {
-  const notes: string[] = [];
+export async function syncResults(db: D1Like, site: SiteRecord, now: Date, google: GoogleAccess, keys: SignalKeys = {}): Promise<string[]> {
+  const today = now.toISOString().slice(0, 10);
+  const notes = await syncSignals(db, site, today, now.getUTCDay() === 1, keys, google.fetchFn);
   await syncFirstPartyResults(db, site.id, now);
   if (!site.gscProperty && !site.ga4Property) return notes;
   let token: string;
@@ -31,7 +32,6 @@ export async function syncResults(db: D1Like, site: SiteRecord, now: Date, googl
   } catch (error) {
     return [...notes, `google failed: ${error instanceof Error ? error.message : String(error)}`];
   }
-  const today = now.toISOString().slice(0, 10);
   if (site.gscProperty) {
     try {
       notes.push(...await syncSearch(db, site, site.gscProperty, token, today, now, google.fetchFn));
@@ -55,6 +55,66 @@ export async function syncResults(db: D1Like, site: SiteRecord, now: Date, googl
       } catch (error) {
         notes.push(`analytics failed: ${error instanceof Error ? error.message : String(error)}`);
       }
+    }
+  }
+  return notes;
+}
+
+/** API keys for the signals that need no Google sign-in: CrUX and PageSpeed (Google API key), Open PageRank. */
+export type SignalKeys = { googleApiKey?: string; openPageRankKey?: string };
+
+const FORM_FACTORS: FormFactor[] = ["phone", "desktop"];
+
+/**
+ * Real-user speed (weekly CrUX history: 40 weeks the first time, then the
+ * latest 2 on Mondays), Lighthouse lab scores, and authority (both weekly).
+ * Each source fails on its own.
+ */
+async function syncSignals(db: D1Like, site: SiteRecord, today: string, monday: boolean, keys: SignalKeys, fetchFn?: typeof fetch): Promise<string[]> {
+  const notes: string[] = [];
+  const weekly = async (marker: string) => monday || !(await firstMetricDay(db, site.id, marker));
+  if (!keys.googleApiKey) notes.push("speed: no Google API key");
+  else {
+    if (await weekly("sync.crux")) {
+      try {
+        const first = !(await firstMetricDay(db, site.id, "sync.crux"));
+        const origin = new URL(site.baseUrl).origin;
+        const points = (await Promise.all(FORM_FACTORS.map((form) => fetchCruxHistory(keys.googleApiKey!, origin, form, first ? 40 : 2, fetchFn)))).flat();
+        await upsertMetricPoints(db, site.id, [...points, { metric: "sync.crux", day: today, value: points.length }]);
+        notes.push(`speed: ${first ? 40 : 2} weeks`);
+      } catch (error) {
+        notes.push(`speed failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    if (await weekly("lab_score_home.phone")) {
+      const settings = (await getPageSettings(db, site.id)) ?? defaultPageSettings(site.id, site.name, site.baseUrl);
+      const eumonPath = await topEumonPage(db, site.id, today);
+      const targets = [
+        { name: "home", url: new URL("/", site.baseUrl).toString() },
+        ...(eumonPath ? [{ name: "eumon", url: `${new URL(settings.publicOrigin).origin}${eumonPath}` }] : []),
+      ];
+      const scored = await Promise.all(targets.flatMap((target) => FORM_FACTORS.map(async (form) => {
+        try {
+          return { metric: `lab_score_${target.name}.${form}`, day: today, value: await fetchLabScore(keys.googleApiKey!, target.url, form === "phone" ? "mobile" : "desktop", fetchFn) };
+        } catch {
+          return null;
+        }
+      })));
+      const points = scored.filter((point) => point !== null);
+      await upsertMetricPoints(db, site.id, points);
+      notes.push(`lab: ${points.length} scores`);
+    }
+  }
+  if (!keys.openPageRankKey) notes.push("authority: no Open PageRank key");
+  else if (await weekly("authority")) {
+    try {
+      const own = authorityDomain(site.baseUrl);
+      const rivals = await listSiteCompetitorDomains(db, site.id);
+      const scores = await fetchAuthority(keys.openPageRankKey, [own, ...rivals], fetchFn);
+      await upsertMetricPoints(db, site.id, scores.map((row) => ({ metric: row.domain === own ? "authority" : `authority:${row.domain}`, day: today, value: row.score })));
+      notes.push(`authority: ${scores.length} domains`);
+    } catch (error) {
+      notes.push(`authority failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
   return notes;

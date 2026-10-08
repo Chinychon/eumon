@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { analysisHealthPoints, clearMetricPoints, getTopQueriesSnapshot, saveTopQueriesSnapshot, SEARCH_METRIC_PATTERNS, indexStatusCounts, listSitesForResults, pagesToInspect, saveIndexStatus, bumpReportShareVersion, createAnalysis, dailyLeads, firstMetricDay, getSite, insertConversionEvent, listMetricSeries, publishedPages, recordLandingSession, saveAnalysisReport, syncFirstPartyResults, updateSiteGa4Property, upsertMetricPoints, upsertSite } from "./index.js";
+import { analysisHealthPoints, clearMetricPoints, topEumonPage, getTopQueriesSnapshot, saveTopQueriesSnapshot, SEARCH_METRIC_PATTERNS, indexStatusCounts, listSitesForResults, pagesToInspect, saveIndexStatus, bumpReportShareVersion, createAnalysis, dailyLeads, firstMetricDay, getSite, insertConversionEvent, listMetricSeries, publishedPages, recordLandingSession, saveAnalysisReport, syncFirstPartyResults, updateSiteGa4Property, upsertMetricPoints, upsertSite } from "./index.js";
 import { openSqliteD1 } from "./sqlite.js";
 
 const now = "2026-10-07T00:00:00.000Z";
@@ -102,8 +102,8 @@ describe("index status", async () => {
     assert.deepEqual(await pagesToInspect(db, "s", 10, today), [], "every page was checked today, so a second Sync now inspects nothing");
   });
 
-  it("syncs only sites with something to sync", async () => {
-    assert.deepEqual(await listSitesForResults(db), ["s"]);
+  it("syncs every site: speed and authority need no connection", async () => {
+    assert.deepEqual(await listSitesForResults(db), ["idle", "s"], "an unconnected site still gets speed and authority");
   });
 });
 
@@ -154,5 +154,23 @@ describe("top queries", () => {
     assert.deepEqual(await getTopQueriesSnapshot(db, "s", { property: "sc-domain:x.com", markets: ["mys"] }), { periodEnd: "2026-10-05", rows });
     assert.equal(await getTopQueriesSnapshot(db, "s", { property: "sc-domain:other.com", markets: ["mys"] }), null, "another property's queries");
     assert.equal(await getTopQueriesSnapshot(db, "s", { property: "sc-domain:x.com", markets: [] }), null, "fetched for other markets");
+  });
+});
+
+describe("signals helpers", () => {
+  it("covers every site in the daily sync, and picks the Eumon page with the most clicks", async () => {
+    const db = openSqliteD1();
+    await upsertSite(db, { id: "s", name: "x.com", baseUrl: "https://x.com", createdAt: now, updatedAt: now });
+    assert.deepEqual(await listSitesForResults(db), ["s"], "speed and authority need no connection");
+    assert.equal(await topEumonPage(db, "s", "2026-10-07"), null);
+    await db.prepare(`INSERT INTO datasets (id, site_id, name, entity_type, description, fields_json, key_field, page_ideas_json, status, created_at, updated_at) VALUES ('d', 's', 'T', 't', '', '[]', 'name', '[]', 'active', ?, ?)`).bind(now, now).run();
+    await db.prepare(`INSERT INTO page_templates (id, site_id, dataset_id, name, config_json, status, created_at, updated_at) VALUES ('t', 's', 'd', 'T', '{}', 'active', ?, ?)`).bind(now, now).run();
+    for (const [id, published] of [["a", "2026-09-01"], ["b", "2026-09-05"]] as const) {
+      await db.prepare(`INSERT INTO generated_pages (id, site_id, template_id, path, group_key, title, description, content_json, quality_score, quality_issues_json, status, published_at, created_at, updated_at)
+        VALUES (?, 's', 't', ?, ?, 'x', '', '{}', 1, '[]', 'published', ?, ?, ?)`).bind(id, `/guides/${id}`, id, published, now, now).run();
+    }
+    assert.equal(await topEumonPage(db, "s", "2026-10-07"), "/guides/a", "no clicks yet: the earliest published");
+    await db.prepare("INSERT INTO page_metrics_daily (site_id, page_id, day, search_clicks, search_impressions, search_position) VALUES ('s', 'b', '2026-10-01', 9, 90, 4)").run();
+    assert.equal(await topEumonPage(db, "s", "2026-10-07"), "/guides/b");
   });
 });

@@ -43,6 +43,9 @@ export const worker = defineWorker({
       GOOGLE_CLIENT_ID: bindings.secret(),
       GOOGLE_CLIENT_SECRET: bindings.secret(),
       OAUTH_ENCRYPTION_KEY: bindings.secret(),
+      // Optional: real-user speed and lab scores (Google API key with the CrUX and PageSpeed Insights APIs), and authority (Open PageRank).
+      GOOGLE_API_KEY: bindings.secret(),
+      OPEN_PAGERANK_KEY: bindings.secret(),
       // Optional language model keys, used in this order: DeepSeek, Claude, then Workers AI.
       DEEPSEEK_API_KEY: bindings.secret(),
       ANTHROPIC_API_KEY: bindings.secret(),

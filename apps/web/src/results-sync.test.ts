@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { getTopQueriesSnapshot, listMetricSeries, setSiteMarkets, updateSiteGa4Property, updateSiteGscProperty, upsertSite, getSite } from "@organic-growth/db";
+import { getTopQueriesSnapshot, listMetricSeries, setSiteCompetitorDomains, setSiteMarkets, updateSiteGa4Property, updateSiteGscProperty, upsertSite, getSite } from "@organic-growth/db";
 import { openSqliteD1 } from "@organic-growth/db/sqlite";
 import { ANALYTICS_SCOPE, SEARCH_CONSOLE_SCOPE } from "./gsc-auth.ts";
 import { syncResults } from "./results-sync.ts";
@@ -117,5 +117,54 @@ describe("results sync", () => {
       periodEnd: "2026-10-04",
       rows: [{ query: "dentist kl", clicks: 10, impressions: 200, position: 6, before: { clicks: 4, impressions: 80, position: 6 } }],
     });
+  });
+
+  it("syncs speed, lab scores, and authority from keys alone, backfilling speed once", async () => {
+    const db = openSqliteD1();
+    await upsertSite(db, { id: "s", name: "x.com", baseUrl: "https://www.x.com", createdAt: now.toISOString(), updatedAt: now.toISOString() });
+    await setSiteCompetitorDomains(db, "s", ["rival.example"]);
+    const asked: string[] = [];
+    const fetchFn = (async (url: string, init?: RequestInit) => {
+      asked.push(`${url} ${init?.body ?? ""}`);
+      if (url.includes("chromeuxreport")) {
+        const periods = JSON.parse(String(init?.body)).collectionPeriodCount as number;
+        return new Response(JSON.stringify({ record: {
+          metrics: { largest_contentful_paint: { percentilesTimeseries: { p75s: Array(periods).fill(3000) } } },
+          collectionPeriods: Array.from({ length: periods }, (_, index) => {
+            const end = new Date(Date.UTC(2026, 9, 3 - 7 * (periods - 1 - index)));
+            return { lastDate: { year: end.getUTCFullYear(), month: end.getUTCMonth() + 1, day: end.getUTCDate() } };
+          }),
+        } }));
+      }
+      if (url.includes("pagespeedonline")) return new Response(JSON.stringify({ lighthouseResult: { categories: { performance: { score: 0.5 } } } }));
+      if (url.includes("openpagerank")) return new Response(JSON.stringify({ response: [{ status_code: 200, domain: "x.com", page_rank_decimal: 2.5 }, { status_code: 200, domain: "rival.example", page_rank_decimal: 3.1 }] }));
+      return new Response("{}");
+    }) as typeof fetch;
+    const google = { connect: async () => { throw new Error("not connected"); }, fetchFn };
+    const keys = { googleApiKey: "g", openPageRankKey: "o" };
+    const record = (await getSite(db, "s"))!;
+    const notes = await syncResults(db, record, now, google, keys);
+    assert.ok(notes.includes("speed: 40 weeks"), notes.join("; "));
+    assert.ok(notes.includes("lab: 2 scores"), notes.join("; "));
+    assert.ok(notes.includes("authority: 2 domains"), notes.join("; "));
+    assert.ok(asked.some((entry) => entry.includes("chromeuxreport") && entry.includes('"origin":"https://www.x.com"')));
+    const series = await listMetricSeries(db, "s", ["crux_lcp_p75.phone", "lab_score_home.phone", "authority", "authority:rival.example"], "2025-01-01", "2026-10-07");
+    assert.equal(series["crux_lcp_p75.phone"]!.length, 40);
+    assert.deepEqual(series["lab_score_home.phone"], [{ day: "2026-10-07", value: 50 }]);
+    assert.deepEqual(series.authority, [{ day: "2026-10-07", value: 2.5 }]);
+    assert.deepEqual(series["authority:rival.example"], [{ day: "2026-10-07", value: 3.1 }]);
+
+    // The next day (a Thursday) fetches nothing weekly again.
+    asked.length = 0;
+    const later = await syncResults(db, record, new Date("2026-10-08T04:15:00Z"), google, keys);
+    assert.equal(asked.length, 0, later.join("; "));
+  });
+
+  it("notes a missing key instead of failing", async () => {
+    const db = openSqliteD1();
+    await upsertSite(db, { id: "s", name: "x.com", baseUrl: "https://x.com", createdAt: now.toISOString(), updatedAt: now.toISOString() });
+    const notes = await syncResults(db, (await getSite(db, "s"))!, now, { connect: async () => { throw new Error("no"); } });
+    assert.ok(notes.includes("speed: no Google API key"), notes.join("; "));
+    assert.ok(notes.includes("authority: no Open PageRank key"), notes.join("; "));
   });
 });

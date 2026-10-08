@@ -172,13 +172,21 @@ export async function indexStatusCounts(db: D1Like, siteId: string): Promise<{ i
   return { indexed: Number(row?.indexed ?? 0), notIndexed: Number(row?.not_indexed ?? 0), unchecked: Number(row?.unchecked ?? 0) };
 }
 
-/** Sites the daily Results sync covers. */
+/** Sites the daily Results sync covers: every site, since speed and authority need no connection. */
 export async function listSitesForResults(db: D1Like): Promise<string[]> {
-  const { results } = await db.prepare(
-    `SELECT id FROM sites WHERE gsc_property IS NOT NULL OR ga4_property IS NOT NULL
-       OR id IN (SELECT site_id FROM generated_pages WHERE status = 'published') ORDER BY id`,
-  ).all<{ id: string }>();
+  const { results } = await db.prepare("SELECT id FROM sites ORDER BY id").all<{ id: string }>();
   return results.map((row) => row.id);
+}
+
+/** The published Eumon page with the most Google clicks over the last 28 days, or the earliest published one. */
+export async function topEumonPage(db: D1Like, siteId: string, today: string): Promise<string | null> {
+  const row = await db.prepare(
+    `SELECT g.path FROM generated_pages g
+     LEFT JOIN page_metrics_daily m ON m.page_id = g.id AND m.site_id = g.site_id AND m.day >= ?
+     WHERE g.site_id = ? AND g.status = 'published'
+     GROUP BY g.id ORDER BY COALESCE(SUM(m.search_clicks), 0) DESC, g.published_at, g.path LIMIT 1`,
+  ).bind(addDays(today, -28), siteId).first<{ path: string }>();
+  return row?.path ?? null;
 }
 
 /** Every Search Console metric, as `LIKE` patterns (a property change starts their history over). */

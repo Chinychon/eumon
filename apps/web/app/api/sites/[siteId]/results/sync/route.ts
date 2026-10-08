@@ -9,5 +9,5 @@ export async function POST(_request: Request, context: { params: Promise<{ siteI
   const { siteId } = await context.params;
   const site = await getSite(env.DB, siteId);
   if (!site) return fail("Site not found.", 404);
-  return json({ notes: await syncResults(env.DB, site, new Date(), googleAccess(env, siteId)) });
+  return json({ notes: await syncResults(env.DB, site, new Date(), googleAccess(env, siteId), { googleApiKey: env.GOOGLE_API_KEY, openPageRankKey: env.OPEN_PAGERANK_KEY }) });
 }

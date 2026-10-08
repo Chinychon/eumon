@@ -127,8 +127,10 @@ const SYNC_NOW_COVERAGE = 50;
 
 /**
  * Asks Google about the next sitemap URLs (unchecked first, then those last
- * checked over 30 days ago), ten at a time, keeping what was learned
- * before any refusal.
+ * checked over 30 days ago), ten at a time. A URL Google won't inspect (for
+ * example one outside the property) is recorded as ERROR, so it waits 30 days
+ * like a checked one instead of blocking the queue. The day stops on a refusal:
+ * quota (429), a revoked token (401), or a whole batch refused (403).
  */
 export async function inspectSitemapUrls(
   db: D1Like, siteId: string, property: string, token: string, today: string, limit: number, fetchFn?: typeof fetch,
@@ -139,18 +141,35 @@ export async function inspectSitemapUrls(
   for (let start = 0; start < queue.length && refused === null; start += 10) {
     const batch = await Promise.all(queue.slice(start, start + 10).map(async (entry) => {
       try {
-        return { ...entry, ...await inspectUrl(token, property, entry.url, fetchFn) };
+        return { entry, row: { ...entry, ...await inspectUrl(token, property, entry.url, fetchFn) }, status: 0, message: "" };
       } catch (error) {
-        const status = (error as { status?: number }).status;
-        if (status === 401 || status === 403 || status === 429) refused = status;
-        return null;
+        return { entry, row: null, status: (error as { status?: number }).status ?? 0, message: error instanceof Error ? error.message : String(error) };
       }
     }));
-    const rows = batch.filter((row) => row !== null);
-    await saveUrlIndexStatus(db, siteId, rows);
+    const rows = batch.flatMap((result) => (result.row ? [result.row] : []));
+    const failed = batch.filter((result) => !result.row);
+    const stop = failed.find((result) => result.status === 429 || result.status === 401)
+      ?? (failed.length === batch.length && failed.every((result) => result.status === 403) ? failed[0] : undefined);
+    if (stop) refused = stop.status;
+    const errors = stop ? [] : failed.map((result) => ({ ...result.entry, verdict: "ERROR", coverageState: result.message.slice(0, 300), lastCrawlTime: null }));
+    await saveUrlIndexStatus(db, siteId, [...rows, ...errors]);
     inspected += rows.length;
   }
   return { inspected, refused, remaining: queue.length === limit && refused === null };
+}
+
+/**
+ * One of the daily workflow's extra coverage steps: true while URLs remain.
+ * Any failure (revoked access, a database error) ends this site's rounds
+ * quietly, so the workflow moves on to the next site.
+ */
+export async function coverageRound(db: D1Like, siteId: string, property: string, google: GoogleAccess, today: string, limit = COVERAGE_STEP): Promise<boolean> {
+  try {
+    const { token } = await google.connect();
+    return (await inspectSitemapUrls(db, siteId, property, token, today, limit, google.fetchFn)).remaining;
+  } catch {
+    return false;
+  }
 }
 
 /** Whether a source has synced before: its marker, or (for sites synced before markers existed) its data. */

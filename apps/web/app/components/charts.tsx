@@ -12,16 +12,17 @@ import { formatNumber } from "./api";
 const compact = (value: number) => value.toLocaleString("en", { notation: "compact", maximumFractionDigits: Math.abs(value) < 1 ? 2 : 1 });
 
 /** A ranked comparison: one bar per row, longest first as given. */
-export function BarList({ rows, format = formatNumber }: { rows: Array<{ label: string; value: number }>; format?: (value: number) => string }) {
-  const max = Math.max(...rows.map((row) => row.value), 0) || 1;
+/** Ranked bars; a null value (not measured yet) shows an empty bar and "—", never a real zero. */
+export function BarList({ rows, format = formatNumber }: { rows: Array<{ label: string; value: number | null }>; format?: (value: number) => string }) {
+  const max = Math.max(...rows.map((row) => row.value ?? 0), 0) || 1;
   return (
     <div className="chart-box">
       <ol className="chart-bars">
         {rows.map((row, index) => (
           <li key={row.label}>
             <span className="chart-bar-label" title={row.label}>{row.label}</span>
-            <span className="chart-bar-track"><i style={{ width: `${Math.max(0, (row.value / max) * 100)}%`, ["--i" as string]: index }} /></span>
-            <span className="chart-bar-value">{format(row.value)}</span>
+            <span className="chart-bar-track"><i style={{ width: `${Math.max(0, ((row.value ?? 0) / max) * 100)}%`, ["--i" as string]: index }} /></span>
+            <span className="chart-bar-value">{row.value === null ? "—" : format(row.value)}</span>
           </li>
         ))}
       </ol>

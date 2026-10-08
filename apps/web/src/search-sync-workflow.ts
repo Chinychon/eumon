@@ -3,7 +3,7 @@ import type { WorkflowEvent, WorkflowStep } from "cloudflare:workers";
 import type { AppEnv } from "../cloudflare.config";
 import { getSite, listSitesForResults, publishedPages } from "@organic-growth/db";
 import { googleAccess } from "./results-access";
-import { COVERAGE_STEP, inspectSitemapUrls, syncResults } from "./results-sync";
+import { COVERAGE_STEP, coverageRound, syncResults } from "./results-sync";
 import { syncGeneratedPageSearch } from "./search-sync";
 
 /** Runs daily (see cloudflare.config.ts) so page performance stays current without anyone clicking "sync". */
@@ -36,11 +36,8 @@ export class SearchSyncWorkflow extends WorkflowEntrypoint<AppEnv, Record<string
       const site = await getSite(this.env.DB, siteId);
       if (site?.gscProperty) {
         for (let round = 1; round <= 8; round++) {
-          const more = await step.do(`coverage-${siteId}-${round}`, { retries: { limit: 1, delay: "1 minute" } }, async () => {
-            const { token } = await googleAccess(this.env, siteId).connect();
-            const result = await inspectSitemapUrls(this.env.DB, siteId, site.gscProperty!, token, new Date().toISOString().slice(0, 10), COVERAGE_STEP);
-            return result.remaining;
-          });
+          const more = await step.do(`coverage-${siteId}-${round}`, () =>
+            coverageRound(this.env.DB, siteId, site.gscProperty!, googleAccess(this.env, siteId), new Date().toISOString().slice(0, 10)));
           if (!more) break;
         }
       }

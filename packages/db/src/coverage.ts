@@ -76,7 +76,8 @@ export async function indexCoverage(db: D1Like, siteId: string, now: Date): Prom
     const n = Number(row.n);
     family.total += n;
     coverage.total += n;
-    if (row.verdict !== null) {
+    // ERROR: Google wouldn't inspect it (outside the property, say); it waits like a checked URL but isn't counted as one.
+    if (row.verdict !== null && row.verdict !== "ERROR") {
       const name = coverageClass(row.verdict, row.coverage_state);
       family.checked += n;
       family.byClass[name] += n;

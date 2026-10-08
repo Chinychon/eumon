@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { createAnalysis, enqueueAnalysisCrawlUrls, getTopQueriesSnapshot, listMetricSeries, saveCrawlBatch, updateAnalysisStatus, setSiteCompetitorDomains, setSiteMarkets, updateSiteGa4Property, updateSiteGscProperty, upsertSite, getSite } from "@organic-growth/db";
+import { createAnalysis, enqueueAnalysisCrawlUrls, getTopQueriesSnapshot, indexCoverage, urlsToInspect, listMetricSeries, saveCrawlBatch, updateAnalysisStatus, setSiteCompetitorDomains, setSiteMarkets, updateSiteGa4Property, updateSiteGscProperty, upsertSite, getSite } from "@organic-growth/db";
 import { openSqliteD1 } from "@organic-growth/db/sqlite";
 import { ANALYTICS_SCOPE, SEARCH_CONSOLE_SCOPE } from "./gsc-auth.ts";
-import { syncResults } from "./results-sync.ts";
+import { coverageRound, inspectSitemapUrls, syncResults } from "./results-sync.ts";
 
 const now = new Date("2026-10-07T04:15:00Z");
 
@@ -195,5 +195,51 @@ describe("results sync", () => {
     assert.ok(inspections <= 130, `stopped within the batch after the refusal (${inspections})`);
     const saved = await db.prepare("SELECT COUNT(*) AS n FROM url_index_status WHERE site_id = 's'").first<{ n: number }>();
     assert.equal(saved?.n, 120, "statuses saved before the refusal are kept");
+  });
+
+  it("ends a site's coverage rounds, without throwing, when its Google access is revoked", async () => {
+    const { db } = await site();
+    const more = await coverageRound(db, "s", "sc-domain:x.com", { connect: async () => { throw new Error("Google access token refresh failed (400)."); } }, "2026-10-07");
+    assert.equal(more, false, "the workflow moves on to the next site");
+  });
+
+  it("records a URL Google won't inspect, so the queue moves past it", async () => {
+    const { db } = await site();
+    const at = now.toISOString();
+    await createAnalysis(db, { id: "a", siteId: "s", status: "running", createdAt: at });
+    const urls = ["https://x.com/doctors/a", "https://x.com/doctors/b", "https://other.x.com/doctors/c"];
+    await enqueueAnalysisCrawlUrls(db, { analysisId: "a", siteId: "s", urls: urls.map((url) => ({ url, routeFamily: "doctors" })) });
+    await saveCrawlBatch(db, { analysisId: "a", outcomes: urls.map((url) => ({ url, page: { url, status: 200, finalUrl: url, hreflang: [], jsonLdCount: 0, contentLength: 1, isEmptyShell: false, headingOutline: [], internalLinkCount: 0, rawTextLength: 1, renderedTextLength: 0, renderDelta: 0, fetchMode: "googlebot", routeFamily: "doctors" } })) });
+    await updateAnalysisStatus(db, "a", "completed", { completedAt: at });
+    const fetchFn = (async (_url: string, init?: RequestInit) => {
+      const asked = JSON.parse(String(init?.body ?? "{}")).inspectionUrl as string;
+      if (asked.includes("other.x.com")) return new Response(JSON.stringify({ error: { message: "URL is not part of this property" } }), { status: 403 });
+      if (asked.endsWith("/b")) return new Response(JSON.stringify({ error: { message: "Backend error" } }), { status: 500 });
+      return new Response(JSON.stringify({ inspectionResult: { indexStatusResult: { verdict: "PASS", coverageState: "Submitted and indexed" } } }));
+    }) as typeof fetch;
+    const result = await inspectSitemapUrls(db, "s", "sc-domain:x.com", "t", "2026-10-07", 10, fetchFn);
+    assert.equal(result.refused, null, "one URL outside the property is not a refusal for the day");
+    const rows = await db.prepare("SELECT url, verdict FROM url_index_status ORDER BY url").all<{ url: string; verdict: string }>();
+    assert.deepEqual(Object.fromEntries(rows.results.map((row) => [row.url, row.verdict])), { "https://x.com/doctors/a": "PASS", "https://x.com/doctors/b": "ERROR", "https://other.x.com/doctors/c": "ERROR" });
+    assert.deepEqual(await urlsToInspect(db, "s", 10, "2026-09-07"), [], "failed URLs wait 30 days like checked ones");
+    const coverage = (await indexCoverage(db, "s", new Date("2026-10-08T00:00:00Z")))!;
+    assert.equal(coverage.checked, 1, "a failed inspection isn't counted as checked");
+  });
+
+  it("stops for the day when Google refuses every URL in a batch", async () => {
+    const { db } = await site();
+    const at = now.toISOString();
+    await createAnalysis(db, { id: "a", siteId: "s", status: "running", createdAt: at });
+    const urls = Array.from({ length: 30 }, (_, index) => `https://x.com/doctors/d${index}`);
+    await enqueueAnalysisCrawlUrls(db, { analysisId: "a", siteId: "s", urls: urls.map((url) => ({ url, routeFamily: "doctors" })) });
+    await saveCrawlBatch(db, { analysisId: "a", outcomes: urls.map((url) => ({ url, page: { url, status: 200, finalUrl: url, hreflang: [], jsonLdCount: 0, contentLength: 1, isEmptyShell: false, headingOutline: [], internalLinkCount: 0, rawTextLength: 1, renderedTextLength: 0, renderDelta: 0, fetchMode: "googlebot", routeFamily: "doctors" } })) });
+    await updateAnalysisStatus(db, "a", "completed", { completedAt: at });
+    let calls = 0;
+    const fetchFn = (async () => { calls++; return new Response(JSON.stringify({ error: { message: "The caller does not have permission" } }), { status: 403 }); }) as unknown as typeof fetch;
+    const result = await inspectSitemapUrls(db, "s", "sc-domain:x.com", "t", "2026-10-07", 30, fetchFn);
+    assert.equal(result.refused, 403);
+    assert.equal(calls, 10, "stopped after the first batch");
+    const saved = await db.prepare("SELECT COUNT(*) AS n FROM url_index_status").first<{ n: number }>();
+    assert.equal(saved?.n, 0, "a refusal isn't recorded against the URLs");
   });
 });

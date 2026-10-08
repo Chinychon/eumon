@@ -170,7 +170,7 @@ export function ResultsView({ endpoint, operator, onNavigate }: { endpoint: stri
             ? <p className="empty-state">{operator && !site.signals.authority ? "Add an Open PageRank key (OPEN_PAGERANK_KEY) to compare authority with your competitors." : "Not measured yet."}</p>
             : (
               <>
-                <BarList format={(value) => value.toFixed(2)} rows={[{ label: host, value: results.authority.site ?? 0 }, ...results.authority.competitors.map((entry) => ({ label: entry.domain, value: entry.score ?? 0 }))]} />
+                <BarList format={(value) => value.toFixed(2)} rows={[{ label: host, value: results.authority.site }, ...results.authority.competitors.map((entry) => ({ label: entry.domain, value: entry.score }))]} />
                 {results.authority.history.length > 1 && (
                   <>
                     {/* A snapshot, not a daily total: today's value is final, so nothing draws dashed. */}

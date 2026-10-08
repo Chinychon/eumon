@@ -679,6 +679,16 @@ details.disclosure[open] > summary { margin-bottom: 10px; }
 .results-pair { gap: 0 24px; margin-bottom: 14px; }
 .results-inline { margin: 6px 0 14px; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
 .rank-buckets + p { margin-top: 10px; }
+.speed-tiles { margin: 0 calc(-1 * var(--pad)) 16px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.speed-tile { padding: 14px var(--pad) 10px; min-width: 0; }
+.speed-tile + .speed-tile { border-left: 1px solid var(--line); }
+.speed-tile .section-title { margin: 0; }
+.speed-hint { margin: 2px 0 8px; }
+.speed-row { display: flex; align-items: center; gap: 10px; min-height: 34px; }
+.speed-form { width: 72px; flex: none; font-family: var(--mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.speed-row strong { font-size: 20px; font-weight: 400; font-variant-numeric: tabular-nums; }
+.lab-scores { margin-bottom: 16px; }
+@media (max-width: 1050px) { .speed-tile + .speed-tile { border-left: 0; border-top: 1px solid var(--line); } }
 .top-queries .was { display: block; margin-top: 2px; font-family: var(--mono); font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .top-queries td:first-child { overflow-wrap: anywhere; }
 .top-queries td:first-child .was { color: var(--green-ink); text-transform: uppercase; letter-spacing: .06em; }

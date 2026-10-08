@@ -1,12 +1,18 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { countryName, type Compare, type ResultsView as Results, type TopQuery } from "@organic-growth/core";
+import { countryName, type Compare, type ResultsView as Results, type SpeedMetric, type SpeedRating, type TopQuery } from "@organic-growth/core";
 import { api, errorMessage, formatNumber } from "./api";
-import { Funnel, LineChart } from "./charts";
-import { Button, Card, Kpi, ViewHeader } from "./ui";
+import { BarList, Funnel, LineChart } from "./charts";
+import { Badge, Button, Card, Kpi, ViewHeader } from "./ui";
 
-type Payload = { site: { name: string; baseUrl: string; searchConnected: boolean; analytics: "connected" | "reconnect" | "none" }; results: Results };
+type Payload = { site: { name: string; baseUrl: string; searchConnected: boolean; analytics: "connected" | "reconnect" | "none"; signals: { speed: boolean; authority: boolean } }; results: Results };
+
+const SPEED_LABEL: Record<SpeedMetric, string> = { lcp: "Loading", inp: "Responding to taps", cls: "Staying still while loading" };
+const SPEED_HINT: Record<SpeedMetric, string> = { lcp: "Main content on screen", inp: "Reaction to a tap or click", cls: "Layout shift while loading" };
+const RATING_LABEL: Record<SpeedRating, string> = { good: "Good", "needs-work": "Needs work", poor: "Poor" };
+const RATING_TONE: Record<SpeedRating, string> = { good: "green", "needs-work": "amber", poor: "red" };
+const formatSpeed = (metric: SpeedMetric, value: number) => (metric === "cls" ? value.toFixed(2) : value >= 1000 ? `${(value / 1000).toFixed(1)} s` : `${Math.round(value)} ms`);
 
 const day = (value: string) => new Date(`${value}T00:00:00Z`).toLocaleDateString("en", { day: "numeric", month: "short", timeZone: "UTC" });
 const pct = (value: number | null, digits = 1) => (value === null ? "—" : `${(value * 100).toFixed(digits)}%`);
@@ -59,7 +65,7 @@ export function ResultsView({ endpoint, operator, onNavigate }: { endpoint: stri
     <div>
       <ViewHeader
         title={operator ? "Performance" : site.name}
-        description={<>Is Eumon working for {host}? {results.searchThrough ? `Google data through ${day(results.searchThrough)}.` : "Google data appears after the first sync."}</>}
+        description={<>Google search, enquiries, speed, and authority for {host}. {results.searchThrough ? `Google data through ${day(results.searchThrough)}.` : "Google data appears after the first sync."}</>}
         actions={operator && (
           <div className="row">
             <Button variant="ghost" onClick={shareLink}>{shared ? "Link copied" : "Copy client link"}</Button>
@@ -82,7 +88,7 @@ export function ResultsView({ endpoint, operator, onNavigate }: { endpoint: stri
           <Kpi label="Pages live" value={formatNumber(pages.live)} caption={pages.live ? `${formatNumber(pages.indexed)} indexed · ${formatNumber(pages.notIndexed)} not · ${formatNumber(pages.unchecked)} not checked yet` : "No Eumon pages published yet"} />
         </div>
 
-        <Card title="Are more people finding you on Google?" subtitle={results.search?.scoped ? `Scoped to your target markets: ${results.markets.map(countryName).join(", ")}.` : results.markets.length ? "Every country, until your target markets' history is synced." : operator ? "Every country. Set target markets in Setup to focus this section." : "Every country."}>
+        <Card title="Google search" subtitle={results.search?.scoped ? `Scoped to your target markets: ${results.markets.map(countryName).join(", ")}.` : results.markets.length ? "Every country, until your target markets' history is synced." : operator ? "Every country. Set target markets in Setup to focus this section." : "Every country."}>
           {results.search ? (
             <>
               <div className="ruled-grid c11 results-pair">
@@ -118,7 +124,7 @@ export function ResultsView({ endpoint, operator, onNavigate }: { endpoint: stri
           )}
         </Card>
 
-        <Card title="Is it bringing enquiries?" subtitle="Eumon's pages from a Google search to an enquiry, over the last 28 days of Search Console data.">
+        <Card title="Enquiries" subtitle="Eumon's pages from a Google search to an enquiry, over the last 28 days of Search Console data.">
           {results.leads.funnel ? <Funnel steps={results.leads.funnel} /> : <p className="empty-state">The funnel appears once Eumon's pages have Google impressions.</p>}
           <div className="section-title">Enquiries per week</div>
           {results.leads.weeks.some((week) => week.other !== null || week.eumon !== null)
@@ -126,8 +132,53 @@ export function ResultsView({ endpoint, operator, onNavigate }: { endpoint: stri
             : <p className="empty-state">{operator ? "No enquiries tracked yet. Install tracking in Setup to count WhatsApp taps, calls, and forms." : "No enquiries tracked yet."}</p>}
         </Card>
 
+        <Card title="Speed and authority" subtitle="Speed for real Chrome visitors over 28 days (Google's 75th percentile), Lighthouse lab scores, and an authority estimate.">
+          {!site.signals.speed && !results.speed.measured
+            ? <p className="empty-state">{operator ? "Add a Google API key (GOOGLE_API_KEY) with the Chrome UX Report and PageSpeed Insights APIs to measure speed." : "Not measured yet."}</p>
+            : (
+              <div className="ruled-grid c3 speed-tiles">
+                {results.speed.metrics.map((entry) => (
+                  <div key={entry.metric} className="speed-tile">
+                    <div className="section-title">{SPEED_LABEL[entry.metric]}</div>
+                    <p className="small muted speed-hint">{SPEED_HINT[entry.metric]}</p>
+                    {(["phone", "desktop"] as const).map((form) => (
+                      <div key={form} className="speed-row">
+                        <span className="speed-form">{form === "phone" ? "Phones" : "Desktops"}</span>
+                        {entry[form].p75 === null
+                          ? <span className="small muted">{results.speed.measured ? "Too few Chrome visits for Google to report" : "Measured after the next sync"}</span>
+                          : <><strong>{formatSpeed(entry.metric, entry[form].p75!)}</strong><Badge tone={RATING_TONE[entry[form].rating!]}>{RATING_LABEL[entry[form].rating!]}</Badge></>}
+                      </div>
+                    ))}
+                    {entry.history.length > 1 && (
+                      <LineChart series={["phones", "desktops"]} points={entry.history.map((week) => ({ x: week.day, values: [week.phone, week.desktop] }))} />
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          {(results.lab.phone.home !== null || results.lab.desktop.home !== null) && (
+            <div className="metrics-grid results-inline lab-scores">
+              {(["phone", "desktop"] as const).map((form) => (
+                <Kpi key={form} label={`Lighthouse score · ${form}`}
+                  value={results.lab[form].eumon ?? results.lab[form].home ?? "—"}
+                  caption={results.lab[form].eumon !== null ? `Eumon page · homepage ${results.lab[form].home ?? "—"}` : "Homepage"} />
+              ))}
+            </div>
+          )}
+          <div className="section-title">Authority</div>
+          {results.authority.site === null && !results.authority.competitors.some((entry) => entry.score !== null)
+            ? <p className="empty-state">{operator && !site.signals.authority ? "Add an Open PageRank key (OPEN_PAGERANK_KEY) to compare authority with your competitors." : "Not measured yet."}</p>
+            : (
+              <>
+                <BarList format={(value) => value.toFixed(2)} rows={[{ label: host, value: results.authority.site ?? 0 }, ...results.authority.competitors.map((entry) => ({ label: entry.domain, value: entry.score ?? 0 }))]} />
+                {results.authority.history.length > 1 && <LineChart series={["authority"]} points={results.authority.history.map((point) => ({ x: point.day, values: [point.value] }))} />}
+              </>
+            )}
+          <p className="small muted">Open PageRank: a free 0–10 estimate from public link data, updated about monthly. Not Google's own measure.</p>
+        </Card>
+
         {operator && (
-          <Card title="Is the site healthy?" subtitle="Share of crawled sitemap pages with no error, no empty HTML, and no noindex, from the latest analysis.">
+          <Card title="Site health" subtitle="Share of crawled sitemap pages with no error, no empty HTML, and no noindex, from the latest analysis.">
             <div className="big-number">{results.health.value === null ? "—" : `${results.health.value}%`}</div>
             <p className="small muted">{results.health.day ? `Analysis of ${day(results.health.day)}.` : "Run an analysis to measure it."}</p>
           </Card>

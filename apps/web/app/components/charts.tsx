@@ -12,7 +12,7 @@ import { formatNumber } from "./api";
 const compact = (value: number) => value.toLocaleString("en", { notation: "compact", maximumFractionDigits: 1 });
 
 /** A ranked comparison: one bar per row, longest first as given. */
-export function BarList({ rows }: { rows: Array<{ label: string; value: number }> }) {
+export function BarList({ rows, format = formatNumber }: { rows: Array<{ label: string; value: number }>; format?: (value: number) => string }) {
   const max = Math.max(...rows.map((row) => row.value), 0) || 1;
   return (
     <div className="chart-box">
@@ -21,7 +21,7 @@ export function BarList({ rows }: { rows: Array<{ label: string; value: number }
           <li key={row.label}>
             <span className="chart-bar-label" title={row.label}>{row.label}</span>
             <span className="chart-bar-track"><i style={{ width: `${Math.max(0, (row.value / max) * 100)}%`, ["--i" as string]: index }} /></span>
-            <span className="chart-bar-value">{formatNumber(row.value)}</span>
+            <span className="chart-bar-value">{format(row.value)}</span>
           </li>
         ))}
       </ol>

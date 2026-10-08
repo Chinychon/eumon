@@ -74,7 +74,8 @@ export function LineChart({ points, series, marker, partialFrom }: {
   const y = (value: number) => 100 - (value / top) * 100;
   const firstPartial = partialFrom ? points.findIndex((point) => point.x >= partialFrom) : points.at(-1)?.x === TODAY() ? points.length - 1 : -1;
   const incomplete = points.length > 1 && firstPartial > 0;
-  const markerAt = marker ? points.findIndex((point) => point.x >= marker.x) : -1;
+  // The marker sits on the point whose period contains it (the last point starting on or before it).
+  const markerAt = marker && points[0] && points[0].x <= marker.x ? points.findLastIndex((point) => point.x <= marker.x) : -1;
   const path = (pairs: Array<[number, number]>) => pairs.map(([px, py], index) => `${index ? "L" : "M"}${px},${py}`).join("");
   const current = hover === null ? undefined : points[hover];
   const last = points.at(-1);
@@ -105,13 +106,26 @@ export function LineChart({ points, series, marker, partialFrom }: {
         <svg className="chart-draw" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
           {[0, 0.5, 1].map((fraction) => <line key={fraction} x1="0" x2="100" y1={y(top * fraction)} y2={y(top * fraction)} className="chart-grid" />)}
           {series.map((name, index) => {
-            const pairs = points.flatMap((point, at): Array<[number, number]> => (point.values[index] === null || point.values[index] === undefined ? [] : [[x(at), y(point.values[index]!)]]));
-            const solid = incomplete ? pairs.filter(([px]) => px <= x(firstPartial - 1)) : pairs;
-            const tail = incomplete ? pairs.filter(([px]) => px >= x(firstPartial - 1)) : [];
+            // A missing value breaks the line, so a gap in the data reads as a gap, not a straight bridge.
+            const runs: Array<Array<[number, number, number]>> = [[]];
+            points.forEach((point, at) => {
+              const value = point.values[index];
+              if (value === null || value === undefined) { if (runs.at(-1)!.length) runs.push([]); return; }
+              runs.at(-1)!.push([x(at), y(value), at]);
+            });
+            const xy = (run: Array<[number, number, number]>) => run.map(([px, py]): [number, number] => [px, py]);
             return (
               <g key={name} className={`chart-series s${index}`}>
-                <path d={path(solid)} />
-                {tail.length > 1 && <path d={path(tail)} className="chart-tail" />}
+                {runs.filter((run) => run.length).map((run) => {
+                  const solid = incomplete ? run.filter(([, , at]) => at <= firstPartial - 1) : run;
+                  const tail = incomplete ? run.filter(([, , at]) => at >= firstPartial - 1) : [];
+                  return (
+                    <g key={run[0]![2]}>
+                      {solid.length > 1 && <path d={path(xy(solid))} />}
+                      {tail.length > 1 && <path d={path(xy(tail))} className="chart-tail" />}
+                    </g>
+                  );
+                })}
               </g>
             );
           })}

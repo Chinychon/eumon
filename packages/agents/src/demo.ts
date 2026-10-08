@@ -4,7 +4,7 @@ import { crawlGooglebotBatch, researchSite, type Fetcher, type SiteResearch } fr
 import {
   chunks, createAnalysis, datasetCoverage, deleteSite, getAnalysisJob, getCrawlCoverage, getCrawlProgress, insertConversionEvent, listAllRecords,
   listCrawlPageResults, listPendingCrawlUrls, recordLandingSession, replaceCurrentSearchMetrics, replacePageSearchMetrics, runStatements, saveAnalysisReport, saveCrawlBatch,
-  saveIndexStatus, saveSiteScope, saveTopQueriesSnapshot, setSiteCompetitorDomains, syncFirstPartyResults, updateSiteGa4Property, upsertMetricPoints, type MetricPoint, setSiteMarkets, setTemplatePublication, syncTemplatePages, updateAnalysisProgress,
+  saveIndexStatus, saveSiteScope, saveTopQueriesSnapshot, saveUrlIndexStatus, listSiteCompetitorDomains, setSiteCompetitorDomains, syncFirstPartyResults, updateSiteGa4Property, upsertMetricPoints, type MetricPoint, setSiteMarkets, setTemplatePublication, syncTemplatePages, updateAnalysisProgress,
   updateAnalysisStatus, upsertDataset, upsertRecords, upsertSite, upsertTemplate, type D1Like,
 } from "@organic-growth/db";
 import { generatePages } from "@organic-growth/pages";
@@ -546,5 +546,40 @@ async function seedDemoResults(db: D1Like, now: number) {
       query, clicks, impressions, position, before: was ? { clicks: was[0], impressions: was[1], position: was[2] } : null,
     })),
   });
+  // Fictional real-user speed: 30 weeks for phones and desktops, phones slower, both improving after go-live.
+  const speed: MetricPoint[] = [{ metric: "sync.crux", day: today, value: 1 }];
+  for (let week = 29; week >= 0; week--) {
+    const day = addDays(today, -2 - week * 7);
+    const after = day >= addDays(today, -80) ? 0.8 : 1;
+    speed.push(
+      { metric: "crux_lcp_p75.phone", day, value: Math.round(4300 * after + (week % 4) * 60) },
+      { metric: "crux_lcp_p75.desktop", day, value: Math.round(2300 * after + (week % 3) * 40) },
+      { metric: "crux_inp_p75.phone", day, value: Math.round(320 * after) },
+      { metric: "crux_inp_p75.desktop", day, value: Math.round(140 * after) },
+      { metric: "crux_cls_p75.phone", day, value: 0.12 },
+      { metric: "crux_cls_p75.desktop", day, value: 0.05 },
+    );
+  }
+  const competitors = await listSiteCompetitorDomains(db, DEMO_SITE_ID);
+  await upsertMetricPoints(db, DEMO_SITE_ID, [
+    ...speed,
+    { metric: "lab_score_home.phone", day: today, value: 41 }, { metric: "lab_score_home.desktop", day: today, value: 78 },
+    { metric: "lab_score_eumon.phone", day: today, value: 96 }, { metric: "lab_score_eumon.desktop", day: today, value: 99 },
+    ...[0, 1, 2, 3].map((month) => ({ metric: "authority", day: addDays(today, -month * 30), value: 1.6 + (3 - month) * 0.1 })),
+    ...competitors.map((domain, index) => ({ metric: `authority:${domain}`, day: today, value: 2.4 - index * 0.9 })),
+  ]);
+  // Fictional URL Inspection results for a sample of the latest crawl's pages.
+  const { results: sample } = await db.prepare(
+    `SELECT url, COALESCE(json_extract(result_json, '$.routeFamily'), 'other') AS family FROM pages
+     WHERE analysis_id = 'analysis_demo_2' AND crawl_state = 'complete' AND status < 400 ORDER BY url LIMIT 600`,
+  ).all<{ url: string; family: string }>();
+  const states = ["Submitted and indexed", "Submitted and indexed", "Submitted and indexed", "Crawled - currently not indexed", "Discovered - currently not indexed", "URL is unknown to Google"];
+  await saveUrlIndexStatus(db, DEMO_SITE_ID, sample.map((row, index) => {
+    const state = row.family === "prices" && index % 2 ? "Discovered - currently not indexed" : states[index % states.length]!;
+    return {
+      url: row.url, family: row.family, verdict: state === "Submitted and indexed" ? "PASS" : "NEUTRAL", coverageState: state,
+      lastCrawlTime: state.startsWith("Submitted") || state.startsWith("Crawled") ? `${addDays(today, -(index % 40))}T02:00:00Z` : null,
+    };
+  }));
   await syncFirstPartyResults(db, DEMO_SITE_ID, new Date(now));
 }

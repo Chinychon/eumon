@@ -70,5 +70,10 @@ describe("demo site", () => {
     assert.ok(view.organic!.length > 60);
     const top = await getTopQueriesSnapshot(db, DEMO_SITE_ID, { property: "sc-domain:demo-clinic.example", markets: ["mys", "sgp"] });
     assert.ok(top && top.rows.length >= 8 && top.rows.some((row) => row.before === null), "a top-queries table with a new query");
+    const signals = await listMetricSeries(db, DEMO_SITE_ID, ["crux_lcp_p75.phone", "crux_lcp_p75.desktop", "lab_score_eumon.phone", "authority", "authority:brightcare-dental.example"], addDays(today, -400), today);
+    assert.ok(signals["crux_lcp_p75.phone"]!.length >= 20 && signals["crux_lcp_p75.desktop"]!.length >= 20, "weekly speed history for both form factors");
+    assert.ok(signals["lab_score_eumon.phone"]!.length && signals.authority!.length && signals["authority:brightcare-dental.example"]!.length);
+    const coverage = await db.prepare("SELECT COUNT(*) AS n FROM url_index_status WHERE site_id = ?").bind(DEMO_SITE_ID).first<{ n: number }>();
+    assert.ok(Number(coverage?.n) > 300, "a sample of sitemap URLs checked with Google");
   });
 });

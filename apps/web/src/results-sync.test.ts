@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { getTopQueriesSnapshot, listMetricSeries, setSiteCompetitorDomains, setSiteMarkets, updateSiteGa4Property, updateSiteGscProperty, upsertSite, getSite } from "@organic-growth/db";
+import { createAnalysis, enqueueAnalysisCrawlUrls, getTopQueriesSnapshot, listMetricSeries, saveCrawlBatch, updateAnalysisStatus, setSiteCompetitorDomains, setSiteMarkets, updateSiteGa4Property, updateSiteGscProperty, upsertSite, getSite } from "@organic-growth/db";
 import { openSqliteD1 } from "@organic-growth/db/sqlite";
 import { ANALYTICS_SCOPE, SEARCH_CONSOLE_SCOPE } from "./gsc-auth.ts";
 import { syncResults } from "./results-sync.ts";
@@ -166,5 +166,29 @@ describe("results sync", () => {
     const notes = await syncResults(db, (await getSite(db, "s"))!, now, { connect: async () => { throw new Error("no"); } });
     assert.ok(notes.includes("speed: no Google API key"), notes.join("; "));
     assert.ok(notes.includes("authority: no Open PageRank key"), notes.join("; "));
+  });
+
+  it("inspects sitemap URLs 200 at a time and stops when Google refuses", async () => {
+    const { db } = await site();
+    const at = now.toISOString();
+    await createAnalysis(db, { id: "a", siteId: "s", status: "running", createdAt: at });
+    const urls = Array.from({ length: 250 }, (_, index) => `https://x.com/doctors/d${index}`);
+    await enqueueAnalysisCrawlUrls(db, { analysisId: "a", siteId: "s", urls: urls.map((url) => ({ url, routeFamily: "doctors" })) });
+    await saveCrawlBatch(db, { analysisId: "a", outcomes: urls.map((url) => ({ url, page: { url, status: 200, finalUrl: url, hreflang: [], jsonLdCount: 0, contentLength: 1, isEmptyShell: false, headingOutline: [], internalLinkCount: 0, rawTextLength: 1, renderedTextLength: 0, renderDelta: 0, fetchMode: "googlebot", routeFamily: "doctors" } })) });
+    await updateAnalysisStatus(db, "a", "completed", { completedAt: at });
+    let inspections = 0;
+    const fetchFn = (async (url: string) => {
+      if (!url.includes("urlInspection")) return new Response(JSON.stringify({ rows: [] }));
+      inspections++;
+      return inspections > 120
+        ? new Response(JSON.stringify({ error: { message: "Quota exceeded" } }), { status: 429 })
+        : new Response(JSON.stringify({ inspectionResult: { indexStatusResult: { verdict: "PASS", coverageState: "Submitted and indexed" } } }));
+    }) as typeof fetch;
+    const notes = await syncResults(db, (await getSite(db, "s"))!, now, { connect: async () => ({ token: "t", scopes: [SEARCH_CONSOLE_SCOPE] }), fetchFn });
+    assert.ok(notes.includes("coverage: inspected 120"), notes.join("; "));
+    assert.ok(notes.includes("coverage stopped: Google answered 429"), notes.join("; "));
+    assert.ok(inspections <= 130, `stopped within the batch after the refusal (${inspections})`);
+    const saved = await db.prepare("SELECT COUNT(*) AS n FROM url_index_status WHERE site_id = 's'").first<{ n: number }>();
+    assert.equal(saved?.n, 120, "statuses saved before the refusal are kept");
   });
 });

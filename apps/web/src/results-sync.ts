@@ -3,7 +3,7 @@ import { authorityDomain, fetchAuthority, fetchCruxHistory, fetchGa4Daily, fetch
 import { addDays } from "@organic-growth/core";
 import {
   defaultPageSettings, firstMetricDay, getPageSettings, indexStatusCounts, listSiteCompetitorDomains, listSiteMarkets, pagesToInspect, topEumonPage,
-  saveIndexStatus, saveTopQueriesSnapshot, syncFirstPartyResults, upsertMetricPoints, type D1Like, type MetricPoint,
+  saveIndexStatus, saveTopQueriesSnapshot, saveUrlIndexStatus, urlsToInspect, syncFirstPartyResults, upsertMetricPoints, type D1Like, type MetricPoint,
 } from "@organic-growth/db";
 import { ANALYTICS_SCOPE } from "./gsc-auth.ts";
 
@@ -120,6 +120,37 @@ async function syncSignals(db: D1Like, site: SiteRecord, today: string, monday: 
   return notes;
 }
 
+/** URL inspections per step: a "Sync now" runs one step; the daily workflow runs up to nine. */
+export const COVERAGE_STEP = 200;
+
+/**
+ * Asks Google about the next sitemap URLs (unchecked first, then those last
+ * checked over 30 days ago), ten at a time, keeping what was learned
+ * before any refusal.
+ */
+export async function inspectSitemapUrls(
+  db: D1Like, siteId: string, property: string, token: string, today: string, limit: number, fetchFn?: typeof fetch,
+): Promise<{ inspected: number; refused: number | null; remaining: boolean }> {
+  const queue = await urlsToInspect(db, siteId, limit, addDays(today, -30));
+  let refused: number | null = null;
+  let inspected = 0;
+  for (let start = 0; start < queue.length && refused === null; start += 10) {
+    const batch = await Promise.all(queue.slice(start, start + 10).map(async (entry) => {
+      try {
+        return { ...entry, ...await inspectUrl(token, property, entry.url, fetchFn) };
+      } catch (error) {
+        const status = (error as { status?: number }).status;
+        if (status === 401 || status === 403 || status === 429) refused = status;
+        return null;
+      }
+    }));
+    const rows = batch.filter((row) => row !== null);
+    await saveUrlIndexStatus(db, siteId, rows);
+    inspected += rows.length;
+  }
+  return { inspected, refused, remaining: queue.length === limit && refused === null };
+}
+
 /** Whether a source has synced before: its marker, or (for sites synced before markers existed) its data. */
 async function synced(db: D1Like, siteId: string, marker: string, data: string): Promise<boolean> {
   return Boolean((await firstMetricDay(db, siteId, marker)) ?? (await firstMetricDay(db, siteId, data)));
@@ -197,5 +228,13 @@ async function syncSearch(db: D1Like, site: SiteRecord, property: string, token:
     points.push({ metric: "pages_indexed", day: today, value: counts.indexed }, { metric: "pages_not_indexed", day: today, value: counts.notIndexed });
   }
   await upsertMetricPoints(db, site.id, points);
-  return [`search: ${span} days`, ...(markets.length ? [`markets: ${marketSpan} days`] : []), `inspected ${inspected.length} pages`, ...(refused ? [`inspection stopped: Google answered ${refused}`] : [])];
+
+  // Sitemap URLs: one step of 200 here; the daily workflow runs more steps (see SearchSyncWorkflow).
+  const coverageNotes: string[] = [];
+  if (refused === null) {
+    const coverage = await inspectSitemapUrls(db, site.id, property, token, today, COVERAGE_STEP, fetchFn);
+    if (coverage.inspected || coverage.refused) coverageNotes.push(`coverage: inspected ${coverage.inspected}`);
+    if (coverage.refused) coverageNotes.push(`coverage stopped: Google answered ${coverage.refused}`);
+  }
+  return [`search: ${span} days`, ...(markets.length ? [`markets: ${marketSpan} days`] : []), `inspected ${inspected.length} pages`, ...(refused ? [`inspection stopped: Google answered ${refused}`] : []), ...coverageNotes];
 }

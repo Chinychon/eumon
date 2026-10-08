@@ -3,7 +3,7 @@ import type { WorkflowEvent, WorkflowStep } from "cloudflare:workers";
 import type { AppEnv } from "../cloudflare.config";
 import { getSite, listSitesForResults, publishedPages } from "@organic-growth/db";
 import { googleAccess } from "./results-access";
-import { syncResults } from "./results-sync";
+import { COVERAGE_STEP, inspectSitemapUrls, syncResults } from "./results-sync";
 import { syncGeneratedPageSearch } from "./search-sync";
 
 /** Runs daily (see cloudflare.config.ts) so page performance stays current without anyone clicking "sync". */
@@ -32,6 +32,18 @@ export class SearchSyncWorkflow extends WorkflowEntrypoint<AppEnv, Record<string
         }
         return notes.join("; ");
       });
+      // Up to 8 more coverage steps (1,600 inspections), so a 23,000-URL site is checked within about two weeks under the 2,000-a-day quota.
+      const site = await getSite(this.env.DB, siteId);
+      if (site?.gscProperty) {
+        for (let round = 1; round <= 8; round++) {
+          const more = await step.do(`coverage-${siteId}-${round}`, { retries: { limit: 1, delay: "1 minute" } }, async () => {
+            const { token } = await googleAccess(this.env, siteId).connect();
+            const result = await inspectSitemapUrls(this.env.DB, siteId, site.gscProperty!, token, new Date().toISOString().slice(0, 10), COVERAGE_STEP);
+            return result.remaining;
+          });
+          if (!more) break;
+        }
+      }
     }
     return results;
   }

@@ -8,5 +8,5 @@ export async function GET(_request: Request, context: { params: Promise<{ token:
   const { token } = await context.params;
   const site = await siteForShareToken(env.DB, token, env.SESSION_SECRET);
   if (!site) return fail("This link has expired or was revoked.", 404);
-  return json(await resultsPayload(env.DB, site, { client: true }));
+  return json(await resultsPayload(env.DB, site, { client: true, signals: { speed: Boolean(env.GOOGLE_API_KEY), authority: Boolean(env.OPEN_PAGERANK_KEY) } }));
 }

@@ -74,4 +74,32 @@ describe("results math", () => {
     assert.equal(view.numbers.leadsSince, "2026-09-25");
     assert.equal(resultsView(base()).numbers.leadsSince, null);
   });
+
+  it("reports speed per form factor with ratings, lab scores, and authority for current competitors", () => {
+    const view = resultsView(base({
+      competitors: ["rival.example", "new.example"],
+      series: {
+        "sync.crux": [{ day: "2026-10-05", value: 6 }],
+        "crux_lcp_p75.phone": [{ day: "2026-09-26", value: 7763 }, { day: "2026-10-03", value: 7012 }],
+        "crux_lcp_p75.desktop": [{ day: "2026-10-03", value: 2100 }],
+        "crux_cls_p75.phone": [{ day: "2026-10-03", value: 0.07 }],
+        "lab_score_home.phone": [{ day: "2026-10-05", value: 32 }],
+        "lab_score_eumon.phone": [{ day: "2026-10-05", value: 96 }],
+        authority: [{ day: "2026-09-28", value: 0.2 }, { day: "2026-10-05", value: 0.25 }],
+        "authority:rival.example": [{ day: "2026-10-05", value: 1.14 }],
+        "authority:gone.example": [{ day: "2026-10-05", value: 5 }],
+      },
+    }));
+    const lcp = view.speed.metrics.find((entry) => entry.metric === "lcp")!;
+    assert.equal(view.speed.measured, true);
+    assert.deepEqual(lcp.phone, { p75: 7012, rating: "poor" });
+    assert.deepEqual(lcp.desktop, { p75: 2100, rating: "good" });
+    assert.deepEqual(lcp.history, [{ day: "2026-09-26", phone: 7763, desktop: null }, { day: "2026-10-03", phone: 7012, desktop: 2100 }]);
+    assert.deepEqual(view.speed.metrics.find((entry) => entry.metric === "inp")!.phone, { p75: null, rating: null }, "no INP data on phones");
+    assert.deepEqual(view.lab, { phone: { home: 32, eumon: 96 }, desktop: { home: null, eumon: null } });
+    assert.deepEqual(view.authority.competitors, [{ domain: "rival.example", score: 1.14 }, { domain: "new.example", score: null }], "removed competitors drop out; new ones wait for the weekly fetch");
+    assert.equal(view.authority.site, 0.25);
+    assert.equal(view.authority.history.length, 2);
+    assert.equal(resultsView(base()).speed.measured, false);
+  });
 });

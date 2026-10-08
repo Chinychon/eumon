@@ -3,6 +3,8 @@
  * the API, the client link, and the tests all compute the same numbers.
  */
 
+import { SPEED_METRICS, speedRating, type SpeedMetric, type SpeedRating } from "./signals.js";
+
 export type DayValue = { day: string; value: number };
 export type Compare = { current: number | null; before: number | null; previous: number | null };
 type Range = [string, string];
@@ -81,6 +83,8 @@ export const RESULT_METRICS = [
   "leads", "leads_eumon", "googlebot_fetches", "eumon_page_views", "eumon_cta_clicks", "published_pages",
   "ga4_sessions", "ga4_organic_sessions", "ga4_organic_engaged_sessions", "ga4_organic_key_events",
   "site_health", "crawl_urls", "crawl_empty_shells", "crawl_http_errors", "crawl_noindex",
+  "sync.crux", ...["lcp", "inp", "cls"].flatMap((metric) => [`crux_${metric}_p75.phone`, `crux_${metric}_p75.desktop`]),
+  "lab_score_home.phone", "lab_score_home.desktop", "lab_score_eumon.phone", "lab_score_eumon.desktop", "authority",
 ];
 
 /** A query's last 28 days of Search Console data, beside the 28 before (null when it had no impressions then). */
@@ -104,7 +108,11 @@ export type ResultsInput = {
   ga4Connected: boolean;
   /** The latest sync's top queries, for the current property and markets. */
   topQueries?: { periodEnd: string; rows: TopQuery[] } | null;
+  /** The site's current competitor domains, for `authority:<domain>` series. */
+  competitors?: string[];
 };
+
+export type SpeedValue = { p75: number | null; rating: SpeedRating | null };
 
 export type ResultsView = {
   today: string;
@@ -139,6 +147,13 @@ export type ResultsView = {
     funnel: Array<{ label: string; value: number }> | null;
   };
   health: { value: number | null; day: string | null };
+  speed: {
+    /** Whether CrUX has been asked yet; asked with no values means too few Chrome visits. */
+    measured: boolean;
+    metrics: Array<{ metric: SpeedMetric; phone: SpeedValue; desktop: SpeedValue; history: Array<{ day: string; phone: number | null; desktop: number | null }> }>;
+  };
+  lab: { phone: { home: number | null; eumon: number | null }; desktop: { home: number | null; eumon: number | null } };
+  authority: { site: number | null; competitors: Array<{ domain: string; score: number | null }>; history: Array<{ day: string; value: number }> };
 };
 
 const HISTORY_DAYS = 486;
@@ -190,6 +205,30 @@ export function resultsView(input: ResultsInput): ResultsView {
     { label: "Enquiries", value: sumCurrent("leads_eumon") },
   ];
 
+  const speedValue = (metric: SpeedMetric, form: "phone" | "desktop"): SpeedValue => {
+    const p75 = latest(series[`crux_${metric}_p75.${form}`], today);
+    return { p75, rating: p75 === null ? null : speedRating(metric, p75) };
+  };
+  const speed = {
+    measured: Boolean(series["sync.crux"]?.length),
+    metrics: SPEED_METRICS.map((metric) => {
+      const phone = series[`crux_${metric}_p75.phone`] ?? [];
+      const desktop = series[`crux_${metric}_p75.desktop`] ?? [];
+      const days = [...new Set([...phone, ...desktop].map((point) => point.day))].sort();
+      const at = (points: DayValue[], day: string) => points.find((point) => point.day === day)?.value ?? null;
+      return { metric, phone: speedValue(metric, "phone"), desktop: speedValue(metric, "desktop"), history: days.map((day) => ({ day, phone: at(phone, day), desktop: at(desktop, day) })) };
+    }),
+  };
+  const lab = {
+    phone: { home: latest(series["lab_score_home.phone"], today), eumon: latest(series["lab_score_eumon.phone"], today) },
+    desktop: { home: latest(series["lab_score_home.desktop"], today), eumon: latest(series["lab_score_eumon.desktop"], today) },
+  };
+  const authority = {
+    site: latest(series.authority, today),
+    competitors: (input.competitors ?? []).map((domain) => ({ domain, score: latest(series[`authority:${domain}`], today) })),
+    history: series.authority ?? [],
+  };
+
   const ga4Sessions = weekly(series.ga4_organic_sessions, from, today, googleComplete);
   const ga4Events = weekly(series.ga4_organic_key_events, from, today, googleComplete);
 
@@ -218,5 +257,6 @@ export function resultsView(input: ResultsInput): ResultsView {
       value: latest(series.site_health, today),
       day: series.site_health?.length ? series.site_health[series.site_health.length - 1]!.day : null,
     },
+    speed, lab, authority,
   };
 }

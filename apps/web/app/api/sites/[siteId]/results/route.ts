@@ -8,7 +8,7 @@ export async function GET(_request: Request, context: { params: Promise<{ siteId
     const { siteId } = await context.params;
     const site = await getSite(env.DB, siteId);
     if (!site) return fail("Site not found.", 404);
-    return json(await resultsPayload(env.DB, site));
+    return json(await resultsPayload(env.DB, site, { signals: { speed: Boolean(env.GOOGLE_API_KEY), authority: Boolean(env.OPEN_PAGERANK_KEY) } }));
   } catch (error) {
     console.error("Results API error:", error);
     return fail(error instanceof Error ? error.message : "Internal error", 500);

@@ -20,7 +20,7 @@ const INSPECTIONS_PER_DAY = 100;
  * Console (daily series, Monday ranking buckets, index status) and GA4.
  * Each Google step fails on its own; the notes say what ran.
  */
-export async function syncResults(db: D1Like, site: SiteRecord, now: Date, google: GoogleAccess, keys: SignalKeys = {}): Promise<string[]> {
+export async function syncResults(db: D1Like, site: SiteRecord, now: Date, google: GoogleAccess, keys: SignalKeys = {}, coverageLimit = SYNC_NOW_COVERAGE): Promise<string[]> {
   const today = now.toISOString().slice(0, 10);
   const notes = await syncSignals(db, site, today, now.getUTCDay() === 1, keys, google.fetchFn);
   await syncFirstPartyResults(db, site.id, now);
@@ -34,7 +34,7 @@ export async function syncResults(db: D1Like, site: SiteRecord, now: Date, googl
   }
   if (site.gscProperty) {
     try {
-      notes.push(...await syncSearch(db, site, site.gscProperty, token, today, now, google.fetchFn));
+      notes.push(...await syncSearch(db, site, site.gscProperty, token, today, now, coverageLimit, google.fetchFn));
     } catch (error) {
       notes.push(`search failed: ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -120,8 +120,10 @@ async function syncSignals(db: D1Like, site: SiteRecord, today: string, monday: 
   return notes;
 }
 
-/** URL inspections per step: a "Sync now" runs one step; the daily workflow runs up to nine. */
+/** URL inspections per daily-workflow step (up to nine a day). */
 export const COVERAGE_STEP = 200;
+/** URL inspections in a "Sync now": batches of ten wait on Google's slowest answer, so 50 keeps the button to about half a minute. */
+const SYNC_NOW_COVERAGE = 50;
 
 /**
  * Asks Google about the next sitemap URLs (unchecked first, then those last
@@ -156,7 +158,7 @@ async function synced(db: D1Like, siteId: string, marker: string, data: string):
   return Boolean((await firstMetricDay(db, siteId, marker)) ?? (await firstMetricDay(db, siteId, data)));
 }
 
-async function syncSearch(db: D1Like, site: SiteRecord, property: string, token: string, today: string, now: Date, fetchFn?: typeof fetch): Promise<string[]> {
+async function syncSearch(db: D1Like, site: SiteRecord, property: string, token: string, today: string, now: Date, coverageLimit: number, fetchFn?: typeof fetch): Promise<string[]> {
   const span = (await synced(db, site.id, "sync.search", "search_clicks")) ? 7 : BACKFILL_DAYS;
   const range = { startDate: addDays(today, -span), endDate: addDays(today, -1) };
   const settings = (await getPageSettings(db, site.id)) ?? defaultPageSettings(site.id, site.name, site.baseUrl);
@@ -229,10 +231,10 @@ async function syncSearch(db: D1Like, site: SiteRecord, property: string, token:
   }
   await upsertMetricPoints(db, site.id, points);
 
-  // Sitemap URLs: one step of 200 here; the daily workflow runs more steps (see SearchSyncWorkflow).
+  // Sitemap URLs: a short step here; the daily workflow runs more (see SearchSyncWorkflow).
   const coverageNotes: string[] = [];
   if (refused === null) {
-    const coverage = await inspectSitemapUrls(db, site.id, property, token, today, COVERAGE_STEP, fetchFn);
+    const coverage = await inspectSitemapUrls(db, site.id, property, token, today, coverageLimit, fetchFn);
     if (coverage.inspected || coverage.refused) coverageNotes.push(`coverage: inspected ${coverage.inspected}`);
     if (coverage.refused) coverageNotes.push(`coverage stopped: Google answered ${coverage.refused}`);
   }

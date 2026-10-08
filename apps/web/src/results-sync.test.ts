@@ -184,7 +184,12 @@ describe("results sync", () => {
         ? new Response(JSON.stringify({ error: { message: "Quota exceeded" } }), { status: 429 })
         : new Response(JSON.stringify({ inspectionResult: { indexStatusResult: { verdict: "PASS", coverageState: "Submitted and indexed" } } }));
     }) as typeof fetch;
-    const notes = await syncResults(db, (await getSite(db, "s"))!, now, { connect: async () => ({ token: "t", scopes: [SEARCH_CONSOLE_SCOPE] }), fetchFn });
+    const google = { connect: async () => ({ token: "t", scopes: [SEARCH_CONSOLE_SCOPE] }), fetchFn };
+    const quick = await syncResults(db, (await getSite(db, "s"))!, now, google);
+    assert.ok(quick.includes("coverage: inspected 50"), `"Sync now" checks 50, so the button answers in seconds: ${quick.join("; ")}`);
+    await db.prepare("DELETE FROM url_index_status").run();
+    inspections = 0;
+    const notes = await syncResults(db, (await getSite(db, "s"))!, now, google, {}, 200);
     assert.ok(notes.includes("coverage: inspected 120"), notes.join("; "));
     assert.ok(notes.includes("coverage stopped: Google answered 429"), notes.join("; "));
     assert.ok(inspections <= 130, `stopped within the batch after the refusal (${inspections})`);

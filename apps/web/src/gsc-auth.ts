@@ -19,6 +19,8 @@ async function decryptSecret(value: string, secret: string): Promise<string> {
 
 export const SEARCH_CONSOLE_SCOPE = "https://www.googleapis.com/auth/webmasters.readonly";
 export const ANALYTICS_SCOPE = "https://www.googleapis.com/auth/analytics.readonly";
+/** Creating Google Sheets for exports: reaches only files Eumon itself creates. */
+export const DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file";
 
 /** `scopes` is Google's space-separated grant, so later code can tell which APIs this connection may call. */
 export async function saveGoogleRefreshToken(db: D1Like, siteId: string, refreshToken: string, encryptionKey: string, scopes: string) {

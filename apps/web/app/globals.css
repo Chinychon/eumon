@@ -610,6 +610,19 @@ details.disclosure[open] > summary { margin-bottom: 10px; }
 .why-body strong { color: var(--ink-2); font-weight: 500; }
 .why-row .severity { flex: none; width: 104px; }
 .table-toggle .table-wrap { margin-bottom: 4px; }
+/* Export: a small menu in a card's header; the options drop below on Surface with the pop shadow. */
+.export { position: relative; display: inline-flex; align-items: center; gap: 10px; }
+.export-menu > summary { list-style: none; }
+.export-menu > summary::-webkit-details-marker { display: none; }
+.export-menu > summary::after { content: ""; width: 5px; height: 5px; margin-left: 2px; border-right: 1px solid currentColor; border-bottom: 1px solid currentColor; transform: translateY(-2px) rotate(45deg); }
+.export-options { position: absolute; z-index: 20; top: calc(100% + 4px); right: 0; min-width: 180px; padding: 4px 0; border: 1px solid var(--line); background: var(--surface); box-shadow: var(--shadow-pop); animation: pop-in .15s var(--ease) both; }
+.export-options button { display: block; width: 100%; padding: 8px 14px; border: 0; background: transparent; text-align: left; font-size: 13px; color: var(--ink); cursor: pointer; }
+.export-options button:hover { background: var(--surface-2); }
+.export-status { position: absolute; z-index: 20; top: calc(100% + 6px); right: 0; width: max-content; max-width: 320px; padding: 8px 12px; border: 1px solid var(--line); background: var(--surface); box-shadow: var(--shadow-pop); font-size: 12px; color: var(--ink-2); animation: pop-in .15s var(--ease) both; }
+/* The tab strip with "Export tab" at its end, on one shared rule. */
+.tabs-bar { display: flex; align-items: flex-end; gap: 12px; margin: 22px 0 14px; border-bottom: 1px solid var(--line); }
+.tabs-bar > .tabs { flex: 1 1 auto; min-width: 0; margin: 0; border-bottom: 0; }
+.tabs-bar > .export { flex: none; margin: 0 0 4px; }
 /* Sync history: one line per run; its notes open as a plain list, failures in red. */
 .sync-notes { margin: 0; padding: 0 0 14px 18px; }
 .sync-notes li { margin: 0 0 4px; font-family: var(--mono); font-size: 12px; }

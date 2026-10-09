@@ -399,4 +399,5 @@ export * from "./demo.js";
 export * from "./results-points.js";
 export * from "./site-signals.js";
 export * from "./google-analytics.js";
+export * from "./google-sheets.js";
 export * from "./dataforseo.js";

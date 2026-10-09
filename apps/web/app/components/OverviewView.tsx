@@ -9,6 +9,8 @@ import { LeadFunnel, TechnicalTab, searchPoints, type Change } from "./ReportTab
 import { AREA_PLACE, doFirst, gapsFirst, HEALTH_COLUMNS, pageTypeHealth, type Navigate, type Place, type Report } from "./report-model";
 import { KeyNumbers, ProofHeadline } from "./results/sections";
 import { AiPanel, CompetitorsPanel, EnquiriesPanel, KeywordsPanel, SearchPanel } from "./SitePanels";
+import { ExportContext, ExportMenu } from "./export/ExportMenu";
+import { backlogSheets, pageTypeSheets, tabSheets } from "./export/report-sheets";
 import { useLeads, useResults, type Leads } from "./site-data";
 import { Button, Card, ViewHeader } from "./ui";
 
@@ -185,6 +187,7 @@ export function OverviewView({ site, tab, onTab, onNavigate }: {
   }
 
   return (
+    <ExportContext.Provider value={{ siteId: site.id, siteName: site.name }}>
     <div>
       <ViewHeader
         title={site.name}
@@ -211,10 +214,14 @@ export function OverviewView({ site, tab, onTab, onNavigate }: {
       {note && <div className="callout" role="status" style={{ marginBottom: 14 }}>{note}</div>}
       {pendingId ? <AnalysisProgress run={run} analysisId={pendingId} />
         : finished && <AnalysisProgress run={finished.run} analysisId={finished.analysisId} finish={finished} onDismiss={() => setFinished(null)} />}
-      <div className="tabs report-tabs" role="tablist" aria-label="Report">
-        {TABS.map((entry) => (
-          <button key={entry.tab} role="tab" aria-selected={current === entry.tab} className={current === entry.tab ? "active" : undefined} onClick={() => openTab(entry.tab)}>{entry.label}</button>
-        ))}
+      <div className="tabs-bar">
+        <div className="tabs report-tabs" role="tablist" aria-label="Report">
+          {TABS.map((entry) => (
+            <button key={entry.tab} role="tab" aria-selected={current === entry.tab} className={current === entry.tab ? "active" : undefined} onClick={() => openTab(entry.tab)}>{entry.label}</button>
+          ))}
+        </div>
+        {/* Every table on the open tab: one sheet each in Excel or Google Sheets. */}
+        <ExportMenu label="Export tab" title={TABS.find((entry) => entry.tab === current)!.label} sheets={() => tabSheets(current, { results: results.data?.results ?? null, report, leads, host: new URL(site.baseUrl).hostname })} />
       </div>
       <div key={current} className="view-enter" role="tabpanel">
         {!loaded || (current !== "overview" && current !== "technical" && !results.data) ? <div className={results.error && loaded ? "callout error" : "empty"}>{loaded && results.error ? results.error : "Loading…"}</div> : (
@@ -251,6 +258,7 @@ export function OverviewView({ site, tab, onTab, onNavigate }: {
         )}
       </div>
     </div>
+    </ExportContext.Provider>
   );
 }
 
@@ -273,12 +281,12 @@ function Briefing({ report, running, leads, hasSearch, competitorCount, onOpen, 
   return (
     <div className="results">
       <div className="ruled-grid c21">
-        <Card title="Where pages break" subtitle="Page types by problem; darker means a larger share is affected." actions={open(AREA_PLACE.technical)}>
+        <Card title="Where pages break" subtitle="Page types by problem; darker means a larger share is affected." actions={<>{open(AREA_PLACE.technical)}{families.length > 0 && <ExportMenu title="Where pages break" sheets={() => pageTypeSheets(report)} />}</>}>
           {families.length
             ? <Heatmap caption="Problems per page type" columns={HEALTH_COLUMNS.map((column) => column.label)} rows={pageTypeHealth(families, 6)} />
             : <p className="empty-state">{report ? "Run a full analysis to check every page type." : runFirst}</p>}
         </Card>
-        <Card title="Do first" subtitle={actions.length ? "The top of the growth plan, in priority order." : undefined}>
+        <Card title="Do first" subtitle={actions.length ? "The top of the growth plan, in priority order." : undefined} actions={actions.length > 0 && <ExportMenu title="Growth plan" sheets={() => backlogSheets(report)} />}>
           {actions.length ? (
             // Scrolls inside the card, so the list never makes the row taller than the heatmap beside it.
             <div className="do-first-scroll"><ol className="do-first">

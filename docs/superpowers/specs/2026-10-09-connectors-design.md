@@ -15,7 +15,7 @@
 | IndexNow (`api.indexnow.org`) | key derived from `SESSION_SECRET` | daily, once the proxy is verified | `indexnow_submitted` |
 | Server or CDN logs | per-site token derived from `SESSION_SECRET` | pushed by the site | `crawl_log_daily`, `crawl_log_paths` (migration 0019) |
 
-Costs at DataForSEO's October 2026 prices: about $0.004 per results page, $0.01 per competitor list, $0.03 per link profile or gap. A site with two competitors and two markets spends roughly $1.50 a month.
+Costs at DataForSEO's October 2026 prices: about $0.004 per results page, $0.01 per competitor list, $0.03 per link profile or gap. A site with two competitors and two markets spends under $0.50 a month (60 results pages, 2 competitor lists, 3 link profiles and a gap).
 
 **Logs** arrive as Cloudflare Logpush (Enterprise), a Vercel log drain (Pro), a forwarding Cloudflare Worker (any plan; the snippet is in Setup), a daily `curl` of an nginx/Apache log, or an upload. Gzip is detected by its magic bytes. Only crawler requests are kept, by user agent (a claim, not verified).
 

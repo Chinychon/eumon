@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { METRICS, RESULT_METRICS } from "@organic-growth/core";
-import { analysisHealthPoints, clearMetricPoints, topEumonPage, getTopQueriesSnapshot, saveTopQueriesSnapshot, indexStatusCounts, listSitesForResults, pagesToInspect, saveIndexStatus, bumpReportShareVersion, createAnalysis, dailyLeads, firstMetricDay, getSite, insertConversionEvent, listMetricSeries, publishedPages, recordLandingSession, saveAnalysisReport, syncFirstPartyResults, updateSiteGa4Property, upsertMetricPoints, upsertSite } from "./index.js";
+import { analysisHealthPoints, clearMetricPoints, topEumonPage, indexStatusCounts, listSitesForResults, pagesToInspect, saveIndexStatus, bumpReportShareVersion, createAnalysis, dailyLeads, firstMetricDay, getSite, insertConversionEvent, listMetricSeries, publishedPages, recordLandingSession, saveAnalysisReport, syncFirstPartyResults, updateSiteGa4Property, upsertMetricPoints, upsertSite } from "./index.js";
 import { openSqliteD1 } from "./sqlite.js";
 
 const now = "2026-10-07T00:00:00.000Z";
@@ -142,19 +142,6 @@ describe("deploy order", () => {
     await saveAnalysisReport(db, "a1", { coverage: { totalUrls: 10, completedUrls: 10, emptyShellUrls: 1, httpErrorUrls: 0 } }, "summary");
     const row = await db.prepare("SELECT status FROM analyses WHERE id = 'a1'").first<{ status: string }>();
     assert.equal(row?.status, "completed");
-  });
-});
-
-describe("top queries", () => {
-  it("keeps the latest list per site, and only for the property and markets it was fetched for", async () => {
-    const db = openSqliteD1();
-    await upsertSite(db, { id: "s", name: "x.com", baseUrl: "https://x.com", createdAt: now, updatedAt: now });
-    const rows = [{ query: "q", clicks: 3, impressions: 40, position: 6, before: null }];
-    await saveTopQueriesSnapshot(db, "s", { property: "sc-domain:x.com", markets: ["mys"], periodEnd: "2026-10-04", rows });
-    await saveTopQueriesSnapshot(db, "s", { property: "sc-domain:x.com", markets: ["mys"], periodEnd: "2026-10-05", rows });
-    assert.deepEqual(await getTopQueriesSnapshot(db, "s", { property: "sc-domain:x.com", markets: ["mys"] }), { periodEnd: "2026-10-05", rows });
-    assert.equal(await getTopQueriesSnapshot(db, "s", { property: "sc-domain:other.com", markets: ["mys"] }), null, "another property's queries");
-    assert.equal(await getTopQueriesSnapshot(db, "s", { property: "sc-domain:x.com", markets: [] }), null, "fetched for other markets");
   });
 });
 

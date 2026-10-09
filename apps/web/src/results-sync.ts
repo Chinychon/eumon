@@ -6,8 +6,11 @@ import { SOURCES } from "./results-sources.ts";
 /** Connects to Google only when a Google step runs; the token and the scopes it was granted come together. */
 export type GoogleAccess = { connect: () => Promise<{ token: string; scopes: string[] }>; fetchFn?: typeof fetch };
 
-/** API keys for the signals that need no Google sign-in: CrUX and PageSpeed (Google API key), Open PageRank, DataForSEO. */
-export type SignalKeys = { googleApiKey?: string; openPageRankKey?: string; dataForSeo?: { login: string; password: string } };
+/**
+ * API keys for the signals that need no Google sign-in: CrUX and PageSpeed (Google API key), Open PageRank, DataForSEO,
+ * Bing Webmaster Tools, and the server secret each site's IndexNow key is derived from.
+ */
+export type SignalKeys = { googleApiKey?: string; openPageRankKey?: string; dataForSeo?: { login: string; password: string }; bingApiKey?: string; indexNowSecret?: string };
 
 /** What every source gets: the site, the day, the keys, and Google on demand (connected once per sync). */
 export type SyncContext = {

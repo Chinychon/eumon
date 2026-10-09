@@ -17,6 +17,7 @@ import {
 } from "@organic-growth/db";
 import { chooseArm, escapeHtml, htmlLang, labelsFor, renderHubPage, renderLandingPage, renderSitemap, type RenderCta } from "@organic-growth/pages";
 import { classifyUserAgent, createId, isRef, isWhatsAppChatUrl, landingSource } from "@organic-growth/core";
+import { indexNowKey } from "@organic-growth/agents";
 import { readJson, settingsFor } from "./server";
 
 const BEACON = "/__eumon/e";
@@ -93,6 +94,12 @@ export async function servePublicGet(request: Request, site: SiteRecord, path: s
     return Response.json({ ok: true, siteId: site.id, proxied }, { headers: { "Cache-Control": "no-store" } });
   }
   if (mount && path !== mount && !path.startsWith(`${mount}/`)) return notFound(settings);
+
+  // The IndexNow key file, inside the mount path so it vouches only for Eumon's pages.
+  if (env.SESSION_SECRET && env.SESSION_SECRET.length >= 32 && /^\/[0-9a-f]{32}\.txt$/.test(path.slice(mount.length))) {
+    const key = await indexNowKey(env.SESSION_SECRET, site.id);
+    if (path === `${mount}/${key}.txt`) return new Response(key, { headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "public, max-age=86400", ...robotsHeader } });
+  }
 
   if (path === `${mount}/sitemap.xml`) {
     const pages = await listPublishedPaths(env.DB, site.id);

@@ -1,10 +1,12 @@
 /*
- * DataForSEO Labs (Google): a domain's ranked keywords in a country, and
- * volume, difficulty and intent for a list of keywords. Paid per request and
- * per row, so every answer carries what it cost; the account allows one task
- * per request.
+ * DataForSEO: Labs (a domain's ranked keywords in a country; volume,
+ * difficulty and intent for a list of keywords; the domains that rank for a
+ * list of keywords), the SERP API (one search's results page), and the
+ * Backlinks API (link profiles and the link gap). Paid per request and per
+ * row, so every answer carries what it cost; the account allows one task per
+ * request.
  */
-import type { RankedKeyword } from "@organic-growth/core";
+import { bareDomain, type BacklinkSummary, type LinkGap, type RankedKeyword, type SerpCompetitor, type SerpFeature, type SerpResult } from "@organic-growth/core";
 
 export type DataForSeoAuth = { login: string; password: string };
 
@@ -20,20 +22,30 @@ export type Answer<T> = { rows: T[]; cost: number };
 type Task<T> = { status_code: number; status_message: string; cost: number | null; result: T[] | null };
 type Envelope<T> = { status_code: number; status_message: string; tasks: Array<Task<T>> | null };
 
-/** Posts one task and returns its first result (undefined when the task has none) with its cost. */
-async function labs<T>(auth: DataForSeoAuth, endpoint: string, task: object, fetchFn: typeof fetch): Promise<{ result: T | undefined; cost: number }> {
-  const response = await fetchFn(`https://api.dataforseo.com/v3/dataforseo_labs/google/${endpoint}/live`, {
+/** A refusal with DataForSEO's status code, e.g. 40204 when an API isn't active on the account. */
+export class DataForSeoError extends Error {
+  constructor(message: string, readonly code: number) {
+    super(message);
+  }
+}
+
+/** Posts one task to `/v3/<path>/live` and returns its first result (undefined when the task has none) with its cost. */
+async function post<T>(auth: DataForSeoAuth, path: string, task: object, fetchFn: typeof fetch): Promise<{ result: T | undefined; cost: number }> {
+  const name = path.replace(/^dataforseo_labs\/google\//, "");
+  const response = await fetchFn(`https://api.dataforseo.com/v3/${path}/live`, {
     method: "POST",
     headers: { Authorization: `Basic ${btoa(`${auth.login}:${auth.password}`)}`, "Content-Type": "application/json" },
     body: JSON.stringify([task]),
   });
-  if (!response.ok) throw new Error(`DataForSEO ${endpoint} request failed (${response.status}).`);
+  if (!response.ok) throw new DataForSeoError(`DataForSEO ${name} request failed (${response.status}).`, response.status);
   const json = await response.json() as Envelope<T>;
   const first = json.tasks?.[0];
-  if (!first) throw new Error(`DataForSEO: ${json.status_message} (${json.status_code}).`);
-  if (first.status_code !== 20000) throw new Error(`DataForSEO ${endpoint}: ${first.status_message} (${first.status_code}).`);
+  if (!first) throw new DataForSeoError(`DataForSEO: ${json.status_message} (${json.status_code}).`, json.status_code);
+  if (first.status_code !== 20000) throw new DataForSeoError(`DataForSEO ${name}: ${first.status_message} (${first.status_code}).`, first.status_code);
   return { result: first.result?.[0], cost: first.cost ?? 0 };
 }
+
+const labs = <T>(auth: DataForSeoAuth, endpoint: string, task: object, fetchFn: typeof fetch) => post<T>(auth, `dataforseo_labs/google/${endpoint}`, task, fetchFn);
 
 type RankedItem = {
   keyword_data: { keyword: string; keyword_info?: { search_volume?: number | null } | null; keyword_properties?: { keyword_difficulty?: number | null } | null; search_intent_info?: { main_intent?: string | null } | null };
@@ -79,4 +91,102 @@ export function keywordOverviewRows(result: unknown): KeywordPrice[] {
 export async function fetchKeywordOverview(auth: DataForSeoAuth, keywords: string[], location: number, language: string, fetchFn: typeof fetch = fetch): Promise<Answer<KeywordPrice>> {
   const { result, cost } = await labs(auth, "keyword_overview", { keywords: keywords.slice(0, 700), location_code: location, language_code: language }, fetchFn);
   return { rows: keywordOverviewRows(result), cost };
+}
+
+type SerpCompetitorItem = { domain: string; avg_position?: number | null; keywords_count?: number | null; visibility?: number | null; etv?: number | null };
+
+export function serpCompetitorRows(result: unknown): SerpCompetitor[] {
+  const items = (result as { items?: SerpCompetitorItem[] | null } | undefined)?.items ?? [];
+  return items.map((item) => ({ domain: bareDomain(item.domain), keywords: item.keywords_count ?? 0, avgPosition: item.avg_position ?? 0, visibility: item.visibility ?? 0, traffic: item.etv ?? 0 }));
+}
+
+/** The domains ranking organically for up to 200 keywords in a country and language, most visible first; at most 100. */
+export async function fetchSerpCompetitors(auth: DataForSeoAuth, keywords: string[], location: number, language: string, fetchFn: typeof fetch = fetch): Promise<Answer<SerpCompetitor>> {
+  const { result, cost } = await labs(auth, "serp_competitors", {
+    keywords: keywords.slice(0, 200), location_code: location, language_code: language, item_types: ["organic"], limit: 100, order_by: ["visibility,desc"],
+  }, fetchFn);
+  return { rows: serpCompetitorRows(result), cost };
+}
+
+/** DataForSEO item types as Eumon's result types; several item types are one feature (short videos are videos). */
+const FEATURE_OF: Record<string, SerpFeature> = {
+  ai_overview: "ai_overview", featured_snippet: "featured_snippet", local_pack: "local_pack", map: "local_pack", people_also_ask: "people_also_ask",
+  video: "video", short_videos: "video", images: "images", shopping: "shopping", popular_products: "shopping", top_stories: "top_stories",
+};
+
+type SerpItem = { type: string; rank_group?: number; domain?: string | null; url?: string | null; title?: string | null; references?: Array<{ domain?: string | null }> | null; items?: SerpItem[] | null };
+
+/** Every source domain an AI Overview names, in its own references and its sections'. */
+function overviewSources(item: SerpItem): string[] {
+  const own = (item.references ?? []).flatMap((reference) => (reference.domain ? [bareDomain(reference.domain)] : []));
+  return [...own, ...(item.items ?? []).flatMap(overviewSources)];
+}
+
+/** One results page as Eumon keeps it: result types, the first ten organic results, the site's place, and the AI Overview's sources. */
+export function serpResult(result: unknown, input: { keyword: string; site: string; checkedAt: string; volume: number | null }): SerpResult {
+  const page = result as { item_types?: string[] | null; items?: SerpItem[] | null } | undefined;
+  const items = page?.items ?? [];
+  const site = bareDomain(input.site);
+  const ours = (domain: string | null | undefined) => Boolean(domain) && (bareDomain(domain!) === site || bareDomain(domain!).endsWith(`.${site}`));
+  const features = [...new Set((page?.item_types ?? []).map((type) => FEATURE_OF[type]).filter((feature): feature is SerpFeature => Boolean(feature)))];
+  const organic = items.filter((item) => item.type === "organic" && item.domain && item.url)
+    .map((item) => ({ position: item.rank_group ?? 0, domain: bareDomain(item.domain!), url: item.url!, title: item.title ?? "" }));
+  const mine = organic.find((item) => ours(item.domain));
+  const sources = [...new Set(items.filter((item) => item.type === "ai_overview").flatMap(overviewSources))];
+  return {
+    keyword: input.keyword, checkedAt: input.checkedAt, volume: input.volume, features,
+    position: mine?.position ?? null, url: mine?.url ?? null,
+    aiOverviewSources: sources, cited: sources.some((domain) => ours(domain)),
+    organic: organic.slice(0, 10),
+  };
+}
+
+/** Google's first page for one search in a country and language, AI Overview included (it loads after the page, and costs a little extra to wait for). */
+export async function fetchSerp(auth: DataForSeoAuth, input: { keyword: string; location: number; language: string; site: string; checkedAt: string; volume: number | null }, fetchFn: typeof fetch = fetch): Promise<{ row: SerpResult; cost: number }> {
+  const { result, cost } = await post(auth, "serp/google/organic/live/advanced", {
+    keyword: input.keyword, location_code: input.location, language_code: input.language, depth: 10, load_async_ai_overview: true,
+  }, fetchFn);
+  return { row: serpResult(result, input), cost };
+}
+
+type SummaryResult = { target?: string; rank?: number | null; backlinks?: number | null; referring_domains?: number | null; referring_main_domains?: number | null; broken_backlinks?: number | null; backlinks_spam_score?: number | null };
+
+export function backlinkSummary(result: unknown, domain: string): BacklinkSummary {
+  const row = (result ?? {}) as SummaryResult;
+  return {
+    domain, rank: row.rank ?? 0, backlinks: row.backlinks ?? 0, referringDomains: row.referring_domains ?? 0,
+    referringMainDomains: row.referring_main_domains ?? 0, brokenBacklinks: row.broken_backlinks ?? 0, spamScore: row.backlinks_spam_score ?? null,
+  };
+}
+
+/** A domain's live link profile, subdomains included, internal links left out. */
+export async function fetchBacklinkSummary(auth: DataForSeoAuth, domain: string, fetchFn: typeof fetch = fetch): Promise<{ row: BacklinkSummary; cost: number }> {
+  const { result, cost } = await post(auth, "backlinks/summary", { target: domain, include_subdomains: true, exclude_internal_backlinks: true, backlinks_status_type: "live" }, fetchFn);
+  return { row: backlinkSummary(result, domain), cost };
+}
+
+type IntersectionItem = { domain_intersection?: Record<string, { target?: string | null; rank?: number | null; backlinks?: number | null } | null> | null };
+
+export function linkGapRows(result: unknown, targets: string[]): LinkGap[] {
+  const items = (result as { items?: IntersectionItem[] | null } | undefined)?.items ?? [];
+  return items.flatMap((item) => {
+    const entries = Object.entries(item.domain_intersection ?? {}).filter(([, entry]) => entry?.target);
+    if (!entries.length) return [];
+    return [{
+      domain: bareDomain(entries[0]![1]!.target!),
+      rank: Math.max(...entries.map(([, entry]) => entry!.rank ?? 0)),
+      backlinks: entries.reduce((sum, [, entry]) => sum + (entry!.backlinks ?? 0), 0),
+      linksTo: entries.map(([key]) => targets[Number(key) - 1]).filter((domain): domain is string => Boolean(domain)),
+    }];
+  });
+}
+
+/** Sites linking to every one of up to three competitors and not to the site, strongest first; at most 100. */
+export async function fetchLinkGap(auth: DataForSeoAuth, competitors: string[], site: string, fetchFn: typeof fetch = fetch): Promise<Answer<LinkGap>> {
+  const targets = competitors.slice(0, 3);
+  const { result, cost } = await post(auth, "backlinks/domain_intersection", {
+    targets: Object.fromEntries(targets.map((domain, index) => [String(index + 1), domain])),
+    exclude_targets: [site], limit: 100, order_by: ["1.rank,desc"], exclude_internal_backlinks: true, backlinks_status_type: "live",
+  }, fetchFn);
+  return { rows: linkGapRows(result, targets), cost };
 }

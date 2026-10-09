@@ -16,6 +16,7 @@ import {
 } from "@organic-growth/core";
 import type { RepoAnalysisResult } from "@organic-growth/repo-analyzer";
 import { competitionOpportunities, counted, type CompetitionReport } from "./competition.js";
+import { linkGapOpportunity, withSerpContext, type ConnectorSignals } from "./connector-findings.js";
 import { estimateDemand } from "./demand.js";
 import { analyzeSearch, searchOpportunities, type SearchInsights } from "./search.js";
 
@@ -40,6 +41,8 @@ export interface AnalysisBundle {
   search?: SearchInsights;
   /** The site's and competitors' keyword lists from the Performance sync, for real demand and keyword gaps. */
   keywords?: KeywordsInput;
+  /** Search results pages, suggested competitors, links and the crawl log, from the sync's other sources. */
+  connectors?: ConnectorSignals;
 }
 
 /** The legacy search summary shape stored in reports as `searchNarrative`. */
@@ -116,7 +119,9 @@ export function buildOpportunities(bundle: AnalysisBundle): Opportunity[] {
         rationale: `“${dataset.name}” holds ${dataset.records.toLocaleString()} ${dataset.entityType} records and ${dataset.livePages.toLocaleString()} published pages. Each record with enough facts can become a landing page for searches that name it; the Data step shows how many pass the quality gate.`,
       };
     });
-  return [...technical, ...fromSearch, ...contentGaps, ...unpublishedData, ...gaps].sort((a, b) => b.priorityScore - a.priorityScore);
+  const links = linkGapOpportunity(bundle.connectors?.links, bundle.siteId, bundle.analysisId);
+  return withSerpContext([...technical, ...fromSearch, ...contentGaps, ...unpublishedData, ...gaps, ...(links ? [links] : [])], bundle.connectors?.serp)
+    .sort((a, b) => b.priorityScore - a.priorityScore);
 }
 
 const COMMERCIAL_INTENT = new Set(["commercial", "transactional"]);
@@ -205,6 +210,8 @@ export function synthesizeGrowthPlan(bundle: AnalysisBundle): GrowthPlan {
       ? "Prioritized from the observed technical finding. Search demand and conversion value are not yet available."
       : opp.intent === "keyword_gap"
         ? `${opp.rationale} Real searches, measured monthly: this is demand you can see before building.`
+      : opp.intent === "link_gap"
+        ? `${opp.rationale} Links from relevant sites are how search engines judge which of several good pages to trust; these sites already link to businesses like yours.`
       : opp.intent === "content_gap"
         ? `${opp.rationale} Competitors that invest this heavily in a page type usually do so because it brings them traffic.`
         : /prioritization aid/i.test(opp.rationale) ? opp.rationale : `${opp.rationale} This opportunity score is a prioritization aid, not a traffic forecast.`,
@@ -213,6 +220,8 @@ export function synthesizeGrowthPlan(bundle: AnalysisBundle): GrowthPlan {
       ? "Review the affected route and implement a targeted change in a Git branch."
       : opp.intent === "keyword_gap"
         ? "Build a landing page that answers this search (a dataset and template in Data, or a page by hand), and link it from related pages."
+      : opp.intent === "link_gap"
+        ? "No code change. Review the strongest sites in the Competitors tab's link gap and see how each links to competitors (directory listing, article, partner page)."
       : opp.intent === "content_gap" || opp.intent === "unpublished_data"
         ? "Create a dataset for this entity type in Data (or reuse the existing one), add sources, and generate one landing page per record with a template."
         : "Review the page against the query intent, then improve its title, content coverage, or internal links as evidence supports.",
@@ -220,6 +229,8 @@ export function synthesizeGrowthPlan(bundle: AnalysisBundle): GrowthPlan {
       ? "No content change inferred from technical crawl data alone."
       : opp.intent === "keyword_gap"
         ? `Study ${opp.potentialPage} for the facts searchers expect, then answer the search more completely, in the market's language.`
+      : opp.intent === "link_gap"
+        ? "Give each site a reason to link: a listing with your details, data or a guide worth citing, or a partnership. Never buy links."
       : opp.intent === "unpublished_data"
         ? "Fill missing fields on thin records first; publish only pages that pass the quality gate."
       : opp.intent === "content_gap"
@@ -230,6 +241,8 @@ export function synthesizeGrowthPlan(bundle: AnalysisBundle): GrowthPlan {
       ? "The crawl is sampled; confirm the issue across the relevant page template before changing production code."
       : opp.intent === "keyword_gap"
         ? "Volume is a monthly average for the country; check that the search's intent matches what the business sells before building."
+      : opp.intent === "link_gap"
+        ? "Link indexes miss links and keep some that are gone; a link from an irrelevant or spammy site does nothing or harms."
       : "The query-intent label is heuristic; validate it manually and avoid rewriting a page based only on average position.",
     measurementMethod: "Compare Search Console impressions, clicks, CTR, and position for the query and landing page after changes; then check conversion events.",
   }));
@@ -246,6 +259,7 @@ export function synthesizeGrowthPlan(bundle: AnalysisBundle): GrowthPlan {
         "6. Competitors: " + (bundle.competition?.competitors.length
           ? `${bundle.competition.competitors.filter((competitor) => competitor.analyzed).length} analyzed from their sitemaps and sampled pages`
           : "not supplied"),
+        ...checkedConnectors(bundle.connectors),
       ].join("\n"),
       evidenceIds: topFindings.slice(0, 3).map((f) => f.id),
     },
@@ -307,12 +321,26 @@ function searchConstraint(bundle: AnalysisBundle, search: SearchInsights): strin
   return `Search data covers ${search.totals.clicks.toLocaleString()} clicks and ${search.totals.impressions.toLocaleString()} impressions in the last 28 days.`;
 }
 
+/** Lines 7 onwards of "What I checked", for the sources that were synced. */
+function checkedConnectors(connectors: ConnectorSignals | undefined): string[] {
+  const lines: string[] = [];
+  if (connectors?.serp?.length) {
+    const overviews = connectors.serp.filter((row) => row.features.includes("ai_overview")).length;
+    lines.push(`Google's results pages for ${connectors.serp.length} of your biggest searches (${overviews} with an AI Overview)`);
+  }
+  if (connectors?.links?.summaries.length) lines.push(`Backlinks for you and ${connectors.links.summaries.length - 1} competitors${connectors.links.gap ? `, and ${connectors.links.gap.rows.length} sites in the link gap` : ""}`);
+  if (connectors?.logCoverage) lines.push(`Your server logs: ${connectors.logCoverage.view.totals.googlebot.toLocaleString("en")} Googlebot requests in 28 days`);
+  return lines.map((line, index) => `${index + 7}. ${line}`);
+}
+
 function competitionConstraint(bundle: AnalysisBundle): string {
   const gap = bundle.competition?.rows.find((row) => row.status === "gap");
   if (gap) {
     return `Content gap: ${gap.competitors[0]!.domain} publishes ${counted(gap.competitors[0]!, gap.label)}; you have ${gap.you.pages ? counted(gap.you) : "none"}.`;
   }
   if (bundle.competition?.competitors.some((competitor) => competitor.analyzed)) return "No large content gap against the competitors analyzed; differentiation will come from depth and conversion, not page count.";
+  const found = (bundle.connectors?.suggestions ?? []).filter((entry) => entry.kind === "competitor").slice(0, 2).map((entry) => entry.domain);
+  if (!bundle.competitors.length && found.length) return `No competitor domains have been supplied; Google's results for your searches show ${found.join(" and ")} winning them.`;
   return bundle.competitors.length ? "Competitor observations are limited to domains selected by the site owner." : "No competitor domains have been supplied, so content gaps are unknown.";
 }
 
@@ -328,7 +356,11 @@ function strategySequence(bundle: AnalysisBundle, findings: Finding[]): string[]
     if (bundle.search?.targetShare && bundle.search.targetShare.impressions < 0.3) steps.push("Publish pages in your target market's language, built around what that market searches for");
     steps.push("Improve pages ranking just off page one for commercial queries");
   }
-  if (!bundle.competition?.competitors.length) steps.push("Add two or three competitor domains to find content gaps");
+  if (!bundle.competition?.competitors.length) {
+    const found = (bundle.connectors?.suggestions ?? []).filter((entry) => entry.kind === "competitor").slice(0, 3).map((entry) => entry.domain);
+    steps.push(found.length ? `Add the competitors that win your searches (${found.join(", ")}) to find content gaps` : "Add two or three competitor domains to find content gaps");
+  }
+  if ((bundle.connectors?.links?.gap?.rows.length ?? 0) >= 5) steps.push("Earn links from the sites that already link to your competitors");
   steps.push("Track conversions on landing pages and double down on the page types that produce customers");
   return steps;
 }
@@ -401,3 +433,6 @@ export * from "./site-signals.js";
 export * from "./google-analytics.js";
 export * from "./google-sheets.js";
 export * from "./dataforseo.js";
+export * from "./bing.js";
+export * from "./connector-findings.js";
+export * from "./log-coverage.js";

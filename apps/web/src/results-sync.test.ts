@@ -125,7 +125,7 @@ describe("results sync", () => {
     const notes = await syncResults(db, record, now, google, { googleApiKey: "g", openPageRankKey: "o", dataForSeo });
     assert.ok(!notes.some((note) => note.includes("failed")), notes.join("; "));
     const written = (await db.prepare("SELECT DISTINCT metric FROM metric_points WHERE site_id = 's'").all<{ metric: string }>()).results.map((row) => row.metric);
-    const declared = new Set([...RESULT_METRICS, "authority:rival.example", "kw_top10:rival.example", "kw_traffic:rival.example"]);
+    const declared = new Set([...RESULT_METRICS, ...["authority", "kw_top10", "kw_traffic", "backlinks", "ref_domains", "backlink_rank"].map((metric) => `${metric}:rival.example`)]);
     assert.deepEqual(written.filter((metric) => !declared.has(metric)), [], "every point a sync writes is declared, so the view can read it and a property change can clear it");
     assert.ok(written.length > 20, `a full sync wrote ${written.length} metrics`);
   });
@@ -164,7 +164,8 @@ describe("results sync", () => {
       const body = JSON.parse(String(init?.body ?? "{}"));
       if (url.includes("dataforseo")) {
         const task = (body as Array<Record<string, unknown>>)[0]!;
-        asked.push({ url, body: task });
+        // This test is about the keyword lists; search results and backlinks have their own.
+        if (url.includes("ranked_keywords") || url.includes("keyword_overview")) asked.push({ url, body: task });
         if (url.includes("keyword_overview")) return new Response(overviewAnswer([["dr amy tan", 320]]));
         if (task.target === "nobody.example") return new Response(rankedAnswer([]));
         if (task.target === "x.com") return new Response(rankedAnswer([["x clinic", 100, 1, 50]]));

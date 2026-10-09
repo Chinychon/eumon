@@ -1,6 +1,7 @@
 "use client";
 
 import { formatDay } from "../../components/api";
+import { BacklinksCard, BingCard, SearchResultsCard } from "../../components/results/ConnectorCards";
 import { KeywordsCard } from "../../components/results/KeywordsCard";
 import { AiReadersCard, AiReferralsCard, AUTHORITY_NOTE, AuthoritySection, EnquiriesCard, GoogleSearchCard, KeyNumbers, ProofHeadline, QuestionSearchesCard, SpeedSection } from "../../components/results/sections";
 import { ExportContext, ExportMenu } from "../../components/export/ExportMenu";
@@ -30,8 +31,11 @@ export function ClientReport({ token }: { token: string }) {
             <ProofHeadline data={data} operator={false} />
             <KeyNumbers data={data} operator={false} />
             <GoogleSearchCard data={data} operator={false} />
+            {data.results.bing && <BingCard data={data} operator={false} />}
             <KeywordsCard keywords={data.results.keywords} host={new URL(data.site.baseUrl).hostname} operator={false} hasCredentials={data.site.signals.keywords} hasMarkets={data.results.markets.length > 0}
               searchTop10={data.results.search?.buckets.find((bucket) => bucket.top === 10)?.queries ?? null} />
+            {data.results.serp.checked > 0 && <SearchResultsCard data={data} operator={false} />}
+            {data.results.links.domains.some((entry) => entry.summary) && <BacklinksCard data={data} operator={false} />}
             <EnquiriesCard data={data} operator={false} />
             <OutcomesCard data={data} operator={false} />
             {data.results.ai && (

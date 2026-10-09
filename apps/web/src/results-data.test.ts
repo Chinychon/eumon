@@ -15,7 +15,7 @@ describe("results payload", () => {
     await upsertOAuthCredential(db, { id: "o", siteId: "s", provider: "google", encryptedBlob: "x", scopes: "webmasters.readonly" });
     const site = (await getSite(db, "s"))!;
     const operator = await resultsPayload(db, site);
-    assert.deepEqual(operator.site, { name: "x.com", baseUrl: "https://x.com", searchConnected: true, analytics: "reconnect", signals: { speed: false, authority: false, keywords: false } });
+    assert.deepEqual(operator.site, { name: "x.com", baseUrl: "https://x.com", searchConnected: true, analytics: "reconnect", signals: { speed: false, authority: false, keywords: false, bing: false } });
     const client = await resultsPayload(db, site, { client: true });
     assert.equal(JSON.stringify(client).includes("properties/9"), false);
     assert.deepEqual(client.results.health, { value: null, day: null });
@@ -41,7 +41,7 @@ describe("results payload", () => {
     await upsertMetricPoints(db, "s", [{ metric: "authority:rival.example", day: at.slice(0, 10), value: 1.1 }]);
     const payload = await resultsPayload(db, (await getSite(db, "s"))!, { keys: { googleApiKey: "g" } });
     assert.deepEqual(payload.results.authority.competitors, [{ domain: "rival.example", score: 1.1 }]);
-    assert.deepEqual(payload.site.signals, { speed: true, authority: false, keywords: false });
+    assert.deepEqual(payload.site.signals, { speed: true, authority: false, keywords: false, bing: false });
   });
 
   it("reads only the keyword lists for the current property, markets and competitors, under the bare domain", async () => {
@@ -66,7 +66,7 @@ describe("results payload", () => {
     assert.deepEqual(keywords.ranked.map((list) => list.domain), ["rival.example", "x.com"], "the other market and the removed competitor are left out");
     assert.equal(keywords.priced.length, 1, "the old property's prices are left out");
     const payload = await resultsPayload(db, site, { keys: { dataForSeo: { login: "a", password: "b" } } });
-    assert.deepEqual(payload.site.signals, { speed: false, authority: false, keywords: true });
+    assert.deepEqual(payload.site.signals, { speed: false, authority: false, keywords: true, bing: false });
     assert.equal(payload.results.keywords.visibility[0]!.domain, "x.com");
   });
 });

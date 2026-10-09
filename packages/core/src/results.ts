@@ -6,6 +6,9 @@
 import { AI_ASSISTANTS, AI_ENGINES, type AiAssistant, type AiEngine } from "./ai-agents.js";
 import { keywordsView, type KeywordsInput } from "./keywords.js";
 import type { PageTypeOutcome } from "./whatsapp.js";
+import { linksView, type LinksInput, type LinksView } from "./links.js";
+import { serpView, type CompetitorSuggestion, type SerpResult, type SerpView } from "./serp.js";
+import { crawlLogView, type CrawlDayRow, type CrawlLogView } from "./server-logs.js";
 import { SPEED_METRICS, speedRating, type SpeedMetric, type SpeedRating } from "./signals.js";
 
 export type DayValue = { day: string; value: number };
@@ -117,6 +120,14 @@ export const METRICS = {
   authority: ["sync.authority", "authority"],
   /** DataForSEO lists live in snapshots; these are the counts that trend. Plus `kw_top10:<domain>` and `kw_traffic:<domain>` for each current competitor. */
   keywords: ["sync.competitor_keywords", "sync.keyword_volumes", "kw_top10", "kw_traffic"],
+  /** Search results per query live in snapshots; these count the checked searches with an AI Overview, and those citing the site. */
+  serp: ["sync.serp", "sync.serp_competitors", "serp_ai_overviews", "serp_ai_cited"],
+  /** DataForSEO Backlinks: the site's profile. Plus `backlinks:<domain>`, `ref_domains:<domain>` and `backlink_rank:<domain>` for each current competitor. */
+  backlinks: ["sync.backlinks", "backlinks", "ref_domains", "backlink_rank"],
+  /** Bing Webmaster Tools: daily clicks and impressions (Bing and the products built on its index), and crawl counts. */
+  bing: ["sync.bing", "bing_clicks", "bing_impressions", "bing_crawled_pages", "bing_crawl_errors", "bing_in_index"],
+  /** URLs sent to IndexNow per day. */
+  indexnow: ["sync.indexnow", "indexnow_submitted"],
 };
 
 /** Every metric the Results view reads. */
@@ -149,6 +160,12 @@ export type ResultsInput = {
   keywords?: KeywordsInput;
   /** Lead outcomes by the page type visitors landed on (last 90 days), and the currency values are in. */
   outcomes?: { currency: string | null; byPageType: PageTypeOutcome[] };
+  /** Checked search results per market, and the domains suggested as competitors from them. */
+  serp?: { lists: Array<{ market: string; periodEnd: string; rows: SerpResult[] }>; suggestions: CompetitorSuggestion[] };
+  /** Link profiles for the site and each current competitor, and the link gap. */
+  links?: LinksInput;
+  /** Crawler requests from the site's server or CDN logs, per day; undefined when no log has been received. */
+  crawlLog?: CrawlDayRow[];
 };
 
 export type SpeedValue = { p75: number | null; rating: SpeedRating | null };
@@ -205,6 +222,18 @@ export type ResultsView = {
     weeks: Array<{ week: string; chats: number | null; customers: number | null; revenue: number | null; partial: boolean }>;
     byPageType: PageTypeOutcome[];
   };
+  serp: SerpView;
+  links: LinksView & { history: DayValue[] };
+  /** Bing Webmaster Tools; null until its first sync. */
+  bing: {
+    clicks: Compare; impressions: Compare;
+    weeks: Array<{ week: string; clicks: number | null; impressions: number | null; partial: boolean }>;
+    inIndex: number | null; crawlErrors: number | null;
+  } | null;
+  /** URLs sent to IndexNow over 28 days; null before the first submission. */
+  indexNow: { submitted: Compare; lastDay: string | null } | null;
+  /** From the site's server or CDN logs; null until a log arrives. */
+  crawlLog: CrawlLogView | null;
   ai: AiView;
 };
 
@@ -320,6 +349,19 @@ export function resultsView(input: ResultsInput): ResultsView {
     weeks: chatWeeks.map((week, index) => ({ week: week.week, chats: week.value, customers: customerWeeks[index]!.value, revenue: revenueWeeks[index]!.value, partial: week.partial })),
     byPageType: input.outcomes?.byPageType ?? [],
   };
+  const serp = serpView(input.serp?.lists ?? [], input.serp?.suggestions ?? []);
+  const links = { ...linksView(input.links ?? { site: keywordLists.site, competitors: input.competitors ?? [], synced: false, summaries: [], gap: null }), history: series.ref_domains ?? [] };
+  // Bing reports through yesterday, like the first-party numbers.
+  const bingImpressions = weekly(series.bing_impressions, from, today, addDays(today, -1));
+  const bing = series["sync.bing"]?.length ? {
+    clicks: compare(series.bing_clicks, firstParty),
+    impressions: compare(series.bing_impressions, firstParty),
+    weeks: weekly(series.bing_clicks, from, today, addDays(today, -1)).map((week, index) => ({ week: week.week, clicks: week.value, impressions: bingImpressions[index]!.value, partial: week.partial })),
+    inIndex: latest(series.bing_in_index, today),
+    crawlErrors: latest(series.bing_crawl_errors, today),
+  } : null;
+  const indexNow = series.indexnow_submitted?.length ? { submitted: compare(series.indexnow_submitted, firstParty), lastDay: series.indexnow_submitted.at(-1)!.day } : null;
+  const crawlLog = input.crawlLog?.length ? crawlLogView(input.crawlLog, today) : null;
 
   const aiSince = series.ai_fetches?.[0]?.day ?? null;
   // Weeks start at the first full week after counting began: before it, nothing was counted.
@@ -385,6 +427,6 @@ export function resultsView(input: ResultsInput): ResultsView {
       value: latest(series.site_health, today),
       day: series.site_health?.length ? series.site_health[series.site_health.length - 1]!.day : null,
     },
-    speed, lab, authority, keywords, outcomes, ai,
+    speed, lab, authority, keywords, serp, links, bing, indexNow, crawlLog, outcomes, ai,
   };
 }

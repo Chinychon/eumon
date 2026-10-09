@@ -1,5 +1,6 @@
 import { countryName, createId, severityFromImpact, slugify, type Finding, type Opportunity, type SearchMetricRow } from "@organic-growth/core";
 import { expectedCtr } from "@organic-growth/pages";
+import { estimateDemand } from "./demand.js";
 
 /** Query wording that usually signals purchase or booking intent, across common markets. */
 export const COMMERCIAL_QUERY_PATTERN =
@@ -264,9 +265,9 @@ export function searchOpportunities(insights: SearchInsights, siteId: string, an
     return {
       id: createId("opp"), siteId, analysisId,
       title: `Move “${entry.query}” onto the first results (now position ${entry.position.toFixed(1)})`,
-      searchDemand: entry.impressions,
+      ...estimateDemand({ kind: "ranking", position: entry.position, impressions: entry.impressions }),
       intent: commercial ? "commercial (query-pattern heuristic)" : "informational or mixed (verify manually)",
-      currentRank: entry.position, competitorStrength: 0, estimatedDifficulty: Math.min(100, Math.round(entry.position * 5)),
+      currentRank: entry.position, competitorStrength: 0,
       currentPage: entry.page, businessValue: commercial ? 1.5 : 1, conversionPotential: commercial ? 1 : 0.5,
       technicalEffort: 1, contentEffort: 2,
       priorityScore: Number(((gain * (commercial ? 1.5 : 1)) / 2).toFixed(2)),
@@ -276,7 +277,7 @@ export function searchOpportunities(insights: SearchInsights, siteId: string, an
   const snippets = insights.lowCtrPages.slice(0, 5).map((page): Opportunity => ({
     id: createId("opp"), siteId, analysisId,
     title: `Rewrite the search snippet of ${page.page.replace(/^https?:\/\/[^/]+/, "") || "/"}`,
-    searchDemand: page.impressions, intent: "snippet", currentRank: page.position, competitorStrength: 0, estimatedDifficulty: 10,
+    ...estimateDemand({ kind: "snippet", impressions: page.impressions }), intent: "snippet", currentRank: page.position, competitorStrength: 0,
     currentPage: page.page, businessValue: 1, conversionPotential: 1, technicalEffort: 1, contentEffort: 1,
     priorityScore: Number((page.impressions * (page.expectedCtr - page.ctr) / 1.5).toFixed(2)),
     rationale: `Position ${page.position.toFixed(1)} with a ${(page.ctr * 100).toFixed(1)}% click-through rate; pages there typically get ~${(page.expectedCtr * 100).toFixed(0)}%. Top queries: ${page.queries.map((query) => `“${query}”`).join(", ")}.`,

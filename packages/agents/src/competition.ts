@@ -1,6 +1,7 @@
 import { schema, type JsonLlm } from "@organic-growth/ai";
 import { createId, type CompetitorProfile, type Opportunity } from "@organic-growth/core";
 import { isContentFamily, type PageInspection, type SiteResearch } from "@organic-growth/crawler";
+import { estimateDemand } from "./demand.js";
 
 /** The connected site's side of the comparison. */
 export type OwnContent = {
@@ -274,10 +275,9 @@ export function competitionOpportunities(report: CompetitionReport, siteId: stri
       title: hasData
         ? `Publish your ${row.data!.dataset} data as ${row.label}`
         : `Build ${row.label}: competitors have ~${count(leader.pages)}, you have ${row.you.pages ? `~${count(row.you.pages)}` : "none"}`,
-      searchDemand: 0,
+      ...estimateDemand({ kind: "content_gap", competitorPages: leader.pages }),
       intent: "content_gap",
       competitorStrength: leader.pages,
-      estimatedDifficulty: Math.min(100, Math.round(Math.log10(leader.pages + 1) * 25)),
       businessValue: hasData ? 1.5 : 1,
       conversionPotential: 1,
       technicalEffort: 1,

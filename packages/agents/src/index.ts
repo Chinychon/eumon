@@ -12,6 +12,7 @@ import {
 } from "@organic-growth/core";
 import type { RepoAnalysisResult } from "@organic-growth/repo-analyzer";
 import { competitionOpportunities, counted, type CompetitionReport } from "./competition.js";
+import { estimateDemand } from "./demand.js";
 import { analyzeSearch, searchOpportunities, type SearchInsights } from "./search.js";
 
 export interface AnalysisBundle {
@@ -66,10 +67,9 @@ export function buildOpportunities(bundle: AnalysisBundle): Opportunity[] {
       siteId: bundle.siteId,
       analysisId: bundle.analysisId,
       title: `Resolve: ${finding.title}`,
-      searchDemand: 0,
+      ...estimateDemand({ kind: "technical", effort }),
       intent: "technical_enabler",
       competitorStrength: 0,
-      estimatedDifficulty: Math.min(100, effort * 15),
       businessValue: impact,
       conversionPotential: 0,
       technicalEffort: effort,
@@ -93,10 +93,9 @@ export function buildOpportunities(bundle: AnalysisBundle): Opportunity[] {
         siteId: bundle.siteId,
         analysisId: bundle.analysisId,
         title: `Publish landing pages from your ${dataset.name} data (${waiting.toLocaleString()} records without a page)`,
-        searchDemand: 0,
+        ...estimateDemand({ kind: "unpublished_data" }),
         intent: "unpublished_data",
         competitorStrength: 0,
-        estimatedDifficulty: 20,
         businessValue: 1.2,
         conversionPotential: 1,
         technicalEffort: 1,

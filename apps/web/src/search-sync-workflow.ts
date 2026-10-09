@@ -1,7 +1,8 @@
 import { WorkflowEntrypoint } from "cloudflare:workers";
 import type { WorkflowEvent, WorkflowStep } from "cloudflare:workers";
 import type { AppEnv } from "../cloudflare.config";
-import { getSite, listSitesForResults, publishedPages } from "@organic-growth/db";
+import { createId } from "@organic-growth/core";
+import { getSite, listSitesForResults, publishedPages, recordSyncRun } from "@organic-growth/db";
 import { googleAccess, signalKeys } from "./results-access";
 import { syncResults } from "./results-sync";
 import { COVERAGE_STEP, coverageRound } from "./url-inspection";
@@ -17,6 +18,7 @@ export class SearchSyncWorkflow extends WorkflowEntrypoint<AppEnv, Record<string
         const site = await getSite(this.env.DB, siteId);
         if (!site) return "skipped: site removed";
         const notes: string[] = [];
+        const startedAt = new Date().toISOString();
         if (site.gscProperty && (await publishedPages(this.env.DB, siteId)).published) {
           try {
             notes.push(`pages: ${(await syncGeneratedPageSearch(this.env, site)).queries} query rows`);
@@ -31,6 +33,7 @@ export class SearchSyncWorkflow extends WorkflowEntrypoint<AppEnv, Record<string
           // A database error on one site must not stop the sites after it.
           notes.push(`results failed: ${error instanceof Error ? error.message : String(error)}`);
         }
+        await recordSyncRun(this.env.DB, { id: createId("sync"), siteId, trigger: "daily", startedAt, finishedAt: new Date().toISOString(), notes }).catch(() => undefined);
         return notes.join("; ");
       });
       // Up to 8 more coverage steps (1,600 inspections), so a 23,000-URL site is checked within about two weeks under the 2,000-a-day quota.

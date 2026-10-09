@@ -602,6 +602,12 @@ details.disclosure[open] > summary { margin-bottom: 10px; }
 .why-body strong { color: var(--ink-2); font-weight: 500; }
 .why-row .severity { flex: none; width: 104px; }
 .table-toggle .table-wrap { margin-bottom: 4px; }
+/* Sync history: one line per run; its notes open as a plain list, failures in red. */
+.sync-notes { margin: 0; padding: 0 0 14px 18px; }
+.sync-notes li { margin: 0 0 4px; font-family: var(--mono); font-size: 12px; }
+.why-row .badge { flex: none; }
+.recent-events-head { margin-top: 18px; }
+.recent-events-head .section-title { margin: 0; }
 /* A table toggle says what a click does: Show when closed, Hide when open. */
 .table-toggle .why-open::before { content: "Show"; }
 .table-toggle[open] .why-open::before { content: "Hide"; }

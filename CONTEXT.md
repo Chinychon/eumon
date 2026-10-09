@@ -25,6 +25,7 @@ Short definitions of the domain terms that name modules and seams. Architecture 
 
 - **Source** (`apps/web/src/results-sources.ts`): one thing the sync collects: Search Console daily series, rankings, top queries, URL inspection, GA4, CrUX, PageSpeed, Open PageRank, the site's own numbers. Each knows its upstream, its cadence and its points. Adding a feed means adding a source, not editing the runner.
 - **Sync runner** (`syncResults` in `apps/web/src/results-sync.ts`): runs every source for one site, connecting Google once, writing points and markers, turning a throw into a `<name> failed` note. "Sync now" and the daily workflow both call it.
+- **Sync run** (`sync_runs`, `packages/db/src/activity.ts`): one sync and every note its sources wrote, kept 30 per site and shown in Setup → Sync history. A note with "failed", "stopped" or "refused" is a problem; Sync now on the Dashboard repeats those.
 - **Refusal**: a URL Inspection answer that holds for the rest of the day: quota (429), a revoked token (401), or a whole batch of 403. A lone failure is one URL Google won't inspect; the queue moves past it.
 - **Fresh list**: a keyword list (snapshot) is refreshed when it is missing or 28 or more days old; a sync whose lists are all fresh spends nothing at DataForSEO. Budget: up to (competitors + 1) × markets calls per sync, in sequence, against the Workers Free plan's 50 subrequests per invocation.
 

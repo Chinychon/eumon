@@ -167,8 +167,11 @@ export function OverviewView({ site, tab, onTab, onNavigate }: {
   async function syncNow() {
     setSyncing(true); setError("");
     try {
-      await api(`/api/sites/${site.id}/results/sync`, { method: "POST" });
+      const { notes } = await api<{ notes: string[] }>(`/api/sites/${site.id}/results/sync`, { method: "POST" });
       await reloadResults();
+      // Say which sources failed, instead of numbers quietly not moving.
+      const problems = notes.filter((entry) => /\b(failed|stopped|refused)\b/i.test(entry));
+      if (problems.length) setError(`Sync finished, but ${problems.length === 1 ? "one source" : `${problems.length} sources`} didn't update: ${problems.join("; ")}. Setup → Sync history keeps the details.`);
     } catch (cause) { setError(errorMessage(cause)); } finally { setSyncing(false); }
   }
 

@@ -1,13 +1,18 @@
 import { env } from "cloudflare:workers";
-import { getSite } from "@organic-growth/db";
+import { createId } from "@organic-growth/core";
+import { getSite, recordSyncRun } from "@organic-growth/db";
 import { googleAccess, signalKeys } from "../../../../../../src/results-access";
 import { syncResults } from "../../../../../../src/results-sync";
 import { fail, json } from "../../../../../../src/server";
 
-/** "Sync now": the same sync the daily workflow runs, for one site. */
+/** "Sync now": the same sync the daily workflow runs, for one site, kept in the site's sync history. */
 export async function POST(_request: Request, context: { params: Promise<{ siteId: string }> }) {
   const { siteId } = await context.params;
   const site = await getSite(env.DB, siteId);
   if (!site) return fail("Site not found.", 404);
-  return json({ notes: await syncResults(env.DB, site, new Date(), googleAccess(env, siteId), signalKeys(env)) });
+  const startedAt = new Date().toISOString();
+  const notes = await syncResults(env.DB, site, new Date(), googleAccess(env, siteId), signalKeys(env));
+  // The history is for the operator; failing to write it must not fail the sync.
+  await recordSyncRun(env.DB, { id: createId("sync"), siteId, trigger: "manual", startedAt, finishedAt: new Date().toISOString(), notes }).catch(() => undefined);
+  return json({ notes });
 }

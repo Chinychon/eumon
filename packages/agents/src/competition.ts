@@ -265,6 +265,7 @@ export function competitionInsights(report: CompetitionReport): string[] {
 export function competitionOpportunities(report: CompetitionReport, siteId: string, analysisId: string): Opportunity[] {
   return report.rows.filter((row) => row.status === "gap").slice(0, 6).map((row) => {
     const leader = row.competitors[0]!;
+    const estimate = estimateDemand({ kind: "content_gap", competitorPages: leader.pages });
     const hasData = Boolean(row.data && row.data.records > row.data.livePages);
     const contentEffort = hasData ? 2 : 4;
     const priorityScore = (12 * Math.log10(leader.pages + 1) * (hasData ? 1.5 : 1)) / contentEffort * 2;
@@ -275,7 +276,8 @@ export function competitionOpportunities(report: CompetitionReport, siteId: stri
       title: hasData
         ? `Publish your ${row.data!.dataset} data as ${row.label}`
         : `Build ${row.label}: competitors have ~${count(leader.pages)}, you have ${row.you.pages ? `~${count(row.you.pages)}` : "none"}`,
-      ...estimateDemand({ kind: "content_gap", competitorPages: leader.pages }),
+      searchDemand: estimate.searchDemand,
+      estimatedDifficulty: estimate.estimatedDifficulty,
       intent: "content_gap",
       competitorStrength: leader.pages,
       businessValue: hasData ? 1.5 : 1,

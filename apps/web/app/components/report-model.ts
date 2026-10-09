@@ -105,7 +105,7 @@ const SEVERITY_RANK: Record<string, number> = { CRITICAL: 0, HIGH: 1, MEDIUM: 2,
 
 /** Which tab explains an opportunity. */
 export const opportunityTab = (intent?: string): ReportTab =>
-  intent === "content_gap" || intent === "unpublished_data" ? "competitors" : intent === "technical_enabler" ? "technical" : "search";
+  intent === "content_gap" || intent === "unpublished_data" || intent === "keyword_gap" ? "competitors" : intent === "technical_enabler" ? "technical" : "search";
 
 /** Which tab explains a finding. */
 export const findingTab = (category: string): ReportTab =>

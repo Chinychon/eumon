@@ -1,14 +1,16 @@
 /*
- * Search demand and difficulty for an opportunity, in one place. Until keyword
- * data is synced (DataForSEO, sub-project C), every figure is an estimate from
- * what the analysis saw; the rationales say so. Real volume and difficulty will
- * replace these bodies without the opportunity builders changing.
+ * Search demand and difficulty for an opportunity, in one place. A query that
+ * DataForSEO has priced (the site's keyword lists) gets its real volume and
+ * difficulty; anything else is estimated from what the analysis saw, and the
+ * rationales say so.
  */
+import type { KeywordDemand } from "@organic-growth/core";
+
 export type DemandInput =
   /** A query ranking 4–15: harder the further from page one; demand is what Search Console saw. */
-  | { kind: "ranking"; position: number; impressions: number }
+  | { kind: "ranking"; query: string; position: number; impressions: number }
   /** Rewriting a page-one snippet: cheap. */
-  | { kind: "snippet"; impressions: number }
+  | { kind: "snippet"; query: string; impressions: number }
   /** A page type competitors publish and the site doesn't: their investment stands in for demand we can't see. */
   | { kind: "content_gap"; competitorPages: number }
   /** Records collected but not yet published as pages. */
@@ -16,13 +18,26 @@ export type DemandInput =
   /** A technical fix, scaled by effort (1–4). */
   | { kind: "technical"; effort: number };
 
-export function estimateDemand(input: DemandInput): { searchDemand: number; estimatedDifficulty: number } {
+export type DemandEstimate = {
+  searchDemand: number;
+  estimatedDifficulty: number;
+  /** A sentence for the rationale when the figures are DataForSEO's; null when estimated. */
+  priced: string | null;
+};
+
+export function estimateDemand(input: DemandInput, demand?: KeywordDemand): DemandEstimate {
   const cap = (value: number) => Math.min(100, Math.round(value));
+  if ((input.kind === "ranking" || input.kind === "snippet") && demand) {
+    const price = demand.lookup(input.query);
+    if (price && price.volume !== null && price.difficulty !== null) {
+      return { searchDemand: price.volume, estimatedDifficulty: price.difficulty, priced: `${price.volume.toLocaleString("en")} searches a month, difficulty ${price.difficulty} of 100 (DataForSEO).` };
+    }
+  }
   switch (input.kind) {
-    case "ranking": return { searchDemand: input.impressions, estimatedDifficulty: cap(input.position * 5) };
-    case "snippet": return { searchDemand: input.impressions, estimatedDifficulty: 10 };
-    case "content_gap": return { searchDemand: 0, estimatedDifficulty: cap(Math.log10(input.competitorPages + 1) * 25) };
-    case "unpublished_data": return { searchDemand: 0, estimatedDifficulty: 20 };
-    case "technical": return { searchDemand: 0, estimatedDifficulty: cap(input.effort * 15) };
+    case "ranking": return { searchDemand: input.impressions, estimatedDifficulty: cap(input.position * 5), priced: null };
+    case "snippet": return { searchDemand: input.impressions, estimatedDifficulty: 10, priced: null };
+    case "content_gap": return { searchDemand: 0, estimatedDifficulty: cap(Math.log10(input.competitorPages + 1) * 25), priced: null };
+    case "unpublished_data": return { searchDemand: 0, estimatedDifficulty: 20, priced: null };
+    case "technical": return { searchDemand: 0, estimatedDifficulty: cap(input.effort * 15), priced: null };
   }
 }

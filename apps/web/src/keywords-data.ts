@@ -7,7 +7,7 @@ import { firstMetricDay, listSnapshots, type D1Like } from "@organic-growth/db";
  * the current property, target markets and competitors (the scope says which),
  * so a changed setting hides the old lists until the next sync replaces them.
  */
-export async function loadKeywords(db: D1Like, site: SiteRecord, scope: { markets: string[]; competitors: string[] }): Promise<KeywordsInput> {
+export async function loadKeywords(db: D1Like, site: Pick<SiteRecord, "id" | "baseUrl" | "gscProperty">, scope: { markets: string[]; competitors: string[] }): Promise<KeywordsInput> {
   const own = authorityDomain(site.baseUrl);
   const domains = new Set([own, ...scope.competitors]);
   const [priced, ranked, marker] = await Promise.all([

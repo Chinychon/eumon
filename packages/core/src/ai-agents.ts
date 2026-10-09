@@ -13,6 +13,7 @@ export const AI_ENGINES = [
   { engine: "perplexity", label: "Perplexity" },
   { engine: "meta", label: "Meta" },
   { engine: "commoncrawl", label: "Common Crawl" },
+  { engine: "deepseek", label: "DeepSeek" },
   { engine: "other", label: "Others" },
 ] as const;
 
@@ -55,6 +56,8 @@ export const AI_AGENTS: AiAgent[] = [
   { agent: "Meta-ExternalFetcher", engine: "meta", kind: "live", purpose: "Meta AI opening a page to answer someone" },
   { agent: "Meta-ExternalAgent", engine: "meta", kind: "crawler", purpose: "Meta AI training and search", search: true },
   { agent: "CCBot", engine: "commoncrawl", kind: "crawler", purpose: "Common Crawl, an open archive many AI models train on" },
+  // DeepSeek publishes no crawler documentation; this is the token bot directories report seeing.
+  { agent: "DeepSeekBot", engine: "deepseek", kind: "crawler", purpose: "DeepSeek (token reported by bot directories; DeepSeek documents none)" },
   { agent: "MistralAI-User", engine: "other", kind: "live", purpose: "Mistral's Le Chat opening a page to answer someone" },
   { agent: "DuckAssistBot", engine: "other", kind: "live", purpose: "DuckDuckGo's AI answers" },
   { agent: "Bytespider", engine: "other", kind: "crawler", purpose: "ByteDance model training" },
@@ -105,6 +108,7 @@ export const AI_ASSISTANTS = [
   { assistant: "copilot", label: "Copilot", hosts: ["copilot.microsoft.com", "copilot.com"] },
   { assistant: "claude", label: "Claude", hosts: ["claude.ai"] },
   { assistant: "meta", label: "Meta AI", hosts: ["meta.ai"] },
+  { assistant: "deepseek", label: "DeepSeek", hosts: ["chat.deepseek.com", "deepseek.com"] },
 ] as const;
 
 export type AiAssistant = (typeof AI_ASSISTANTS)[number]["assistant"];

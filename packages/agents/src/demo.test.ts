@@ -106,4 +106,13 @@ describe("demo site", () => {
     assert.ok(pace, report.findings.map((finding) => finding.title).join(" | "));
     assert.ok(!report.findings.some((finding) => /^Search impressions fell|^Google's indexed count fell/.test(finding.title)), "the demo's numbers rise");
   });
+
+  it("shows a soft 404 and the same dentist listed twice in the latest analysis", async () => {
+    const db = openSqliteD1();
+    await seedDemoSite(db, Date.now());
+    const titles = ((await getAnalysisJob(db, "analysis_demo_2"))!.report as { findings: Array<{ title: string }> }).findings.map((finding) => finding.title);
+    assert.ok(titles.includes("Pages that say not found but answer 200"), titles.join(" | "));
+    assert.ok(titles.includes("Pages that are the same page twice"), titles.join(" | "));
+    assert.ok(!titles.includes("The site answers 200 for pages that don't exist"), "the demo's unknown URLs are real 404s");
+  });
 });

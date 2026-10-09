@@ -33,6 +33,7 @@ import {
   isSafePublicUrl,
   researchSite,
   type SiteResearch,
+  probeNotFound,
 } from "@organic-growth/crawler";
 import { googleAccessToken } from "./gsc-auth";
 import { searchConsoleReconciliation } from "@organic-growth/db";
@@ -146,8 +147,10 @@ export class SiteAnalysisWorkflow extends WorkflowEntrypoint<AppEnv, AnalysisPay
             searchMetrics = await fetchSearchConsoleMetrics(accessToken, site.gscProperty);
             await replaceCurrentSearchMetrics(db, siteId, searchMetrics);
           }
+          // One fetch of a URL that cannot exist: a site that answers 200 for it is a soft-404 site, and pages carrying that title are soft 404s.
+          const notFoundProbe = await probeNotFound(site.baseUrl, analysisId).catch(() => undefined);
           const [coverage, examples, datasets, targetMarkets, entityKeys, competitors] = await Promise.all([
-            getCrawlCoverage(db, analysisId),
+            getCrawlCoverage(db, analysisId, { notFoundTitle: notFoundProbe && notFoundProbe.status < 400 ? notFoundProbe.title ?? null : null }),
             listCrawlPageResults(db, analysisId, 50),
             datasetCoverage(db, siteId),
             listSiteMarkets(db, siteId),
@@ -179,6 +182,7 @@ export class SiteAnalysisWorkflow extends WorkflowEntrypoint<AppEnv, AnalysisPay
             entityKeys,
             keywords,
             connectors,
+            notFoundProbe,
             llm,
             repoSnapshot,
             maxPages: 25,

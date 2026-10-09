@@ -1,6 +1,6 @@
 import type { DataRecord, Dataset, Finding, KeywordsInput, PageTemplate, RankedKeyword, SearchMetricRow } from "@organic-growth/core";
 import { addDays, findingKey, REF_ALPHABET, REF_LENGTH, slugify, suggestRedirect } from "@organic-growth/core";
-import { crawlGooglebotBatch, researchSite, type Fetcher, type SiteResearch } from "@organic-growth/crawler";
+import { crawlGooglebotBatch, probeNotFound, researchSite, type Fetcher, type SiteResearch } from "@organic-growth/crawler";
 import {
   chunks, createAnalysis, createLead, recordLeadClick, updateLead, defaultPageSettings, recordSyncRun, recountCrawl, upsertPageSettings, datasetCoverage, deleteSite, getAnalysisJob, getCrawlCoverage, getCrawlProgress, importSearchConsoleUrls, insertChange, insertConversionEvent, listAllRecords,
   listCrawlLogDays, listCrawlPageResults, listPendingCrawlUrls, recordLandingSession, replaceCurrentSearchMetrics, replacePageSearchMetrics, runStatements, saveAnalysisReport, saveCrawlBatch,
@@ -53,12 +53,17 @@ const BLOG = Array.from({ length: 900 }, (_, i) => `${TREATMENTS[i % TREATMENTS.
 
 type Page = { path: string; family: string; index: number };
 
+const RETIRED_TREATMENTS = ["gold-crowns", "amalgam-fillings"];
+
 /** Every URL the demo sitemap lists: about 1,800 across six page types. */
 function demoPages(): Page[] {
   const pages: Page[] = [{ path: "/", family: "home", index: 0 }];
   PAGES.forEach((slug, index) => pages.push({ path: `/${slug}`, family: "page", index }));
   DENTISTS.forEach((dentist, index) => pages.push({ path: `/dentists/${dentist.slug}`, family: "dentists", index }));
   TREATMENT_LIST.forEach((treatment, index) => pages.push({ path: `/treatments/${treatment.slug}`, family: "treatments", index }));
+  // Two retired treatments still in the sitemap answer 200 with "not found" (soft 404s), and one dentist is listed twice under a coded slug.
+  RETIRED_TREATMENTS.forEach((slug, index) => pages.push({ path: `/treatments/${slug}`, family: "treatments", index: TREATMENT_LIST.length + index }));
+  pages.push({ path: `/dentists/${DENTISTS[3]!.slug}-2b7f1a`, family: "dentists", index: DENTISTS.length });
   CITIES.forEach((city, index) => pages.push({ path: `/clinics/${city}`, family: "clinics", index }));
   BLOG.forEach((slug, index) => pages.push({ path: index < 12 ? `/blog/drafts/${slug}` : `/blog/${slug}`, family: "blog", index }));
   let index = 0;
@@ -110,7 +115,8 @@ function demoResponse(path: string, version: number): { status: number; body: st
   if (path === "/") return { status: 200, body: document({ path, title: "Demo Dental Clinic | Dentists in Malaysia and Singapore", description: "Demo data: a fictional dental clinic group.", h1: "Dental care across 11 clinics", body: `<p>${PROSE.repeat(3)}</p>`, tracking: true, jsonLd: { "@context": "https://schema.org", "@type": "Dentist", name: "Demo Dental Clinic" } }) };
   if (first && !second && PAGES.includes(first)) return { status: 200, body: document({ path, title: `${title(first)} | Demo Dental Clinic`, description: `${title(first)} at Demo Dental Clinic.`, h1: title(first), body: `<p>${PROSE.repeat(2)}</p>`, tracking: true }) };
   if (first === "dentists" && second && !third) {
-    const index = DENTISTS.findIndex((dentist) => dentist.slug === second);
+    // The duplicate listing: the same dentist under a slug with a code on the end.
+    const index = DENTISTS.findIndex((dentist) => dentist.slug === second.replace(/-2b7f1a$/, ""));
     const dentist = DENTISTS[index];
     if (!dentist) return null;
     // Twelve dentists left the clinic; their pages 404 until version 3 drops them from the sitemap.
@@ -123,6 +129,9 @@ function demoResponse(path: string, version: number): { status: number; body: st
     }) };
   }
   if (first === "treatments" && second && !third) {
+    if (RETIRED_TREATMENTS.includes(second)) {
+      return { status: 200, body: document({ path, title: "Halaman tidak ditemukan | Demo Dental Clinic", description: "Rawatan ini tidak lagi ditawarkan.", h1: "Halaman tidak ditemukan", body: "<p>Maaf, rawatan ini tidak lagi ditawarkan di klinik kami.</p>" }) };
+    }
     const treatment = TREATMENT_LIST.find((entry) => entry.slug === second);
     if (!treatment) return null;
     return { status: 200, body: document({ path, title: `${title(treatment.slug)}: cost, recovery, and what to expect | Demo Dental Clinic`, description: `${title(treatment.slug)} from RM ${treatment.price}.`, h1: title(treatment.slug), body: `<p>${title(treatment.slug)} starts from RM ${treatment.price} at every clinic.</p><p>${PROSE.repeat(3)}</p>`, tracking: true, jsonLd: { "@context": "https://schema.org", "@type": "MedicalProcedure", name: title(treatment.slug) } }) };
@@ -404,8 +413,9 @@ async function analyzeDemo(db: D1Like, input: { analysisId: string; version: num
   const fetcher = demoFetcher(input.version, input.now);
   const research: SiteResearch[] = [];
   for (const domain of COMPETITORS) research.push(await researchSite(domain, fetcher, { maxFiles: 5, maxUrls: 5_000 }));
+  const notFoundProbe = await probeNotFound(ORIGIN, input.analysisId, fetcher);
   const [coverage, examples, datasets] = await Promise.all([
-    getCrawlCoverage(db, input.analysisId),
+    getCrawlCoverage(db, input.analysisId, { notFoundTitle: notFoundProbe.status < 400 ? notFoundProbe.title ?? null : null }),
     listCrawlPageResults(db, input.analysisId, 50),
     datasetCoverage(db, DEMO_SITE_ID),
   ]);
@@ -419,6 +429,7 @@ async function analyzeDemo(db: D1Like, input: { analysisId: string; version: num
     fetcher,
     maxPages: 25,
     repeatability: false,
+    notFoundProbe,
     competitorResearch: research,
     datasets,
     targetMarkets: ["mys", "sgp"],

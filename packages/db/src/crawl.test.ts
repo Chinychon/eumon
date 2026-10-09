@@ -1,9 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { CrawlPageResult } from "@organic-growth/core";
+import { simhash, type CrawlPageResult } from "@organic-growth/core";
 import {
-  analysisStalled, compactReport, createAnalysis, enqueueAnalysisCrawlUrls, estimateCrawl, getAnalysisJob, getCrawlCoverage, getCrawlProgress, getPreviousCompletedAnalysis,
-  listCrawlStates, listPendingCrawlUrls, pruneCrawlResults, recountCrawl, reuseCrawlResults, saveAnalysisReport, saveCrawlBatch, setLatestReportSearch, updateAnalysisProgress, updateAnalysisStatus, upsertSite,
+  analysisStalled, compactReport, createAnalysis, enqueueAnalysisCrawlUrls, estimateCrawl, getAnalysisJob, getCrawlCoverage, getCrawlProgress, getPreviousCompletedAnalysis, listCrawlStates, listPendingCrawlUrls, pruneCrawlResults, recountCrawl, reuseCrawlResults, saveAnalysisReport, saveCrawlBatch, setLatestReportSearch, updateAnalysisProgress, updateAnalysisStatus, upsertSite,
 } from "./index.js";
 import { openSqliteD1 } from "./sqlite.js";
 
@@ -68,6 +67,8 @@ describe("full-crawl coverage", async () => {
     assert.equal(coverage.emptyShellUrls, 2);
     assert.equal(coverage.httpErrorUrls, 1, "a bot challenge is not counted as an HTTP error");
     assert.deepEqual(coverage.issues, {
+      softNotFound: 0,
+      nearDuplicate: 0,
       robotsBlocked: 1,
       noindex: 1,
       canonicalMismatch: 1,
@@ -278,5 +279,51 @@ describe("search section on the last report", () => {
     assert.equal(await setLatestReportSearch(db, "site", { totals: { clicks: 5 } }), true);
     assert.deepEqual((await getAnalysisJob(db, "new"))?.report, { findings: [1], search: { totals: { clicks: 5 } } });
     assert.deepEqual((await getAnalysisJob(db, "old"))?.report, { findings: [], search: null }, "older reports keep their own data");
+  });
+});
+
+describe("soft 404s, near-duplicates and locales in coverage", () => {
+  it("counts soft 404s (by flag and by the probe's title), near-duplicate groups with suffixed slugs, and the split by locale", async () => {
+    const db = openSqliteD1();
+    const now = new Date().toISOString();
+    await upsertSite(db, { id: "site", name: "x.com", baseUrl: "https://x.com", createdAt: now, updatedAt: now });
+    await createAnalysis(db, { id: "c1", siteId: "site", status: "running", createdAt: now });
+    const u = (path: string) => `https://x.com${path}`;
+    const bio = (hospital: string, city: string) => `Dr Lim Ai Wei is a consultant obstetrician and gynaecologist at ${hospital} in ${city} with many years of experience. She completed her medical degree at the University of Malaya and her postgraduate training in obstetrics and gynaecology in Kuala Lumpur and Singapore. Her clinical interests include high-risk pregnancy, minimally invasive gynaecological surgery, fertility assessment and menopause care. She sees patients for antenatal care, routine screening, contraception advice and the management of fibroids and endometriosis. Dr Lim speaks English, Malay and Mandarin, and consults on weekdays with Saturday morning sessions for returning patients. Appointments can be made through the hospital's patient line or by WhatsApp; most insurers and company panels are accepted.`;
+    const bioA = simhash(bio("Pantai Hospital", "Kuala Lumpur"));
+    const bioB = simhash(bio("Gleneagles Hospital", "Penang"));
+    const bioC = simhash("Dr Lim Ai Wei is a dermatologist at Sunway Medical Centre treating acne, eczema and psoriasis, offering laser treatments and mole checks with same-day appointments for urgent rashes.");
+    const pages: CrawlPageResult[] = [
+      page(u("/doctors/dr-lim-ai-wei"), { title: "Dr Lim Ai Wei", textHash: bioA, locale: "default" }),
+      page(u("/doctors/dr-lim-ai-wei-7f3a2b"), { title: "Dr Lim Ai Wei", textHash: bioB, locale: "default" }),
+      page(u("/doctors/dr-lim-ai-wei-derm"), { title: "Dr Lim Ai Wei", textHash: bioC, locale: "default" }),
+      page(u("/treatments/old"), { title: "Page not found", softNotFound: true, locale: "default", noindex: false }),
+      page(u("/treatments/older"), { title: "Oops", locale: "default" }),
+      page(u("/id/doctors/dr-lim-ai-wei"), { title: "Dr Lim Ai Wei (ID)", locale: "id", noindex: true }),
+      page(u("/id/doctors/dr-tan"), { title: "Dr Tan", locale: "id", noindex: true }),
+    ];
+    await enqueueAnalysisCrawlUrls(db, { analysisId: "c1", siteId: "site", urls: pages.map((entry) => ({ url: entry.url, routeFamily: "doctors" })) });
+    await saveCrawlBatch(db, { analysisId: "c1", outcomes: pages.map((entry) => ({ url: entry.url, page: entry })) });
+    const plain = await getCrawlCoverage(db, "c1");
+    assert.equal(plain.issues?.softNotFound, 1, "the flagged page");
+    assert.equal(plain.issues?.nearDuplicate, 2, "two of the three namesakes are the same page");
+    assert.deepEqual(plain.nearDuplicateGroups, [{ title: "Dr Lim Ai Wei", urls: [u("/doctors/dr-lim-ai-wei"), u("/doctors/dr-lim-ai-wei-7f3a2b")], suffixed: true }]);
+    assert.deepEqual(plain.locales?.map((entry) => [entry.locale, entry.urls, entry.noindex]), [["default", 5, 0], ["id", 2, 2]]);
+    const probed = await getCrawlCoverage(db, "c1", { notFoundTitle: "Oops" });
+    assert.equal(probed.issues?.softNotFound, 2, "plus the page that shares the probe's title");
+    assert.equal(probed.notFoundTitle, "Oops");
+    assert.ok(probed.issueExamples?.softNotFound?.some((example) => example.url === u("/treatments/older")));
+  });
+
+  it("reads 0 and no locales for crawls saved before these fields existed", async () => {
+    const db = openSqliteD1();
+    const now = new Date().toISOString();
+    await upsertSite(db, { id: "site", name: "x.com", baseUrl: "https://x.com", createdAt: now, updatedAt: now });
+    await createAnalysis(db, { id: "old", siteId: "site", status: "running", createdAt: now });
+    await enqueueAnalysisCrawlUrls(db, { analysisId: "old", siteId: "site", urls: [{ url: "https://x.com/a", routeFamily: "page" }] });
+    await saveCrawlBatch(db, { analysisId: "old", outcomes: [{ url: "https://x.com/a", page: page("https://x.com/a") }] });
+    await db.prepare("UPDATE pages SET result_json = json_remove(result_json, '$.locale', '$.textHash', '$.softNotFound') WHERE analysis_id = 'old'").run();
+    const coverage = await getCrawlCoverage(db, "old");
+    assert.deepEqual([coverage.issues?.softNotFound, coverage.issues?.nearDuplicate, coverage.locales], [0, 0, undefined]);
   });
 });

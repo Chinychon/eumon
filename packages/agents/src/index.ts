@@ -21,6 +21,8 @@ import { estimateDemand } from "./demand.js";
 import { analyzeSearch, searchOpportunities, type SearchInsights } from "./search.js";
 
 export interface AnalysisBundle {
+  /** What the site answered for a URL that cannot exist; a status under 400 is a soft-404 site. */
+  notFoundProbe?: { url: string; status: number; title?: string };
   siteId: string;
   analysisId: string;
   baseUrl: string;
@@ -437,3 +439,4 @@ export * from "./bing.js";
 export * from "./connector-findings.js";
 export * from "./log-coverage.js";
 export * from "./trend-signals.js";
+export * from "./not-found-probe.js";

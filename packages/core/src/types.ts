@@ -132,6 +132,12 @@ export type CrawlPageResult = {
   noindex?: boolean;
   /** schema.org `@type` values found in JSON-LD, `@graph` flattened. */
   jsonLdTypes?: string[];
+  /** The URL's language prefix (`classifyLanguage`): `id`, `zh`, or `default`. */
+  locale?: string;
+  /** Simhash of the visible text (16 hex characters) when it has 200 characters or more; `nearDuplicate` compares two. */
+  textHash?: string;
+  /** Answered under 400 but says it is missing: Google's soft 404. */
+  softNotFound?: boolean;
   /** JSON-LD blocks that failed to parse (search engines ignore them). */
   invalidJsonLd?: number;
   /** Route family (`/en/doctors/jane` → `doctors`), used to report problems per page template. */
@@ -168,6 +174,8 @@ export type SitemapAudit = {
 
 /** Problems counted across every crawled sitemap URL. */
 export type CrawlIssue =
+  | "softNotFound"
+  | "nearDuplicate"
   | "robotsBlocked"
   | "noindex"
   | "canonicalMismatch"
@@ -194,6 +202,20 @@ export type CrawlFamilyStats = {
   missingStructuredData: number;
 };
 
+/** Crawl health of one language version (the URL's locale prefix; `default` for none). */
+export type CrawlLocaleStats = {
+  locale: string;
+  urls: number;
+  crawled: number;
+  emptyShells: number;
+  errors: number;
+  noindex: number;
+  redirected: number;
+  missingDescription: number;
+  missingStructuredData: number;
+  softNotFound: number;
+};
+
 /** Aggregate coverage for a sitemap-driven crawl. Individual page records live in storage. */
 export type CrawlCoverage = {
   totalUrls: number;
@@ -207,6 +229,12 @@ export type CrawlCoverage = {
   issues?: Partial<Record<CrawlIssue, number>>;
   issueExamples?: Partial<Record<CrawlIssue, CrawlIssueExample[]>>;
   duplicateTitleGroups?: Array<{ title: string; count: number; examples: string[] }>;
+  /** Indexable pages with the same title whose text hashes are within a few bits; `suffixed` when their URLs differ only by a trailing code. */
+  nearDuplicateGroups?: Array<{ title: string; urls: string[]; suffixed: boolean }>;
+  /** Per language version, only when the crawl has more than one. */
+  locales?: CrawlLocaleStats[];
+  /** The title the site gave a URL that cannot exist, when it answered under 400; pages with that title count as soft 404s. */
+  notFoundTitle?: string | null;
   families?: CrawlFamilyStats[];
 }
 

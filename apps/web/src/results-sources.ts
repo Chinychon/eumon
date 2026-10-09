@@ -14,6 +14,8 @@ import {
 } from "@organic-growth/db";
 import { ANALYTICS_SCOPE } from "./gsc-auth.ts";
 import type { Source, SyncContext } from "./results-sync.ts";
+import { CONNECTOR_SOURCES } from "./connector-sources.ts";
+import { dollars, eumonOrigin, FRESH_DAYS, marketLocation, noMarkets, said } from "./source-helpers.ts";
 import { inspectSitemapUrls, inspectUrls } from "./url-inspection.ts";
 
 /** Search Console and GA4 history fetched on a site's first sync. */
@@ -22,11 +24,6 @@ const BACKFILL_DAYS = 486;
 const INSPECTIONS_PER_DAY = 100;
 const FORM_FACTORS: FormFactor[] = ["phone", "desktop"];
 
-/** Where Eumon's pages are served. */
-async function eumonOrigin(db: D1Like, site: SiteRecord): Promise<{ origin: string; mountPath: string }> {
-  const settings = (await getPageSettings(db, site.id)) ?? defaultPageSettings(site.id, site.name, site.baseUrl);
-  return { origin: new URL(settings.publicOrigin).origin, mountPath: settings.mountPath };
-}
 
 /** Real-user speed from CrUX: 40 weeks the first time, then the latest 2 (the API updates on Mondays). Too few Chrome visits means no points, only the marker. */
 const speed: Source = {
@@ -225,18 +222,8 @@ const analytics: Source = {
   },
 };
 
-/** DataForSEO's location for a target market, or null for a country it doesn't cover. */
-const marketLocation = (market: string): number | null => {
-  const numeric = countryNumeric(market);
-  return numeric === null ? null : dataForSeoLocation(numeric);
-};
 
-const noMarkets = (name: string) => async ({ db, site }: SyncContext) => ((await listSiteMarkets(db, site.id)).length ? null : `${name}: set target markets in Setup`);
 
-/** A keyword list is refreshed when it is missing or this many days old, so a new competitor or market is fetched on the next sync and nothing fresh is paid for twice. */
-const FRESH_DAYS = 28;
-const dollars = (cost: number) => `$${cost.toFixed(2)}`;
-const said = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 /**
  * Every domain's organic keywords in each covered target market, the site's
@@ -352,4 +339,8 @@ const keywordVolumes: Source = {
   },
 };
 
-export const SOURCES: Source[] = [speed, lab, authority, firstParty, search, rankings, topQueryList, inspection, analytics, competitorKeywords, keywordVolumes];
+export const SOURCES: Source[] = [
+  speed, lab, authority, firstParty, search, rankings, topQueryList, inspection, analytics, competitorKeywords, keywordVolumes,
+  // After the keyword lists: search competitors and results pages are chosen from them.
+  ...CONNECTOR_SOURCES,
+];

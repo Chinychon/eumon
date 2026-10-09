@@ -57,6 +57,10 @@ export async function PUT(request: Request, context: { params: Promise<{ siteId:
     if (typeof body.brandColor !== "string" || !/^#[0-9a-f]{6}$/i.test(body.brandColor)) return fail("Use a hex colour such as #176b50.");
     next.brandColor = body.brandColor;
   }
+  if (body.currency !== undefined) {
+    if (typeof body.currency !== "string" || !/^[A-Za-z]{3}$/.test(body.currency)) return fail("Use a three-letter currency code such as MYR, IDR or SGD.");
+    next.currency = body.currency.toUpperCase();
+  }
   // A new domain or path must be verified again before pages count as live.
   if (next.publicOrigin !== current.publicOrigin || next.mountPath !== current.mountPath) next.verifiedAt = undefined;
   await upsertPageSettings(env.DB, next);

@@ -6,6 +6,7 @@ import type { IndexCoverage } from "@organic-growth/db";
 import { api, formatDay, formatNumber } from "./api";
 import { BarList, Funnel, Heatmap, PairedBars, Scatter } from "./charts";
 import { CrawlGarden } from "./pixel";
+import { CrawlLogCard } from "./results/ConnectorCards";
 import { SPEED_SUBTITLE, SpeedSection } from "./results/sections";
 import { SiteGraph } from "./SiteGraph";
 import { familyLabel, findingArea, gapsFirst, HEALTH_COLUMNS, opportunityArea, pageTypeHealth, servedShare, urlPath, type Finding, type Navigate, type Report } from "./report-model";
@@ -47,7 +48,7 @@ export function WhyRow({ lead, title, aside, children }: { lead?: ReactNode; tit
 export const Severity = ({ value }: { value: string }) => <span className={`severity ${SEVERITY_CLASS[value] ?? "info"}`}>{value}</span>;
 
 /** The site as Google receives it, where it breaks, how fast it is, and the fixes, most impact first. Speed comes from the sync, so it shows before any analysis. */
-export function TechnicalTab({ siteId, report, results, running, changes, busy, hasRepo, onGenerateChange, onOpenPullRequest, onRecrawl }: {
+export function TechnicalTab({ siteId, report, results, running, changes, busy, hasRepo, onGenerateChange, onOpenPullRequest, onRecrawl, onSetup }: {
   siteId: string;
   report: Report | null;
   results: Payload | null;
@@ -59,13 +60,17 @@ export function TechnicalTab({ siteId, report, results, running, changes, busy, 
   onGenerateChange: (findingId: string) => void;
   onOpenPullRequest: (change: Change) => void;
   onRecrawl: () => void;
+  /** Opens Setup, where server logs are connected. */
+  onSetup?: () => void;
 }) {
   const speed = results && <Card title="Speed" subtitle={SPEED_SUBTITLE} actions={<ExportMenu title="Speed" sheets={() => speedSheets(results.results)} />}><SpeedSection data={results} operator /></Card>;
+  const crawlLog = results && <CrawlLogCard data={results} onSetup={onSetup} />;
   if (!report) {
     return (
       <div className="results">
         <TechnicalNumbers report={null} results={results} running={running} />
         <Card title="Every sitemap URL"><p className="empty-state">{running ? "Fills in when the analysis finishes: every sitemap URL, fetched as Googlebot does, and where pages break." : "Run an analysis to fetch every sitemap URL as Googlebot does and see where pages break."}</p></Card>
+        {crawlLog}
         {speed}
       </div>
     );
@@ -101,6 +106,7 @@ export function TechnicalTab({ siteId, report, results, running, changes, busy, 
           <Heatmap caption="Problems per page type" columns={HEALTH_COLUMNS.map((column) => column.label)} rows={pageTypeHealth(families).map((row) => ({ ...row, note: `${formatNumber(row.urls)} ${row.urls === 1 ? "URL" : "URLs"}` }))} />
         </Card>
       )}
+      {crawlLog}
       {speed}
       <SiteGraph siteId={siteId} />
       <Card title="Fixes" actions={<><span className="count-pill">{findings.length} findings</span>{findings.length > 0 && <ExportMenu title="Technical fixes" sheets={() => fixSheets(report, (category) => findingArea(category) === "technical")} />}</>}>

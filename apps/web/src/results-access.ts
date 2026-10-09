@@ -3,7 +3,7 @@ import { googleAccessToken, googleScopes } from "./gsc-auth.ts";
 import type { GoogleAccess, SignalKeys } from "./results-sync.ts";
 
 type GoogleEnv = { DB: D1Like; GOOGLE_CLIENT_ID: string; GOOGLE_CLIENT_SECRET: string; OAUTH_ENCRYPTION_KEY: string };
-type KeyEnv = { GOOGLE_API_KEY?: string; OPEN_PAGERANK_KEY?: string; DATAFORSEO_LOGIN?: string; DATAFORSEO_PASSWORD?: string };
+type KeyEnv = { GOOGLE_API_KEY?: string; OPEN_PAGERANK_KEY?: string; DATAFORSEO_LOGIN?: string; DATAFORSEO_PASSWORD?: string; BING_WEBMASTER_API_KEY?: string; SESSION_SECRET?: string };
 
 /** The keyed signals the environment provides; a blank secret is no key. */
 export function signalKeys(env: KeyEnv): SignalKeys {
@@ -11,6 +11,9 @@ export function signalKeys(env: KeyEnv): SignalKeys {
     googleApiKey: env.GOOGLE_API_KEY || undefined,
     openPageRankKey: env.OPEN_PAGERANK_KEY || undefined,
     dataForSeo: env.DATAFORSEO_LOGIN && env.DATAFORSEO_PASSWORD ? { login: env.DATAFORSEO_LOGIN, password: env.DATAFORSEO_PASSWORD } : undefined,
+    bingApiKey: env.BING_WEBMASTER_API_KEY || undefined,
+    // IndexNow keys are derived from the session secret, which signs sessions too: too short a secret is no key.
+    indexNowSecret: env.SESSION_SECRET && env.SESSION_SECRET.length >= 32 ? env.SESSION_SECRET : undefined,
   };
 }
 

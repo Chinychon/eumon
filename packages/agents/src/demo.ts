@@ -1,13 +1,15 @@
 import type { DataRecord, Dataset, KeywordsInput, PageTemplate, RankedKeyword, SearchMetricRow } from "@organic-growth/core";
-import { addDays, slugify } from "@organic-growth/core";
+import { addDays, REF_ALPHABET, REF_LENGTH, slugify } from "@organic-growth/core";
 import { crawlGooglebotBatch, researchSite, type Fetcher, type SiteResearch } from "@organic-growth/crawler";
 import {
-  chunks, createAnalysis, defaultPageSettings, recordSyncRun, recountCrawl, upsertPageSettings, datasetCoverage, deleteSite, getAnalysisJob, getCrawlCoverage, getCrawlProgress, insertConversionEvent, listAllRecords,
+  chunks, createAnalysis, createLead, recordLeadClick, updateLead, defaultPageSettings, recordSyncRun, recountCrawl, upsertPageSettings, datasetCoverage, deleteSite, getAnalysisJob, getCrawlCoverage, getCrawlProgress, insertConversionEvent, listAllRecords,
   listCrawlPageResults, listPendingCrawlUrls, recordLandingSession, replaceCurrentSearchMetrics, replacePageSearchMetrics, runStatements, saveAnalysisReport, saveCrawlBatch,
   saveIndexStatus, saveSiteScope, saveSnapshot, saveTopQueriesSnapshot, saveUrlIndexStatus, listSiteCompetitorDomains, setSiteCompetitorDomains, syncFirstPartyResults, updateSiteGa4Property, upsertMetricPoints, type MetricPoint, setSiteMarkets, setTemplatePublication, syncTemplatePages, updateAnalysisProgress,
   updateAnalysisStatus, upsertDataset, upsertRecords, upsertSite, upsertTemplate, type D1Like,
 } from "@organic-growth/db";
 import { generatePages } from "@organic-growth/pages";
+import { demoLinks, demoSerpLists, demoSuggestions, seedDemoConnectors } from "./demo-connectors.js";
+import { crawlLogCoverage } from "./log-coverage.js";
 import { queueFullCrawl, runFullAnalysis } from "./pipeline.js";
 
 /*
@@ -342,6 +344,9 @@ const DEMO_RANKED: Record<string, Record<string, Ranked[]>> = {
 /** Estimated monthly visits for a ranking, the way DataForSEO's etv falls off past the top 3. */
 const estimatedTraffic = (volume: number, position: number) => Math.round(volume * (position <= 1 ? 0.3 : position <= 3 ? 0.15 : position <= 10 ? 0.04 : position <= 20 ? 0.008 : 0.002) * 10) / 10;
 
+/** What the demo's connector data is built from. */
+const demoConnectorInput = () => ({ siteId: DEMO_SITE_ID, origin: ORIGIN, own, competitors: COMPETITORS, ranked: DEMO_RANKED, paths: demoPages() });
+
 /** The demo's keyword lists, as the analysis and the view read them. */
 export function demoKeywords(today: string): KeywordsInput {
   return {
@@ -418,6 +423,13 @@ async function analyzeDemo(db: D1Like, input: { analysisId: string; version: num
     targetMarkets: ["mys", "sgp"],
     // The keyword lists the growth plan prices queries and finds gaps with, as a synced site has them.
     keywords: demoKeywords(new Date(input.now).toISOString().slice(0, 10)),
+    // Likewise results pages, links, suggested competitors and the crawl log.
+    connectors: {
+      serp: demoSerpLists(demoConnectorInput(), new Date(input.now).toISOString().slice(0, 10)).flatMap((list) => list.rows),
+      suggestions: demoSuggestions(),
+      links: demoLinks(demoConnectorInput(), new Date(input.now).toISOString().slice(0, 10)),
+      logCoverage: await crawlLogCoverage(db, DEMO_SITE_ID, input.analysisId, new Date(input.now).toISOString().slice(0, 10)),
+    },
     crawlCoverage: { coverage, examples },
     renderPages: (urls) => renderDemo(urls, input.version),
   });
@@ -560,12 +572,13 @@ async function seedPageEngine(db: D1Like, now: number) {
       ...(page ? { pageUrl: `${ORIGIN}${page.path}` } : {}), sessionId: `session_demo_${i % 180}`, occurredAt,
     });
   }
+  await seedDemoLeads(db, live, now);
   // The proxy rule was verified when the guides went live, so the engine's pages count as live on the clinic's domain.
   const goLive = new Date(now - 80 * DAY).toISOString();
   await upsertPageSettings(db, {
     ...defaultPageSettings(DEMO_SITE_ID, "Demo Dental Clinic", ORIGIN),
     ctaLabel: "WhatsApp us", ctaUrl: "https://wa.me/60123456789", ctaCopy: "Ask about price and availability at your nearest clinic.",
-    verifiedAt: goLive, updatedAt: goLive,
+    currency: "MYR", verifiedAt: goLive, updatedAt: goLive,
   });
   // A CTA test that has run since go-live: the price-led copy is ahead.
   for (const [id, label, copy, impressions, clicks] of [
@@ -595,6 +608,37 @@ async function seedPageEngine(db: D1Like, now: number) {
 }
 
 /**
+ * WhatsApp leads with reference codes over 80 days: most from visitors who
+ * landed on a treatment guide, some from the rest of the site, and a few
+ * entered by hand. About half became chats, a third of those qualified, and
+ * some became customers worth the treatment's price.
+ */
+async function seedDemoLeads(db: D1Like, live: Array<{ id: string; path: string }>, now: number) {
+  const code = (n: number) => Array.from({ length: REF_LENGTH }, (_, k) => REF_ALPHABET[(n * 7 + k * 13 + Math.floor(n / (k + 1))) % REF_ALPHABET.length]).join("");
+  const at = (ms: number) => new Date(Math.min(ms, now - 60_000)).toISOString();
+  for (let i = 0; i < 150; i++) {
+    const clicked = now - ((i * 4271) % (80 * 24 * 60)) * 60_000 - 3 * 3600_000;
+    const fromGuide = i % 6 !== 1;
+    const page = live[(i * 3) % Math.max(live.length, 1)];
+    const sessionId = fromGuide ? `session_lead_${i}` : `session_main_${i}`;
+    if (fromGuide && page) await recordLandingSession(db, { siteId: DEMO_SITE_ID, sessionId, pageId: page.id, source: i % 8 === 0 ? "ai:chatgpt" : i % 5 === 0 ? "other" : "search" });
+    const id = `lead_demo_${i}`;
+    await recordLeadClick(db, { id, siteId: DEMO_SITE_ID, ref: `${code(i)}`, sessionId, pageUrl: fromGuide && page ? `${ORIGIN}${page.path}` : `${ORIGIN}/contact`, placement: fromGuide ? ["hero", "sticky", "footer-band"][i % 3] : "main site", at: at(clicked) });
+    // Recent clicks are still waiting for staff to match them.
+    if (now - clicked < 2 * DAY || i % 9 === 4) continue;
+    if (i % 2 === 0 || i % 7 === 0) {
+      await updateLead(db, DEMO_SITE_ID, id, { status: "chat", at: at(clicked + 15 * 60_000) });
+      if (i % 3 === 0) await updateLead(db, DEMO_SITE_ID, id, { status: "qualified", at: at(clicked + DAY) });
+      if (i % 3 === 0 && i % 4 === 0) await updateLead(db, DEMO_SITE_ID, id, { status: "won", value: 900 + ((i * 137) % 40) * 150, at: at(clicked + 6 * DAY) });
+      else if (i % 10 === 2) await updateLead(db, DEMO_SITE_ID, id, { status: "lost", at: at(clicked + 3 * DAY) });
+    }
+  }
+  for (const [n, channel] of [[1, "phone"], [2, "walk-in"], [3, "phone"]] as const) {
+    await createLead(db, { id: `lead_demo_manual_${n}`, siteId: DEMO_SITE_ID, channel, at: new Date(now - n * 9 * DAY).toISOString() });
+  }
+}
+
+/**
  * Rebuilds the demo site: two finished analyses a month apart (so changes
  * show), Search Console rows, datasets with a live template, and conversions.
  */
@@ -606,6 +650,8 @@ export async function seedDemoSite(db: D1Like, now = Date.now()): Promise<{ site
   await setSiteCompetitorDomains(db, DEMO_SITE_ID, COMPETITORS);
   await replaceCurrentSearchMetrics(db, DEMO_SITE_ID, demoSearchRows(now));
   await seedPageEngine(db, now);
+  // Before the analyses, which read the crawl log.
+  await seedDemoConnectors(db, demoConnectorInput(), now);
   await completedAnalysis(db, "analysis_demo_1", 1, now - 30 * DAY);
   await completedAnalysis(db, "analysis_demo_2", 2, now - 2 * DAY);
   await seedDemoResults(db, now);
@@ -809,7 +855,8 @@ async function seedDemoResults(db: D1Like, now: number) {
   await seedDemoKeywords(db, now);
   // Three syncs for the history in Setup: two clean daily runs, and a Sync now where Analytics refused the token.
   const ran = (daysBack: number, hour: number) => new Date(now - daysBack * DAY + hour * 3600_000).toISOString();
-  const clean = ["speed: 2 weeks", "lab: 2 scores", "authority: 3 domains", "search: 7 days", "search@markets: 7 days", "rankings: skipped (Mondays)", "inspected 52 pages", "coverage: inspected 50", "analytics: 7 days", "keywords: lists fresh"];
+  const clean = ["speed: 2 weeks", "lab: 2 scores", "authority: 3 domains", "search: 7 days", "search@markets: 7 days", "rankings: skipped (Mondays)", "inspected 52 pages", "coverage: inspected 50", "analytics: 7 days", "keywords: lists fresh",
+    "search competitors: lists fresh", "search results: 10 pages checked, $0.04", "backlinks: lists fresh", "bing: 14 days", "indexnow: nothing changed", "crawl log: 64 Googlebot and 12 Bingbot requests yesterday"];
   await recordSyncRun(db, { id: "sync_demo_1", siteId: DEMO_SITE_ID, trigger: "daily", startedAt: ran(2, 4.25), finishedAt: ran(2, 4.27), notes: clean });
   await recordSyncRun(db, { id: "sync_demo_2", siteId: DEMO_SITE_ID, trigger: "manual", startedAt: ran(1, 9.1), finishedAt: ran(1, 9.12),
     notes: [...clean.filter((note) => !note.startsWith("analytics")), "analytics failed: Google Analytics report request failed (403): The caller does not have permission. Reconnect Google in Setup."] });

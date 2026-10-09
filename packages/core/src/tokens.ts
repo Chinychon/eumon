@@ -36,3 +36,17 @@ export async function verifyToken<T extends object>(value: string, secret: strin
     return null;
   }
 }
+
+/** A 32-hex-character key derived from the server secret and a label, stable while the secret is: per-site keys with nothing stored. */
+export async function derivedKey(secret: string, label: string): Promise<string> {
+  const signature = new Uint8Array(await crypto.subtle.sign("HMAC", await hmacKey(secret, "sign"), encoder.encode(label)));
+  return [...signature.slice(0, 16)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+/** Compares two strings without stopping at the first difference, for secrets sent by callers. */
+export function sameSecret(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let difference = 0;
+  for (let index = 0; index < a.length; index++) difference |= a.charCodeAt(index) ^ b.charCodeAt(index);
+  return difference === 0;
+}

@@ -18,6 +18,8 @@ export * from "./metrics.js";
 export * from "./coverage.js";
 export * from "./activity.js";
 export * from "./snapshots.js";
+export * from "./leads.js";
+export * from "./server-logs.js";
 import { analysisHealthPoints, upsertMetricPoints } from "./metrics.js";
 
 export async function upsertSite(

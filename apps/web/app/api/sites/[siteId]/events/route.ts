@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
-import { createId, type ConversionEventName } from "@organic-growth/core";
+import { createId, isRef, type ConversionEventName } from "@organic-growth/core";
 import { isSameSite } from "@organic-growth/crawler";
-import { getPageSettings, getSite, insertConversionEvent } from "@organic-growth/db";
+import { getPageSettings, getSite, insertConversionEvent, recordLeadClick } from "@organic-growth/db";
 
 const events = new Set<ConversionEventName>([
   "page_view", "cta_click", "whatsapp_click", "phone_click", "email_click", "form_start", "form_submit",
@@ -74,6 +74,10 @@ export async function POST(request: Request, context: { params: Promise<{ siteId
   }
   const destination = typeof body.destination === "string" ? body.destination.slice(0, 120) : undefined;
   const sessionId = typeof body.sessionId === "string" && /^[a-zA-Z0-9_-]{16,64}$/.test(body.sessionId) ? body.sessionId : undefined;
-  await insertConversionEvent(env.DB, { id: createId("event"), siteId, event: body.event, destination, pageUrl, sessionId, occurredAt: new Date().toISOString() });
+  // A WhatsApp click from the tracking snippet carries the reference code it wrote into the message.
+  const ref = body.event === "whatsapp_click" && isRef(body.ref) ? body.ref : undefined;
+  const occurredAt = new Date().toISOString();
+  await insertConversionEvent(env.DB, { id: createId("event"), siteId, event: body.event, destination, pageUrl, sessionId, ...(ref ? { properties: { ref } } : {}), occurredAt });
+  if (ref) await recordLeadClick(env.DB, { id: createId("lead"), siteId, ref, sessionId, pageUrl, placement: "main site", at: occurredAt });
   return Response.json({ accepted: true }, { status: 202, headers: { "Access-Control-Allow-Origin": allowed.origin, "Vary": "Origin" } });
 }

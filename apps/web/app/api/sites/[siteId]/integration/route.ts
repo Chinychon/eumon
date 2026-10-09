@@ -1,6 +1,8 @@
 import { env } from "cloudflare:workers";
 import { GOOGLEBOT_UA, defaultFetcher, headerNoindex, isEmptyShell, parseHtmlSignals } from "@organic-growth/crawler";
+import { WHATSAPP_REF_JS } from "@organic-growth/core";
 import { getSite, listPublishedPaths, upsertPageSettings } from "@organic-growth/db";
+import { labelsFor } from "@organic-growth/pages";
 import { fail, json, settingsFor } from "../../../../../src/server";
 
 type Snippet = { id: string; label: string; when: string; language: string; code: string };
@@ -107,10 +109,12 @@ ProxyPassReverse "${prefix || "/"}" "${target}${prefix}"`,
  * visitor first landed on, and it auto-tracks WhatsApp, phone, email, and form
  * submissions. It never sends form contents.
  */
-function trackingSnippet(endpoint: string, siteId: string): string {
+function trackingSnippet(endpoint: string, siteId: string, whatsappHello: string): string {
   return `<script>
 (function () {
   var endpoint = ${JSON.stringify(endpoint)};
+  var hello = ${JSON.stringify(whatsappHello).replace(/</g, "\\u003c")};
+  ${WHATSAPP_REF_JS.replace(/\n/g, "\n  ")}
   function sessionId() {
     var match = document.cookie.match(/(?:^|; )eumon_sid=([a-zA-Z0-9_-]{16,64})/);
     if (match) return match[1];
@@ -120,17 +124,22 @@ function trackingSnippet(endpoint: string, siteId: string): string {
       return value;
     } catch (e) { return undefined; }
   }
-  window.eumonTrack = function (event, destination) {
+  window.eumonTrack = function (event, destination, ref) {
     try {
       fetch(endpoint, { method: "POST", mode: "cors", keepalive: true, headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ event: event, destination: destination, pageUrl: location.href, sessionId: sessionId() }) }).catch(function () {});
+        body: JSON.stringify({ event: event, destination: destination, pageUrl: location.href, sessionId: sessionId(), ref: ref || undefined }) }).catch(function () {});
     } catch (e) {}
   };
   document.addEventListener("click", function (e) {
     var link = e.target && e.target.closest && e.target.closest("a[href]");
     if (!link) return;
     var href = link.getAttribute("href") || "";
-    if (/wa\\.me|whatsapp\\.com/i.test(href)) window.eumonTrack("whatsapp_click", "whatsapp");
+    if (/wa\\.me|whatsapp\\.com/i.test(href)) {
+      // A reference code in the message lets the chat be matched to this visit.
+      var ref = eumonRef(), next = eumonWithRef(link.href, ref, hello);
+      if (next) link.setAttribute("href", next);
+      window.eumonTrack("whatsapp_click", "whatsapp", next ? ref : undefined);
+    }
     else if (/^tel:/i.test(href)) window.eumonTrack("phone_click", "phone");
     else if (/^mailto:/i.test(href)) window.eumonTrack("email_click", "email");
   }, true);
@@ -180,7 +189,7 @@ export async function GET(request: Request, context: { params: Promise<{ siteId:
     snippets: snippets(target, settings.mountPath, publicHost),
     framework: site.fingerprint?.framework ?? null,
     deployment: site.fingerprint?.deployment ?? null,
-    trackingSnippet: trackingSnippet(`${new URL(request.url).origin}/api/sites/${site.id}/events`, site.id),
+    trackingSnippet: trackingSnippet(`${new URL(request.url).origin}/api/sites/${site.id}/events`, site.id, labelsFor(settings.language).whatsappHello(settings.siteName)),
   });
 }
 

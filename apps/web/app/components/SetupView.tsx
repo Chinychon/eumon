@@ -99,7 +99,8 @@ export function SetupView({ site }: { site: SiteRecord }) {
               </Field>
               <Field label="Brand colour"><div className="row" style={{ flexWrap: "nowrap" }}><input type="color" value={form.brandColor} onChange={(event) => set("brandColor", event.target.value)} style={{ width: 44, height: 36, border: 0, background: "none" }} /><input className="input mono" value={form.brandColor} onChange={(event) => set("brandColor", event.target.value)} /></div></Field>
               <Field label="Call-to-action label"><input className="input" value={form.ctaLabel} onChange={(event) => set("ctaLabel", event.target.value)} /></Field>
-              <Field label="Call-to-action link" hint="WhatsApp (https://wa.me/60…), tel:, mailto:, or your contact page."><input className="input" value={form.ctaUrl} onChange={(event) => set("ctaUrl", event.target.value)} /></Field>
+              <Field label="Call-to-action link" hint="WhatsApp (https://wa.me/60…), tel:, mailto:, or your contact page. A WhatsApp link gets a short code in the visitor's message, so the chat can be matched to the visit under Dashboard → Enquiries."><input className="input" value={form.ctaUrl} onChange={(event) => set("ctaUrl", event.target.value)} /></Field>
+              <Field label="Currency" hint="For the value of customers you mark under Enquiries (MYR, IDR, SGD…)."><input className="input mono" style={{ maxWidth: 120 }} maxLength={3} value={form.currency ?? ""} placeholder="MYR" onChange={(event) => set("currency", event.target.value.toUpperCase() || undefined)} /></Field>
               <Field label="Supporting line" hint="Shown next to the button on every page." wide><input className="input" value={form.ctaCopy} onChange={(event) => set("ctaCopy", event.target.value)} /></Field>
             </div>
             <div className="row" style={{ marginTop: 12 }}><Button busy={busy === "save"} onClick={save}>Save settings</Button></div>

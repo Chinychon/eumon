@@ -490,6 +490,8 @@ export type PageSettings = {
   ctaLabel: string;
   ctaUrl: string;
   ctaCopy: string;
+  /** ISO 4217 code lead values are entered in (e.g. `MYR`); unset until chosen. */
+  currency?: string;
   /** Set when the live check confirmed the proxy serves these pages on the public origin. */
   verifiedAt?: string;
   updatedAt: string;

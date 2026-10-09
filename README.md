@@ -19,7 +19,7 @@ Eumon also compares the site with the competitors you name — which kinds of pa
 3. **Source and collect.** Pull records from the site's own pages, public directories, sitemaps, or a CSV. The collector identifies itself, obeys robots.txt, and paces requests; every source can be previewed first.
 4. **Generate.** A template turns each record into a landing page. AI writes the copy pattern once per template; pages are filled from the data, and pages without enough substance are held back.
 5. **Publish on your domain.** One proxy rule (Cloudflare Worker, Vercel, Netlify, nginx, Apache…) forwards a path such as `/guides` to Eumon, which serves complete HTML with canonical tags, structured data, a sitemap, and internal links. A built-in check verifies what Googlebot receives.
-6. **Measure.** Page views, CTA clicks, Googlebot fetches, Search Console impressions and clicks per page, and conversions on the main site attributed to the landing page a visitor arrived on.
+6. **Measure.** Page views, CTA clicks, Googlebot fetches, Search Console impressions and clicks per page, and conversions on the main site attributed to the landing page a visitor arrived on. WhatsApp links get a short code in the visitor's message, so staff can match each chat to the visit and mark what it became (a customer, and its value). Optional sources add Bing, Google's results pages for your searches, backlinks, and what crawlers request in your own server or CDN logs; new pages are announced through IndexNow.
 7. **Optimize.** Ranked suggestions (titles that under-perform their ranking, near-miss queries, pages Google ignores, weak CTAs), AI title rewrites, automatic CTA testing, and a before/after record of every change.
 
 ## Quick start
@@ -40,6 +40,9 @@ What each setting in `.dev.vars` unlocks (details in [apps/web/README.md](apps/w
 |---|---|
 | nothing | Site analysis, CSV import, page generation, publishing, analytics |
 | `DEEPSEEK_API_KEY` or `ANTHROPIC_API_KEY` | AI scoping, data extraction from web pages, page copy, title suggestions |
+| `DATAFORSEO_LOGIN`, `DATAFORSEO_PASSWORD` | Keyword volumes and gaps, Google results pages for your searches, the domains that win them, backlinks and the link gap |
+| `BING_WEBMASTER_API_KEY` | Bing clicks, impressions and crawl counts |
+| `SESSION_SECRET` (32+ characters) | Also derives each site's IndexNow key and server-log token |
 | `SESSION_SECRET`, `OAUTH_ENCRYPTION_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Google Search Console data |
 | `GITHUB_APP_*` (plus `SESSION_SECRET`) | Repository analysis and draft pull requests |
 

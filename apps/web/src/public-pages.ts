@@ -11,11 +11,12 @@ import {
   listTemplates,
   recordAiSignal,
   recordLandingSession,
+  recordLeadClick,
   getDataset,
   getTemplate,
 } from "@organic-growth/db";
 import { chooseArm, escapeHtml, htmlLang, labelsFor, renderHubPage, renderLandingPage, renderSitemap, type RenderCta } from "@organic-growth/pages";
-import { classifyUserAgent, createId, landingSource } from "@organic-growth/core";
+import { classifyUserAgent, createId, isRef, isWhatsAppChatUrl, landingSource } from "@organic-growth/core";
 import { readJson, settingsFor } from "./server";
 
 const BEACON = "/__eumon/e";
@@ -158,7 +159,7 @@ function conversionEventFor(url: string): ConversionEventName {
  * search engine sent the visitor.
  */
 export async function servePublicBeacon(request: Request, site: SiteRecord): Promise<Response> {
-  const body = await readJson<{ t?: unknown; p?: unknown; v?: unknown; s?: unknown; x?: unknown; r?: unknown; u?: unknown }>(request, 2048);
+  const body = await readJson<{ t?: unknown; p?: unknown; v?: unknown; s?: unknown; x?: unknown; r?: unknown; u?: unknown; w?: unknown }>(request, 2048);
   const noContent = new Response(null, { status: 204, headers: { "Cache-Control": "no-store" } });
   if (!body || typeof body.p !== "string" || (body.t !== "view" && body.t !== "cta")) return noContent;
   if (classifyUserAgent(request.headers.get("user-agent") ?? "")) return noContent;
@@ -178,15 +179,22 @@ export async function servePublicBeacon(request: Request, site: SiteRecord): Pro
     const settings = await settingsFor(site);
     const variants = variantId ? await listCtaVariants(env.DB, site.id) : [];
     const ctaUrl = variants.find((variant) => variant.id === variantId)?.url ?? settings.ctaUrl;
+    // A WhatsApp CTA's click carries the reference code the page wrote into the message.
+    const ref = isRef(body.w) && isWhatsAppChatUrl(ctaUrl) ? body.w : undefined;
+    const placement = typeof body.x === "string" ? body.x.slice(0, 40) : undefined;
+    const pageUrl = `${settings.publicOrigin.replace(/\/$/, "")}${page.path}`;
+    const occurredAt = new Date().toISOString();
     await insertConversionEvent(env.DB, {
       id: createId("event"),
       siteId: site.id,
       event: conversionEventFor(ctaUrl),
-      destination: typeof body.x === "string" ? body.x.slice(0, 40) : undefined,
-      pageUrl: `${settings.publicOrigin.replace(/\/$/, "")}${page.path}`,
+      destination: placement,
+      pageUrl,
       sessionId,
-      occurredAt: new Date().toISOString(),
+      ...(ref ? { properties: { ref } } : {}),
+      occurredAt,
     });
+    if (ref) await recordLeadClick(env.DB, { id: createId("lead"), siteId: site.id, ref, sessionId, pageUrl, placement, at: occurredAt });
   }
   return noContent;
 }

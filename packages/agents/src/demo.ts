@@ -1,8 +1,8 @@
 import type { DataRecord, Dataset, KeywordsInput, PageTemplate, RankedKeyword, SearchMetricRow } from "@organic-growth/core";
-import { addDays, slugify } from "@organic-growth/core";
+import { addDays, REF_ALPHABET, REF_LENGTH, slugify } from "@organic-growth/core";
 import { crawlGooglebotBatch, researchSite, type Fetcher, type SiteResearch } from "@organic-growth/crawler";
 import {
-  chunks, createAnalysis, defaultPageSettings, recordSyncRun, recountCrawl, upsertPageSettings, datasetCoverage, deleteSite, getAnalysisJob, getCrawlCoverage, getCrawlProgress, insertConversionEvent, listAllRecords,
+  chunks, createAnalysis, createLead, recordLeadClick, updateLead, defaultPageSettings, recordSyncRun, recountCrawl, upsertPageSettings, datasetCoverage, deleteSite, getAnalysisJob, getCrawlCoverage, getCrawlProgress, insertConversionEvent, listAllRecords,
   listCrawlPageResults, listPendingCrawlUrls, recordLandingSession, replaceCurrentSearchMetrics, replacePageSearchMetrics, runStatements, saveAnalysisReport, saveCrawlBatch,
   saveIndexStatus, saveSiteScope, saveSnapshot, saveTopQueriesSnapshot, saveUrlIndexStatus, listSiteCompetitorDomains, setSiteCompetitorDomains, syncFirstPartyResults, updateSiteGa4Property, upsertMetricPoints, type MetricPoint, setSiteMarkets, setTemplatePublication, syncTemplatePages, updateAnalysisProgress,
   updateAnalysisStatus, upsertDataset, upsertRecords, upsertSite, upsertTemplate, type D1Like,
@@ -560,12 +560,13 @@ async function seedPageEngine(db: D1Like, now: number) {
       ...(page ? { pageUrl: `${ORIGIN}${page.path}` } : {}), sessionId: `session_demo_${i % 180}`, occurredAt,
     });
   }
+  await seedDemoLeads(db, live, now);
   // The proxy rule was verified when the guides went live, so the engine's pages count as live on the clinic's domain.
   const goLive = new Date(now - 80 * DAY).toISOString();
   await upsertPageSettings(db, {
     ...defaultPageSettings(DEMO_SITE_ID, "Demo Dental Clinic", ORIGIN),
     ctaLabel: "WhatsApp us", ctaUrl: "https://wa.me/60123456789", ctaCopy: "Ask about price and availability at your nearest clinic.",
-    verifiedAt: goLive, updatedAt: goLive,
+    currency: "MYR", verifiedAt: goLive, updatedAt: goLive,
   });
   // A CTA test that has run since go-live: the price-led copy is ahead.
   for (const [id, label, copy, impressions, clicks] of [
@@ -592,6 +593,37 @@ async function seedPageEngine(db: D1Like, now: number) {
     businessSummary: "Demo data: a fictional group of 11 dental clinics in Malaysia and Singapore.",
     conversionGoal: "A WhatsApp enquiry or a booking form submission",
   });
+}
+
+/**
+ * WhatsApp leads with reference codes over 80 days: most from visitors who
+ * landed on a treatment guide, some from the rest of the site, and a few
+ * entered by hand. About half became chats, a third of those qualified, and
+ * some became customers worth the treatment's price.
+ */
+async function seedDemoLeads(db: D1Like, live: Array<{ id: string; path: string }>, now: number) {
+  const code = (n: number) => Array.from({ length: REF_LENGTH }, (_, k) => REF_ALPHABET[(n * 7 + k * 13 + Math.floor(n / (k + 1))) % REF_ALPHABET.length]).join("");
+  const at = (ms: number) => new Date(Math.min(ms, now - 60_000)).toISOString();
+  for (let i = 0; i < 150; i++) {
+    const clicked = now - ((i * 4271) % (80 * 24 * 60)) * 60_000 - 3 * 3600_000;
+    const fromGuide = i % 6 !== 1;
+    const page = live[(i * 3) % Math.max(live.length, 1)];
+    const sessionId = fromGuide ? `session_lead_${i}` : `session_main_${i}`;
+    if (fromGuide && page) await recordLandingSession(db, { siteId: DEMO_SITE_ID, sessionId, pageId: page.id, source: i % 8 === 0 ? "ai:chatgpt" : i % 5 === 0 ? "other" : "search" });
+    const id = `lead_demo_${i}`;
+    await recordLeadClick(db, { id, siteId: DEMO_SITE_ID, ref: `${code(i)}`, sessionId, pageUrl: fromGuide && page ? `${ORIGIN}${page.path}` : `${ORIGIN}/contact`, placement: fromGuide ? ["hero", "sticky", "footer-band"][i % 3] : "main site", at: at(clicked) });
+    // Recent clicks are still waiting for staff to match them.
+    if (now - clicked < 2 * DAY || i % 9 === 4) continue;
+    if (i % 2 === 0 || i % 7 === 0) {
+      await updateLead(db, DEMO_SITE_ID, id, { status: "chat", at: at(clicked + 15 * 60_000) });
+      if (i % 3 === 0) await updateLead(db, DEMO_SITE_ID, id, { status: "qualified", at: at(clicked + DAY) });
+      if (i % 3 === 0 && i % 4 === 0) await updateLead(db, DEMO_SITE_ID, id, { status: "won", value: 900 + ((i * 137) % 40) * 150, at: at(clicked + 6 * DAY) });
+      else if (i % 10 === 2) await updateLead(db, DEMO_SITE_ID, id, { status: "lost", at: at(clicked + 3 * DAY) });
+    }
+  }
+  for (const [n, channel] of [[1, "phone"], [2, "walk-in"], [3, "phone"]] as const) {
+    await createLead(db, { id: `lead_demo_manual_${n}`, siteId: DEMO_SITE_ID, channel, at: new Date(now - n * 9 * DAY).toISOString() });
+  }
 }
 
 /**

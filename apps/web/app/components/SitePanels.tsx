@@ -4,6 +4,7 @@ import type { SiteRecord } from "@organic-growth/core";
 import { AiReadinessCard, CompetitorsSection, ConversionSections, IndexCoverageCard, SearchAnalysis } from "./ReportTabs";
 import type { Navigate, Report } from "./report-model";
 import { KeywordsCard } from "./results/KeywordsCard";
+import { LeadsDesk, OutcomesCard } from "./results/LeadsCards";
 import { AiReadersCard, AiReferralsCard, AUTHORITY_NOTE, AuthoritySection, ConnectPrompt, EnquiriesCard, GoogleSearchCard, OrganicSessions, QuestionSearchesCard } from "./results/sections";
 import { ExportMenu } from "./export/ExportMenu";
 import { competitorSheets, pick } from "./export/report-sheets";
@@ -43,10 +44,12 @@ export function SearchPanel({ site, data, report, onNavigate }: { site: SiteReco
 }
 
 /** Eumon's pages from a search to an enquiry, enquiries per week, and how each template asks. */
-export function EnquiriesPanel({ data, report, leads, onNavigate }: { data: Payload; report: Report | null; leads: Leads; onNavigate: Navigate }) {
+export function EnquiriesPanel({ site, data, report, leads, onNavigate, onLeadsChanged }: { site: SiteRecord; data: Payload; report: Report | null; leads: Leads; onNavigate: Navigate; onLeadsChanged?: () => void }) {
   return (
     <div className="results">
       <EnquiriesCard data={data} operator />
+      <OutcomesCard data={data} operator />
+      <LeadsDesk siteId={site.id} onChanged={onLeadsChanged} />
       <ConversionSections report={report} leads={leads} onNavigate={onNavigate} />
     </div>
   );

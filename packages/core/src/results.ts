@@ -5,6 +5,7 @@
 
 import { AI_ASSISTANTS, AI_ENGINES, type AiAssistant, type AiEngine } from "./ai-agents.js";
 import { keywordsView, type KeywordsInput } from "./keywords.js";
+import type { PageTypeOutcome } from "./whatsapp.js";
 import { SPEED_METRICS, speedRating, type SpeedMetric, type SpeedRating } from "./signals.js";
 
 export type DayValue = { day: string; value: number };
@@ -86,6 +87,8 @@ const BUCKET_METRICS = RANK_BUCKETS.flatMap((n) => [`queries_top${n}`, `queries_
 export const METRICS = {
   /** Plus leads by landing source: Eumon-page sessions that came from search, an AI assistant, or anything else. */
   firstParty: ["leads", "leads_eumon", "leads_eumon.search", "leads_eumon.ai", "leads_eumon.other", "googlebot_fetches", "eumon_page_views", "eumon_cta_clicks", "published_pages"],
+  /** Lead outcomes from the leads Eumon tracks: WhatsApp clicks with a code, chats matched, qualified, customers and their value, on the day each happened. */
+  outcomes: ["wa_clicks", "lead_chats", "leads_qualified", "customers", "revenue"],
   /** AI agents fetching Eumon pages, per engine and kind, and the visits AI assistants sent them. */
   ai: [
     "ai_fetches", "ai_crawler_fetches", "ai_live_fetches", "ai_referral_visits",
@@ -144,6 +147,8 @@ export type ResultsInput = {
   competitors?: string[];
   /** The keyword lists, scoped to the current property, markets and competitors. */
   keywords?: KeywordsInput;
+  /** Lead outcomes by the page type visitors landed on (last 90 days), and the currency values are in. */
+  outcomes?: { currency: string | null; byPageType: PageTypeOutcome[] };
 };
 
 export type SpeedValue = { p75: number | null; rating: SpeedRating | null };
@@ -192,6 +197,14 @@ export type ResultsView = {
   lab: { phone: { home: number | null; eumon: number | null }; desktop: { home: number | null; eumon: number | null } };
   authority: { site: number | null; competitors: Array<{ domain: string; score: number | null }>; history: Array<{ day: string; value: number }> };
   keywords: KeywordsView;
+  /** What enquiries became: chats matched, qualified, customers and their value; `since` is null until the first lead. */
+  outcomes: {
+    since: string | null;
+    currency: string | null;
+    clicks: Compare; chats: Compare; qualified: Compare; customers: Compare; revenue: Compare;
+    weeks: Array<{ week: string; chats: number | null; customers: number | null; revenue: number | null; partial: boolean }>;
+    byPageType: PageTypeOutcome[];
+  };
   ai: AiView;
 };
 
@@ -295,6 +308,19 @@ export function resultsView(input: ResultsInput): ResultsView {
   const visibleTotal = visibilityRows.reduce((total, row) => total + (row.traffic ?? 0), 0);
   const keywords = { ...keywordsView(keywordLists), visibility: visibilityRows.map((row) => ({ ...row, share: visibleTotal && row.traffic !== null ? row.traffic / visibleTotal : null })) };
 
+  const outcomeSince = series.wa_clicks?.[0]?.day ?? null;
+  const chatWeeks = outcomeSince ? weekly(series.lead_chats, outcomeSince, today, addDays(today, -1)) : [];
+  const customerWeeks = outcomeSince ? weekly(series.customers, outcomeSince, today, addDays(today, -1)) : [];
+  const revenueWeeks = outcomeSince ? weekly(series.revenue, outcomeSince, today, addDays(today, -1)) : [];
+  const outcomes: ResultsView["outcomes"] = {
+    since: outcomeSince,
+    currency: input.outcomes?.currency ?? null,
+    clicks: compare(series.wa_clicks, firstParty), chats: compare(series.lead_chats, firstParty), qualified: compare(series.leads_qualified, firstParty),
+    customers: compare(series.customers, firstParty), revenue: compare(series.revenue, firstParty),
+    weeks: chatWeeks.map((week, index) => ({ week: week.week, chats: week.value, customers: customerWeeks[index]!.value, revenue: revenueWeeks[index]!.value, partial: week.partial })),
+    byPageType: input.outcomes?.byPageType ?? [],
+  };
+
   const aiSince = series.ai_fetches?.[0]?.day ?? null;
   // Weeks start at the first full week after counting began: before it, nothing was counted.
   const crawlerWeeks = aiSince ? weekly(series.ai_crawler_fetches, aiSince, today, addDays(today, -1)) : [];
@@ -359,6 +385,6 @@ export function resultsView(input: ResultsInput): ResultsView {
       value: latest(series.site_health, today),
       day: series.site_health?.length ? series.site_health[series.site_health.length - 1]!.day : null,
     },
-    speed, lab, authority, keywords, ai,
+    speed, lab, authority, keywords, outcomes, ai,
   };
 }

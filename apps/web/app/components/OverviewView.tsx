@@ -248,7 +248,7 @@ export function OverviewView({ site, tab, onTab, onNavigate }: {
             )}
             {current === "technical" && <TechnicalTab siteId={site.id} report={report} results={results.data} running={Boolean(pendingId)} changes={changes} busy={busy} hasRepo={hasRepo} onGenerateChange={generateChange} onOpenPullRequest={openPullRequest} onRecrawl={() => runAnalysis(true)} />}
             {results.data && current === "search" && <SearchPanel site={site} data={results.data} report={report} onNavigate={onNavigate} />}
-            {results.data && current === "enquiries" && <EnquiriesPanel data={results.data} report={report} leads={leads} onNavigate={onNavigate} />}
+            {results.data && current === "enquiries" && <EnquiriesPanel site={site} data={results.data} report={report} leads={leads} onNavigate={onNavigate} onLeadsChanged={() => void reloadResults()} />}
             {results.data && current === "keywords" && <KeywordsPanel site={site} data={results.data} />}
             {results.data && current === "competitors" && <CompetitorsPanel site={site} data={results.data} report={report} onNavigate={onNavigate} />}
             {results.data && current === "ai" && <AiPanel data={results.data} report={report} onNavigate={onNavigate} />}

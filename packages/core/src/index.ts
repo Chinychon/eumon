@@ -10,3 +10,4 @@ export * from "./signals.js";
 export * from "./ai-agents.js";
 export * from "./sheet-titles.js";
 export * from "./sync-notes.js";
+export * from "./whatsapp.js";

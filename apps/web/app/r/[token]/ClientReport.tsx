@@ -5,6 +5,7 @@ import { KeywordsCard } from "../../components/results/KeywordsCard";
 import { AiReadersCard, AiReferralsCard, AUTHORITY_NOTE, AuthoritySection, EnquiriesCard, GoogleSearchCard, KeyNumbers, ProofHeadline, QuestionSearchesCard, SpeedSection } from "../../components/results/sections";
 import { ExportContext, ExportMenu } from "../../components/export/ExportMenu";
 import { competitorSheets, pick, speedSheets } from "../../components/export/report-sheets";
+import { OutcomesCard } from "../../components/results/LeadsCards";
 import { useResults } from "../../components/site-data";
 import { Card, ViewHeader } from "../../components/ui";
 
@@ -32,6 +33,7 @@ export function ClientReport({ token }: { token: string }) {
             <KeywordsCard keywords={data.results.keywords} host={new URL(data.site.baseUrl).hostname} operator={false} hasCredentials={data.site.signals.keywords} hasMarkets={data.results.markets.length > 0}
               searchTop10={data.results.search?.buckets.find((bucket) => bucket.top === 10)?.queries ?? null} />
             <EnquiriesCard data={data} operator={false} />
+            <OutcomesCard data={data} operator={false} />
             {data.results.ai && (
               <>
                 <AiReadersCard data={data} operator={false} />

@@ -19,7 +19,7 @@ Eumon also compares the site with the competitors you name — which kinds of pa
 3. **Source and collect.** Pull records from the site's own pages, public directories, sitemaps, or a CSV. The collector identifies itself, obeys robots.txt, and paces requests; every source can be previewed first.
 4. **Generate.** A template turns each record into a landing page. AI writes the copy pattern once per template; pages are filled from the data, and pages without enough substance are held back.
 5. **Publish on your domain.** One proxy rule (Cloudflare Worker, Vercel, Netlify, nginx, Apache…) forwards a path such as `/guides` to Eumon, which serves complete HTML with canonical tags, structured data, a sitemap, and internal links. A built-in check verifies what Googlebot receives.
-6. **Measure.** Page views, CTA clicks, Googlebot fetches, Search Console impressions and clicks per page, and conversions on the main site attributed to the landing page a visitor arrived on.
+6. **Measure.** Page views, CTA clicks, Googlebot fetches, Search Console impressions and clicks per page, and conversions on the main site attributed to the landing page a visitor arrived on. WhatsApp links get a short code in the visitor's message, so staff can match each chat to the visit and mark what it became (a customer, and its value).
 7. **Optimize.** Ranked suggestions (titles that under-perform their ranking, near-miss queries, pages Google ignores, weak CTAs), AI title rewrites, automatic CTA testing, and a before/after record of every change.
 
 ## Quick start

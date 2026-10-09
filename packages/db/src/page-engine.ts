@@ -773,6 +773,7 @@ export async function getPageSettings(db: D1Like, siteId: string): Promise<PageS
     ctaLabel: String(row.cta_label),
     ctaUrl: String(row.cta_url),
     ctaCopy: String(row.cta_copy),
+    currency: optional(row.currency),
     verifiedAt: optional(row.verified_at),
     updatedAt: String(row.updated_at),
   };
@@ -780,15 +781,15 @@ export async function getPageSettings(db: D1Like, siteId: string): Promise<PageS
 
 export async function upsertPageSettings(db: D1Like, settings: PageSettings): Promise<void> {
   await db.prepare(
-    `INSERT INTO page_settings (site_id, public_origin, mount_path, language, site_name, brand_color, cta_label, cta_url, cta_copy, verified_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO page_settings (site_id, public_origin, mount_path, language, site_name, brand_color, cta_label, cta_url, cta_copy, currency, verified_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(site_id) DO UPDATE SET public_origin = excluded.public_origin, mount_path = excluded.mount_path, language = excluded.language,
        verified_at = excluded.verified_at, site_name = excluded.site_name,
        brand_color = excluded.brand_color, cta_label = excluded.cta_label, cta_url = excluded.cta_url,
-       cta_copy = excluded.cta_copy, updated_at = excluded.updated_at`,
+       cta_copy = excluded.cta_copy, currency = excluded.currency, updated_at = excluded.updated_at`,
   ).bind(
     settings.siteId, settings.publicOrigin, settings.mountPath, settings.language || "en", settings.siteName, settings.brandColor,
-    settings.ctaLabel, settings.ctaUrl, settings.ctaCopy, settings.verifiedAt ?? null, settings.updatedAt,
+    settings.ctaLabel, settings.ctaUrl, settings.ctaCopy, settings.currency ?? null, settings.verifiedAt ?? null, settings.updatedAt,
   ).run();
 }
 

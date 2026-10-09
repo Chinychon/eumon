@@ -1,5 +1,6 @@
 import { addDays, AI_AGENTS, AI_ASSISTANTS, AI_ENGINES } from "@organic-growth/core";
 import { chunks, nowIso, runStatements, type D1Like } from "./d1.js";
+import { dailyLeadOutcomes } from "./leads.js";
 
 /*
  * Results ledger: one value per site, metric, and day. Sync jobs overwrite
@@ -130,7 +131,37 @@ export async function syncFirstPartyResults(db: D1Like, siteId: string, now = ne
     }),
     { metric: "published_pages", day: today, value: pages.published },
   ]);
+  await syncLeadOutcomes(db, siteId, now);
   await syncAiResults(db, siteId, now);
+}
+
+/**
+ * Lead outcomes in the ledger: WhatsApp clicks with a code, chats, qualified
+ * leads, customers and their value, per day. Outcomes change after the fact
+ * (a chat becomes a customer weeks later, or is moved back), so every run
+ * rewrites every day from the first lead, a day with nothing being a real 0.
+ * Marking a lead runs it too, so the numbers follow at once.
+ */
+export async function syncLeadOutcomes(db: D1Like, siteId: string, now = new Date()): Promise<void> {
+  const [rows, first] = await Promise.all([
+    dailyLeadOutcomes(db, siteId, "2000-01-01"),
+    db.prepare("SELECT substr(MIN(created_at), 1, 10) AS day FROM leads WHERE site_id = ?").bind(siteId).first<{ day: string | null }>(),
+  ]);
+  if (!first?.day) return;
+  const byDay = new Map(rows.map((row) => [row.day, row]));
+  const today = now.toISOString().slice(0, 10);
+  const days: string[] = [];
+  for (let day = first.day; day <= today; day = addDays(day, 1)) days.push(day);
+  await upsertMetricPoints(db, siteId, [...new Set([...days, ...byDay.keys()])].flatMap((day) => {
+    const row = byDay.get(day);
+    return [
+      { metric: "wa_clicks", day, value: row?.clicks ?? 0 },
+      { metric: "lead_chats", day, value: row?.chats ?? 0 },
+      { metric: "leads_qualified", day, value: row?.qualified ?? 0 },
+      { metric: "customers", day, value: row?.won ?? 0 },
+      { metric: "revenue", day, value: row?.revenue ?? 0 },
+    ];
+  }));
 }
 
 const ENGINE_OF = new Map(AI_AGENTS.map((agent) => [agent.agent, agent]));

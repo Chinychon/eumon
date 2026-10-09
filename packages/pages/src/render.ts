@@ -1,4 +1,5 @@
 import type { GeneratedPage, PageLink, PageSettings } from "@organic-growth/core";
+import { WHATSAPP_REF_JS } from "@organic-growth/core";
 import { htmlLang, labelsFor } from "./labels.js";
 
 export type RenderCta = { variantId?: string; label: string; copy: string; url: string };
@@ -130,14 +131,16 @@ function relatedHtml(related: PageLink[], heading: string): string {
   return `<section class="related"><h2>${escapeHtml(heading)}</h2><ul>${related.map((link) => `<li><a href="${escapeHtml(link.path)}">${escapeHtml(link.title)}</a></li>`).join("")}</ul></section>`;
 }
 
-export function trackingScript(beaconPath: string, pageId: string, variantId: string | undefined, cookieDomain: string | undefined): string {
+export function trackingScript(beaconPath: string, pageId: string, variantId: string | undefined, cookieDomain: string | undefined, whatsappHello = ""): string {
   // Beacon is same-origin (served through the customer's proxy), first-party,
   // and fails silently so analytics can never break the page. A view sends the
   // referrer's host only (never the full URL) and utm_source, so the server
-  // can tell visits from AI assistants and search engines.
+  // can tell visits from AI assistants and search engines. A WhatsApp CTA gets
+  // a fresh reference code in its message at the moment it is clicked.
   const domain = cookieDomain && /^[a-z0-9.-]+$/i.test(cookieDomain) ? `; domain=${cookieDomain}` : "";
-  const config = scriptJson({ e: beaconPath, p: pageId, v: variantId ?? null, d: domain });
-  return `<script>(function(c){try{var m=document.cookie.match(/(?:^|; )eumon_sid=([^;]+)/),s=m?m[1]:(crypto.randomUUID?crypto.randomUUID().replace(/-/g,""):String(Math.random()).slice(2)+Date.now());document.cookie="eumon_sid="+s+"; path=/; max-age=2592000; SameSite=Lax"+c.d;var R="",U=null;try{R=document.referrer?new URL(document.referrer).host:"";if(R===location.host)R="";U=(new URLSearchParams(location.search).get("utm_source")||"").slice(0,80)||null}catch(_){}var send=function(t,x){var b=JSON.stringify(t==="view"?{t:t,p:c.p,v:c.v,s:s,r:R,u:U}:{t:t,p:c.p,v:c.v,s:s,x:x||null});if(navigator.sendBeacon){navigator.sendBeacon(c.e,new Blob([b],{type:"application/json"}))}else{fetch(c.e,{method:"POST",body:b,keepalive:true,headers:{"Content-Type":"application/json"}})}};send("view");document.addEventListener("click",function(ev){var a=ev.target&&ev.target.closest&&ev.target.closest("[data-eumon-cta]");if(a)send("cta",a.getAttribute("data-eumon-cta"))},true)}catch(_){}})(${config})</script>`;
+  const config = scriptJson({ e: beaconPath, p: pageId, v: variantId ?? null, d: domain, h: whatsappHello });
+  return `<script>(function(c){${WHATSAPP_REF_JS}
+try{var m=document.cookie.match(/(?:^|; )eumon_sid=([^;]+)/),s=m?m[1]:(crypto.randomUUID?crypto.randomUUID().replace(/-/g,""):String(Math.random()).slice(2)+Date.now());document.cookie="eumon_sid="+s+"; path=/; max-age=2592000; SameSite=Lax"+c.d;var R="",U=null;try{R=document.referrer?new URL(document.referrer).host:"";if(R===location.host)R="";U=(new URLSearchParams(location.search).get("utm_source")||"").slice(0,80)||null}catch(_){}var send=function(t,x,w){var b=JSON.stringify(t==="view"?{t:t,p:c.p,v:c.v,s:s,r:R,u:U}:{t:t,p:c.p,v:c.v,s:s,x:x||null,w:w||null});if(navigator.sendBeacon){navigator.sendBeacon(c.e,new Blob([b],{type:"application/json"}))}else{fetch(c.e,{method:"POST",body:b,keepalive:true,headers:{"Content-Type":"application/json"}})}};send("view");document.addEventListener("click",function(ev){var a=ev.target&&ev.target.closest&&ev.target.closest("[data-eumon-cta]");if(a){var w=eumonRef(),n=eumonWithRef(a.href,w,c.h);if(n)a.href=n;send("cta",a.getAttribute("data-eumon-cta"),n?w:null)}},true)}catch(_){}})(${config})</script>`;
 }
 
 function styles(brand: string): string {
@@ -200,7 +203,7 @@ ${relatedHtml(page.related, labels.related)}
 </main>
 <footer><div class="wrap">© ${new Date(page.updatedAt).getUTCFullYear()} ${escapeHtml(settings.siteName)} · ${escapeHtml(labels.lastUpdated)} ${escapeHtml(page.updatedAt.slice(0, 10))}</div></footer>
 <div class="sticky">${ctaButton(cta, origin, "sticky")}</div>
-${trackingScript(options.beaconPath, page.id, cta.variantId, options.cookieDomain)}
+${trackingScript(options.beaconPath, page.id, cta.variantId, options.cookieDomain, labels.whatsappHello(page.h1))}
 </body>
 </html>`;
 }

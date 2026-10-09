@@ -334,6 +334,9 @@ details.disclosure[open] > summary { margin-bottom: 10px; }
 .impact, .score { font-size: 14px; }
 .impact small, .score small { display: block; font-size: 11px; color: var(--soft); }
 .empty-state { font-size: 13px; line-height: 1.7; color: var(--muted); padding: 10px 0 14px; }
+/* Notes: a short muted paragraph in a card keeps its distance from the chart, legend or table beside it (the CSS reset zeroes paragraph margins). */
+:is(.card, .panel) > p.small.muted { margin: 12px 0; }
+:is(.card, .panel) > p.small.muted:last-child { margin-bottom: 0; }
 .domain-icon { width: 28px; height: 28px; display: grid; place-items: center; background: var(--green-soft); color: var(--green-ink); font-family: var(--mono); font-size: 12px; }
 .relevance { font-size: 12px; color: var(--muted); }
 .crawl-note { padding: 10px 14px; font-size: 12.5px; display: flex; gap: 10px; }
@@ -598,6 +601,9 @@ details.disclosure[open] > summary { margin-bottom: 10px; }
 .why-body strong { color: var(--ink-2); font-weight: 500; }
 .why-row .severity { flex: none; width: 104px; }
 .table-toggle .table-wrap { margin-bottom: 4px; }
+/* A table toggle says what a click does: Show when closed, Hide when open. */
+.table-toggle .why-open::before { content: "Show"; }
+.table-toggle[open] .why-open::before { content: "Hide"; }
 /* Do first: three ranked actions, each opening the tab that explains it. */
 .do-first { margin: 0 calc(-1 * var(--pad)); padding: 0; list-style: none; }
 .do-first li { border-top: 1px solid var(--line); }
@@ -632,7 +638,7 @@ details.disclosure[open] > summary { margin-bottom: 10px; }
 .link-node.opens:hover .link-name, .link-node.opens:focus-visible .link-name { fill: var(--ink); }
 :is(.link-edge, .link-node, .flow-row).dim { opacity: .18; }
 .link-node, .flow-row { transition: opacity .2s; }
-.link-foot { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 16px; }
+.link-foot { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 16px; margin-bottom: 14px; }
 .link-foot .chart-legend { margin-top: 0; }
 .link-legend .s0 { --c: var(--ink-2); }
 .link-legend .eumon { --c: var(--green); }

@@ -162,7 +162,7 @@ export function SiteGraph({ siteId }: { siteId: string }) {
       </div>
       {graph.edges.length > 0 && (
         <details className="why-row table-toggle">
-          <summary><span className="why-title">Links between page types as a table</span><span className="why-open" aria-hidden="true">Show</span></summary>
+          <summary><span className="why-title">Links between page types as a table</span><span className="why-open" aria-hidden="true" /></summary>
           <div className="table-wrap">
             <table className="table">
               <thead><tr><th>From</th><th>To</th><th className="num">Links</th></tr></thead>

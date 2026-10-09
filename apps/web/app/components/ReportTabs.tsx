@@ -325,8 +325,8 @@ export function CompetitorsSection({ report, site, competitors, onNavigate }: { 
       </div>
       <Card title="What stands out">
         {competition.insights.slice(0, 6).map((insight) => <p key={insight} className="line-item">{insight}</p>)}
-        <details className="why-row table-toggle">
-          <summary><span className="why-title">Every section as a table</span><span className="why-open" aria-hidden="true">Show</span></summary>
+        <details className="why-row table-toggle" open>
+          <summary><span className="why-title">Every section as a table</span><span className="why-open" aria-hidden="true" /></summary>
           <div className="table-wrap">
             <table className="table">
               <thead><tr><th>Content type</th><th className="num">You</th>{domains.map((competitor) => <th className="num" key={competitor.domain}>{competitor.domain}</th>)}<th>Status</th><th>Your data</th></tr></thead>
@@ -389,9 +389,14 @@ export function ConversionSections({ report, leads, onNavigate }: { report: Repo
               ))}</tbody>
             </table>
           </div>
-          <details className="why-row table-toggle">
-            <summary><span className="why-title">Events worth tracking</span><span className="why-open" aria-hidden="true">Show</span></summary>
-            <div className="why-body">{conversion.suggestedEvents.map((entry) => <p key={entry.event}><code>{entry.event}</code>: {entry.trigger}</p>)}</div>
+          <details className="why-row table-toggle" open>
+            <summary><span className="why-title">Events worth tracking</span><span className="why-open" aria-hidden="true" /></summary>
+            <div className="table-wrap">
+              <table className="table">
+                <thead><tr><th>Event</th><th>When it fires</th></tr></thead>
+                <tbody>{conversion.suggestedEvents.map((entry) => <tr key={entry.event}><td><code>{entry.event}</code></td><td>{entry.trigger}</td></tr>)}</tbody>
+              </table>
+            </div>
           </details>
         </Card>
       )}
@@ -436,7 +441,7 @@ function CodeIntelligence({ repo }: { repo: NonNullable<Report["repo"]> }) {
       <div className="fact-grid">{facts.filter(([, value]) => value).map(([name, value]) => <div key={name}><span>{name}</span><strong>{value}</strong></div>)}</div>
       {routes.length > 0 && (
         <details className="why-row table-toggle">
-          <summary><span className="why-title">{routes.length} routes and how they render</span><span className="why-open" aria-hidden="true">Show</span></summary>
+          <summary><span className="why-title">{routes.length} routes and how they render</span><span className="why-open" aria-hidden="true" /></summary>
           <div className="table-wrap">
             <table className="table">
               <thead><tr><th>Route</th><th>Renders</th><th>Content data</th><th>Title & meta</th><th>Notes</th></tr></thead>

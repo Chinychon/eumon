@@ -23,7 +23,7 @@ function delta(before: number, after: number): string {
   return `${change >= 0 ? "+" : ""}${Math.round(change * 100)}%`;
 }
 
-export function PerformanceView({ site, onNavigate }: { site: SiteRecord; onNavigate: (view: "pages" | "connections") => void }) {
+export function PageResultsView({ site, onNavigate }: { site: SiteRecord; onNavigate: (view: "pages" | "connections") => void }) {
   const [days, setDays] = useState(28);
   const [data, setData] = useState<PerformanceData | null>(null);
   const [error, setError] = useState("");

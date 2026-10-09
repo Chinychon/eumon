@@ -1,8 +1,18 @@
 import type { D1Like } from "@organic-growth/db";
-import { googleAccessToken, googleScopes } from "./gsc-auth";
-import type { GoogleAccess } from "./results-sync";
+import { googleAccessToken, googleScopes } from "./gsc-auth.ts";
+import type { GoogleAccess, SignalKeys } from "./results-sync.ts";
 
 type GoogleEnv = { DB: D1Like; GOOGLE_CLIENT_ID: string; GOOGLE_CLIENT_SECRET: string; OAUTH_ENCRYPTION_KEY: string };
+type KeyEnv = { GOOGLE_API_KEY?: string; OPEN_PAGERANK_KEY?: string; DATAFORSEO_LOGIN?: string; DATAFORSEO_PASSWORD?: string };
+
+/** The keyed signals the environment provides; a blank secret is no key. */
+export function signalKeys(env: KeyEnv): SignalKeys {
+  return {
+    googleApiKey: env.GOOGLE_API_KEY || undefined,
+    openPageRankKey: env.OPEN_PAGERANK_KEY || undefined,
+    dataForSeo: env.DATAFORSEO_LOGIN && env.DATAFORSEO_PASSWORD ? { login: env.DATAFORSEO_LOGIN, password: env.DATAFORSEO_PASSWORD } : undefined,
+  };
+}
 
 /** The site's Google token and its granted scopes, fetched only when a Google step needs them. */
 export function googleAccess(env: GoogleEnv, siteId: string): GoogleAccess {

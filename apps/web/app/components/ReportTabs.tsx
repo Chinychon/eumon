@@ -3,22 +3,25 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { COVERAGE_CLASSES, countryName, type CoverageClass, type SiteRecord } from "@organic-growth/core";
 import type { IndexCoverage } from "@organic-growth/db";
-import { api, formatNumber } from "./api";
+import { api, formatDay, formatNumber } from "./api";
 import { BarList, Funnel, Heatmap, PairedBars, Scatter } from "./charts";
 import { CrawlGarden } from "./pixel";
+import { SPEED_SUBTITLE, SpeedSection } from "./results/sections";
 import { SiteGraph } from "./SiteGraph";
-import { familyLabel, findingTab, gapsFirst, HEALTH_COLUMNS, opportunityTab, pageTypeHealth, type Finding, type Report } from "./report-model";
+import { familyLabel, findingArea, gapsFirst, HEALTH_COLUMNS, opportunityArea, pageTypeHealth, servedShare, type Finding, type Navigate, type Report } from "./report-model";
+import type { Leads, Payload } from "./site-data";
 import { Badge, Button, Card, Kpi } from "./ui";
 
 /*
- * The full report, one tab per area. Each tab leads with a chart; every
- * finding, opportunity, and insight is one line, with the explanation behind
- * "Why" so the page reads at a glance.
+ * The analysis report by area, as sections the console's pages compose:
+ * technical on the Overview, search and conversion on Performance,
+ * competitors beside keywords. Each leads with a chart; every finding,
+ * opportunity, and insight is one line, with the explanation behind "Why" so
+ * the page reads at a glance. Sections return fragments, so they stack into
+ * the page's ruled `.results` column.
  */
 
 export type Change = { id: string; findingId?: string; title: string; reason: string; patch: string; prUrl?: string };
-export type Leads = { pages: number; views: number; ctaClicks: number; conversions: number; events28: number } | null;
-type Navigate = (view: "connections" | "data" | "setup") => void;
 
 const SEVERITY_CLASS: Record<string, string> = { CRITICAL: "critical", HIGH: "high", MEDIUM: "medium", LOW: "low", INFORMATIONAL: "info" };
 const path = (url: string) => url.replace(/^https?:\/\/[^/]+/, "") || "/";
@@ -41,10 +44,11 @@ export function WhyRow({ lead, title, aside, children }: { lead?: ReactNode; tit
 
 export const Severity = ({ value }: { value: string }) => <span className={`severity ${SEVERITY_CLASS[value] ?? "info"}`}>{value}</span>;
 
-/** The site as Google receives it, where it breaks, and the fixes, most impact first. */
-export function TechnicalTab({ siteId, report, changes, busy, hasRepo, onGenerateChange, onOpenPullRequest, onRecrawl }: {
+/** The site as Google receives it, where it breaks, how fast it is, and the fixes, most impact first. Speed comes from the sync, so it shows before any analysis. */
+export function TechnicalTab({ siteId, report, results, changes, busy, hasRepo, onGenerateChange, onOpenPullRequest, onRecrawl }: {
   siteId: string;
-  report: Report;
+  report: Report | null;
+  results: Payload | null;
   changes: Change[];
   busy: string;
   hasRepo: boolean;
@@ -52,12 +56,23 @@ export function TechnicalTab({ siteId, report, changes, busy, hasRepo, onGenerat
   onOpenPullRequest: (change: Change) => void;
   onRecrawl: () => void;
 }) {
+  const speed = results && <Card title="Speed" subtitle={SPEED_SUBTITLE}><SpeedSection data={results} operator /></Card>;
+  if (!report) {
+    return (
+      <div className="results">
+        <TechnicalNumbers report={null} results={results} />
+        <Card title="Every sitemap URL"><p className="empty-state">Run an analysis to fetch every sitemap URL as Googlebot does and see where pages break.</p></Card>
+        {speed}
+      </div>
+    );
+  }
   const families = report.coverage?.families ?? [];
-  const findings = report.findings.filter((finding) => findingTab(finding.category) === "technical").sort((a, b) => b.organicImpactScore - a.organicImpactScore);
+  const findings = report.findings.filter((finding) => findingArea(finding.category) === "technical").sort((a, b) => b.organicImpactScore - a.organicImpactScore);
   const comparisons = report.rendering?.comparisons ?? [];
   const flaky = (report.rendering?.repeatability ?? []).filter((entry) => entry.failed);
   return (
     <div className="results">
+      <TechnicalNumbers report={report} results={results} />
       <div className="ruled-grid c11">
         <Card title="Every sitemap URL" subtitle={`${formatNumber(report.coverage?.totalUrls ?? report.sitemap.totalUrls)} URLs, one square each, as Googlebot received them.`}>
           {families.length ? (
@@ -79,6 +94,7 @@ export function TechnicalTab({ siteId, report, changes, busy, hasRepo, onGenerat
           <Heatmap caption="Problems per page type" columns={HEALTH_COLUMNS.map((column) => column.label)} rows={pageTypeHealth(families).map((row) => ({ ...row, note: `${formatNumber(row.urls)} ${row.urls === 1 ? "URL" : "URLs"}` }))} />
         </Card>
       )}
+      {speed}
       <SiteGraph siteId={siteId} />
       <Card title="Fixes" actions={<span className="count-pill">{findings.length} findings</span>}>
         {findings.length ? findings.map((finding) => (
@@ -94,6 +110,23 @@ export function TechnicalTab({ siteId, report, changes, busy, hasRepo, onGenerat
         </div>
       )}
       {report.sitemap.errors.length > 0 && <div className="crawl-note"><strong>Sitemap note</strong><span>{report.sitemap.errors.join(" ")}</span></div>}
+    </div>
+  );
+}
+
+/** Sitemap size, how much of it reaches Google intact, site health, and the fixes found. */
+function TechnicalNumbers({ report, results }: { report: Report | null; results: Payload | null }) {
+  const coverage = report?.coverage;
+  const served = servedShare(coverage);
+  const health = results?.results.health;
+  const fixes = report?.findings.filter((finding) => findingArea(finding.category) === "technical");
+  const urgent = fixes?.filter((finding) => finding.severity === "CRITICAL" || finding.severity === "HIGH").length ?? 0;
+  return (
+    <div className="metrics-grid">
+      <Kpi label="URLs in sitemap" value={report ? formatNumber(report.sitemap.totalUrls) : "—"} caption={!report ? "Run an analysis to fill these in" : report.sitemap.errors[0] ? "See the sitemap note below" : "Declared to search engines"} />
+      <Kpi label="Reach Google intact" value={served === null ? "—" : `${Math.round(served * 100)}%`} caption={coverage ? `${formatNumber(coverage.emptyShellUrls)} empty · ${formatNumber(coverage.httpErrorUrls)} errors` : "Every sitemap URL, fetched as Google"} />
+      <Kpi label="Site health" value={health?.value == null ? "—" : `${health.value}%`} caption={health?.day ? `No error, empty HTML, or noindex · ${formatDay(health.day)}` : "Crawled pages with no error, empty HTML, or noindex"} />
+      <Kpi label="Technical fixes" value={fixes ? formatNumber(fixes.length) : "—"} caption={fixes ? (urgent ? `${urgent} critical or high` : "None critical or high") : "Found by each analysis"} />
     </div>
   );
 }
@@ -141,13 +174,13 @@ function CoverageBar({ byClass, checked }: { byClass: Record<CoverageClass, numb
 }
 
 /** How many sitemap URLs Google has crawled and indexed, from URL Inspection a few hundred a day. */
-function IndexCoverageCard({ siteId, onNavigate }: { siteId: string; onNavigate: Navigate }) {
+export function IndexCoverageCard({ siteId, onNavigate }: { siteId: string; onNavigate: Navigate }) {
   const [data, setData] = useState<{ coverage: IndexCoverage | null; connected: boolean } | null>(null);
   useEffect(() => { api<{ coverage: IndexCoverage | null; connected: boolean }>(`/api/sites/${siteId}/index-coverage`).then(setData).catch(() => setData(null)); }, [siteId]);
   if (!data) return null;
   const title = "Google crawl coverage";
   if (!data.connected) {
-    return <Card title={title}><p className="empty-state">Connect Search Console to ask Google about each sitemap URL.</p><Button small variant="secondary" onClick={() => onNavigate("connections")}>Open Setup</Button></Card>;
+    return <Card title={title}><p className="empty-state">Connect Search Console to ask Google about each sitemap URL.</p><Button small variant="secondary" onClick={() => onNavigate("setup")}>Open Setup</Button></Card>;
   }
   const coverage = data.coverage;
   if (!coverage || coverage.checked === 0) {
@@ -178,27 +211,18 @@ function IndexCoverageCard({ siteId, onNavigate }: { siteId: string; onNavigate:
   );
 }
 
-export function SearchTab({ siteId, report, onNavigate }: { siteId: string; report: Report; onNavigate: Navigate }) {
+/** What the latest analysis found in Search Console: the search mix, queries near page one, where searchers are, and pages to fix. */
+export function SearchAnalysis({ report }: { report: Report }) {
   const search = report.search;
-  if (!search) {
-    return (
-      <div className="results">
-        <IndexCoverageCard siteId={siteId} onNavigate={onNavigate} />
-        <Card title="No search data yet" subtitle="Connect Search Console to see which searches find this site, the queries closest to page one, and pages searchers skip.">
-          <Button onClick={() => onNavigate("connections")}>Connect Search Console</Button>
-        </Card>
-      </div>
-    );
-  }
+  if (!search) return null;
   const entity = search.entityQueries?.byType[0];
-  const opportunities = report.opportunities.filter((entry) => opportunityTab(entry.intent) === "search").sort((a, b) => b.priorityScore - a.priorityScore);
+  const opportunities = report.opportunities.filter((entry) => opportunityArea(entry, report.findings) === "search" && entry.intent !== "technical_enabler").sort((a, b) => b.priorityScore - a.priorityScore);
   // The page-level rows below say what the search findings say, page by page; the findings show only without them.
   const findings = search.lowCtrPages.length || search.cannibalized.length ? [] : report.findings.filter((finding) => finding.category === "search");
   return (
-    <div className="results">
-      <IndexCoverageCard siteId={siteId} onNavigate={onNavigate} />
+    <>
       <div className="metrics-grid">
-        <Kpi label="Clicks" value={formatNumber(search.totals.clicks)} caption={`${formatNumber(search.totals.impressions)} impressions · ${(search.totals.ctr * 100).toFixed(1)}% CTR`} />
+        <Kpi label="Near page one" value={formatNumber(search.strikingDistance.length)} caption="queries at positions 4–15 in the latest analysis" />
         <Kpi label="From target markets" value={search.targetShare ? share(search.targetShare.impressions) : "—"} caption={search.targetShare ? search.targetMarkets.map(countryName).join(", ") : "Set markets in Setup"} />
         <Kpi label="Commercial searches" value={share(search.commercialShare)} caption="of clicks: cost, price, best, booking…" />
         <Kpi label={entity ? `Looking up a ${entity.entityType}` : "Branded searches"} value={share(entity ? search.entityQueries!.share : search.brandedShare)} caption={entity ? "of clicks name one record" : "of clicks include your brand"} />
@@ -238,7 +262,7 @@ export function SearchTab({ siteId, report, onNavigate }: { siteId: string; repo
         ))}
         {!findings.length && !search.lowCtrPages.length && !search.cannibalized.length && <p className="empty-state">No search problems found on existing pages.</p>}
       </Card>
-    </div>
+    </>
   );
 }
 
@@ -249,12 +273,13 @@ const GAP_STATUS: Record<string, { label: string; tone: string }> = {
   shared: { label: "Comparable", tone: "gray" },
 };
 
-export function CompetitorsTab({ report, site, onNavigate }: { report: Report; site: SiteRecord; onNavigate: Navigate }) {
-  const competition = report.competition;
-  if (!competition?.rows.length) {
+/** Pages per section against each competitor, your advantage, the competitors, and what stands out. */
+export function CompetitorsSection({ report, site, onNavigate }: { report: Report | null; site: SiteRecord; onNavigate: Navigate }) {
+  const competition = report?.competition;
+  if (!report || !competition?.rows.length) {
     return (
-      <Card title="No competitors compared yet" subtitle="Add competitor domains. The next analysis reads their sitemaps and a few pages per section to show which kinds of pages they publish that you don't.">
-        <Button onClick={() => onNavigate("connections")}>Add competitors</Button>
+      <Card title="No competitors compared yet" subtitle="Add competitor domains in Setup. The next analysis reads their sitemaps and a few pages per section to show which kinds of pages they publish that you don't.">
+        <Button onClick={() => onNavigate("setup")}>Add competitors</Button>
       </Card>
     );
   }
@@ -265,7 +290,7 @@ export function CompetitorsTab({ report, site, onNavigate }: { report: Report; s
     ? <>{`~${formatNumber(entry.pages)}`}{(entry.languages ?? 1) > 1 && <small className="cell-note">{entry.languages} languages · {formatNumber(entry.urls ?? entry.pages)} URLs</small>}</>
     : "—");
   return (
-    <div className="results">
+    <>
       <Card
         title="Pages per section: you vs each competitor"
         subtitle="Sections where a competitor is furthest ahead come first. Counts show where they invest, not search demand."
@@ -312,13 +337,13 @@ export function CompetitorsTab({ report, site, onNavigate }: { report: Report; s
           </div>
         </details>
       </Card>
-    </div>
+    </>
   );
 }
 
 const PATH_LABELS: Record<string, string> = { whatsapp: "WhatsApp", phone: "Phone", email: "Email", form: "Enquiry form", booking: "Booking / quote" };
 
-/** Visit → CTA → lead from the landing pages, then how each template asks for the enquiry. */
+/** Visit → CTA → lead from the landing pages. */
 export function LeadFunnel({ leads, onNavigate }: { leads: Leads; onNavigate: Navigate }) {
   if (!leads) return <p className="empty-state">Loading…</p>;
   if (!leads.pages) {
@@ -332,20 +357,14 @@ export function LeadFunnel({ leads, onNavigate }: { leads: Leads; onNavigate: Na
   return <Funnel steps={[{ label: "Page views", value: leads.views }, { label: "CTA clicks", value: leads.ctaClicks }, { label: "Leads", value: leads.conversions }]} />;
 }
 
-export function LeadsTab({ report, leads, onNavigate }: { report: Report; leads: Leads; onNavigate: Navigate }) {
-  const conversion = report.conversion;
-  const label = (family: string) => familyLabel(family);
+/** Every conversion event tracked, how each template asks for the enquiry, and the conversion findings. */
+export function ConversionSections({ report, leads, onNavigate }: { report: Report | null; leads: Leads; onNavigate: Navigate }) {
+  const conversion = report?.conversion;
   return (
-    <div className="results">
-      <div className="ruled-grid c11">
-        <Card title="Visit to lead, last 28 days" subtitle="From Eumon's landing pages: views, taps on the call to action, then enquiries.">
-          <LeadFunnel leads={leads} onNavigate={onNavigate} />
-        </Card>
-        <Card title="Conversion events" subtitle="Everything tracked on the site in the last 28 days.">
-          <div className="big-number">{leads ? formatNumber(leads.events28) : "—"}</div>
-          <Button small variant="secondary" onClick={() => onNavigate("setup")}>Tracking setup</Button>
-        </Card>
-      </div>
+    <>
+      <Card title="Conversion events" subtitle="Everything tracked on the site in the last 28 days." actions={<Button small variant="secondary" onClick={() => onNavigate("setup")}>Tracking setup</Button>}>
+        <div className="big-number">{leads ? formatNumber(leads.events28) : "—"}</div>
+      </Card>
       {conversion && conversion.templates.length > 0 && (
         <Card title="How each template asks for the enquiry">
           <div className="table-wrap">
@@ -353,7 +372,7 @@ export function LeadsTab({ report, leads, onNavigate }: { report: Report; leads:
               <thead><tr><th>Template</th><th>Ways to convert</th><th>Prices shown</th><th>Tracking</th></tr></thead>
               <tbody>{conversion.templates.map((template) => (
                 <tr key={template.url}>
-                  <td><a href={template.url} target="_blank" rel="noreferrer"><code>{label(template.family)}</code></a></td>
+                  <td><a href={template.url} target="_blank" rel="noreferrer"><code>{familyLabel(template.family)}</code></a></td>
                   <td>{template.paths.length ? template.paths.map((entry) => PATH_LABELS[entry] ?? entry).join(", ") : <span className="bad-count">None found</span>}</td>
                   <td>{template.prices ? "Yes" : <span className="muted">No</span>}</td>
                   <td className="small">{template.tracking.join(", ") || <span className="bad-count">None found</span>}</td>
@@ -367,7 +386,7 @@ export function LeadsTab({ report, leads, onNavigate }: { report: Report; leads:
           </details>
         </Card>
       )}
-      {report.findings.filter((finding) => finding.category === "conversion").map((finding) => (
+      {report?.findings.filter((finding) => finding.category === "conversion").map((finding) => (
         <Card key={finding.id}>
           <WhyRow lead={<Severity value={finding.severity} />} title={finding.title}>
             <p>{finding.summary}</p>
@@ -375,7 +394,7 @@ export function LeadsTab({ report, leads, onNavigate }: { report: Report; leads:
           </WhyRow>
         </Card>
       ))}
-    </div>
+    </>
   );
 }
 

@@ -1,5 +1,6 @@
-import { countryName, createId, severityFromImpact, slugify, type Finding, type Opportunity, type SearchMetricRow } from "@organic-growth/core";
+import { countryName, createId, severityFromImpact, slugify, type Finding, type KeywordDemand, type Opportunity, type SearchMetricRow } from "@organic-growth/core";
 import { expectedCtr } from "@organic-growth/pages";
+import { estimateDemand } from "./demand.js";
 
 /** Query wording that usually signals purchase or booking intent, across common markets. */
 export const COMMERCIAL_QUERY_PATTERN =
@@ -257,29 +258,33 @@ export function findingsFromSearch(insights: SearchInsights, siteId: string, ana
 }
 
 /** The pages and queries closest to more clicks, as prioritized opportunities. */
-export function searchOpportunities(insights: SearchInsights, siteId: string, analysisId: string): Opportunity[] {
+export function searchOpportunities(insights: SearchInsights, siteId: string, analysisId: string, demand?: KeywordDemand): Opportunity[] {
   const striking = insights.strikingDistance.slice(0, 8).map((entry): Opportunity => {
     const commercial = COMMERCIAL_QUERY_PATTERN.test(entry.query);
     const gain = entry.impressions * Math.max(expectedCtr(3) - entry.clicks / Math.max(entry.impressions, 1), 0);
+    const estimate = estimateDemand({ kind: "ranking", query: entry.query, position: entry.position, impressions: entry.impressions }, demand);
     return {
       id: createId("opp"), siteId, analysisId,
       title: `Move “${entry.query}” onto the first results (now position ${entry.position.toFixed(1)})`,
-      searchDemand: entry.impressions,
+      searchDemand: estimate.searchDemand, estimatedDifficulty: estimate.estimatedDifficulty,
       intent: commercial ? "commercial (query-pattern heuristic)" : "informational or mixed (verify manually)",
-      currentRank: entry.position, competitorStrength: 0, estimatedDifficulty: Math.min(100, Math.round(entry.position * 5)),
+      currentRank: entry.position, competitorStrength: 0,
       currentPage: entry.page, businessValue: commercial ? 1.5 : 1, conversionPotential: commercial ? 1 : 0.5,
       technicalEffort: 1, contentEffort: 2,
       priorityScore: Number(((gain * (commercial ? 1.5 : 1)) / 2).toFixed(2)),
-      rationale: `${count(entry.impressions)} impressions and ${count(entry.clicks)} clicks at average position ${entry.position.toFixed(1)}. Positions 1–3 typically earn several times the clicks; strengthen the page's coverage of this query, its title, and internal links to it. A prioritization aid, not a traffic forecast.`,
+      rationale: `${count(entry.impressions)} impressions and ${count(entry.clicks)} clicks at average position ${entry.position.toFixed(1)}. Positions 1–3 typically earn several times the clicks; strengthen the page's coverage of this query, its title, and internal links to it. A prioritization aid, not a traffic forecast.${estimate.priced ? ` ${estimate.priced}` : ""}`,
     };
   });
-  const snippets = insights.lowCtrPages.slice(0, 5).map((page): Opportunity => ({
-    id: createId("opp"), siteId, analysisId,
-    title: `Rewrite the search snippet of ${page.page.replace(/^https?:\/\/[^/]+/, "") || "/"}`,
-    searchDemand: page.impressions, intent: "snippet", currentRank: page.position, competitorStrength: 0, estimatedDifficulty: 10,
-    currentPage: page.page, businessValue: 1, conversionPotential: 1, technicalEffort: 1, contentEffort: 1,
-    priorityScore: Number((page.impressions * (page.expectedCtr - page.ctr) / 1.5).toFixed(2)),
-    rationale: `Position ${page.position.toFixed(1)} with a ${(page.ctr * 100).toFixed(1)}% click-through rate; pages there typically get ~${(page.expectedCtr * 100).toFixed(0)}%. Top queries: ${page.queries.map((query) => `“${query}”`).join(", ")}.`,
-  }));
+  const snippets = insights.lowCtrPages.slice(0, 5).map((page): Opportunity => {
+    const estimate = estimateDemand({ kind: "snippet", query: page.queries[0] ?? "", impressions: page.impressions }, demand);
+    return {
+      id: createId("opp"), siteId, analysisId,
+      title: `Rewrite the search snippet of ${page.page.replace(/^https?:\/\/[^/]+/, "") || "/"}`,
+      searchDemand: estimate.searchDemand, estimatedDifficulty: estimate.estimatedDifficulty, intent: "snippet", currentRank: page.position, competitorStrength: 0,
+      currentPage: page.page, businessValue: 1, conversionPotential: 1, technicalEffort: 1, contentEffort: 1,
+      priorityScore: Number((page.impressions * (page.expectedCtr - page.ctr) / 1.5).toFixed(2)),
+      rationale: `Position ${page.position.toFixed(1)} with a ${(page.ctr * 100).toFixed(1)}% click-through rate; pages there typically get ~${(page.expectedCtr * 100).toFixed(0)}%. Top queries: ${page.queries.map((query) => `“${query}”`).join(", ")}.${estimate.priced ? ` ${estimate.priced}` : ""}`,
+    };
+  });
   return [...striking, ...snippets];
 }

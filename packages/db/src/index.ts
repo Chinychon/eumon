@@ -16,6 +16,7 @@ export * from "./page-engine.js";
 export * from "./assistant.js";
 export * from "./metrics.js";
 export * from "./coverage.js";
+export * from "./snapshots.js";
 import { analysisHealthPoints, upsertMetricPoints } from "./metrics.js";
 
 export async function upsertSite(

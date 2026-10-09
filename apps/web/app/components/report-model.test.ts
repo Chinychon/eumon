@@ -1,17 +1,38 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { doFirst, gapsFirst, pageTypeHealth, servedShare, type Finding } from "./report-model.ts";
+import { doFirst, gapsFirst, pageTypeHealth, resolveLink, servedShare, type Finding } from "./report-model.ts";
 
 const finding = (title: string, severity: string, impact: number, category = "rendering"): Finding =>
   ({ id: title, category, severity, title, summary: "", organicImpactScore: impact });
 
 describe("report model", () => {
-  it("puts urgent findings first, then the best opportunity, then the rest", () => {
+  it("takes the backlog from the opportunities, urgent fixes first, each pointing at the area that explains it", () => {
     const actions = doFirst({
-      findings: [finding("Low thing", "LOW", 90), finding("Empty prices", "HIGH", 77), finding("Skipped titles", "MEDIUM", 55, "search")],
-      opportunities: [{ title: "Push implants", rationale: "", priorityScore: 156 }, { title: "Weaker", rationale: "", priorityScore: 10, intent: "content_gap" }],
-    });
-    assert.deepEqual(actions.map((action) => [action.title, action.tab]), [["Empty prices", "technical"], ["Push implants", "search"], ["Skipped titles", "search"]]);
+      findings: [finding("No analytics or conversion tracking found", "MEDIUM", 45, "conversion"), finding("Empty prices", "HIGH", 77)],
+      opportunities: [
+        { title: "Resolve: Empty prices", rationale: "", priorityScore: 59, intent: "technical_enabler" },
+        { title: "Push implants", rationale: "", priorityScore: 156, intent: "commercial (query-pattern heuristic)" },
+        { title: "Resolve: No analytics or conversion tracking found", rationale: "", priorityScore: 20, intent: "technical_enabler" },
+        { title: "Rank for “veneers”", rationale: "", priorityScore: 31, intent: "keyword_gap" },
+        { title: "Resolve: A finding from an older run", rationale: "", priorityScore: 10, intent: "technical_enabler" },
+      ],
+    }, 6);
+    assert.deepEqual(actions.map((action) => [action.title, action.area]), [
+      ["Resolve: Empty prices", "technical"],
+      ["Push implants", "search"],
+      ["Rank for “veneers”", "competitors"],
+      ["Resolve: No analytics or conversion tracking found", "leads"],
+      ["Resolve: A finding from an older run", "technical"],
+    ]);
+    assert.equal(doFirst({ findings: [], opportunities: [] }).length, 0);
+  });
+
+  it("sends old links to the page that now holds their content", () => {
+    assert.deepEqual(resolveLink("overview", "search"), { view: "results", tab: "search" });
+    assert.deepEqual(resolveLink("overview", "leads"), { view: "results", tab: "enquiries" });
+    assert.deepEqual(resolveLink("overview", "competitors"), { view: "keywords", tab: null });
+    assert.deepEqual(resolveLink("overview", "technical"), { view: "overview", tab: "technical" });
+    assert.deepEqual(resolveLink("connections", null), { view: "setup", tab: null });
   });
 
   it("measures each problem against the pages it applies to, and skips schema on top-level pages", () => {

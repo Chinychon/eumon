@@ -1,6 +1,7 @@
 import { schema, type JsonLlm } from "@organic-growth/ai";
 import { createId, type CompetitorProfile, type Opportunity } from "@organic-growth/core";
 import { isContentFamily, type PageInspection, type SiteResearch } from "@organic-growth/crawler";
+import { estimateDemand } from "./demand.js";
 
 /** The connected site's side of the comparison. */
 export type OwnContent = {
@@ -264,6 +265,7 @@ export function competitionInsights(report: CompetitionReport): string[] {
 export function competitionOpportunities(report: CompetitionReport, siteId: string, analysisId: string): Opportunity[] {
   return report.rows.filter((row) => row.status === "gap").slice(0, 6).map((row) => {
     const leader = row.competitors[0]!;
+    const estimate = estimateDemand({ kind: "content_gap", competitorPages: leader.pages });
     const hasData = Boolean(row.data && row.data.records > row.data.livePages);
     const contentEffort = hasData ? 2 : 4;
     const priorityScore = (12 * Math.log10(leader.pages + 1) * (hasData ? 1.5 : 1)) / contentEffort * 2;
@@ -274,10 +276,10 @@ export function competitionOpportunities(report: CompetitionReport, siteId: stri
       title: hasData
         ? `Publish your ${row.data!.dataset} data as ${row.label}`
         : `Build ${row.label}: competitors have ~${count(leader.pages)}, you have ${row.you.pages ? `~${count(row.you.pages)}` : "none"}`,
-      searchDemand: 0,
+      searchDemand: estimate.searchDemand,
+      estimatedDifficulty: estimate.estimatedDifficulty,
       intent: "content_gap",
       competitorStrength: leader.pages,
-      estimatedDifficulty: Math.min(100, Math.round(Math.log10(leader.pages + 1) * 25)),
       businessValue: hasData ? 1.5 : 1,
       conversionPotential: 1,
       technicalEffort: 1,

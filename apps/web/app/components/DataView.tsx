@@ -169,10 +169,10 @@ function DatasetCard({ dataset, siteBaseUrl, onChanged }: { dataset: DatasetWith
     try { await action(); await onChanged(); } catch (cause) { setError(errorMessage(cause)); } finally { setBusy(""); }
   }
 
-  async function collect() {
+  async function collect(sourceIds?: string[]) {
     setBusy("collect"); setError("");
     try {
-      const started = await api<{ jobId: string }>(`/api/datasets/${dataset.id}/scrape`, { method: "POST", json: {} });
+      const started = await api<{ jobId: string }>(`/api/datasets/${dataset.id}/scrape`, { method: "POST", json: sourceIds ? { sourceIds } : {} });
       setJob({ id: started.jobId, siteId: dataset.siteId, kind: "scrape", subjectId: dataset.id, status: "queued", createdAt: new Date().toISOString() });
       setJobCounts(null); setFailures([]);
     } catch (cause) { setError(errorMessage(cause)); } finally { setBusy(""); }
@@ -223,12 +223,12 @@ function DatasetCard({ dataset, siteBaseUrl, onChanged }: { dataset: DatasetWith
           </div>
         )}
 
-      {dataset.recordCount > 0 && <InventoryPanel datasetId={dataset.id} recordCount={dataset.recordCount} entityType={dataset.entityType} />}
+      {dataset.recordCount > 0 && <InventoryPanel datasetId={dataset.id} entityType={dataset.entityType} version={`${dataset.recordCount}|${dataset.updatedAt}|${dataset.sources.map((source) => `${source.recordCount}@${source.lastRunAt ?? ""}`).join(",")}|${job?.completedAt ?? ""}`} />}
 
       <div className="section-title">Sources</div>
       {dataset.sources.length === 0 && <p className="small muted">No sources yet. Add your own site's pages, a public directory, a Supabase table, or import a CSV.</p>}
-      {dataset.sources.map((source) => <SourceRow key={source.id} source={source} onChanged={onChanged} />)}
-      <AddSourceForm datasetId={dataset.id} siteBaseUrl={siteBaseUrl} onAdded={onChanged} />
+      {dataset.sources.map((source) => <SourceRow key={source.id} source={source} onChanged={onChanged} onPull={running ? undefined : () => collect([source.id])} />)}
+      <AddSourceForm datasetId={dataset.id} siteBaseUrl={siteBaseUrl} onAdded={async (source) => { await onChanged(); if (source.kind === "supabase" && !running) await collect([source.id]); }} />
 
       <div className="section-title">Collect</div>
       {running || job ? (
@@ -239,7 +239,7 @@ function DatasetCard({ dataset, siteBaseUrl, onChanged }: { dataset: DatasetWith
         </div>
       ) : null}
       <div className="row">
-        <Button busy={busy === "collect" || running} disabled={!approved.length} onClick={collect}>
+        <Button busy={busy === "collect" || running} disabled={!approved.length} onClick={() => collect()}>
           {running ? "Collecting…" : `Collect from ${approved.length} approved source${approved.length === 1 ? "" : "s"}`}
         </Button>
         <label className="btn btn-secondary">
@@ -304,7 +304,7 @@ function FieldsEditor({ dataset, onDone }: { dataset: Dataset; onDone: () => Pro
   );
 }
 
-function SourceRow({ source, onChanged }: { source: DataSource; onChanged: () => Promise<void> }) {
+function SourceRow({ source, onChanged, onPull }: { source: DataSource; onChanged: () => Promise<void>; onPull?: () => Promise<void> }) {
   const [preview, setPreview] = useState<Preview | null>(null);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
@@ -355,10 +355,7 @@ function SourceRow({ source, onChanged }: { source: DataSource; onChanged: () =>
       </div>
       <div className="row" style={{ justifyContent: "flex-end" }}>
         {supabase
-          ? <Button small variant="secondary" busy={busy === "pull"} onClick={() => act("pull", async () => {
-            const result = await api<{ rows: number; records: number }>(`/api/sources/${source.id}/pull`, { method: "POST" });
-            setNote(`Pulled ${formatNumber(result.rows)} rows into ${formatNumber(result.records)} records.`);
-          })}>Pull now</Button>
+          ? <Button small variant="secondary" disabled={!onPull || source.status !== "approved"} onClick={() => onPull && act("pull", async () => { await onPull(); setNote("Reading the table; the progress shows under Collect."); }, false)}>Pull now</Button>
           : <Button small variant="secondary" busy={busy === "preview"} onClick={() => act("preview", async () => setPreview(await api<Preview>(`/api/sources/${source.id}/preview`, { method: "POST" })), false)}>Preview</Button>}
         {source.status !== "approved" && <Button small busy={busy === "approve"} onClick={() => act("approve", () => api(`/api/sources/${source.id}`, { method: "PATCH", json: { status: "approved" } }))}>Approve</Button>}
         {source.status === "approved" && <Button small variant="ghost" onClick={() => act("reject", () => api(`/api/sources/${source.id}`, { method: "PATCH", json: { status: "rejected" } }))}>Pause</Button>}
@@ -368,7 +365,7 @@ function SourceRow({ source, onChanged }: { source: DataSource; onChanged: () =>
   );
 }
 
-function AddSourceForm({ datasetId, siteBaseUrl, onAdded }: { datasetId: string; siteBaseUrl: string; onAdded: () => Promise<void> }) {
+function AddSourceForm({ datasetId, siteBaseUrl, onAdded }: { datasetId: string; siteBaseUrl: string; onAdded: (source: DataSource) => Promise<void> }) {
   const [open, setOpen] = useState(false);
   const [kind, setKind] = useState<DataSource["kind"]>("own_site");
   const [url, setUrl] = useState("");
@@ -383,12 +380,10 @@ function AddSourceForm({ datasetId, siteBaseUrl, onAdded }: { datasetId: string;
     setBusy(true); setError("");
     try {
       const { source } = await api<{ source: DataSource }>(`/api/datasets/${datasetId}/sources`, { method: "POST", json: { kind, url, urlPattern: pattern, maxPages: Number(maxPages), table, key } });
-      setKey("");
-      // A table is read at once, so a wrong key or table name shows here, not days later.
-      if (kind === "supabase") await api(`/api/sources/${source.id}/pull`, { method: "POST" });
-      setOpen(false); setUrl(""); setPattern(""); setTable("");
-      await onAdded();
-    } catch (cause) { setError(errorMessage(cause)); await onAdded(); } finally { setBusy(false); }
+      setKey(""); setOpen(false); setUrl(""); setPattern(""); setTable("");
+      // A table is read at once (the card's Collect progress shows it), so a wrong key or table name shows on the source row, not days later.
+      await onAdded(source);
+    } catch (cause) { setError(errorMessage(cause)); } finally { setBusy(false); }
   }
   return (
     <div className="callout" style={{ marginTop: 8, background: "var(--surface)" }}>
@@ -436,14 +431,14 @@ function AddSourceForm({ datasetId, siteBaseUrl, onAdded }: { datasetId: string;
 }
 
 /** What the records say about the content: fill per field (by language), records listed twice, and the records' pages in the latest crawl. */
-function InventoryPanel({ datasetId, recordCount, entityType }: { datasetId: string; recordCount: number; entityType: string }) {
+function InventoryPanel({ datasetId, entityType, version }: { datasetId: string; entityType: string; version: string }) {
   const [inventory, setInventory] = useState<Inventory | null>(null);
   const [error, setError] = useState("");
   useEffect(() => {
     let live = true;
-    api<{ inventory: Inventory }>(`/api/datasets/${datasetId}/inventory`).then((data) => { if (live) setInventory(data.inventory); }, (cause) => { if (live) setError(errorMessage(cause)); });
+    api<{ inventory: Inventory }>(`/api/datasets/${datasetId}/inventory`).then((data) => { if (live) { setInventory(data.inventory); setError(""); } }, (cause) => { if (live) setError(errorMessage(cause)); });
     return () => { live = false; };
-  }, [datasetId, recordCount]);
+  }, [datasetId, version]);
   if (error) return <><div className="section-title">Inventory</div><p className="small" style={{ color: "var(--red)" }}>{error}</p></>;
   if (!inventory) return <><div className="section-title">Inventory</div><p className="small muted">Counting…</p></>;
   const percent = (share: number) => `${Math.round(share * 100)}%`;
@@ -469,12 +464,12 @@ function InventoryPanel({ datasetId, recordCount, entityType }: { datasetId: str
       </div>
       <p className="small" style={{ marginBottom: 6 }}>
         {duplicates.records > 0
-          ? <><strong>{formatNumber(duplicates.records)}</strong> {entityType} records share {formatNumber(duplicates.groups)} name{duplicates.groups === 1 ? "" : "s"}: {duplicates.examples.slice(0, 5).map((group) => `${group.name} ×${group.keys.length}`).join(", ")}. Merge duplicates (below) proposes the merges.</>
+          ? <><strong>{formatNumber(duplicates.records)}</strong> {entityType} records share {formatNumber(duplicates.groups)} name{duplicates.groups === 1 ? "" : "s"}: {duplicates.examples.slice(0, 5).map((group) => `${group.name} ×${group.keys.length}`).join(", ")}. They may be the same {entityType} listed twice; Merge duplicates (below) merges what it finds and deletes the extra records, so review first.</>
           : <>No two records share a name.</>}
       </p>
       {pages && (
         <p className="small" style={{ marginBottom: 6 }}>
-          <strong>{formatNumber(pages.linked)}</strong> {entityType} pages on the site in the latest crawl: {formatNumber(pages.thin)} thin (an empty shell or under 250 characters), {formatNumber(pages.missing)} missing (404, or not crawled).
+          <strong>{formatNumber(pages.linked)}</strong> {entityType} pages on the site in the latest crawl: {formatNumber(pages.thin)} thin (an empty shell or under 250 characters), {formatNumber(pages.gone)} gone (404 or 410), {formatNumber(pages.unreached)} not reached.
           {pages.examples.thin.length > 0 && <> Thin: {pages.examples.thin.map((url) => <span key={url} className="mono"> {url.replace(/^https?:\/\/[^/]+/, "")}</span>)}</>}
         </p>
       )}

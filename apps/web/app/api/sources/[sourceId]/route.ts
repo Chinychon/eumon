@@ -12,7 +12,10 @@ export async function PATCH(request: Request, context: { params: Promise<{ sourc
   if (!body) return fail("Send the changes as JSON.");
   const next: DataSource = { ...source };
   if (body.status === "approved" || body.status === "rejected" || body.status === "proposed") next.status = body.status;
-  if (body.urlPattern !== undefined) {
+  if (body.urlPattern !== undefined && source.kind === "supabase") {
+    if (typeof body.urlPattern !== "string" || !/^[A-Za-z_][A-Za-z0-9_]{0,62}$/.test(body.urlPattern.trim())) return fail("Enter the table or view name (letters, digits and underscores).");
+    next.urlPattern = body.urlPattern.trim();
+  } else if (body.urlPattern !== undefined) {
     const pattern = validateUrlPattern(body.urlPattern);
     if (typeof pattern === "object") return fail(pattern.error);
     next.urlPattern = pattern;

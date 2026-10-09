@@ -14,6 +14,20 @@ describe("languageOf", () => {
     assert.deepEqual(languageOf({ key: "overview", label: "Overview (ID)" }), { base: "Overview", language: "ID" });
     assert.equal(languageOf({ key: "id", label: "Record id" }), null);
     assert.equal(languageOf({ key: "hospital", label: "Hospital" }), null);
+    assert.deepEqual(languageOf({ key: "bio_ms", label: "Biography (Malay)" }), { base: "Biography", language: "MS" }, "a label without a code keeps its base; the key gives the language");
+  });
+});
+
+describe("language groups", () => {
+  it("groups variants by their key stem, and treats a lone _id or _it key as a plain field, not Indonesian or Italian", () => {
+    const result = inventoryFromRows(
+      [{ key: "name", label: "Name" }, { key: "bio_en", label: "Biography (English)" }, { key: "bio_ms", label: "Biography (Malay)" }, { key: "price_id", label: "Price id" }, { key: "role_it", label: "Role" }],
+      { records: 10, fills: { name: 10, bio_en: 9, bio_ms: 5, price_id: 2, role_it: 1 }, names: [], pages: null },
+    );
+    assert.deepEqual(result.languages, [{ base: "Biography", variants: [{ language: "EN", filled: 9, share: 0.9 }, { language: "MS", filled: 5, share: 0.5 }] }]);
+    assert.equal(result.fields.find((field) => field.key === "bio_ms")?.language, "MS");
+    assert.equal("language" in result.fields.find((field) => field.key === "price_id")!, false, "a foreign key is a plain field");
+    assert.equal("language" in result.fields.find((field) => field.key === "role_it")!, false);
   });
 });
 
@@ -33,7 +47,7 @@ describe("inventoryFromRows", () => {
     records: 4,
     fills: { name: 4, bio_en: 3, bio_id: 3, bio_zh: 2, hospital: 3, url: 2, id: 0 },
     names: [{ key: "a", name: "Dr A" }, { key: "b", name: "Dr B" }, { key: "c", name: "Dr C" }, { key: "d", name: "dr. a" }],
-    pages: { linked: 3, thin: 1, missing: 1, examples: { thin: ["https://x.com/doctors/b"], missing: ["https://x.com/doctors/c"] } },
+    pages: { linked: 3, thin: 1, gone: 1, unreached: 0, examples: { thin: ["https://x.com/doctors/b"], gone: ["https://x.com/doctors/c"] } },
   };
   it("gives every field its share, groups language variants by their base, counts the duplicates and carries the pages through", () => {
     const result = inventoryFromRows(fields, rows);

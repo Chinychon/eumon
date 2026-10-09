@@ -203,7 +203,7 @@ describe("inventory findings", () => {
       fields: fields([["name", "Name", 7704, 1], ["bio_en", "Bio (EN)", 7074, 0.918, "EN"], ["bio_id", "Bio (ID)", 7077, 0.919, "ID"], ["bio_zh", "Bio (ZH)", 7077, 0.919, "ZH"]]),
       languages: [{ base: "Bio", variants: [{ language: "EN", filled: 7074, share: 0.918 }, { language: "ID", filled: 7077, share: 0.919 }, { language: "ZH", filled: 7077, share: 0.919 }] }],
       duplicates: { groups: 20, records: 40, examples: [{ name: "Dr Lim Ai Wei", keys: ["a", "b"] }] },
-      pages: { linked: 7000, thin: 596, missing: 18, examples: { thin: ["https://x.com/doctors/a"], missing: [] } },
+      pages: { linked: 7000, thin: 596, gone: 18, unreached: 0, examples: { thin: ["https://x.com/doctors/a"], gone: [] } },
     } };
     const findings = findingsFromInventory({ siteId: "s", analysisId: "a", inventories: [signal] });
     assert.deepEqual(findings.map((finding) => finding.title), [
@@ -214,12 +214,28 @@ describe("inventory findings", () => {
     assert.ok(findings.every((finding) => finding.category === "content"));
     assert.match(findings[0]!.summary, /92%/);
     assert.deepEqual(findings[1]!.evidence.examples, [{ name: "Dr Lim Ai Wei", keys: ["a", "b"] }]);
+    assert.match(findings[1]!.summary, /may be the same/, "a shared name is a suspicion, not a verdict");
+    assert.match(findings[1]!.recommendation ?? "", /deletes the extra records/i, "Merge duplicates applies, it does not propose");
+  });
+
+  it("takes the plural from the dataset's name, and never rounds a gap up to 100% filled", () => {
+    const specialties: InventorySignal = { dataset: { id: "d2", name: "Specialties", entityType: "specialty", records: 200 }, inventory: {
+      records: 200, fields: fields([["overview", "Overview", 40, 0.2]]), languages: [], duplicates: { groups: 0, records: 0, examples: [] },
+      pages: { linked: 200, thin: 30, gone: 2, unreached: 1, examples: { thin: ["https://x.com/specialties/a"], gone: ["https://x.com/specialties/z"] } },
+    } };
+    const titles = findingsFromInventory({ siteId: "s", analysisId: "a", inventories: [specialties] }).map((finding) => finding.title);
+    assert.deepEqual(titles, ["160 of 200 specialties have no Overview", "30 specialty pages have almost no content"]);
+    const nearlyFull: InventorySignal = { ...base(50000), inventory: { ...base(50000).inventory, fields: fields([["bio_en", "Bio (EN)", 49950, 0.999, "EN"]]), languages: [{ base: "Bio", variants: [{ language: "EN", filled: 49950, share: 0.999 }] }] } };
+    const [finding] = findingsFromInventory({ siteId: "s", analysisId: "a", inventories: [nearlyFull] });
+    assert.equal(finding?.title, "50 of 50,000 doctors have no Bio (EN)");
+    assert.match(finding!.summary, /99%/);
+    assert.doesNotMatch(finding!.summary, /100%/);
   });
 
   it("stays quiet on small datasets, well-filled fields, few duplicates and few thin pages", () => {
     const small = { ...base(40), inventory: { ...base(40).inventory, fields: fields([["bio_en", "Bio (EN)", 10, 0.25, "EN"]]), duplicates: { groups: 5, records: 10, examples: [] } } };
     assert.deepEqual(findingsFromInventory({ siteId: "s", analysisId: "a", inventories: [small] }), [], "under 50 records");
-    const fine = { ...base(500), inventory: { ...base(500).inventory, fields: fields([["bio", "Bio", 480, 0.96], ["phone", "Phone", 300, 0.6]]), duplicates: { groups: 1, records: 3, examples: [] }, pages: { linked: 500, thin: 9, missing: 0, examples: { thin: [], missing: [] } } } };
+    const fine = { ...base(500), inventory: { ...base(500).inventory, fields: fields([["bio", "Bio", 480, 0.96], ["phone", "Phone", 300, 0.6]]), duplicates: { groups: 1, records: 3, examples: [] }, pages: { linked: 500, thin: 9, gone: 0, unreached: 0, examples: { thin: [], gone: [] } } } };
     assert.deepEqual(findingsFromInventory({ siteId: "s", analysisId: "a", inventories: [fine] }), [], "96% filled, phone under 50% but only 200 missing is... fine? no: 200 missing of 500 at 60% is above the 50% line");
     const plain = { ...base(500), inventory: { ...base(500).inventory, fields: fields([["overview", "Overview", 60, 0.12]]) } };
     assert.deepEqual(findingsFromInventory({ siteId: "s", analysisId: "a", inventories: [plain] }).map((finding) => finding.title), ["440 of 500 doctors have no Overview"], "a plain field under half filled");

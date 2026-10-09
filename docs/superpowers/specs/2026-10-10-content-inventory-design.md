@@ -49,3 +49,12 @@ The demo's Dentists dataset gains `bio_en` and `bio_ms` fields with the Malay bi
 - The language-gap rule has no 90% ceiling (above): the test and the MedBay report both flag a 92%-filled field with 630 records missing.
 - Thin pages fire at a twentieth of the linked pages, not a tenth: 596 thin doctor pages of 7,000 is the case the report made.
 - The demo seeds 128 dentists (the twelve leavers are left out), so the Malay bio is missing for half of them to clear the 50-missing threshold.
+
+## After review (2026-10-10)
+
+- The pull is no longer one request: a 1,000-row page cost about 34 D1 calls through `upsertRecords`, so a 7,700-row table failed on its second page under the Free plan. It now runs as collection-workflow steps (`runSupabasePull`), a page a step, each written by one bulk statement per 200 rows (`replaceRecords`), with `Prefer: count=exact` and the reported total deciding when it is done (a project that caps rows per request still finishes). A complete pull removes records the source no longer has; a capped pull keeps what it read and says the table is larger. "Pull now" and a new source go through the Collect job, whose progress the card shows.
+- Findings read the crawl of the analysis in progress (`analysisId` through `loadInventories`), in a workflow step of their own; the card reads the latest finished crawl.
+- Pages match across scheme, `www.`, fragments and trailing slashes; **missing** became **gone** (404/410) and **unreached**; no crawl rows means no page counts; the page URL field is `url`/`page`, else a url-type field that is not a photo or an outside website.
+- The key is validated (charset; `sb_secret_*` and service-role JWTs refused), sealed before the source row exists, deleted with the source and with the dataset, and never appears in an error (`withoutKey`), and the pull follows no redirects.
+- Rows with the same name stay separate records (`dr-tan-mei-2`), so the inventory can show the duplicates the feature exists to find; a table-only collection skips the by-name merge. The duplicate finding now says the records *may* be the same and that Merge duplicates deletes.
+- A lone `_id`/`_it` key is a plain field; variants group by key stem (`bio_en` + `bio_ms` under "Biography"); the plural comes from the dataset's name; shares round down.

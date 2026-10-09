@@ -445,7 +445,7 @@ async function analyzeDemo(db: D1Like, input: { analysisId: string; version: num
       logCoverage: await crawlLogCoverage(db, DEMO_SITE_ID, input.analysisId, new Date(input.now).toISOString().slice(0, 10)),
       searchConsole: await searchConsoleReconciliation(db, DEMO_SITE_ID, input.analysisId),
       trends: await loadTrendSignals(db, DEMO_SITE_ID, await listCrawlLogDays(db, DEMO_SITE_ID, addDays(new Date(input.now).toISOString().slice(0, 10), -182)), new Date(input.now).toISOString().slice(0, 10)),
-      inventory: await loadInventories(db, DEMO_SITE_ID),
+      inventory: await loadInventories(db, DEMO_SITE_ID, { analysisId: input.analysisId }),
     },
     crawlCoverage: { coverage, examples },
     renderPages: (urls) => renderDemo(urls, input.version),

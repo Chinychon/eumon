@@ -25,7 +25,7 @@ describe("dataset inventory", () => {
     await saveCrawlBatch(db, { analysisId: "a1", outcomes: [{ url: "https://x.com/doctors/dr-a", page: page("https://x.com/doctors/dr-a", 200, 1500) }, { url: "https://x.com/doctors/dr-b", page: page("https://x.com/doctors/dr-b", 200, 60) }] });
     await saveAnalysisReport(db, "a1", { findings: [] }, "done");
     const result = await datasetInventory(db, (await getDataset(db, "d"))!);
-    assert.deepEqual(result.pages, { linked: 2, thin: 1, missing: 0, examples: { thin: ["https://x.com/doctors/dr-b"], missing: [] } });
+    assert.deepEqual(result.pages, { linked: 2, thin: 1, gone: 0, unreached: 0, examples: { thin: ["https://x.com/doctors/dr-b"], gone: [] } });
     assert.equal(result.fields.find((field) => field.key === "bio_en")?.share, 0.5);
     const all = await loadInventories(db, "s");
     assert.deepEqual(all.map((entry) => [entry.dataset.name, entry.dataset.records]), [["Doctors", 2]]);

@@ -46,3 +46,15 @@ A **Worker cron trigger** (`triggers.scheduled({ schedule: "15 4 * * *" })` in `
 
 - The `inspection` source leaves `syncResults` rather than shrinking to 40: in one HTTP request every source shares the 50 subrequests, so inline inspection on the Free plan can never be more than a sample, and the sample was what made Sync now exceed the budget.
 - Sync now becomes asynchronous. The button used to answer with the notes in about half a minute; now it answers at once and the dashboard waits for the run to be recorded. Cost if wrong: an operator who closes the tab sees the result only in Sync history.
+
+## After review (2026-10-10)
+
+- **One instance per site.** The cron creates `daily-<day>-<site>` for every site instead of one instance for all: each site has its own 1,024 steps and its own retries, and the step budget logic went away with the `list-sites` step.
+- **A failing Eumon page is recorded** (checked today, no verdict), and the page loop ends at three steps whatever Google answers, so one page Google fails on can no longer trap the loop and spend the day's quota.
+- **Quota ledger.** The `start` step counts inspections already made since midnight Pacific, Google's quota day, and the run spends only what is left of 2,000; a Sync now in the morning and the cron at night share the day.
+- **One coverage queue a day** (`coverage-queue`), sliced 40 a step, instead of a rescan of the crawl every step.
+- **Steps that die cost a note**, never the run (`index-counts` included); inspection steps retry once with a three-minute timeout.
+- **The generated pages' Search Console sync** (`page-search`) is back as the first step for sites with published pages; it had been dropped with the old workflow body.
+- **Manual lock.** Clicks of Sync now within ten minutes join one instance; a manual sync is refused while the day's daily run for the site is going. `startSync` treats any create error as "exists" only when the instance can be fetched.
+- **The dashboard** matches a manual run only, survives a failed poll, stops when the instance errored (GET `results/sync?id=`), ends with the view (`key={site.id}`), and says the wait may outlast the poll.
+- Deferred: one step per source for the `sources` step (its sources catch their own failures); the six-connection limit makes "ten at a time" effectively six.

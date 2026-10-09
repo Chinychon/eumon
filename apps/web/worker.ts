@@ -1,6 +1,6 @@
 import handler from "vinext/server/fetch-handler";
 import type { AppEnv } from "./cloudflare.config";
-import { startSync } from "./src/sync-steps.js";
+import { startDailySyncs } from "./src/sync-steps.js";
 
 export * from "vinext/server/fetch-handler";
 export { SiteAnalysisWorkflow } from "./src/analysis-workflow.js";
@@ -11,8 +11,8 @@ const app = (typeof handler === "function" ? { fetch: handler } : handler) as Ex
 
 export default {
   ...app,
-  /** The daily Results sync (the cron trigger in cloudflare.config.ts): one workflow instance a day for every site. */
+  /** The daily Results sync (the cron trigger in cloudflare.config.ts): one workflow instance per site, named after the day, so a second firing creates none. */
   scheduled(controller: ScheduledController, env: AppEnv, ctx: ExecutionContext) {
-    ctx.waitUntil(startSync(env, { trigger: "daily" }, new Date(controller.scheduledTime)));
+    ctx.waitUntil(startDailySyncs(env, new Date(controller.scheduledTime)));
   },
 } satisfies ExportedHandler<AppEnv>;

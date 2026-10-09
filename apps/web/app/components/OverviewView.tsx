@@ -41,23 +41,37 @@ function deltasBetween(before: Report | null, after: Report): RunDelta[] {
   ];
 }
 
+
+/**
+ * The run a Sync now started, once it is recorded: every four seconds for up to
+ * fifteen minutes (a site's 2,000 inspections can take twenty). Only a manual
+ * run counts; a failed poll waits for the next tick; an instance that errored
+ * ends the wait; `alive` ends it when the view is gone.
+ */
+async function waitForSyncRun(siteId: string, id: string, startedAt: string, alive: () => boolean): Promise<{ notes: string[] } | { failed: string } | null> {
+  const deadline = Date.now() + 15 * 60_000;
+  while (Date.now() < deadline && alive()) {
+    await new Promise((resolve) => setTimeout(resolve, 4000));
+    if (!alive()) return null;
+    try {
+      const { runs } = await api<{ runs: Array<{ trigger: string; startedAt: string; notes: string[] }> }>(`/api/sites/${siteId}/sync-runs`);
+      const run = runs.find((entry) => entry.trigger === "manual" && entry.startedAt >= startedAt);
+      if (run) return run;
+      const instance = await api<{ status: string; error: string | null }>(`/api/sites/${siteId}/results/sync?id=${encodeURIComponent(id)}`);
+      if (instance.status === "errored" || instance.status === "terminated") return { failed: instance.error ?? instance.status };
+    } catch {
+      // A failed poll is not a failed sync; the next tick asks again.
+    }
+  }
+  return null;
+}
+
 /**
  * Is it working, and what to do first: weekly Google clicks with the go-live
  * marked and the four key numbers, then the analysis run, the connections,
  * and two tabs: a one-screen briefing and the technical report. The open tab
  * lives in the address (`?tab=`), kept by the shell.
  */
-/** The run a Sync now started, once it is recorded: polled every four seconds for up to fifteen minutes (a site's 2,000 inspections take about ten). */
-async function waitForSyncRun(siteId: string, startedAt: string): Promise<{ notes: string[] } | null> {
-  const deadline = Date.now() + 15 * 60_000;
-  while (Date.now() < deadline) {
-    await new Promise((resolve) => setTimeout(resolve, 4000));
-    const { runs } = await api<{ runs: Array<{ startedAt: string; notes: string[] }> }>(`/api/sites/${siteId}/sync-runs`);
-    const run = runs.find((entry) => entry.startedAt >= startedAt);
-    if (run) return run;
-  }
-  return null;
-}
 
 export function OverviewView({ site, tab, onTab, onNavigate }: {
   site: SiteRecord;
@@ -84,6 +98,9 @@ export function OverviewView({ site, tab, onTab, onNavigate }: {
   const reloadResults = results.reload;
   const current: Tab = TABS.find((entry) => entry.tab === tab && entry.tab !== "overview")?.tab ?? "overview";
   const [syncing, setSyncing] = useState(false);
+  // The sync poll ends when this view (or this site's view) goes away.
+  const alive = useRef(true);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, [site.id]);
   const [shared, setShared] = useState(false);
 
   const loadChanges = useCallback(async (analysisId: string) => {
@@ -183,10 +200,15 @@ export function OverviewView({ site, tab, onTab, onNavigate }: {
   async function syncNow() {
     setSyncing(true); setError("");
     try {
-      const { startedAt } = await api<{ startedAt: string }>(`/api/sites/${site.id}/results/sync`, { method: "POST" });
-      const run = await waitForSyncRun(site.id, startedAt);
+      const { id, startedAt } = await api<{ id: string; startedAt: string }>(`/api/sites/${site.id}/results/sync`, { method: "POST" });
+      const run = await waitForSyncRun(site.id, id, startedAt, () => alive.current);
+      if (!alive.current) return;
       if (!run) {
         setError("The sync is still running. Setup → Sync history shows its result when it finishes; the numbers refresh on the next load.");
+        return;
+      }
+      if ("failed" in run) {
+        setError(`Sync failed: ${run.failed}. Setup → Sync history keeps the details.`);
         return;
       }
       await reloadResults();

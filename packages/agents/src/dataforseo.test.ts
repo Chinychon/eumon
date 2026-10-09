@@ -19,8 +19,9 @@ const rankedTask = {
 };
 
 describe("DataForSEO client", () => {
-  it("maps a country's numeric code to DataForSEO's location", () => {
+  it("maps a country's numeric code to DataForSEO's location, and knows which countries it doesn't cover", () => {
     assert.equal(dataForSeoLocation(360), 2360);
+    assert.equal(dataForSeoLocation(104), null, "Myanmar is not in DataForSEO's list");
   });
 
   it("asks for a domain's ranked keywords in a country and reads each row", async () => {

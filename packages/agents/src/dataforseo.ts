@@ -7,8 +7,11 @@ import type { RankedKeyword } from "@organic-growth/core";
 
 export type DataForSeoAuth = { login: string; password: string };
 
-/** DataForSEO's Google location for a country: 2000 + its ISO 3166-1 numeric code. */
-export const dataForSeoLocation = (numeric: number) => 2000 + numeric;
+/** Countries in Eumon's table that DataForSEO's Google locations don't cover (checked against its list on 2026-10-09): Brunei, Myanmar, Laos, China, Hong Kong, Taiwan, Nepal, Turkey, Russia, Qatar, Kuwait, Oman. */
+const UNCOVERED = new Set([96, 104, 418, 156, 344, 158, 524, 792, 643, 634, 414, 512]);
+
+/** DataForSEO's Google location for a country: 2000 + its ISO 3166-1 numeric code, or null for a country it doesn't cover. */
+export const dataForSeoLocation = (numeric: number): number | null => (UNCOVERED.has(numeric) ? null : 2000 + numeric);
 
 type Task<T> = { status_code: number; status_message: string; result: T[] | null };
 type Envelope<T> = { status_code: number; status_message: string; tasks: Array<Task<T>> | null };

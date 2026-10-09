@@ -8,7 +8,8 @@ Short definitions of the domain terms that name modules and seams. Architecture 
 - **Ledger**: `metric_points`, one value per site, metric and day. Numbers over time live here, and every ratio is derived by the reader. Upserts overwrite, so re-runs and Google's revised days never double count.
 - **Metric group** (`METRICS` in `packages/core/src/results.ts`): the ledger metrics one upstream connection writes. A group is what its sync may write, what the view reads, and what a changed property clears.
 - **Marker**: a `sync.*` metric a source writes after each run. Its absence means a first run, which backfills history.
-- **Snapshot**: a "latest list" that replaces itself, not a series. Today only `search_top_queries`. The next list (ranked keywords from DataForSEO) generalises it into one store keyed by kind, scope and period; counts derived from a list (keywords in the top 10, visibility share) go in the ledger so they trend.
+- **Snapshot** (`site_snapshots`, `packages/db/src/snapshots.ts`): a "latest list" that replaces itself, keyed by kind and scope: `top_queries` (property|markets), `keywords` (property|market: the site's Search Console queries priced by DataForSEO), `competitor_keywords` (domain|market: a domain's ranked keywords). The scope names what made the list, so a changed property, market or competitor hides the old list until the next sync. Counts derived from a list (`kw_top10`, `kw_traffic`) go in the ledger so they trend.
+- **Keyword gap**: a competitor's ranked keyword the site appears for in none of its lists; the best-placed competitor stands for it. The Keywords card shows the 25 biggest; the growth plan turns the reachable ones (volume ≥ 100, difficulty ≤ 40) into `keyword_gap` opportunities.
 
 ## Sync
 

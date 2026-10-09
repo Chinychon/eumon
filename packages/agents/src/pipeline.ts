@@ -45,7 +45,7 @@ import {
   type AnalysisBundle,
 } from "./index.js";
 import { findingsFromCode } from "./code-findings.js";
-import { findingsFromCrawlLog, type ConnectorSignals } from "./connector-findings.js";
+import { findingsFromCrawlLog, findingsFromSearchConsoleImport, type ConnectorSignals } from "./connector-findings.js";
 import { auditConversion, findingsFromConversion } from "./conversion.js";
 import {
   compareCompetition,
@@ -353,6 +353,7 @@ export async function runFullAnalysis(input: RunAnalysisInput) {
   const competitors = competition ? competitorProfiles(competition, input.siteId) : [];
 
   if (input.connectors?.logCoverage) findings.push(...findingsFromCrawlLog({ siteId: input.siteId, analysisId, coverage: input.connectors.logCoverage }));
+  findings.push(...findingsFromSearchConsoleImport({ siteId: input.siteId, analysisId, view: input.connectors?.searchConsole ?? null }));
   const rankedFindings = rankSeverityByOrganicImpact(findings);
 
   const bundle: AnalysisBundle = {

@@ -1,10 +1,10 @@
 import type { DataRecord, Dataset, Finding, KeywordsInput, PageTemplate, RankedKeyword, SearchMetricRow } from "@organic-growth/core";
-import { addDays, findingKey, REF_ALPHABET, REF_LENGTH, slugify } from "@organic-growth/core";
+import { addDays, findingKey, REF_ALPHABET, REF_LENGTH, slugify, suggestRedirect } from "@organic-growth/core";
 import { crawlGooglebotBatch, researchSite, type Fetcher, type SiteResearch } from "@organic-growth/crawler";
 import {
-  chunks, createAnalysis, createLead, recordLeadClick, updateLead, defaultPageSettings, recordSyncRun, recountCrawl, upsertPageSettings, datasetCoverage, deleteSite, getAnalysisJob, getCrawlCoverage, getCrawlProgress, insertChange, insertConversionEvent, listAllRecords,
+  chunks, createAnalysis, createLead, recordLeadClick, updateLead, defaultPageSettings, recordSyncRun, recountCrawl, upsertPageSettings, datasetCoverage, deleteSite, getAnalysisJob, getCrawlCoverage, getCrawlProgress, importSearchConsoleUrls, insertChange, insertConversionEvent, listAllRecords,
   listCrawlPageResults, listPendingCrawlUrls, recordLandingSession, replaceCurrentSearchMetrics, replacePageSearchMetrics, runStatements, saveAnalysisReport, saveCrawlBatch,
-  saveIndexStatus, saveSiteScope, saveSnapshot, saveTopQueriesSnapshot, saveUrlIndexStatus, listSiteCompetitorDomains, setSiteCompetitorDomains, syncFirstPartyResults, updateSiteGa4Property, upsertMetricPoints, type MetricPoint, setSiteMarkets, setTemplatePublication, syncTemplatePages, updateAnalysisProgress,
+  saveIndexStatus, saveSearchConsoleChart, saveSearchConsoleChecks, saveSearchConsoleSummary, saveSiteScope, saveSnapshot, searchConsoleReconciliation, saveTopQueriesSnapshot, saveUrlIndexStatus, listSiteCompetitorDomains, setSiteCompetitorDomains, syncFirstPartyResults, updateSiteGa4Property, upsertMetricPoints, type MetricPoint, setSiteMarkets, setTemplatePublication, syncTemplatePages, updateAnalysisProgress,
   updateAnalysisStatus, upsertDataset, upsertRecords, upsertSite, upsertTemplate, type D1Like,
 } from "@organic-growth/db";
 import { generatePages } from "@organic-growth/pages";
@@ -429,6 +429,7 @@ async function analyzeDemo(db: D1Like, input: { analysisId: string; version: num
       suggestions: demoSuggestions(),
       links: demoLinks(demoConnectorInput(), new Date(input.now).toISOString().slice(0, 10)),
       logCoverage: await crawlLogCoverage(db, DEMO_SITE_ID, input.analysisId, new Date(input.now).toISOString().slice(0, 10)),
+      searchConsole: await searchConsoleReconciliation(db, DEMO_SITE_ID),
     },
     crawlCoverage: { coverage, examples },
     renderPages: (urls) => renderDemo(urls, input.version),
@@ -639,6 +640,44 @@ async function seedDemoLeads(db: D1Like, live: Array<{ id: string; path: string 
   }
 }
 
+/**
+ * A Search Console export as a real one looks: most of the catalogue found but
+ * not crawled, dentist pages Google saw as noindex that are indexable now, old
+ * slugs that redirect or are gone (a dozen matching a live page), the overview
+ * table, and sixteen weeks of indexed counts. Live checks are pre-recorded:
+ * the demo never fetches outside.
+ */
+async function seedDemoSearchConsole(db: D1Like, now: number) {
+  const at = new Date(now - 3 * DAY).toISOString();
+  const { results } = await db.prepare("SELECT url, route_family AS family FROM pages WHERE analysis_id = 'analysis_demo_1' AND crawl_state = 'complete' AND status < 400 ORDER BY url").all<{ url: string; family: string }>();
+  const prices = results.filter((row) => row.family === "prices").map((row) => row.url);
+  const dentists = results.filter((row) => row.family === "dentists").map((row) => row.url);
+  const live = dentists.slice(0, 70);
+  // Old slugs: a year ago the dentist pages had no "dr-" and only two name parts.
+  const shortSlug = (url: string) => url.replace(/\/dentists\/([^/]+)$/, (_, slug: string) => `/dentists/${slug.replace(/^dr-/, "").split("-").slice(0, 2).join("-")}`);
+  const redirected = dentists.slice(0, 50).map((url) => ({ url: `${url}-2019`, to: url }));
+  const gone = dentists.slice(0, 20).map(shortSlug).filter((url) => !dentists.includes(url));
+  const list = (urls: string[]) => urls.map((url) => ({ url, lastCrawled: at.slice(0, 10) }));
+  await importSearchConsoleUrls(db, DEMO_SITE_ID, { reason: "discovered", reasonText: "Discovered – currently not indexed", urls: list(prices), importedAt: at });
+  await importSearchConsoleUrls(db, DEMO_SITE_ID, { reason: "noindex", reasonText: "Excluded by 'noindex' tag", urls: list([...live, ...redirected.map((entry) => entry.url), ...gone]), importedAt: at });
+  await saveSearchConsoleChecks(db, DEMO_SITE_ID, [
+    ...redirected.map((entry) => ({ url: entry.url, status: 200, finalUrl: entry.to, noindex: false, suggestedUrl: null })),
+    ...gone.map((url) => ({ url, status: 404, finalUrl: null, noindex: null, suggestedUrl: suggestRedirect(url, dentists) })),
+  ]);
+  const indexed = 300;
+  await saveSearchConsoleSummary(db, DEMO_SITE_ID, [
+    { reason: "indexed", reasonText: "Indexed", source: null, validation: null, pages: indexed },
+    { reason: "discovered", reasonText: "Discovered – currently not indexed", source: "Google systems", validation: "Not Started", pages: prices.length },
+    { reason: "noindex", reasonText: "Excluded by 'noindex' tag", source: "Website", validation: "Failed", pages: live.length + redirected.length + gone.length },
+    { reason: "crawled", reasonText: "Crawled – currently not indexed", source: "Google systems", validation: "Not Started", pages: 9 },
+    { reason: "not_found", reasonText: "Not found (404)", source: "Website", validation: "Not Started", pages: gone.length },
+  ], at);
+  await saveSearchConsoleChart(db, DEMO_SITE_ID, Array.from({ length: 16 }, (_, week) => {
+    const back = 15 - week;
+    return { day: new Date(now - (back * 7 + 3) * DAY).toISOString().slice(0, 10), indexed: Math.round(indexed * (1 - back / 18)), notIndexed: Math.round((prices.length + 200) * (1 - back / 24)) };
+  }));
+}
+
 /** One pull request, merged between the two analyses, for a first-run finding the second run no longer reports: History's "Fixed with Eumon" row. */
 async function seedDemoFix(db: D1Like, now: number) {
   type Reported = { findings: Finding[] };
@@ -668,6 +707,7 @@ export async function seedDemoSite(db: D1Like, now = Date.now()): Promise<{ site
   // Before the analyses, which read the crawl log.
   await seedDemoConnectors(db, demoConnectorInput(), now);
   await completedAnalysis(db, "analysis_demo_1", 1, now - 30 * DAY);
+  await seedDemoSearchConsole(db, now);
   await completedAnalysis(db, "analysis_demo_2", 2, now - 2 * DAY);
   await seedDemoFix(db, now);
   await seedDemoResults(db, now);

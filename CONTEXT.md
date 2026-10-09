@@ -35,6 +35,9 @@ Short definitions of the domain terms that name modules and seams. Architecture 
 
 - **Finding key**: the same problem across analyses: a finding's category and title with numbers blanked (`findingKey`). Each finished analysis saves its **key list** (kind `finding_keys` in the snapshot store, scope = the analysis id); a `vanished` row in a list says a previous finding is gone because every page it pointed at was missing or erroring in that crawl, decided on save because crawl rows are pruned later.
 - **Resolution**: a finding key present in one analysis and absent from the next (`resolutions`). The History tab labels it **Fixed with Eumon** when a merged change or opened PR names a finding with that key, **No longer applies** when its row vanished, and **Resolved** otherwise. Eumon's **actions** (pull requests, page edits, CTA tests, publications) are listed beside them.
+- **Search Console import**: Google's Page indexing report has no API, so its exports are imported in Setup (a reason's URL list, the overview table, the chart). Imported URLs live in `search_console_urls` with the reason Google gave; the overview is the `search_console_summary` snapshot; the chart is the `gsc_indexed` / `gsc_not_indexed` metrics.
+- **Today status**: what an imported URL is now — `indexable`, `noindex`, `redirect`, `gone`, `error` or `unchecked` — from the latest crawl's row when it has one, otherwise a **live check** (fetched as Googlebot from the console, twenty per request). `todayStatus` is the rule; `searchConsoleReconciliation` applies it in SQL so a 20,000-URL list costs counts, not rows.
+- **Redirect suggestion**: for a gone URL, the live URL of the same page type whose slug contains every word of the dead slug (`suggestRedirect`); one word alone must be six characters or more.
 
 ## Data
 

@@ -183,3 +183,19 @@ export function aiReadinessSheets(report: Report | null): Sheet[] {
   return [sheet("AI agents in robots.txt", ["Agent", "What it does", "Kind", "robots.txt"],
     readiness.crawlers.map((crawler) => [crawler.agent, crawler.purpose, crawler.kind, crawler.allowed ? "allowed" : "blocked"]))];
 }
+
+/** The Search Console import card: each reason's URLs by what they are today, the redirect suggestions, Google's totals and the indexed history. */
+export function searchConsoleSheets(view: {
+  reasons: Array<{ reasonText: string; urls: number; today: Record<string, number> }>;
+  suggestions: Array<{ url: string; suggestedUrl: string }>;
+  summary: { rows: Array<{ reasonText: string; source: string | null; validation: string | null; pages: number }> } | null;
+  history: Array<{ day: string; indexed: number; notIndexed: number }>;
+}): Sheet[] {
+  const statuses = ["indexable", "noindex", "redirect", "gone", "error", "unchecked"];
+  return [
+    sheet("Search Console reasons", ["Reason", "URLs", "Indexable now", "Still noindex", "Redirects", "Gone", "Erroring", "Not checked"], view.reasons.map((entry) => [entry.reasonText, entry.urls, ...statuses.map((name) => entry.today[name] ?? 0)])),
+    sheet("Redirect suggestions", ["Old URL", "Live page"], view.suggestions.map((entry) => [entry.url, entry.suggestedUrl])),
+    sheet("Google totals", ["Reason", "Source", "Validation", "Pages"], (view.summary?.rows ?? []).map((row) => [row.reasonText, row.source, row.validation, row.pages])),
+    sheet("Indexed over time", ["Day", "Indexed", "Not indexed"], view.history.map((point) => [point.day, point.indexed, point.notIndexed])),
+  ];
+}

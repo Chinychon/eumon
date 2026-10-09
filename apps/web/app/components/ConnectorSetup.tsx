@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { strFromU8, unzipSync } from "fflate";
+import { GSC_REASONS } from "@organic-growth/core";
 import { api, errorMessage, formatDay, formatNumber } from "./api";
 import { Badge, Button, Card, CopyBlock } from "./ui";
 
@@ -98,6 +100,9 @@ export function ConnectorSetup({ siteId }: { siteId: string }) {
   const [tab, setTab] = useState("worker");
   const [upload, setUpload] = useState("");
   const [uploading, setUploading] = useState(false);
+  const [exportReason, setExportReason] = useState("");
+  const [exportStatus, setExportStatus] = useState("");
+  const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
     setConnectors(null);
@@ -111,6 +116,37 @@ export function ConnectorSetup({ siteId }: { siteId: string }) {
       const result = await uploadLog(file, connectors.logs);
       setUpload(`Read ${formatNumber(result.received)} requests; kept ${formatNumber(result.crawler)} from crawlers. The Technical tab shows them now.`);
     } catch (cause) { setUpload(errorMessage(cause)); } finally { setUploading(false); }
+  }
+
+  /** One export (CSV, or the ZIP Search Console downloads): every CSV inside is imported, then URLs outside the sitemap are fetched until none remain. */
+  async function sendExport(file: File | undefined) {
+    if (!file) return;
+    setExporting(true); setExportStatus("Reading the export…");
+    try {
+      const files: Array<{ name: string; text: string }> = file.name.toLowerCase().endsWith(".zip")
+        ? Object.entries(unzipSync(new Uint8Array(await file.arrayBuffer()))).filter(([name]) => name.toLowerCase().endsWith(".csv")).map(([, data]) => ({ name: file.name, text: strFromU8(data) }))
+        : [{ name: file.name, text: await file.text() }];
+      if (!files.length) throw new Error("The ZIP holds no CSV files.");
+      const notes: string[] = [];
+      let remaining = 0;
+      for (const entry of files) {
+        const query = new URLSearchParams({ name: entry.name, ...(exportReason ? { reason: exportReason } : {}) });
+        const outcome = await api<{ kind: string; imported: number; reason?: string; remainingChecks?: number }>(`/api/sites/${siteId}/search-console/import?${query}`, { method: "POST", body: entry.text, headers: { "Content-Type": "text/csv" } });
+        const label = outcome.reason ? GSC_REASONS.find((reason) => reason.reason === outcome.reason)?.label ?? outcome.reason : "";
+        notes.push(outcome.kind === "urls" ? `${formatNumber(outcome.imported)} URLs as ${label}` : outcome.kind === "table" ? `the overview (${outcome.imported} reasons)` : `the chart (${outcome.imported} days)`);
+        remaining = Math.max(remaining, outcome.remainingChecks ?? 0);
+      }
+      const imported = `Imported ${notes.join(", ")}.`;
+      let done = 0;
+      while (remaining > 0) {
+        setExportStatus(`${imported} Checking ${formatNumber(remaining + done)} URLs that are no longer in the sitemap… ${formatNumber(done)} done.`);
+        const step = await api<{ checked: number; remaining: number }>(`/api/sites/${siteId}/search-console/check`, { method: "POST" });
+        done += step.checked;
+        remaining = step.remaining;
+        if (!step.checked) break;
+      }
+      setExportStatus(`${imported}${done ? ` Checked ${formatNumber(done)} URLs outside the sitemap.` : ""} The Search tab shows the result.`);
+    } catch (cause) { setExportStatus(errorMessage(cause)); } finally { setExporting(false); }
   }
 
   if (error) return <Card><p className="empty-state">{error}</p></Card>;
@@ -147,6 +183,24 @@ export function ConnectorSetup({ siteId }: { siteId: string }) {
             : !indexNow.verified
               ? "Tells Bing and the other IndexNow engines about every page Eumon publishes, changes or takes down. Starts once the proxy rule is verified below."
               : <>New and changed landing pages are sent with each sync. Key file: <a className="mono" href={indexNow.keyUrl!} target="_blank" rel="noreferrer">{indexNow.keyUrl}</a>{indexNow.lastSubmitted ? `. Last sent ${formatDay(indexNow.lastSubmitted)}.` : "."}</>}</p>
+        </div>
+      </div>
+      <div className="list-row">
+        <Badge tone="gray">Export</Badge>
+        <div className="grow">
+          <h3>Search Console export</h3>
+          <p>Google's Page indexing report has no API, but it exports. Drop a reason's URL list (the ZIP as downloaded, or its CSV), the overview table, or the chart: every URL is checked against today's crawl, URLs no longer in the sitemap are fetched, and gone ones get a redirect suggestion. The Search tab shows the result.</p>
+          <div className="row" style={{ marginTop: 8 }}>
+            <select className="input" value={exportReason} onChange={(event) => setExportReason(event.target.value)} disabled={exporting} aria-label="Reason of the URL list">
+              <option value="">Reason from the file name</option>
+              {GSC_REASONS.filter((entry) => entry.reason !== "other").map((entry) => <option key={entry.reason} value={entry.reason}>{entry.label}</option>)}
+            </select>
+            <label className="btn btn-secondary btn-small">
+              {exporting ? "Importing…" : "Import an export"}
+              <input type="file" accept=".csv,.zip" hidden disabled={exporting} onChange={(event) => void sendExport(event.target.files?.[0])} />
+            </label>
+          </div>
+          {exportStatus && <p className="small">{exportStatus}</p>}
         </div>
       </div>
       <div className="list-row">

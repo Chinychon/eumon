@@ -40,6 +40,7 @@ import {
   type SiteResearch,
 } from "@organic-growth/crawler";
 import { googleAccessToken } from "./gsc-auth";
+import { searchConsoleReconciliation } from "@organic-growth/db";
 import { connectorSignals, loadConnectorLists } from "./connectors-data";
 import { loadKeywords } from "./keywords-data";
 
@@ -165,7 +166,8 @@ export class SiteAnalysisWorkflow extends WorkflowEntrypoint<AppEnv, AnalysisPay
           const connectors = await Promise.all([
             loadConnectorLists(db, { id: siteId, baseUrl: site.baseUrl }, { markets: targetMarkets, competitors }),
             crawlLogCoverage(db, siteId, analysisId),
-          ]).then(([lists, coverage]) => connectorSignals(lists, coverage)).catch(() => undefined);
+            searchConsoleReconciliation(db, siteId).catch(() => null),
+          ]).then(([lists, coverage, searchConsole]) => connectorSignals(lists, coverage, searchConsole)).catch(() => undefined);
           const raw = await runFullAnalysis({
             analysisId,
             siteId,

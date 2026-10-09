@@ -2,7 +2,7 @@ import { COVERAGE_CLASSES, coverageClass, type CoverageClass } from "@organic-gr
 import { chunks, nowIso, runStatements, type D1Like } from "./d1.js";
 
 /** The site's latest finished analysis: its crawl is the set of sitemap URLs Google should have. */
-async function latestCrawl(db: D1Like, siteId: string): Promise<string | null> {
+export async function latestCrawl(db: D1Like, siteId: string): Promise<string | null> {
   const row = await db.prepare("SELECT id FROM analyses WHERE site_id = ? AND status = 'completed' ORDER BY created_at DESC LIMIT 1").bind(siteId).first<{ id: string }>();
   return row?.id ?? null;
 }

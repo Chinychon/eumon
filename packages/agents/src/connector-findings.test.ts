@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { crawlLogView, type LinksInput, type SerpResult } from "@organic-growth/core";
-import { findingsFromCrawlLog, linkGapOpportunity, withSerpContext, type LogCoverage } from "./connector-findings.js";
+import { findingsFromCrawlLog, findingsFromSearchConsoleImport, linkGapOpportunity, withSerpContext, type LogCoverage } from "./connector-findings.js";
 import { buildOpportunities, gapOpportunities, synthesizeGrowthPlan } from "./index.js";
 
 const view = (googlebot: { ok: number; redirect?: number; missing?: number; error?: number; query?: number }) => crawlLogView([
@@ -89,5 +89,42 @@ describe("links and results pages in the plan", () => {
     const priority = plan.priorities.find((entry) => entry.title.startsWith("Earn links"))!;
     assert.match(priority.contentRequired, /Never buy links/);
     assert.match(plan.sections.find((section) => section.title === "Strategy sequence")!.body, /Add the competitors that win your searches \(found\.example\)[\s\S]*Earn links from the sites that already link to your competitors/);
+  });
+});
+
+describe("Search Console import findings", () => {
+  const today = (over: Partial<Record<string, number>>) => ({ indexable: 0, noindex: 0, redirect: 0, gone: 0, error: 0, unchecked: 0, ...over });
+  const summary = (indexed: number, notIndexed: number) => ({ importedAt: "2026-10-09", rows: [
+    { reason: "indexed" as const, reasonText: "Indexed", source: null, validation: null, pages: indexed },
+    { reason: "discovered" as const, reasonText: "Discovered - currently not indexed", source: "Google systems", validation: "Not Started", pages: notIndexed },
+  ] });
+
+  it("names a low indexed share, noindex URLs that are indexable now, and dead URLs with their redirects", () => {
+    const findings = findingsFromSearchConsoleImport({ siteId: "s", analysisId: "a", view: {
+      importedAt: "2026-10-09T00:00:00.000Z", summary: summary(1561, 24498), remainingChecks: 0,
+      reasons: [
+        { reason: "noindex", reasonText: "Excluded by 'noindex' tag", urls: 468, today: today({ indexable: 207, redirect: 199, noindex: 35, gone: 27 }), examples: { indexable: ["https://x.com/doctors/dr-a"] } },
+        { reason: "not_found", reasonText: "Not found (404)", urls: 6, today: today({ gone: 6 }), examples: {} },
+      ],
+      suggestions: Array.from({ length: 30 }, (_, i) => ({ url: `https://x.com/doctors/old-${i}`, suggestedUrl: `https://x.com/doctors/dr-new-${i}` })),
+    } });
+    assert.deepEqual(findings.map((finding) => finding.title), [
+      "Google has indexed 1,561 of the 26,059 URLs it knows (6%)",
+      "207 URLs Google excluded as noindex are indexable now",
+      "33 old URLs Google still crawls return 404; 30 match a live page",
+    ]);
+    assert.ok(findings.every((finding) => finding.category === "indexing" && finding.recommendation));
+    const dead = findings[2]!;
+    assert.equal((dead.evidence.suggestions as unknown[]).length, 25, "evidence carries at most 25 pairs");
+    assert.equal(dead.pagesAffected?.length, 30, "the dead URLs it can name: the suggested ones (the fixture has no gone examples)");
+  });
+
+  it("stays quiet under the thresholds, and without an import", () => {
+    assert.deepEqual(findingsFromSearchConsoleImport({ siteId: "s", analysisId: "a", view: null }), []);
+    const quiet = findingsFromSearchConsoleImport({ siteId: "s", analysisId: "a", view: {
+      importedAt: "2026-10-09T00:00:00.000Z", summary: summary(900, 100), remainingChecks: 0,
+      reasons: [{ reason: "noindex", reasonText: "Excluded by 'noindex' tag", urls: 12, today: today({ indexable: 9, gone: 3 }), examples: {} }], suggestions: [],
+    } });
+    assert.deepEqual(quiet, [], "90% indexed, 9 indexable, 3 gone: none reaches its threshold");
   });
 });

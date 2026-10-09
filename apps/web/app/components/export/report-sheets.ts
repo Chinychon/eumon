@@ -183,20 +183,3 @@ export function aiReadinessSheets(report: Report | null): Sheet[] {
   return [sheet("AI agents in robots.txt", ["Agent", "What it does", "Kind", "robots.txt"],
     readiness.crawlers.map((crawler) => [crawler.agent, crawler.purpose, crawler.kind, crawler.allowed ? "allowed" : "blocked"]))];
 }
-
-/** Every table on a Dashboard tab, for "Export tab". Empty tables are left out. */
-export function tabSheets(tab: string, input: { results: Results | null; report: Report | null; leads: Leads; host: string }): Sheet[] {
-  const { results, report, leads, host } = input;
-  const all: Sheet[] = (() => {
-    switch (tab) {
-      case "technical": return [...pageTypeSheets(report), ...renderingSheets(report), ...(results ? speedSheets(results) : []), ...fixSheets(report, (category) => !["search", "competitors", "conversion", "ai_visibility"].includes(category)), ...routeSheets(report?.repo)];
-      case "search": return [...(results ? googleSearchSheets(results) : []), ...searchAnalysisSheets(report), ...fixSheets(report, (category) => category === "search")];
-      case "enquiries": return [...(results ? enquirySheets(results) : []), ...conversionSheets(report, leads), ...fixSheets(report, (category) => category === "conversion")];
-      case "keywords": return results ? keywordSheets(results.keywords, host) : [];
-      case "competitors": return results ? competitorSheets(report, results, host) : [];
-      case "ai": return [...(results ? aiSheets(results) : []), ...aiReadinessSheets(report), ...fixSheets(report, (category) => category === "ai_visibility")];
-      default: return [...(results ? proofSheets(results) : []), ...pageTypeSheets(report), ...backlogSheets(report)];
-    }
-  })();
-  return all.filter((entry) => entry.rows.length > 0);
-}

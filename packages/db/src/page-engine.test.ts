@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { GeneratedPage, PageTemplate } from "@organic-growth/core";
 import { listRecordKeys, listSiteMarkets, setSiteMarkets, upsertSite } from "./index.js";
-import { datasetCoverage, defaultPageSettings, getPageSettings, setTemplatePublication, syncTemplatePages, upsertDataset, upsertPageSettings, upsertRecords, upsertTemplate } from "./page-engine.js";
+import { datasetCoverage, defaultPageSettings, deleteTemplate, getPageSettings, listPageRevisions, recordLandingSession, setTemplatePublication, syncTemplatePages, upsertDataset, upsertPageSettings, upsertRecords, upsertTemplate } from "./page-engine.js";
 import { openSqliteD1 } from "./sqlite.js";
 
 describe("datasetCoverage", () => {
@@ -62,15 +62,43 @@ describe("markets and record keys", () => {
   });
 });
 
-import * as engine from "./index.js";
-import * as sqlite from "./sqlite.js";
+describe("page revisions", () => {
+  it("measures each change over equal windows before and after, in one query, and cascade with their template", async () => {
+    const db = openSqliteD1();
+    const now = new Date().toISOString();
+    await upsertSite(db, { id: "site", name: "x.com", baseUrl: "https://x.com", createdAt: now, updatedAt: now });
+    await db.prepare(`INSERT INTO datasets (id, site_id, name, entity_type, description, fields_json, key_field, page_ideas_json, status, created_at, updated_at) VALUES ('d', 'site', 'T', 't', '', '[]', 'name', '[]', 'active', ?, ?)`).bind(now, now).run();
+    await db.prepare(`INSERT INTO page_templates (id, site_id, dataset_id, name, config_json, status, created_at, updated_at) VALUES ('t', 'site', 'd', 'T', '{}', 'active', ?, ?)`).bind(now, now).run();
+    const day = (offset: number) => new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10);
+    for (const id of ["a", "b"]) {
+      await db.prepare(`INSERT INTO generated_pages (id, site_id, template_id, path, group_key, title, description, content_json, quality_score, quality_issues_json, status, created_at, updated_at)
+        VALUES (?, 'site', 't', ?, ?, 'x', '', '{}', 1, '[]', 'published', ?, ?)`).bind(id, `/${id}`, id, now, now).run();
+      // 2 views a day before the change ten days ago, 5 a day since, and one more day outside the window.
+      for (let offset = -21; offset < 0; offset++) {
+        await db.prepare("INSERT INTO page_metrics_daily (site_id, page_id, day, views, search_clicks) VALUES ('site', ?, ?, ?, 1)").bind(id, day(offset), offset < -10 ? 2 : 5).run();
+      }
+    }
+    await db.prepare("INSERT INTO page_revisions (id, page_id, field, before_value, after_value, reason, author, created_at) VALUES ('r1', 'a', 'title', 'Old', 'New', 'CTR', 'eumon', ?)").bind(`${day(-10)}T09:00:00.000Z`).run();
+    await db.prepare("INSERT INTO page_revisions (id, page_id, field, before_value, after_value, reason, author, created_at) VALUES ('r2', 'b', 'title', 'Old', 'New', 'CTR', 'eumon', ?)").bind(`${day(0)}T09:00:00.000Z`).run();
+    const [today, tenDays] = await listPageRevisions(db, "site");
+    assert.equal(tenDays!.id, "r1");
+    assert.equal(tenDays!.windowDays, 10);
+    assert.deepEqual(tenDays!.metricsBefore, { views: 20, ctaClicks: 0, searchClicks: 10, searchImpressions: 0 });
+    assert.deepEqual(tenDays!.metricsAfter, { views: 50, ctaClicks: 0, searchClicks: 10, searchImpressions: 0 });
+    assert.deepEqual({ id: today!.id, windowDays: today!.windowDays, after: today!.metricsAfter.views }, { id: "r2", windowDays: 0, after: 0 }, "a change made today has no window yet");
+    await deleteTemplate(db, "t");
+    for (const table of ["generated_pages", "page_revisions", "page_metrics_daily"]) {
+      assert.equal(Number((await db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).first<{ n: number }>())?.n), 0, table);
+    }
+  });
+});
 
 describe("landing sessions", () => {
   it("says whether a landing was the session's first, so a reload isn't a second visit", async () => {
-    const db = sqlite.openSqliteD1();
+    const db = openSqliteD1();
     const at = "2026-10-09T00:00:00.000Z";
-    await engine.upsertSite(db, { id: "s", name: "x.com", baseUrl: "https://x.com", createdAt: at, updatedAt: at });
-    assert.equal(await engine.recordLandingSession(db, { siteId: "s", sessionId: "b".repeat(16), pageId: "p1", source: "ai:chatgpt" }), true);
-    assert.equal(await engine.recordLandingSession(db, { siteId: "s", sessionId: "b".repeat(16), pageId: "p1", source: "ai:chatgpt" }), false);
+    await upsertSite(db, { id: "s", name: "x.com", baseUrl: "https://x.com", createdAt: at, updatedAt: at });
+    assert.equal(await recordLandingSession(db, { siteId: "s", sessionId: "b".repeat(16), pageId: "p1", source: "ai:chatgpt" }), true);
+    assert.equal(await recordLandingSession(db, { siteId: "s", sessionId: "b".repeat(16), pageId: "p1", source: "ai:chatgpt" }), false);
   });
 });

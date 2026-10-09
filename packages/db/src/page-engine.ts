@@ -444,12 +444,9 @@ export async function listTemplates(db: D1Like, siteId: string): Promise<Array<P
   });
 }
 
+/** Deletes a template; its pages, their revisions and daily counters cascade with it. */
 export async function deleteTemplate(db: D1Like, id: string): Promise<void> {
-  await runStatements(db, [
-    db.prepare("DELETE FROM page_revisions WHERE page_id IN (SELECT id FROM generated_pages WHERE template_id = ?)").bind(id),
-    db.prepare("DELETE FROM generated_pages WHERE template_id = ?").bind(id),
-    db.prepare("DELETE FROM page_templates WHERE id = ?").bind(id),
-  ]);
+  await db.prepare("DELETE FROM page_templates WHERE id = ?").bind(id).run();
 }
 
 // ---------------------------------------------------------------------------
@@ -707,36 +704,41 @@ export async function listPageRevisions(db: D1Like, siteId: string, limit = 50, 
      WHERE p.site_id = ? ORDER BY r.created_at DESC LIMIT ?`,
   ).bind(siteId, limit).all<Row>();
   const now = Date.now();
-  return Promise.all(results.map(async (row) => {
-    const createdAt = String(row.created_at);
-    const changeDay = createdAt.slice(0, 10);
+  const shift = (day: string, days: number) => new Date(Date.parse(`${day}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
+  const windows = results.map((row) => {
+    const changeDay = String(row.created_at).slice(0, 10);
     const elapsed = Math.floor((now - Date.parse(`${changeDay}T00:00:00Z`)) / 86_400_000);
     const windowDays = Math.max(0, Math.min(maxWindowDays, elapsed));
-    const window = async (from: string, to: string): Promise<WindowMetrics> => {
-      const totals = await db.prepare(
-        `SELECT COALESCE(SUM(views), 0) AS views, COALESCE(SUM(cta_clicks), 0) AS cta_clicks,
-           COALESCE(SUM(search_clicks), 0) AS search_clicks, COALESCE(SUM(search_impressions), 0) AS search_impressions
-         FROM page_metrics_daily WHERE page_id = ? AND day >= ? AND day < ?`,
-      ).bind(String(row.page_id), from, to).first<Record<string, number>>();
-      return {
-        views: Number(totals?.views ?? 0),
-        ctaClicks: Number(totals?.cta_clicks ?? 0),
-        searchClicks: Number(totals?.search_clicks ?? 0),
-        searchImpressions: Number(totals?.search_impressions ?? 0),
-      };
-    };
-    const shift = (days: number) => new Date(Date.parse(`${changeDay}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
-    const [metricsBefore, metricsAfter] = await Promise.all([
-      window(shift(-windowDays), changeDay),
-      window(changeDay, shift(windowDays)),
-    ]);
+    return { id: String(row.id), page: String(row.page_id), from: shift(changeDay, -windowDays), change: changeDay, to: shift(changeDay, windowDays), windowDays };
+  });
+  // Every revision's before and after windows in one query (the Free plan allows 50 queries per request).
+  const sums = (side: "b" | "a", range: string) => ["views", "cta_clicks", "search_clicks", "search_impressions"]
+    .map((column) => `COALESCE(SUM(CASE WHEN ${range} THEN m.${column} END), 0) AS ${side}_${column}`).join(", ");
+  const { results: totals } = windows.length ? await db.prepare(
+    `WITH w AS (
+       SELECT json_extract(value, '$.id') AS id, json_extract(value, '$.page') AS page_id, json_extract(value, '$.from') AS day_from,
+         json_extract(value, '$.change') AS day_change, json_extract(value, '$.to') AS day_to FROM json_each(?))
+     SELECT w.id, ${sums("b", "m.day < w.day_change")}, ${sums("a", "m.day >= w.day_change")}
+     FROM w LEFT JOIN page_metrics_daily m ON m.page_id = w.page_id AND m.day >= w.day_from AND m.day < w.day_to
+     GROUP BY w.id`,
+  ).bind(JSON.stringify(windows)).all<Record<string, number | string>>() : { results: [] };
+  const byId = new Map(totals.map((row) => [String(row.id), row]));
+  const metrics = (row: Record<string, number | string> | undefined, side: "b" | "a"): WindowMetrics => ({
+    views: Number(row?.[`${side}_views`] ?? 0),
+    ctaClicks: Number(row?.[`${side}_cta_clicks`] ?? 0),
+    searchClicks: Number(row?.[`${side}_search_clicks`] ?? 0),
+    searchImpressions: Number(row?.[`${side}_search_impressions`] ?? 0),
+  });
+  return results.map((row, index) => {
+    const window = windows[index]!;
+    const total = byId.get(window.id);
     return {
-      id: String(row.id), pageId: String(row.page_id), path: String(row.path), field: String(row.field),
+      id: window.id, pageId: String(row.page_id), path: String(row.path), field: String(row.field),
       before: String(row.before_value ?? ""), after: String(row.after_value ?? ""),
-      reason: String(row.reason), author: String(row.author), createdAt,
-      windowDays, metricsBefore, metricsAfter,
+      reason: String(row.reason), author: String(row.author), createdAt: String(row.created_at),
+      windowDays: window.windowDays, metricsBefore: metrics(total, "b"), metricsAfter: metrics(total, "a"),
     };
-  }));
+  });
 }
 
 // ---------------------------------------------------------------------------

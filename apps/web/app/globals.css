@@ -179,6 +179,8 @@ code { font-family: var(--mono); }
 .welcome-row { padding: 8px 0 36px; }
 .welcome-row h1 { font-size: 44px; line-height: 1.08; letter-spacing: -.03em; font-weight: 400; margin: 0 0 14px; text-wrap: balance; }
 .intro { font-size: 15px; line-height: 1.65; color: var(--muted); max-width: 540px; margin: 0; }
+.welcome-demo { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px; margin-top: 22px; }
+.welcome-demo > span { font-size: 13px; color: var(--muted); max-width: 420px; }
 .steps-grid, .metrics-grid, .kpi-grid { display: grid; border: 1px solid var(--line); background: var(--surface); overflow: hidden; }
 .steps-grid, .metrics-grid { grid-template-columns: repeat(4, 1fr); }
 .metrics-grid.c3 { grid-template-columns: repeat(3, 1fr); }
@@ -235,6 +237,8 @@ code { font-family: var(--mono); }
 .input::placeholder, .textarea::placeholder { color: var(--soft); }
 .input:focus, .select:focus, .textarea:focus { border-color: var(--green); box-shadow: 0 0 0 3px var(--green-soft); }
 .field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+/* A button standing in for a field (Connect GitHub) is as tall as the inputs beside it. */
+.field > .btn { height: 38px; }
 .field > small { font-size: 12px; color: var(--muted); line-height: 1.45; }
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
 .form-grid .span-2 { grid-column: 1 / -1; }
@@ -619,10 +623,9 @@ details.disclosure[open] > summary { margin-bottom: 10px; }
 .export-options button { display: block; width: 100%; padding: 8px 14px; border: 0; background: transparent; text-align: left; font-size: 13px; color: var(--ink); cursor: pointer; }
 .export-options button:hover { background: var(--surface-2); }
 .export-status { position: absolute; z-index: 20; top: calc(100% + 6px); right: 0; width: max-content; max-width: 320px; padding: 8px 12px; border: 1px solid var(--line); background: var(--surface); box-shadow: var(--shadow-pop); font-size: 12px; color: var(--ink-2); animation: pop-in .15s var(--ease) both; }
-/* The tab strip with "Export tab" at its end, on one shared rule. */
+/* The Dashboard's tab strip. */
 .tabs-bar { display: flex; align-items: flex-end; gap: 12px; margin: 22px 0 14px; border-bottom: 1px solid var(--line); }
 .tabs-bar > .tabs { flex: 1 1 auto; min-width: 0; margin: 0; border-bottom: 0; }
-.tabs-bar > .export { flex: none; margin: 0 0 4px; }
 /* Sync history: one line per run; its notes open as a plain list, failures in red. */
 .sync-notes { margin: 0; padding: 0 0 14px 18px; }
 .sync-notes li { margin: 0 0 4px; font-family: var(--mono); font-size: 12px; }

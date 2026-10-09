@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import type { CrawlPageResult } from "@organic-growth/core";
 import {
   analysisStalled, compactReport, createAnalysis, enqueueAnalysisCrawlUrls, estimateCrawl, getAnalysisJob, getCrawlCoverage, getCrawlProgress, getPreviousCompletedAnalysis,
-  listCrawlStates, listPendingCrawlUrls, reuseCrawlResults, saveAnalysisReport, saveCrawlBatch, setLatestReportSearch, updateAnalysisProgress, updateAnalysisStatus, upsertSite,
+  listCrawlStates, listPendingCrawlUrls, pruneCrawlResults, recountCrawl, reuseCrawlResults, saveAnalysisReport, saveCrawlBatch, setLatestReportSearch, updateAnalysisProgress, updateAnalysisStatus, upsertSite,
 } from "./index.js";
 import { openSqliteD1 } from "./sqlite.js";
 
@@ -106,6 +106,8 @@ describe("compactReport", () => {
     assert.equal(parsed.pages.length, 0);
     assert.equal(parsed.findings.length, 30, "every finding is kept");
     assert.equal(compactReport({ small: true }), JSON.stringify({ small: true }));
+    const wide = compactReport({ pages: [{ title: "牙科诊所".repeat(5000) }], plan: {} }, 30_000);
+    assert.ok(new TextEncoder().encode(wide).byteLength <= 30_000, "measured in UTF-8 bytes, not characters");
   });
 });
 
@@ -188,6 +190,55 @@ describe("live crawl progress", async () => {
     assert.equal(progress.crawled, 0, "reused results do not count as fetched in this run");
     const coverage = await getCrawlCoverage(db, "p2");
     assert.equal(coverage.emptyShellUrls, 1, "reused results still count toward the analysis");
+  });
+});
+
+describe("crawl counters", () => {
+  it("match a full recount after saves, a retried save, a page-type change and a failure", async () => {
+    const db = openSqliteD1();
+    const now = new Date().toISOString();
+    const u = (path: string) => `https://z.com${path}`;
+    await upsertSite(db, { id: "site", name: "z.com", baseUrl: "https://z.com", createdAt: now, updatedAt: now });
+    await createAnalysis(db, { id: "c1", siteId: "site", status: "running", createdAt: now });
+    await enqueueAnalysisCrawlUrls(db, { analysisId: "c1", siteId: "site", urls: ["/a/1", "/a/2", "/a/3", "/b/1", "/b/2"].map((path) => ({ url: u(path), routeFamily: path.split("/")[1]! })) });
+    const batch = [
+      { url: u("/a/1"), page: page(u("/a/1"), { noindex: true }) },
+      { url: u("/a/2"), page: page(u("/a/2"), { routeFamily: "moved" }) },
+      { url: u("/b/1"), page: page(u("/b/1"), { status: 500 }) },
+      { url: u("/b/2"), error: "timeout" },
+    ];
+    await saveCrawlBatch(db, { analysisId: "c1", outcomes: batch });
+    const first = await getCrawlProgress(db, "c1");
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await saveCrawlBatch(db, { analysisId: "c1", outcomes: batch });
+    const retried = await getCrawlProgress(db, "c1");
+    assert.deepEqual(retried, first, "a retried save moves nothing");
+    await recountCrawl(db, "c1");
+    assert.deepEqual(await getCrawlProgress(db, "c1"), first, "counters equal a recount");
+    assert.deepEqual({ total: first.total, pending: first.pending, crawled: first.crawled, failed: first.failed, noindex: first.noindex, httpErrors: first.httpErrors },
+      { total: 5, pending: 1, crawled: 4, failed: 1, noindex: 1, httpErrors: 1 });
+    assert.deepEqual(first.families.map((family) => [family.family, family.total, family.done]), [["a", 2, 1], ["b", 2, 2], ["moved", 1, 1]]);
+    assert.deepEqual(first.recent.map((entry) => entry.url).sort(), batch.map((entry) => entry.url).sort());
+  });
+});
+
+describe("crawl retention", () => {
+  it("keeps crawl rows for the two latest finished analyses and anything newer, and every report and counter", async () => {
+    const db = openSqliteD1();
+    const now = new Date().toISOString();
+    await upsertSite(db, { id: "site", name: "r.com", baseUrl: "https://r.com", createdAt: now, updatedAt: now });
+    const runs = [["old", "completed"], ["stopped", "cancelled"], ["previous", "completed"], ["latest", "completed"], ["later", "failed"], ["running", "running"]] as const;
+    for (const [index, [id, status]] of runs.entries()) {
+      await createAnalysis(db, { id, siteId: "site", status: "running", createdAt: `2026-10-0${index + 1}T00:00:00.000Z` });
+      await enqueueAnalysisCrawlUrls(db, { analysisId: id, siteId: "site", urls: [{ url: `https://r.com/${id}`, routeFamily: "page" }] });
+      if (status === "completed") await saveAnalysisReport(db, id, { coverage: null }, "done");
+      else if (status !== "running") await updateAnalysisStatus(db, id, status);
+    }
+    assert.equal(await pruneCrawlResults(db, "site"), 0, "already pruned when the latest finished");
+    const left = await db.prepare("SELECT DISTINCT analysis_id AS id FROM pages ORDER BY id").all<{ id: string }>();
+    assert.deepEqual(left.results.map((row) => row.id), ["later", "latest", "previous", "running"]);
+    assert.equal((await getCrawlProgress(db, "old")).total, 1, "an old analysis keeps its counts");
+    assert.ok((await getAnalysisJob(db, "old"))?.report, "and its report");
   });
 });
 

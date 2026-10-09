@@ -2,7 +2,7 @@ import type { DataRecord, Dataset, KeywordsInput, PageTemplate, RankedKeyword, S
 import { addDays, slugify } from "@organic-growth/core";
 import { crawlGooglebotBatch, researchSite, type Fetcher, type SiteResearch } from "@organic-growth/crawler";
 import {
-  chunks, createAnalysis, defaultPageSettings, recordSyncRun, upsertPageSettings, datasetCoverage, deleteSite, getAnalysisJob, getCrawlCoverage, getCrawlProgress, insertConversionEvent, listAllRecords,
+  chunks, createAnalysis, defaultPageSettings, recordSyncRun, recountCrawl, upsertPageSettings, datasetCoverage, deleteSite, getAnalysisJob, getCrawlCoverage, getCrawlProgress, insertConversionEvent, listAllRecords,
   listCrawlPageResults, listPendingCrawlUrls, recordLandingSession, replaceCurrentSearchMetrics, replacePageSearchMetrics, runStatements, saveAnalysisReport, saveCrawlBatch,
   saveIndexStatus, saveSiteScope, saveSnapshot, saveTopQueriesSnapshot, saveUrlIndexStatus, listSiteCompetitorDomains, setSiteCompetitorDomains, syncFirstPartyResults, updateSiteGa4Property, upsertMetricPoints, type MetricPoint, setSiteMarkets, setTemplatePublication, syncTemplatePages, updateAnalysisProgress,
   updateAnalysisStatus, upsertDataset, upsertRecords, upsertSite, upsertTemplate, type D1Like,
@@ -440,6 +440,7 @@ async function crawlAll(db: D1Like, analysisId: string, version: number, end: nu
   const start = end - minutes * 60_000;
   const statements = results.map((row, index) => db.prepare("UPDATE pages SET crawled_at = ? WHERE analysis_id = ? AND url = ?").bind(new Date(start + index * step).toISOString(), analysisId, row.url));
   for (const group of chunks(statements, 100)) await runStatements(db, group);
+  await recountCrawl(db, analysisId);
 }
 
 async function completedAnalysis(db: D1Like, id: string, version: number, at: number) {

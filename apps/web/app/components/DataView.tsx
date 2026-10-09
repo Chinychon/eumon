@@ -75,7 +75,7 @@ export function DataView({ site, onNavigate }: { site: SiteRecord; onNavigate: (
           <li>Track which pages bring visits, clicks, and conversions, then improve them</li>
         </ol>
         <div className="row">
-          <Button variant="secondary" onClick={() => onNavigate("performance")}>See performance</Button>
+          <Button variant="secondary" onClick={() => onNavigate("performance")}>See page results</Button>
           {conversions && <span className="small muted">Conversion events: {formatNumber(conversions.totalEvents)} total · {formatNumber(conversions.last28Days)} in the last 28 days</span>}
         </div>
       </Card>

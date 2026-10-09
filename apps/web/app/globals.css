@@ -300,9 +300,9 @@ details.disclosure[open] > summary { margin-bottom: 10px; }
 
 /* Overview: the report is a stack of paper sheets */
 .results > * + * { margin-top: -1px; }
-/* Overview: the numbers first, then the run, then one ruled line of connections, then the report. */
-.overview-kpis { margin-bottom: -1px; }
-.overview-kpis + .run { margin-top: 0; }
+/* Overview: the proof first (clicks per week over the key numbers), then the run, then one ruled line of connections, then the report. */
+.overview-proof { margin-bottom: -1px; }
+.overview-proof + .run { margin-top: 0; }
 .connections-strip { width: 100%; display: flex; align-items: center; flex-wrap: wrap; gap: 6px 18px; padding: 11px 16px; border: 1px solid var(--line); background: var(--surface); color: var(--soft); font-family: var(--mono); font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase; text-align: left; transition: background-color .2s, color .2s; }
 .connections-strip span { display: inline-flex; align-items: center; gap: 7px; }
 .connections-strip span:not(.connections-label, .connections-open)::before { content: ""; width: 6px; height: 6px; border: 1px solid var(--soft); }
@@ -605,7 +605,7 @@ details.disclosure[open] > summary { margin-bottom: 10px; }
 .do-first button:hover { background: var(--surface-2); }
 .do-first-rank { font-family: var(--mono); font-size: 12px; color: var(--soft); padding-top: 1px; }
 .do-first-title { font-size: 13.5px; font-weight: 500; line-height: 1.45; }
-.do-first .severity { grid-column: 2; justify-self: start; }
+.do-first-place { grid-column: 2; justify-self: start; font-family: var(--mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--green-ink); }
 .brief-note { margin: 8px 0 0; }
 .big-number { font-size: 30px; letter-spacing: -.02em; margin: 2px 0 12px; font-variant-numeric: tabular-nums; }
 .advantage-line { margin: 0; font-size: 14px; line-height: 1.6; color: var(--ink-2); }
@@ -774,7 +774,8 @@ details.disclosure[open] > summary { margin-bottom: 10px; }
   .workspace { flex: none; margin: 0; height: 34px; padding: 0 10px; }
   .workspace small, .workspace-label, .workspace-group { display: none; }
   .workspace-item { display: contents; }
-  .site-switcher { flex: none; flex-direction: row; align-items: center; margin: 0 0 0 auto; padding: 0 0 0 8px; }
+  /* Relative, so the visually hidden label is placed inside the scrolling strip instead of widening the page. */
+  .site-switcher { position: relative; flex: none; flex-direction: row; align-items: center; margin: 0 0 0 auto; padding: 0 0 0 8px; }
   /* The client switcher stays reachable on phones, at the end of the scrolling strip. */
   .site-switcher label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   .site-switcher select { width: 168px; height: 34px; }

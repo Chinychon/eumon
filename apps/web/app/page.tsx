@@ -11,30 +11,28 @@ import { OverviewView, type Repository } from "./components/OverviewView";
 import { PagesView } from "./components/PagesView";
 import { KeywordsView } from "./components/KeywordsView";
 import { ResultsView } from "./components/ResultsView";
-import { PerformanceView } from "./components/PerformanceView";
+import { PageResultsView } from "./components/PageResultsView";
+import { resolveLink, type View } from "./components/report-model";
 import { SetupView } from "./components/SetupView";
 import { BrandMark } from "./components/pixel";
 import { Button, LeafIcon, ThemeToggle } from "./components/ui";
 
-type View = "overview" | "results" | "keywords" | "ask" | "connections" | "data" | "pages" | "performance" | "setup";
-
 /**
  * `steps` are the pipeline steps (README) a view covers; `group` labels the run of views it starts.
  * View keys stay as they were when labels changed, so saved and shared links keep working.
+ * Each question has one page: Overview (is it working, what first, technical),
+ * Performance (search, enquiries), Keywords & competitors (how we compare).
  */
 const NAV: Array<{ view: View; label: string; steps?: string; group?: string }> = [
   { view: "overview", label: "Overview" },
   { view: "results", label: "Performance" },
-  { view: "keywords", label: "Keywords" },
+  { view: "keywords", label: "Keywords & competitors" },
   { view: "ask", label: "Ask" },
   { view: "data", label: "Data", steps: "1–3", group: "Landing page engine" },
   { view: "pages", label: "Landing pages", steps: "4–5" },
-  { view: "performance", label: "Page performance", steps: "6–7" },
+  { view: "performance", label: "Page results", steps: "6–7" },
   { view: "setup", label: "Setup" },
 ];
-
-/** Connections now live at the top of Setup. */
-const resolveView = (view: View): View => (view === "connections" ? "setup" : view);
 
 function setQuery(params: Record<string, string | null>) {
   const url = new URL(window.location.href);
@@ -49,6 +47,8 @@ export default function Home() {
   const [sites, setSites] = useState<SiteRecord[] | null>(null);
   const [siteId, setSiteId] = useState("");
   const [view, setView] = useState<View>("overview");
+  /** The open tab on a page with tabs (Overview, Performance); null is its first tab. */
+  const [tab, setTab] = useState<string | null>(null);
   const [repositories, setRepositories] = useState<Repository[]>([]);
   const [githubInstalled, setGithubInstalled] = useState(false);
   const [adding, setAdding] = useState(false);
@@ -80,7 +80,8 @@ export default function Home() {
   useEffect(() => {
     const query = new URLSearchParams(window.location.search);
     const requestedView = query.get("view") as View | null;
-    if (requestedView && NAV.some((item) => item.view === resolveView(requestedView))) setView(resolveView(requestedView));
+    const link = requestedView ? resolveLink(requestedView, query.get("tab")) : null;
+    if (link && NAV.some((item) => item.view === link.view)) { setView(link.view); setTab(link.tab); }
     setAskThread(query.get("thread") ?? "");
     if (query.get("github") === "connected") setNotice("GitHub connected. Choose a repository in Setup.");
     if (query.get("github_error") === "installation_invalid") setError("GitHub returned without a valid install session. Start “Connect GitHub” from this tab and use the same address for the callback.");
@@ -96,12 +97,18 @@ export default function Home() {
       .catch(() => undefined);
   }, [loadSites]);
 
-  useEffect(() => { if (siteId) setQuery({ site: siteId, view, thread: view === "ask" ? askThread || null : null, ...(view === "overview" ? {} : { tab: null }) }); }, [siteId, view, askThread]);
+  // The open page and tab live in the address, so a refresh or a shared link lands on them.
+  useEffect(() => { if (siteId) setQuery({ site: siteId, view, tab, thread: view === "ask" ? askThread || null : null }); }, [siteId, view, tab, askThread]);
   useEffect(() => { if (!notice) return; const timer = setTimeout(() => setNotice(""), 6000); return () => clearTimeout(timer); }, [notice]);
 
   const site = sites?.find((entry) => entry.id === siteId) ?? null;
   const run = useSiteRun(siteId);
-  const navigate = (next: View) => { setView(resolveView(next)); window.scrollTo({ top: 0 }); };
+  const navigate = (next: View, nextTab?: string) => {
+    const link = resolveLink(next, nextTab ?? null);
+    setView(link.view);
+    setTab(link.tab);
+    window.scrollTo({ top: 0 });
+  };
   const drawerOpen = drawer && Boolean(site) && view !== "ask" && !adding;
   // On phones the drawer covers the page, so the page behind it is taken out of reach.
   const covered = drawerOpen && narrow;
@@ -152,13 +159,13 @@ export default function Home() {
             />
           ) : (
             <div key={`${site.id}:${view}`} className="view-enter">
-              {view === "overview" && <OverviewView site={site} onNavigate={navigate} />}
-              {view === "results" && <ResultsView endpoint={`/api/sites/${site.id}/results`} operator onNavigate={navigate} />}
-              {view === "keywords" && <KeywordsView endpoint={`/api/sites/${site.id}/results`} />}
+              {view === "overview" && <OverviewView site={site} tab={tab} onTab={setTab} onNavigate={navigate} />}
+              {view === "results" && <ResultsView site={site} tab={tab} onTab={setTab} onNavigate={navigate} />}
+              {view === "keywords" && <KeywordsView site={site} onNavigate={navigate} />}
               {view === "ask" && <AskView key={site.id} site={site} threadId={askThread} onThreadChange={setAskThread} />}
               {view === "data" && <DataView site={site} onNavigate={navigate} />}
               {view === "pages" && <PagesView site={site} onNavigate={navigate} />}
-              {view === "performance" && <PerformanceView site={site} onNavigate={navigate} />}
+              {view === "performance" && <PageResultsView site={site} onNavigate={navigate} />}
               {view === "setup" && (
                 <>
                   <ConnectionsView site={site} repositories={repositories} githubInstalled={githubInstalled} onSiteChanged={(updated) => setSites((items) => items?.map((item) => (item.id === updated.id ? updated : item)) ?? null)} />

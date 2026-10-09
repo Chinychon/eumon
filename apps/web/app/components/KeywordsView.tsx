@@ -1,37 +1,40 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { api, errorMessage } from "./api";
-import type { Payload } from "./ResultsView";
+import type { SiteRecord } from "@organic-growth/core";
+import { CompetitorsSection } from "./ReportTabs";
+import type { Navigate } from "./report-model";
 import { KeywordsCard } from "./results/KeywordsCard";
-import { ViewHeader } from "./ui";
+import { AUTHORITY_NOTE, AuthoritySection } from "./results/sections";
+import { useLatestReport, useResults } from "./site-data";
+import { Card, ViewHeader } from "./ui";
 
 /**
- * What the site's searches are worth and which ones competitors win: the
- * Keywords card on its own page, for the operator and technical clients.
+ * How the site compares: what its searches are worth and which ones
+ * competitors win, the kinds of pages competitors publish, and authority
+ * beside theirs. Keywords show even before competitors are added.
  */
-export function KeywordsView({ endpoint }: { endpoint: string }) {
-  const [data, setData] = useState<Payload | null>(null);
-  const [error, setError] = useState("");
-  useEffect(() => {
-    setData(null);
-    setError("");
-    api<Payload>(endpoint).then(setData).catch((cause) => setError(errorMessage(cause)));
-  }, [endpoint]);
+export function KeywordsView({ site, onNavigate }: { site: SiteRecord; onNavigate: Navigate }) {
+  const { data, error } = useResults(`/api/sites/${site.id}/results`);
+  const report = useLatestReport(site.id);
 
   if (error) return <div className="callout error" role="alert">{error}</div>;
-  if (!data) return <div className="empty">Loading…</div>;
-  const { site, results } = data;
+  if (!data || report === undefined) return <div className="empty">Loading…</div>;
+  const { results } = data;
   const host = new URL(site.baseUrl).hostname;
   return (
     <div>
       <ViewHeader
-        title="Keywords"
-        description={<>What {host}'s searches are worth, which searches competitors win, and each domain's share of visibility. {results.keywords.asOf ? "Refreshed monthly by Sync now on Performance." : "Filled by Sync now on Performance."}</>}
+        title="Keywords & competitors"
+        description={<>What {host}'s searches are worth, which searches competitors win, the pages they publish that you don't, and authority beside theirs. Keywords {results.keywords.asOf ? "refresh monthly with Sync now on Performance" : "fill in with Sync now on Performance"}; competitors are compared by each analysis.</>}
       />
       <div className="results">
-        <KeywordsCard keywords={results.keywords} host={host} operator hasCredentials={site.signals.keywords} hasMarkets={results.markets.length > 0}
+        <KeywordsCard keywords={results.keywords} host={host} operator hasCredentials={data.site.signals.keywords} hasMarkets={results.markets.length > 0}
           searchTop10={results.search?.buckets.find((bucket) => bucket.top === 10)?.queries ?? null} />
+        <CompetitorsSection report={report} site={site} onNavigate={onNavigate} />
+        <Card title="Authority" subtitle="An authority estimate for you and each competitor.">
+          <AuthoritySection data={data} operator />
+          <p className="small muted">{AUTHORITY_NOTE}</p>
+        </Card>
       </div>
     </div>
   );

@@ -1,6 +1,7 @@
 /*
- * The analysis report as the console reads it, and the small derivations the
- * Overview charts draw from it. No React here, so it runs under `node --test`.
+ * The analysis report as the console reads it, the small derivations the
+ * Overview charts draw from it, and where in the console each area lives.
+ * No React here, so it runs under `node --test`.
  */
 
 export type Finding = { id: string; category: string; severity: string; title: string; summary: string; recommendation?: string; organicImpactScore: number };
@@ -65,7 +66,33 @@ export type Report = {
 type RouteInspection = { pathPattern: string; source: string; dynamic: boolean; rendering: string; renderingEvidence?: string; clientDataFetching?: string; metadata: string; sequentialAwaits: number; unboundedQueries: string[] };
 type Fingerprint = { framework: string; router?: string; rendering?: string; deployment?: string; cms?: string; database?: string; analytics: string[]; seoTooling: string[]; contentSource?: string; language: string; packageManager: string };
 
-export type ReportTab = "overview" | "technical" | "search" | "competitors" | "leads";
+/** What a finding or opportunity is about, which decides the page that explains it. */
+export type Area = "technical" | "search" | "competitors" | "leads";
+
+/** Rail pages, by the keys their links use. Keys stay as they were when labels changed, so saved and shared links keep working. */
+export type View = "overview" | "results" | "keywords" | "ask" | "connections" | "data" | "pages" | "performance" | "setup";
+export type Navigate = (view: View, tab?: string) => void;
+
+/** A rail page and, where it has tabs, the tab. */
+export type Place = { view: View; tab: string | null };
+
+/** The page and tab that explain each area, and the name a link to it carries. */
+export const AREA_PLACE: Record<Area, Place & { label: string }> = {
+  technical: { view: "overview", tab: "technical", label: "Technical" },
+  search: { view: "results", tab: "search", label: "Search" },
+  competitors: { view: "keywords", tab: null, label: "Competitors" },
+  leads: { view: "results", tab: "enquiries", label: "Enquiries" },
+};
+
+/**
+ * Where a link lands. Connections moved into Setup, and the Overview's Search,
+ * Competitors and Leads tabs moved to the pages that now hold their content.
+ */
+export function resolveLink(view: View, tab: string | null): Place {
+  if (view === "connections") return { view: "setup", tab: null };
+  if (view === "overview" && (tab === "search" || tab === "competitors" || tab === "leads")) return { view: AREA_PLACE[tab].view, tab: AREA_PLACE[tab].tab };
+  return { view, tab };
+}
 
 export const familyLabel = (family: string) => (family === "home" ? "Homepage" : family === "page" ? "Top-level pages" : `/${family}/`);
 
@@ -101,29 +128,38 @@ export function servedShare(coverage: Report["coverage"]): number | null {
   return Math.max(0, served) / coverage.totalUrls;
 }
 
-const SEVERITY_RANK: Record<string, number> = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3, INFORMATIONAL: 4 };
+/** Which area explains an opportunity. A technical enabler resolves one finding, so it goes where that finding does. */
+export function opportunityArea(opportunity: Pick<Report["opportunities"][number], "title" | "intent">, findings: Pick<Finding, "title" | "category">[] = []): Area {
+  const { intent } = opportunity;
+  if (intent === "content_gap" || intent === "unpublished_data" || intent === "keyword_gap") return "competitors";
+  if (intent === "technical_enabler") {
+    const finding = findings.find((entry) => opportunity.title === `Resolve: ${entry.title}`);
+    return finding ? findingArea(finding.category) : "technical";
+  }
+  return "search";
+}
 
-/** Which tab explains an opportunity. */
-export const opportunityTab = (intent?: string): ReportTab =>
-  intent === "content_gap" || intent === "unpublished_data" || intent === "keyword_gap" ? "competitors" : intent === "technical_enabler" ? "technical" : "search";
-
-/** Which tab explains a finding. */
-export const findingTab = (category: string): ReportTab =>
+/** Which area explains a finding. */
+export const findingArea = (category: string): Area =>
   category === "search" ? "search" : category === "competitors" ? "competitors" : category === "conversion" ? "leads" : "technical";
 
-export type Action = { title: string; severity?: string; tab: ReportTab };
+export type Action = { title: string; score: number; area: Area };
+
+const URGENT = new Set(["CRITICAL", "HIGH"]);
 
 /**
- * The three things to do first: critical and high findings, then the
- * strongest opportunity, then the remaining findings by impact.
+ * The backlog's top. The growth plan's opportunities rank technical fixes,
+ * queries near page one, content and keyword gaps, and unpublished data in
+ * one priority order; critical and high findings go first anyway, because
+ * the plan can rank a dozen near-page-one queries above pages Google can't
+ * read.
  */
-export function doFirst(report: Pick<Report, "findings" | "opportunities">, limit = 3): Action[] {
-  const findings = [...report.findings].sort((a, b) => (SEVERITY_RANK[a.severity] ?? 9) - (SEVERITY_RANK[b.severity] ?? 9) || b.organicImpactScore - a.organicImpactScore);
-  const asAction = (finding: Finding): Action => ({ title: finding.title, severity: finding.severity, tab: findingTab(finding.category) });
-  const urgent = findings.filter((finding) => (SEVERITY_RANK[finding.severity] ?? 9) <= 1).map(asAction);
-  const top = [...report.opportunities].sort((a, b) => b.priorityScore - a.priorityScore)[0];
-  const rest = findings.filter((finding) => (SEVERITY_RANK[finding.severity] ?? 9) > 1).map(asAction);
-  return [...urgent, ...(top ? [{ title: top.title, tab: opportunityTab(top.intent) }] : []), ...rest].slice(0, limit);
+export function doFirst(report: Pick<Report, "findings" | "opportunities">, limit = 5): Action[] {
+  const urgent = new Set(report.findings.filter((finding) => URGENT.has(finding.severity)).map((finding) => `Resolve: ${finding.title}`));
+  return [...report.opportunities]
+    .sort((a, b) => Number(urgent.has(b.title)) - Number(urgent.has(a.title)) || b.priorityScore - a.priorityScore)
+    .slice(0, limit)
+    .map((opportunity) => ({ title: opportunity.title, score: opportunity.priorityScore, area: opportunityArea(opportunity, report.findings) }));
 }
 
 

@@ -60,6 +60,21 @@ describe("history", () => {
     assert.deepEqual(history.rows.map((row) => row.kind), ["fixed", "resolved", "change"], "newest first; the two resolutions share a date and come before the earlier PR");
   });
 
+  it("credits the change made in each stretch when a problem comes back and is fixed again", async () => {
+    const db = await site();
+    await finished(db, "a1", "2026-09-01T00:00:00.000Z", [finding("f1", "Thin meta descriptions")]);
+    await change(db, "c1", "f1", "2026-09-03T00:00:00.000Z");
+    await finished(db, "a2", "2026-09-05T00:00:00.000Z", []);
+    await finished(db, "a3", "2026-09-10T00:00:00.000Z", [finding("f2", "Thin meta descriptions")]);
+    await change(db, "c2", "f2", "2026-09-12T00:00:00.000Z");
+    await finished(db, "a4", "2026-09-15T00:00:00.000Z", []);
+    const history = await assembleHistory(db, "s");
+    assert.deepEqual(history.rows.filter((row) => row.kind === "fixed" || row.kind === "resolved").map((row) => [row.kind, row.at.slice(0, 10), row.detail]), [
+      ["fixed", "2026-09-15", "Pull request #2: Fix for f2"],
+      ["fixed", "2026-09-05", "Pull request #2: Fix for f1"],
+    ], "each resolution takes the change made within its own stretch");
+  });
+
   it("says a finding no longer applies when its pages vanished, and ignores a change naming an unknown finding", async () => {
     const db = await site();
     await finished(db, "a1", "2026-09-01T00:00:00.000Z", [finding("f1", "Canonical mismatches detected", ["https://x.com/a", "https://x.com/b"])], { "https://x.com/a": 200, "https://x.com/b": 200 });

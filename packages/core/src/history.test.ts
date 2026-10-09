@@ -87,6 +87,15 @@ describe("resolutions", () => {
     ]);
   });
 
+  it("keeps a key open while any of its same-key findings remains, and resolves it once when all are gone", () => {
+    const pair = (ids: [string, string]) => [row(ids[0], "Rewrite the search snippet of /prices/kl-2"), row(ids[1], "Rewrite the search snippet of /prices/kl-7")];
+    const oneLeft = resolutions([run("a1", "2026-09-01T00:00:00.000Z", pair(["f1", "f2"])), run("a2", "2026-09-08T00:00:00.000Z", [row("f3", "Rewrite the search snippet of /prices/kl-7")])]);
+    assert.deepEqual(oneLeft, { resolved: [], open: 1 }, "open counts keys, not findings");
+    const bothGone = resolutions([run("a1", "2026-09-01T00:00:00.000Z", pair(["f1", "f2"])), run("a2", "2026-09-08T00:00:00.000Z", [])]);
+    assert.equal(bothGone.resolved.length, 1);
+    assert.equal(bothGone.open, 0);
+  });
+
   it("resolves everything at once when a run has no findings, and nothing with fewer than two runs", () => {
     assert.deepEqual(resolutions([]), { resolved: [], open: 0 });
     assert.deepEqual(resolutions([run("a1", "2026-09-01T00:00:00.000Z", [row("f1", "Thin meta descriptions")])]), { resolved: [], open: 1 });

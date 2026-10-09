@@ -639,10 +639,6 @@ async function seedDemoLeads(db: D1Like, live: Array<{ id: string; path: string 
   }
 }
 
-/**
- * Rebuilds the demo site: two finished analyses a month apart (so changes
- * show), Search Console rows, datasets with a live template, and conversions.
- */
 /** One pull request, merged between the two analyses, for a first-run finding the second run no longer reports: History's "Fixed with Eumon" row. */
 async function seedDemoFix(db: D1Like, now: number) {
   type Reported = { findings: Finding[] };
@@ -657,6 +653,10 @@ async function seedDemoFix(db: D1Like, now: number) {
   });
 }
 
+/**
+ * Rebuilds the demo site: two finished analyses a month apart (so changes
+ * show), Search Console rows, datasets with a live template, and conversions.
+ */
 export async function seedDemoSite(db: D1Like, now = Date.now()): Promise<{ siteId: string }> {
   await deleteSite(db, DEMO_SITE_ID);
   const created = new Date(now - 95 * DAY).toISOString();

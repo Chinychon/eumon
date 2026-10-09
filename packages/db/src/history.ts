@@ -1,6 +1,6 @@
 import { runKeys, type Finding, type HistoryRun, type KeyRow } from "@organic-growth/core";
 import { runStatements, type D1Like } from "./d1.js";
-import { getSnapshot, listSnapshots, snapshotStatement } from "./snapshots.js";
+import { getSnapshot, snapshotStatement } from "./snapshots.js";
 
 /*
  * History: each finished run's finding key list in the snapshot store (kind
@@ -10,18 +10,18 @@ import { getSnapshot, listSnapshots, snapshotStatement } from "./snapshots.js";
  */
 
 export const FINDING_KEYS = "finding_keys";
-/** How many finished runs History looks back over: keeps the first open within the Free plan's query budget. */
-export const HISTORY_RUNS = 12;
+/** How many missing key lists one open of History fills from reports; older runs fill on the next open. */
+export const BACKFILL_RUNS = 12;
 
 export type CompletedAnalysis = { id: string; completedAt: string };
 
-/** The latest finished runs with a report, oldest first. */
-export async function listCompletedAnalyses(db: D1Like, siteId: string, limit = HISTORY_RUNS): Promise<CompletedAnalysis[]> {
+/** Every finished run with a report, oldest first. */
+export async function listCompletedAnalyses(db: D1Like, siteId: string): Promise<CompletedAnalysis[]> {
   const { results } = await db.prepare(
     `SELECT id, COALESCE(completed_at, created_at) AS completed_at FROM analyses
-     WHERE site_id = ? AND status = 'completed' AND report_json IS NOT NULL ORDER BY created_at DESC LIMIT ?`,
-  ).bind(siteId, limit).all<{ id: string; completed_at: string }>();
-  return results.reverse().map((row) => ({ id: String(row.id), completedAt: String(row.completed_at) }));
+     WHERE site_id = ? AND status = 'completed' AND report_json IS NOT NULL ORDER BY created_at`,
+  ).bind(siteId).all<{ id: string; completed_at: string }>();
+  return results.map((row) => ({ id: String(row.id), completedAt: String(row.completed_at) }));
 }
 
 /** Of `urls`, those live in the previous crawl (fetched, status under 400) and missing or erroring (status 400 or more) in this one. Pages the previous crawl never fetched are unknown, never vanished. */
@@ -46,28 +46,30 @@ export async function saveFindingKeys(db: D1Like, siteId: string, analysisId: st
 }
 
 /**
- * The latest finished runs with their key lists, oldest first. Runs saved
- * before key lists existed get theirs from their report here (one read, one
- * batch of writes); their crawls are long pruned, so no vanished rows.
+ * Every finished run that has a key list, oldest first. Runs saved before
+ * key lists existed get theirs from their report's findings here, the
+ * newest `BACKFILL_RUNS` of them per open (one read, one batch of writes
+ * that never replaces a list a finishing run just saved); their crawls are
+ * long pruned, so no vanished rows. A fixed number of queries whatever the
+ * run count.
  */
 export async function historyRuns(db: D1Like, siteId: string): Promise<HistoryRun[]> {
   const runs = await listCompletedAnalyses(db, siteId);
-  const saved = new Map((await listSnapshots<KeyRow>(db, siteId, FINDING_KEYS)).map((entry) => [entry.scope, entry.rows]));
-  const missing = runs.filter((run) => !saved.has(run.id)).map((run) => run.id);
-  const reports = new Map<string, { findings?: Finding[] }>();
+  const { results: lists } = await db.prepare(
+    "SELECT scope, rows_json FROM site_snapshots WHERE site_id = ? AND kind = ? AND scope IN (SELECT value FROM json_each(?))",
+  ).bind(siteId, FINDING_KEYS, JSON.stringify(runs.map((run) => run.id))).all<{ scope: string; rows_json: string }>();
+  const keys = new Map(lists.map((row) => [String(row.scope), JSON.parse(String(row.rows_json)) as KeyRow[]]));
+  const missing = runs.filter((run) => !keys.has(run.id)).slice(-BACKFILL_RUNS);
   if (missing.length) {
-    const { results } = await db.prepare("SELECT id, report_json FROM analyses WHERE id IN (SELECT value FROM json_each(?))").bind(JSON.stringify(missing)).all<{ id: string; report_json: string }>();
-    for (const row of results) reports.set(String(row.id), JSON.parse(String(row.report_json)));
+    const { results } = await db.prepare("SELECT id, json_extract(report_json, '$.findings') AS findings FROM analyses WHERE id IN (SELECT value FROM json_each(?))")
+      .bind(JSON.stringify(missing.map((run) => run.id))).all<{ id: string; findings: string | null }>();
+    const findings = new Map(results.map((row) => [String(row.id), row.findings ? JSON.parse(String(row.findings)) as Finding[] : []]));
+    const statements = missing.map((run) => {
+      const rows = runKeys({ findings: findings.get(run.id) ?? [] });
+      keys.set(run.id, rows);
+      return snapshotStatement(db, siteId, { kind: FINDING_KEYS, scope: run.id, periodEnd: run.completedAt.slice(0, 10), rows }, true);
+    });
+    await runStatements(db, statements);
   }
-  const statements: ReturnType<typeof snapshotStatement>[] = [];
-  let previous: KeyRow[] = [];
-  const out: HistoryRun[] = [];
-  for (const run of runs) {
-    const keys = saved.get(run.id) ?? runKeys(reports.get(run.id) ?? {}, previous);
-    if (!saved.has(run.id)) statements.push(snapshotStatement(db, siteId, { kind: FINDING_KEYS, scope: run.id, periodEnd: run.completedAt.slice(0, 10), rows: keys }));
-    out.push({ analysisId: run.id, completedAt: run.completedAt, keys });
-    previous = keys;
-  }
-  await runStatements(db, statements);
-  return out;
+  return runs.filter((run) => keys.has(run.id)).map((run) => ({ analysisId: run.id, completedAt: run.completedAt, keys: keys.get(run.id)! }));
 }

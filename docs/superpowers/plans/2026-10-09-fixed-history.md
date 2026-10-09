@@ -15,7 +15,7 @@
 - No new table and no migration: key lists live in `site_snapshots` (kind `finding_keys`, scope = analysis id).
 - `findingKey` = `${category}|${title with every run of digits replaced by "#"}`, lower-cased and trimmed.
 - `pages` on a key row is `pagesAffected.slice(0, 50)`.
-- History looks back over the latest **12** finished runs (`HISTORY_RUNS = 12`); a request does a fixed number of D1 queries (the Free plan allows 50).
+- History reads every finished run; the backfill fills at most **12** missing key lists per open (`BACKFILL_RUNS = 12`); a request does a fixed number of D1 queries whatever the run count (the Free plan allows 50). (Revised after review: the plan first capped the runs read, which would have cut the log short.)
 - The History API response is `{ runs, open, numbers: { resolved, fixedWithEumon, noLongerApplies, actions }, rows }`, rows newest first, capped at **200**.
 - Badge texts: "Fixed with Eumon", "Resolved", "No longer applies", "Pull request", "Page edit", "CTA test", "Published".
 - Empty states: "Run an analysis first." and "History starts with your second analysis: fix something, run it again."

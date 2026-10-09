@@ -25,19 +25,18 @@ export async function assembleHistory(db: D1Like, siteId: string): Promise<Histo
   const [changes, revisions, variants, publications] = await Promise.all([listChanges(db, siteId), listPageRevisions(db, siteId), listCtaVariants(db, siteId), listPublications(db, siteId)]);
   const { resolved, open } = resolutions(runs);
 
-  // A change names a finding id; the key lists say which problem that id was.
+  // A change names a finding id; the key lists say which problem that id was. A problem that came back may have a change per stretch.
   const keyOf = new Map(runs.flatMap((run) => run.keys.map((row) => [row.id, row.key] as const)));
   const done = changes.filter((change) => DONE.has(change.status));
-  const fixedBy = new Map<string, (typeof done)[number]>();
+  const changesFor = new Map<string, typeof done>();
   for (const change of done) {
     const key = change.findingId && keyOf.get(change.findingId);
-    if (key && !fixedBy.has(key)) fixedBy.set(key, change);
+    if (key) changesFor.set(key, [...(changesFor.get(key) ?? []), change]);
   }
   const prTitle = (change: (typeof done)[number]) => `${change.prNumber ? `Pull request #${change.prNumber}` : "Change"}: ${change.title}`;
 
   const resolutionRows: HistoryRow[] = resolved.map((entry) => {
-    const change = fixedBy.get(entry.key);
-    const fixed = change && change.createdAt >= entry.firstSeen && change.createdAt <= entry.resolvedAt ? change : undefined;
+    const fixed = changesFor.get(entry.key)?.find((change) => change.createdAt >= entry.firstSeen && change.createdAt <= entry.resolvedAt);
     return {
       kind: fixed ? "fixed" : entry.vanished ? "vanished" : "resolved",
       at: entry.resolvedAt, title: entry.title,

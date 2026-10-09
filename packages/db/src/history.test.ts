@@ -80,7 +80,17 @@ describe("history key lists", () => {
     await finished(db, "a2", "2026-09-04T00:00:00.000Z", []);
     await finished(db, "a3", "2026-09-05T00:00:00.000Z", []);
     assert.deepEqual((await listCompletedAnalyses(db, "s")).map((run) => run.id), ["a1", "a2", "a3"]);
-    assert.deepEqual((await listCompletedAnalyses(db, "s", 2)).map((run) => run.id), ["a2", "a3"], "the window keeps the latest");
+  });
+
+  it("reads every finished run, filling at most twelve missing key lists per open, newest first", async () => {
+    const db = await site();
+    for (let index = 1; index <= 14; index++) await finished(db, `a${index}`, `2026-09-${String(index).padStart(2, "0")}T00:00:00.000Z`, [finding(`f${index}`, "Thin meta descriptions")]);
+    await db.prepare("DELETE FROM site_snapshots WHERE kind = ?").bind(FINDING_KEYS).run();
+    const first = await historyRuns(db, "s");
+    assert.deepEqual(first.map((run) => run.analysisId), Array.from({ length: 12 }, (_, index) => `a${index + 3}`), "the two oldest wait for the next open");
+    const second = await historyRuns(db, "s");
+    assert.equal(second.length, 14);
+    assert.equal(second[0]!.analysisId, "a1");
   });
 
   it("groups published pages by day and template, newest day first", async () => {

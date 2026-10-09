@@ -203,7 +203,7 @@ function suggestionsFor(site: SiteRecord, view: string | undefined, competitors:
     return ["Which landing pages bring enquiries?", "How have landing page views changed this month?", site.gscProperty ? "Which queries are close to page one?" : "What changed after the last page edits?"];
   }
   if (view === "Performance") return [site.gscProperty ? "Which queries are close to page one?" : "How do I connect Search Console?", "How have Google clicks changed since the last month?", "Which pages bring enquiries?"];
-  if (view === "Keywords & competitors") return [competitors[0] ? `How do we compare with ${competitors[0]}?` : "Who are our competitors in search?", "Which keyword gaps are worth a page?", "What kinds of pages do competitors publish that we don't?"];
+  if (view === "Keywords") return [competitors[0] ? `How do we compare with ${competitors[0]}?` : "Who are our competitors in search?", "Which keyword gaps are worth a page?", "What kinds of pages do competitors publish that we don't?"];
   return ["What should we fix first?", "Which page types have empty HTML?", competitors[0] ? `How do we compare with ${competitors[0]}?` : "Which issues did the last crawl find?"];
 }
 

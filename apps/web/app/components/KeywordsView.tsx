@@ -24,7 +24,7 @@ export function KeywordsView({ site, onNavigate }: { site: SiteRecord; onNavigat
   return (
     <div>
       <ViewHeader
-        title="Keywords & competitors"
+        title="Keywords"
         description={<>What {host}'s searches are worth, which searches competitors win, the pages they publish that you don't, and authority beside theirs. Keywords {results.keywords.asOf ? "refresh monthly with Sync now on Performance" : "fill in with Sync now on Performance"}; competitors are compared by each analysis.</>}
       />
       <div className="results">

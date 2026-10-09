@@ -21,12 +21,12 @@ import { Button, LeafIcon, ThemeToggle } from "./components/ui";
  * `steps` are the pipeline steps (README) a view covers; `group` labels the run of views it starts.
  * View keys stay as they were when labels changed, so saved and shared links keep working.
  * Each question has one page: Overview (is it working, what first, technical),
- * Performance (search, enquiries), Keywords & competitors (how we compare).
+ * Performance (search, enquiries), Keywords (how we compare).
  */
 const NAV: Array<{ view: View; label: string; steps?: string; group?: string }> = [
   { view: "overview", label: "Overview" },
   { view: "results", label: "Performance" },
-  { view: "keywords", label: "Keywords & competitors" },
+  { view: "keywords", label: "Keywords" },
   { view: "ask", label: "Ask" },
   { view: "data", label: "Data", steps: "1–3", group: "Landing page engine" },
   { view: "pages", label: "Landing pages", steps: "4–5" },

@@ -28,9 +28,13 @@ export function ClientReport({ token }: { token: string }) {
             <KeywordsCard keywords={data.results.keywords} host={new URL(data.site.baseUrl).hostname} operator={false} hasCredentials={data.site.signals.keywords} hasMarkets={data.results.markets.length > 0}
               searchTop10={data.results.search?.buckets.find((bucket) => bucket.top === 10)?.queries ?? null} />
             <EnquiriesCard data={data} operator={false} />
-            <AiReadersCard data={data} operator={false} />
-            <AiReferralsCard data={data} operator={false} />
-            <QuestionSearchesCard data={data} operator={false} />
+            {data.results.ai && (
+              <>
+                <AiReadersCard data={data} operator={false} />
+                <AiReferralsCard data={data} operator={false} />
+                <QuestionSearchesCard data={data} operator={false} />
+              </>
+            )}
             <Card title="Speed and authority" subtitle="Speed for real Chrome visitors over 28 days (Google's 75th percentile), Lighthouse lab scores, and an authority estimate.">
               <SpeedSection data={data} operator={false} />
               <div className="section-title">Authority</div>

@@ -31,7 +31,7 @@ npm install
 npm run build:packages
 cp apps/web/.dev.vars.example apps/web/.dev.vars   # fill in what you need (below)
 npm run db:migrate:local
-npm run dev                                         # http://localhost:5174
+npm run dev                                         # builds the packages, then http://localhost:5174
 ```
 
 What each setting in `.dev.vars` unlocks (details in [apps/web/README.md](apps/web/README.md)):

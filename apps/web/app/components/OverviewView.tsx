@@ -188,18 +188,19 @@ export function OverviewView({ site, tab, onTab, onNavigate }: {
     <div>
       <ViewHeader
         title={site.name}
-        description={<>Whether organic search is working for <a href={site.baseUrl} target="_blank" rel="noreferrer">{site.baseUrl}</a>, what to do first, and the detail behind it, one tab per question. {results.data?.results.searchThrough ? `Google data through ${formatDay(results.data.results.searchThrough)}.` : ""}</>}
+        description={<>Whether organic search is working for <a href={site.baseUrl} target="_blank" rel="noreferrer">{new URL(site.baseUrl).hostname}</a>, and what to do first.{results.data?.results.searchThrough ? ` Google data through ${formatDay(results.data.results.searchThrough)}.` : ""}</>}
         actions={(
           <div className="view-actions">
             <div className="row">
               <Button variant="ghost" onClick={shareLink}>{shared ? "Link copied" : "Copy client link"}</Button>
               <Button variant="secondary" busy={syncing} onClick={syncNow}>Sync now</Button>
-              {!running && report && <Button variant="ghost" disabled={busy === "analysis"} onClick={() => runAnalysis(true)}>Re-crawl every page</Button>}
               {!running && <Button busy={busy === "analysis"} onClick={() => runAnalysis()}>{run?.stalled ? "Start a new run" : report ? "Update analysis" : "Run analysis"}</Button>}
             </div>
             {!running && report && !run?.stalled && (
               <p className="view-note">
-                Update reuses pages that haven't changed.{pace ? ` Re-crawling all ${formatNumber(report.sitemap.totalUrls)} takes about ${Math.max(1, Math.round(report.sitemap.totalUrls / pace.perMinute))} min.` : ""}
+                Update reuses pages that haven't changed, or{" "}
+                <button className="text-link" disabled={busy === "analysis"} onClick={() => runAnalysis(true)}>re-crawl all {formatNumber(report.sitemap.totalUrls)}</button>
+                {pace ? ` (about ${Math.max(1, Math.round(report.sitemap.totalUrls / pace.perMinute))} min)` : ""}.
               </p>
             )}
           </div>
@@ -264,7 +265,7 @@ function Briefing({ report, running, leads, hasSearch, competitorCount, onOpen, 
   onNavigate: Navigate;
 }) {
   const families = report?.coverage?.families ?? [];
-  const actions = report ? doFirst(report) : [];
+  const actions = report ? doFirst(report, 10) : [];
   const open = (place: Place & { label: string }) => <Button small variant="ghost" onClick={() => onOpen(place)}>{place.label} →</Button>;
   const competition = report?.competition;
   const domains = competition?.competitors.filter((competitor) => competitor.analyzed).slice(0, 2) ?? [];
@@ -279,7 +280,8 @@ function Briefing({ report, running, leads, hasSearch, competitorCount, onOpen, 
         </Card>
         <Card title="Do first" subtitle={actions.length ? "The top of the growth plan, in priority order." : undefined}>
           {actions.length ? (
-            <ol className="do-first">
+            // Scrolls inside the card, so the list never makes the row taller than the heatmap beside it.
+            <div className="do-first-scroll"><ol className="do-first">
               {actions.map((action, index) => (
                 <li key={action.title}>
                   <button onClick={() => onOpen(AREA_PLACE[action.area])}>
@@ -289,7 +291,7 @@ function Briefing({ report, running, leads, hasSearch, competitorCount, onOpen, 
                   </button>
                 </li>
               ))}
-            </ol>
+            </ol></div>
           ) : <p className="empty-state">{report ? "Nothing to do first in this analysis." : running ? "The backlog fills in when the analysis finishes." : "Run an analysis to see what to do first."}</p>}
         </Card>
       </div>

@@ -123,13 +123,21 @@ const STATE_NAMES = ["Waiting", "Served", "Empty HTML", "Error", "Blocked", "Blo
 const MAX_HEIGHT = 168;
 const GROW_MS = 520;
 
-/** Square size and URLs per square, so the garden fits in about 170px whatever the site's size. */
-function plotFor(urls: number, beds: number, width: number) {
+/** The largest square the garden draws, so a site with a handful of URLs gets big squares, not a strip. */
+const MAX_PITCH = 36;
+
+/**
+ * Square size and URLs per square: the largest square at which every URL
+ * fits the space (about 170px tall by default, or the whole area given),
+ * then several URLs per square once even small squares won't fit.
+ */
+function plotFor(urls: number, beds: number, width: number, height = MAX_HEIGHT) {
+  const pitches = Array.from({ length: MAX_PITCH - 4 }, (_, index) => MAX_PITCH - index);
   for (let k = 1; ; k++) {
     const cells = Math.ceil(urls / k) + beds;
-    for (const pitch of [14, 12, 10, 8, 7, 6, 5]) {
+    for (const pitch of pitches) {
       const columns = Math.max(1, Math.floor(width / pitch));
-      if (Math.ceil(cells / columns) * pitch <= MAX_HEIGHT) return { k, pitch, columns, gap: pitch >= 8 ? 2 : 1 };
+      if (Math.ceil(cells / columns) * pitch <= height) return { k, pitch, columns, gap: pitch >= 16 ? Math.round(pitch * 0.14) : pitch >= 8 ? 2 : 1 };
     }
   }
 }
@@ -141,21 +149,27 @@ function plotFor(urls: number, beds: number, width: number) {
  * and the healthy ones bloom when the analysis finishes. Counts are exact per
  * bed; where a problem sits inside its bed carries no meaning.
  */
-export function CrawlGarden({ families, bloom = false, label }: { families: Bed[]; bloom?: boolean; label: string }) {
+export function CrawlGarden({ families, bloom = false, label, fill = false }: { families: Bed[]; bloom?: boolean; label: string; fill?: boolean }) {
   const box = useRef<HTMLDivElement>(null);
+  /** With `fill`, the squares size themselves to this area, which takes the card's free height. */
+  const area = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const beds = useRef(new Map<string, { states: Uint8Array; born: Float64Array }>());
   const bloomed = useRef(false);
   const frame = useRef(0);
   const [width, setWidth] = useState(0);
+  const [height, setHeight] = useState(0);
   const [tip, setTip] = useState<{ x: number; y: number; bed: Bed; state: number } | null>(null);
   const [theme, setTheme] = useState(0);
   const reduced = useReducedMotion();
 
   useLayoutEffect(() => {
-    const element = box.current;
+    const element = area.current;
     if (!element) return;
-    const observer = new ResizeObserver(([entry]) => setWidth(Math.floor(entry!.contentRect.width)));
+    const observer = new ResizeObserver(([entry]) => {
+      setWidth(Math.floor(entry!.contentRect.width));
+      setHeight(Math.floor(entry!.contentRect.height));
+    });
     observer.observe(element);
     const themeWatch = new MutationObserver(() => setTheme((value) => value + 1));
     themeWatch.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
@@ -163,7 +177,7 @@ export function CrawlGarden({ families, bloom = false, label }: { families: Bed[
   }, []);
 
   const urls = families.reduce((sum, bed) => sum + bed.total, 0);
-  const plot = width ? plotFor(urls, families.length, width) : null;
+  const plot = width && (!fill || height) ? plotFor(urls, families.length, width, fill ? height : MAX_HEIGHT) : null;
 
   // Bring each bed's squares up to date: new squares take the states that appeared since the last poll.
   if (plot) {
@@ -302,8 +316,10 @@ export function CrawlGarden({ families, bloom = false, label }: { families: Bed[
   void theme;
   const familyName = (family: string) => (family === "home" ? "Homepage" : family === "page" ? "Top-level pages" : `/${family}/`);
   return (
-    <div className="garden" ref={box}>
-      <canvas ref={canvas} role="img" aria-label={label} onMouseMove={hover} onMouseLeave={() => setTip(null)} />
+    <div className={`garden${fill ? " fill" : ""}`} ref={box}>
+      <div className="garden-area" ref={area}>
+        <canvas ref={canvas} role="img" aria-label={label} onMouseMove={hover} onMouseLeave={() => setTip(null)} />
+      </div>
       {tip && (
         <div className="garden-tip" style={{ left: tip.x, top: tip.y }}>
           <strong>{familyName(tip.bed.family)} · {STATE_NAMES[tip.state]}</strong>

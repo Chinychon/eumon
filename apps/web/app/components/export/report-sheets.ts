@@ -1,5 +1,5 @@
 import type { Report } from "../report-model";
-import { familyLabel } from "../report-model.ts";
+import { familyLabel, urlPath } from "../report-model.ts";
 import type { Leads, Payload } from "../site-data";
 import type { Cell, Sheet } from "./workbook";
 
@@ -10,7 +10,7 @@ import type { Cell, Sheet } from "./workbook";
  */
 
 type Results = Payload["results"];
-const path = (url: string) => url.replace(/^https?:\/\/[^/]+/, "") || "/";
+const path = urlPath;
 const sheet = (name: string, columns: string[], rows: Cell[][]): Sheet => ({ name, columns, rows });
 const round = (value: number | null | undefined, digits = 1) => (value === null || value === undefined ? null : Number(value.toFixed(digits)));
 

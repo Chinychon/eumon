@@ -37,3 +37,15 @@ describe("export workbook", () => {
     assert.equal(fileName("Search · Demo Dental Clinic", "2026-10-09", "xlsx"), "search-demo-dental-clinic-2026-10-09.xlsx");
   });
 });
+
+describe("spreadsheet formulas", () => {
+  it("neutralises text that a spreadsheet would run as a formula, and leaves numbers alone", () => {
+    const sheet = { name: "Queries", columns: ["Query", "Change"], rows: [["=HYPERLINK(\"http://evil\",\"x\")", -5], ["-2+3", 7], ["@sum", null], ["price", 1]] };
+    const csv = toCsv(sheet).split("\r\n");
+    assert.equal(csv[1], "\"'=HYPERLINK(\"\"http://evil\"\",\"\"x\"\")\",-5");
+    assert.equal(csv[2], "'-2+3,7");
+    assert.equal(csv[3], "'@sum,");
+    assert.equal(csv[4], "price,1");
+    assert.equal(toTsv([sheet]).split("\n")[2], "'-2+3\t7");
+  });
+});

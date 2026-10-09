@@ -213,3 +213,20 @@ describe("signals helpers", () => {
     assert.equal(await topEumonPage(db, "s", "2026-10-07"), "/guides/b");
   });
 });
+
+describe("enquiries by source", () => {
+  it("backfills the by-source split for a site that was synced before the split existed", async () => {
+    const db = openSqliteD1();
+    const at = "2026-10-05T04:00:00.000Z";
+    await upsertSite(db, { id: "s", name: "x.com", baseUrl: "https://x.com", createdAt: at, updatedAt: at });
+    await recordLandingSession(db, { siteId: "s", sessionId: "a".repeat(16), pageId: "p1", source: "search", at: "2026-10-01T01:00:00Z" });
+    await insertConversionEvent(db, { id: "e1", siteId: "s", event: "whatsapp_click", occurredAt: "2026-10-01T02:00:00Z", sessionId: "a".repeat(16) });
+    await syncFirstPartyResults(db, "s", new Date(at));
+    // An older deploy wrote leads and leads_eumon, never the split.
+    await db.prepare("DELETE FROM metric_points WHERE site_id = 's' AND metric LIKE 'leads\\_eumon.%' ESCAPE '\\'").run();
+    await syncFirstPartyResults(db, "s", new Date("2026-10-20T04:00:00.000Z"));
+    const series = await listMetricSeries(db, "s", ["leads_eumon", "leads_eumon.search"], "2026-09-01", "2026-10-31");
+    assert.equal(series["leads_eumon.search"]![0]?.day, "2026-10-01", "the split starts where the leads start, not seven days ago");
+    assert.equal(series["leads_eumon.search"]!.length, series.leads_eumon!.length, "every day leads_eumon has, the split has too");
+  });
+});

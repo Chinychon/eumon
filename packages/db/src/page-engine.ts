@@ -842,10 +842,13 @@ export async function incrementPageMetric(
 }
 
 /** Keeps the first Eumon page a session landed on, and where it came from (`search`, `ai:<assistant>`, `other`). */
-export async function recordLandingSession(db: D1Like, input: { siteId: string; sessionId: string; pageId: string; source?: string; at?: string }): Promise<void> {
-  await db.prepare(
+/** Records a session's first landing on an Eumon page. True when this was the first: a reload or a later page in the same session returns false. */
+export async function recordLandingSession(db: D1Like, input: { siteId: string; sessionId: string; pageId: string; source?: string; at?: string }): Promise<boolean> {
+  const result = await db.prepare(
     "INSERT OR IGNORE INTO page_sessions (site_id, session_id, page_id, first_seen_at, source) VALUES (?, ?, ?, ?, ?)",
-  ).bind(input.siteId, input.sessionId, input.pageId, input.at ?? nowIso(), input.source ?? null).run();
+  ).bind(input.siteId, input.sessionId, input.pageId, input.at ?? nowIso(), input.source ?? null).run() as { meta?: { changes?: number }; changes?: number } | undefined;
+  // D1 reports the row count under meta; Node's SQLite at the top level.
+  return (result?.meta?.changes ?? result?.changes ?? 0) > 0;
 }
 
 /** One AI agent's request for a landing page (`fetch`, name = agent), or one visit an AI assistant sent (`referral`, name = assistant). */

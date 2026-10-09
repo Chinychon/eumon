@@ -131,7 +131,8 @@ export function runTechnicalSeoAudit(input: {
     ? AI_ROBOTS_CHECKS.filter((crawler) => !parseRobots(input.robotsTxt!, crawler.agent.toLowerCase(), { exact: true }).isAllowed("/"))
     : [];
   if (blockedAiCrawlers.length) {
-    const blockedSearch = blockedAiCrawlers.filter((crawler) => crawler.kind !== "crawler" || /search/i.test(crawler.agent));
+    // Each agent says whether it feeds AI answers; training and control-only tokens don't.
+    const blockedSearch = blockedAiCrawlers.filter((crawler) => crawler.search);
     findings.push({
       id: createId("finding"),
       siteId,

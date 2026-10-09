@@ -7,7 +7,7 @@ import {
   authorityDomain, dataForSeoLocation, fetchAuthority, fetchCruxHistory, fetchGa4AiReferrals, fetchGa4Daily, fetchKeywordOverview, fetchLabScore, fetchQueryPositions, fetchRankedKeywords, fetchSearchDaily,
   ga4AiPoints, mergePositions, questionPoints, rankingPoints, searchDayPoints, topQueries, type FormFactor, type QueryPosition,
 } from "@organic-growth/agents";
-import { addDays, countryNumeric, type PricedKeyword, type RankedKeyword, type SiteRecord } from "@organic-growth/core";
+import { addDays, AI_ASSISTANTS, countryNumeric, type PricedKeyword, type RankedKeyword, type SiteRecord } from "@organic-growth/core";
 import {
   defaultPageSettings, firstMetricDay, getPageSettings, indexStatusCounts, listSiteCompetitorDomains, listSiteMarkets, listSnapshotDates, listSnapshots, pagesToInspect, saveIndexStatus,
   saveSnapshot, saveTopQueriesSnapshot, syncFirstPartyResults, topEumonPage, type D1Like, type MetricPoint,
@@ -206,7 +206,9 @@ const analytics: Source = {
       fetchGa4AiReferrals(token, site.ga4Property!, start, end, fetchFn).catch(() => null),
     ]);
     const ai = aiDays ? ga4AiPoints(aiDays) : [];
-    const aiTotals = new Set(ai.filter((point) => point.metric === "ga4_ai_sessions").map((point) => point.day));
+    // GA4 revises recent days: a day, or an assistant on a day, it no longer reports is a real 0, so the by-assistant bars always add up to the total.
+    const written = new Set(ai.map((point) => `${point.metric}|${point.day}`));
+    const aiMetrics = ["ga4_ai_sessions", "ga4_ai_key_events", ...AI_ASSISTANTS.map(({ assistant }) => `ga4_ai_sessions.${assistant}`)];
     return {
       points: [
         ...days.flatMap((day) => [
@@ -214,7 +216,7 @@ const analytics: Source = {
           { metric: "ga4_organic_sessions", day: day.day, value: day.organicSessions },
           { metric: "ga4_organic_engaged_sessions", day: day.day, value: day.organicEngagedSessions },
           { metric: "ga4_organic_key_events", day: day.day, value: day.organicKeyEvents },
-          ...(aiDays && !aiTotals.has(day.day) ? [{ metric: "ga4_ai_sessions", day: day.day, value: 0 }, { metric: "ga4_ai_key_events", day: day.day, value: 0 }] : []),
+          ...(aiDays ? aiMetrics.filter((metric) => !written.has(`${metric}|${day.day}`)).map((metric) => ({ metric, day: day.day, value: 0 })) : []),
         ]),
         ...ai,
       ],

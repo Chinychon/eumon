@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { SiteRecord } from "@organic-growth/core";
+import { isProblemNote, type SiteRecord } from "@organic-growth/core";
 import { api, errorMessage, formatDay, formatNumber } from "./api";
 import { AnalysisProgress, isFinished, useRun, type RunDelta, type RunProgress } from "./AnalysisProgress";
 import { Heatmap, PairedBars, Scatter } from "./charts";
@@ -172,7 +172,7 @@ export function OverviewView({ site, tab, onTab, onNavigate }: {
       const { notes } = await api<{ notes: string[] }>(`/api/sites/${site.id}/results/sync`, { method: "POST" });
       await reloadResults();
       // Say which sources failed, instead of numbers quietly not moving.
-      const problems = notes.filter((entry) => /\b(failed|stopped|refused)\b/i.test(entry));
+      const problems = notes.filter(isProblemNote);
       if (problems.length) setError(`Sync finished, but ${problems.length === 1 ? "one source" : `${problems.length} sources`} didn't update: ${problems.join("; ")}. Setup → Sync history keeps the details.`);
     } catch (cause) { setError(errorMessage(cause)); } finally { setSyncing(false); }
   }

@@ -4,21 +4,13 @@
  * only reaches files Eumon creates.
  */
 
+import { sheetTitles } from "@organic-growth/core";
 import { googleError } from "./google-search-console.js";
 
 export type SheetTable = { name: string; columns: string[]; rows: Array<Array<string | number | null>> };
 
-/** Unique sheet titles, as Google requires; brackets and a few other characters confuse A1 ranges, so they go. */
-function titles(names: string[]): string[] {
-  const used = new Set<string>();
-  return names.map((name) => {
-    const base = name.replace(/[[\]:*?/\\']/g, " ").replace(/\s+/g, " ").trim().slice(0, 90) || "Sheet";
-    let title = base;
-    for (let n = 2; used.has(title.toLowerCase()); n++) title = `${base} ${n}`;
-    used.add(title.toLowerCase());
-    return title;
-  });
-}
+/** Unique sheet titles, as Google requires; brackets, a few other characters and apostrophes confuse A1 ranges, so they go. */
+const titles = (names: string[]) => sheetTitles(names, 90, /[[\]:*?/\\']/g);
 
 const cell = (value: string | number | null, header: boolean) => ({
   ...(value === null ? {} : { userEnteredValue: typeof value === "number" && Number.isFinite(value) ? { numberValue: value } : { stringValue: String(value) } }),

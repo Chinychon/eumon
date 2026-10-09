@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { GeneratedPage, PageTemplate } from "@organic-growth/core";
 import { listRecordKeys, listSiteMarkets, setSiteMarkets, upsertSite } from "./index.js";
-import { datasetCoverage, defaultPageSettings, deleteTemplate, getPageSettings, listPageRevisions, setTemplatePublication, syncTemplatePages, upsertDataset, upsertPageSettings, upsertRecords, upsertTemplate } from "./page-engine.js";
+import { datasetCoverage, defaultPageSettings, deleteTemplate, getPageSettings, listPageRevisions, recordLandingSession, setTemplatePublication, syncTemplatePages, upsertDataset, upsertPageSettings, upsertRecords, upsertTemplate } from "./page-engine.js";
 import { openSqliteD1 } from "./sqlite.js";
 
 describe("datasetCoverage", () => {
@@ -90,5 +90,15 @@ describe("page revisions", () => {
     for (const table of ["generated_pages", "page_revisions", "page_metrics_daily"]) {
       assert.equal(Number((await db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).first<{ n: number }>())?.n), 0, table);
     }
+  });
+});
+
+describe("landing sessions", () => {
+  it("says whether a landing was the session's first, so a reload isn't a second visit", async () => {
+    const db = openSqliteD1();
+    const at = "2026-10-09T00:00:00.000Z";
+    await upsertSite(db, { id: "s", name: "x.com", baseUrl: "https://x.com", createdAt: at, updatedAt: at });
+    assert.equal(await recordLandingSession(db, { siteId: "s", sessionId: "b".repeat(16), pageId: "p1", source: "ai:chatgpt" }), true);
+    assert.equal(await recordLandingSession(db, { siteId: "s", sessionId: "b".repeat(16), pageId: "p1", source: "ai:chatgpt" }), false);
   });
 });

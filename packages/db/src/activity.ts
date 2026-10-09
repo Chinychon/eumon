@@ -26,8 +26,8 @@ export async function listSyncRuns(db: D1Like, siteId: string, limit = 20): Prom
   return results.map((row) => ({ id: row.id, trigger: row.trigger, startedAt: row.started_at, finishedAt: row.finished_at, notes: JSON.parse(row.notes_json) as string[] }));
 }
 
-/** A note that says something went wrong, as the sync writes them ("analytics failed: …", "inspection stopped: …"). */
-export const isProblemNote = (note: string) => /\b(failed|stopped|refused)\b/i.test(note);
+/** The one rule for a note that says something went wrong lives in core, where the console's pages can read it too. */
+export { isProblemNote } from "@organic-growth/core";
 
 export type RecentEvent = { id: string; event: string; destination: string | null; pageUrl: string | null; occurredAt: string; landedOnEumon: boolean };
 

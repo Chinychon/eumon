@@ -545,7 +545,7 @@ async function seedPageEngine(db: D1Like, now: number) {
   // AI agents reading the guides since go-live: crawlers steady, live fetches (an assistant answering someone) growing. CCBot and Bytespider are blocked in robots.txt.
   const agents: Array<[string, number, number]> = [
     ["GPTBot", 3, 0], ["OAI-SearchBot", 2, 1], ["ChatGPT-User", 0, 6], ["ClaudeBot", 2, 0], ["Claude-SearchBot", 1, 1], ["Claude-User", 0, 2],
-    ["PerplexityBot", 2, 1], ["Perplexity-User", 0, 4], ["Meta-ExternalAgent", 2, 0], ["Amazonbot", 1, 0], ["DeepSeekBot", 1, 0],
+    ["PerplexityBot", 2, 1], ["Perplexity-User", 0, 4], ["Meta-ExternalAgent", 2, 0], ["Amazonbot", 1, 0], ["DeepSeekBot", 1, 0], ["GoogleOther", 1, 0],
   ];
   for (let d = 79; d >= 0; d--) {
     const day = new Date(now - d * DAY).toISOString().slice(0, 10);

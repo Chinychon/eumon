@@ -34,6 +34,14 @@ describe("AI agents", () => {
     assert.ok(AI_ENGINES.some((entry) => entry.engine === "deepseek"), "radar axis");
   });
 
+  it("gives Google's AI fetchers a Gemini axis: GoogleOther and Vertex AI count there, Googlebot itself stays Search", () => {
+    assert.equal(agentOf("Mozilla/5.0 (compatible; GoogleOther) Chrome/W.X.Y.Z Safari/537.36"), "GoogleOther");
+    assert.equal(agentOf("Mozilla/5.0 (compatible; Google-CloudVertexBot/1.0; +https://developers.google.com/crawling/docs/crawlers-fetchers/google-common-crawlers)"), "Google-CloudVertexBot");
+    assert.equal(agentOf("Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"), "googlebot", "Gemini's answers fetch as Googlebot, counted under Search");
+    assert.ok(AI_ENGINES.some((entry) => entry.engine === "google" && /Gemini/.test(entry.label)), "an axis named for Gemini");
+    for (const agent of ["GoogleOther", "Google-CloudVertexBot"]) assert.equal(AI_AGENTS.find((entry) => entry.agent === agent)?.engine, "google");
+  });
+
   it("maps every agent to a radar engine", () => {
     const engines = new Set(AI_ENGINES.map((entry) => entry.engine));
     for (const agent of AI_AGENTS) assert.ok(engines.has(agent.engine), agent.agent);

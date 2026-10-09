@@ -12,6 +12,7 @@ export const AI_ENGINES = [
   { engine: "anthropic", label: "Anthropic" },
   { engine: "perplexity", label: "Perplexity" },
   { engine: "meta", label: "Meta" },
+  { engine: "google", label: "Gemini / Google" },
   { engine: "commoncrawl", label: "Common Crawl" },
   { engine: "deepseek", label: "DeepSeek" },
   { engine: "other", label: "Others" },
@@ -39,9 +40,10 @@ export type AiAgent = {
 
 /**
  * AI user agents worth counting, from each operator's published crawler docs.
- * Google has no separate AI user agent: its AI answers fetch as Googlebot,
- * and `Google-Extended` (like `Applebot-Extended`) is only a robots.txt token,
- * so both appear in `AI_ROBOTS_TOKENS`, not here.
+ * Gemini's answers and AI Overviews fetch as Googlebot (counted under Search);
+ * Google's other AI fetchers, GoogleOther and Vertex AI, are its axis here.
+ * `Google-Extended` (like `Applebot-Extended`) is only a robots.txt token, so
+ * both appear in `AI_ROBOTS_TOKENS`, not here.
  */
 export const AI_AGENTS: AiAgent[] = [
   { agent: "ChatGPT-User", engine: "openai", kind: "live", purpose: "ChatGPT opening a page to answer someone" },
@@ -55,6 +57,8 @@ export const AI_AGENTS: AiAgent[] = [
   { agent: "PerplexityBot", engine: "perplexity", kind: "crawler", purpose: "Perplexity search results", search: true },
   { agent: "Meta-ExternalFetcher", engine: "meta", kind: "live", purpose: "Meta AI opening a page to answer someone" },
   { agent: "Meta-ExternalAgent", engine: "meta", kind: "crawler", purpose: "Meta AI training and search", search: true },
+  { agent: "GoogleOther", engine: "google", kind: "crawler", purpose: "Google's generic crawler, used by its product teams including AI research (Gemini's answers fetch as Googlebot)" },
+  { agent: "Google-CloudVertexBot", engine: "google", kind: "crawler", purpose: "Google Vertex AI agents, fetching on a site owner's request" },
   { agent: "CCBot", engine: "commoncrawl", kind: "crawler", purpose: "Common Crawl, an open archive many AI models train on" },
   // DeepSeek publishes no crawler documentation; this is the token bot directories report seeing.
   { agent: "DeepSeekBot", engine: "deepseek", kind: "crawler", purpose: "DeepSeek (token reported by bot directories; DeepSeek documents none)" },

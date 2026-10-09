@@ -33,6 +33,9 @@ Short definitions of the domain terms that name modules and seams. Architecture 
 
 - **Opportunity**: a prioritised thing to do, from search data, competitor content, collected datasets or a technical finding. Its `searchDemand` and `estimatedDifficulty` come from one **demand estimate** (`packages/agents/src/demand.ts`); until keyword data is synced they are heuristics, and the rationales say so.
 
+- **Finding key**: the same problem across analyses: a finding's category and title with numbers blanked (`findingKey`). Each finished analysis saves its **key list** (kind `finding_keys` in the snapshot store, scope = the analysis id); a `vanished` row in a list says a previous finding is gone because every page it pointed at was missing or erroring in that crawl, decided on save because crawl rows are pruned later.
+- **Resolution**: a finding key present in one analysis and absent from the next (`resolutions`). The History tab labels it **Fixed with Eumon** when a merged change or opened PR names a finding with that key, **No longer applies** when its row vanished, and **Resolved** otherwise. Eumon's **actions** (pull requests, page edits, CTA tests, publications) are listed beside them.
+
 ## Data
 
 - **Ownership**: every table with a `site_id` cascades from `sites`, so deleting a site is `DELETE FROM sites` (`deleteSite` clears the two largest tables first). Crawl results (`pages`) and changes cascade from their analysis; daily page counters (`page_metrics_daily`, `ai_page_daily`) from their generated page. A new table that belongs to a site takes `REFERENCES sites(id) ON DELETE CASCADE`; the demo test checks nothing survives a delete.

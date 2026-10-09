@@ -1,5 +1,6 @@
 import { RANK_BUCKETS, type TopQuery } from "@organic-growth/core";
 import type { MetricPoint } from "@organic-growth/db";
+import { isQuestionQuery } from "./search.js";
 
 export type SearchDay = { day: string; clicks: number; impressions: number; positionWeight: number };
 export type QueryPosition = { query: string; position: number; impressions: number; clicks: number };
@@ -61,4 +62,14 @@ export function topQueries(current: QueryPosition[], previous: QueryPosition[], 
         before: was ? { clicks: was.clicks, impressions: was.impressions, position: was.position } : null,
       };
     });
+}
+
+/** Question searches in a query list (a 28-day window), as a snapshot on the window's last day: how many, and their clicks and impressions. */
+export function questionPoints(rows: QueryPosition[], day: string): MetricPoint[] {
+  const questions = rows.filter((row) => isQuestionQuery(row.query));
+  return [
+    { metric: "question_queries", day, value: questions.length },
+    { metric: "question_clicks", day, value: questions.reduce((total, row) => total + row.clicks, 0) },
+    { metric: "question_impressions", day, value: questions.reduce((total, row) => total + row.impressions, 0) },
+  ];
 }

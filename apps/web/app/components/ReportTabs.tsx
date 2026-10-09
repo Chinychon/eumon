@@ -45,10 +45,12 @@ export function WhyRow({ lead, title, aside, children }: { lead?: ReactNode; tit
 export const Severity = ({ value }: { value: string }) => <span className={`severity ${SEVERITY_CLASS[value] ?? "info"}`}>{value}</span>;
 
 /** The site as Google receives it, where it breaks, how fast it is, and the fixes, most impact first. Speed comes from the sync, so it shows before any analysis. */
-export function TechnicalTab({ siteId, report, results, changes, busy, hasRepo, onGenerateChange, onOpenPullRequest, onRecrawl }: {
+export function TechnicalTab({ siteId, report, results, running, changes, busy, hasRepo, onGenerateChange, onOpenPullRequest, onRecrawl }: {
   siteId: string;
   report: Report | null;
   results: Payload | null;
+  /** An analysis is under way, so the empty states wait for it rather than ask for one. */
+  running: boolean;
   changes: Change[];
   busy: string;
   hasRepo: boolean;
@@ -60,8 +62,8 @@ export function TechnicalTab({ siteId, report, results, changes, busy, hasRepo, 
   if (!report) {
     return (
       <div className="results">
-        <TechnicalNumbers report={null} results={results} />
-        <Card title="Every sitemap URL"><p className="empty-state">Run an analysis to fetch every sitemap URL as Googlebot does and see where pages break.</p></Card>
+        <TechnicalNumbers report={null} results={results} running={running} />
+        <Card title="Every sitemap URL"><p className="empty-state">{running ? "Fills in when the analysis finishes: every sitemap URL, fetched as Googlebot does, and where pages break." : "Run an analysis to fetch every sitemap URL as Googlebot does and see where pages break."}</p></Card>
         {speed}
       </div>
     );
@@ -72,7 +74,7 @@ export function TechnicalTab({ siteId, report, results, changes, busy, hasRepo, 
   const flaky = (report.rendering?.repeatability ?? []).filter((entry) => entry.failed);
   return (
     <div className="results">
-      <TechnicalNumbers report={report} results={results} />
+      <TechnicalNumbers report={report} results={results} running={running} />
       <div className="ruled-grid c11">
         <Card title="Every sitemap URL" subtitle={`${formatNumber(report.coverage?.totalUrls ?? report.sitemap.totalUrls)} URLs, one square each, as Googlebot received them.`}>
           {families.length ? (
@@ -115,7 +117,7 @@ export function TechnicalTab({ siteId, report, results, changes, busy, hasRepo, 
 }
 
 /** Sitemap size, how much of it reaches Google intact, site health, and the fixes found. */
-function TechnicalNumbers({ report, results }: { report: Report | null; results: Payload | null }) {
+function TechnicalNumbers({ report, results, running }: { report: Report | null; results: Payload | null; running: boolean }) {
   const coverage = report?.coverage;
   const served = servedShare(coverage);
   const health = results?.results.health;
@@ -123,7 +125,7 @@ function TechnicalNumbers({ report, results }: { report: Report | null; results:
   const urgent = fixes?.filter((finding) => finding.severity === "CRITICAL" || finding.severity === "HIGH").length ?? 0;
   return (
     <div className="metrics-grid">
-      <Kpi label="URLs in sitemap" value={report ? formatNumber(report.sitemap.totalUrls) : "—"} caption={!report ? "Run an analysis to fill these in" : report.sitemap.errors[0] ? "See the sitemap note below" : "Declared to search engines"} />
+      <Kpi label="URLs in sitemap" value={report ? formatNumber(report.sitemap.totalUrls) : "—"} caption={!report ? (running ? "Fills in when the analysis finishes" : "Run an analysis to fill these in") : report.sitemap.errors[0] ? "See the sitemap note below" : "Declared to search engines"} />
       <Kpi label="Reach Google intact" value={served === null ? "—" : `${Math.round(served * 100)}%`} caption={coverage ? `${formatNumber(coverage.emptyShellUrls)} empty · ${formatNumber(coverage.httpErrorUrls)} errors` : "Every sitemap URL, fetched as Google"} />
       <Kpi label="Site health" value={health?.value == null ? "—" : `${health.value}%`} caption={health?.day ? `No error, empty HTML, or noindex · ${formatDay(health.day)}` : "Crawled pages with no error, empty HTML, or noindex"} />
       <Kpi label="Technical fixes" value={fixes ? formatNumber(fixes.length) : "—"} caption={fixes ? (urgent ? `${urgent} critical or high` : "None critical or high") : "Found by each analysis"} />
@@ -274,8 +276,13 @@ const GAP_STATUS: Record<string, { label: string; tone: string }> = {
 };
 
 /** Pages per section against each competitor, your advantage, the competitors, and what stands out. */
-export function CompetitorsSection({ report, site, onNavigate }: { report: Report | null; site: SiteRecord; onNavigate: Navigate }) {
+export function CompetitorsSection({ report, site, competitors, onNavigate }: { report: Report | null; site: SiteRecord; competitors: number; onNavigate: Navigate }) {
   const competition = report?.competition;
+  if (competitors > 0 && !competition?.rows.length) {
+    return (
+      <Card title="Competitors not compared yet" subtitle={`${competitors} ${competitors === 1 ? "competitor is" : "competitors are"} set up. ${report ? "The last analysis ran before they were added; update it" : "Run an analysis"} (top of this page) to compare the kinds of pages they publish with yours.`} />
+    );
+  }
   if (!report || !competition?.rows.length) {
     return (
       <Card title="No competitors compared yet" subtitle="Add competitor domains in Setup. The next analysis reads their sitemaps and a few pages per section to show which kinds of pages they publish that you don't.">
@@ -316,8 +323,8 @@ export function CompetitorsSection({ report, site, onNavigate }: { report: Repor
       </div>
       <Card title="What stands out">
         {competition.insights.slice(0, 6).map((insight) => <p key={insight} className="line-item">{insight}</p>)}
-        <details className="why-row table-toggle">
-          <summary><span className="why-title">Every section as a table</span><span className="why-open" aria-hidden="true">Show</span></summary>
+        <details className="why-row table-toggle" open>
+          <summary><span className="why-title">Every section as a table</span><span className="why-open" aria-hidden="true" /></summary>
           <div className="table-wrap">
             <table className="table">
               <thead><tr><th>Content type</th><th className="num">You</th>{domains.map((competitor) => <th className="num" key={competitor.domain}>{competitor.domain}</th>)}<th>Status</th><th>Your data</th></tr></thead>
@@ -380,9 +387,14 @@ export function ConversionSections({ report, leads, onNavigate }: { report: Repo
               ))}</tbody>
             </table>
           </div>
-          <details className="why-row table-toggle">
-            <summary><span className="why-title">Events worth tracking</span><span className="why-open" aria-hidden="true">Show</span></summary>
-            <div className="why-body">{conversion.suggestedEvents.map((entry) => <p key={entry.event}><code>{entry.event}</code>: {entry.trigger}</p>)}</div>
+          <details className="why-row table-toggle" open>
+            <summary><span className="why-title">Events worth tracking</span><span className="why-open" aria-hidden="true" /></summary>
+            <div className="table-wrap">
+              <table className="table">
+                <thead><tr><th>Event</th><th>When it fires</th></tr></thead>
+                <tbody>{conversion.suggestedEvents.map((entry) => <tr key={entry.event}><td><code>{entry.event}</code></td><td>{entry.trigger}</td></tr>)}</tbody>
+              </table>
+            </div>
           </details>
         </Card>
       )}
@@ -395,6 +407,54 @@ export function ConversionSections({ report, leads, onNavigate }: { report: Repo
         </Card>
       ))}
     </>
+  );
+}
+
+const KIND_LABEL: Record<string, string> = { live: "Live answers", crawler: "Crawler", control: "Control token" };
+
+/**
+ * Whether AI assistants may read the site, from the latest analysis:
+ * robots.txt per AI agent, llms.txt, and question-and-answer markup.
+ * Blocking is a choice; this says what it costs, it never "fixes" it.
+ */
+export function AiReadinessCard({ report }: { report: Report | null }) {
+  const readiness = report?.aiReadiness;
+  if (!readiness) {
+    return <Card title="Can AI assistants read the site?"><p className="empty-state">{report ? "The last analysis ran before AI readiness was checked. Run it again to see it." : "Run an analysis to check robots.txt for each AI crawler, llms.txt, and question markup."}</p></Card>;
+  }
+  const blocked = readiness.crawlers.filter((crawler) => !crawler.allowed);
+  const findings = report!.findings.filter((finding) => finding.category === "ai_visibility");
+  return (
+    <Card title="Can AI assistants read the site?" subtitle="From the latest analysis: robots.txt as it applies to each AI agent, an llms.txt guide for AI tools, and FAQ markup on the sampled pages.">
+      <div className="metrics-grid c3">
+        <Kpi label="AI agents allowed" value={readiness.robots === "unreadable" ? "—" : `${readiness.crawlers.length - blocked.length} of ${readiness.crawlers.length}`}
+          caption={readiness.robots === "missing" ? "No robots.txt: everything is allowed" : readiness.robots === "unreadable" ? "robots.txt couldn't be read" : blocked.length ? `${blocked.length} blocked in robots.txt` : "None blocked"} />
+        <Kpi label="llms.txt" value={readiness.llmsTxt ? "Present" : "None"} caption={readiness.llmsTxt ? "A plain-text guide AI tools can read" : "Optional: a short guide to the site for AI tools"} />
+        <Kpi label="Pages with FAQ markup" value={`${readiness.faqPages.pages} of ${readiness.faqPages.of}`} caption="Sampled pages with FAQPage or QAPage data" />
+      </div>
+      {findings.map((finding) => (
+        <WhyRow key={finding.id} lead={<Severity value={finding.severity} />} title={finding.title}>
+          <p>{finding.summary}</p>
+          {finding.recommendation && <p><strong>Next step.</strong> {finding.recommendation}</p>}
+        </WhyRow>
+      ))}
+      <details className="why-row table-toggle" open={blocked.length > 0}>
+        <summary><span className="why-title">Every AI agent and what robots.txt says</span><span className="why-open" aria-hidden="true" /></summary>
+        <div className="table-wrap">
+          <table className="table">
+            <thead><tr><th>Agent</th><th>What it does</th><th>Kind</th><th>robots.txt</th></tr></thead>
+            <tbody>{readiness.crawlers.map((crawler) => (
+              <tr key={crawler.agent}>
+                <td><code>{crawler.agent}</code></td>
+                <td className="small">{crawler.purpose}</td>
+                <td className="small">{KIND_LABEL[crawler.kind] ?? crawler.kind}</td>
+                <td>{crawler.allowed ? <Badge tone="green">Allowed</Badge> : <Badge tone="red">Blocked</Badge>}</td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+      </details>
+    </Card>
   );
 }
 
@@ -427,7 +487,7 @@ function CodeIntelligence({ repo }: { repo: NonNullable<Report["repo"]> }) {
       <div className="fact-grid">{facts.filter(([, value]) => value).map(([name, value]) => <div key={name}><span>{name}</span><strong>{value}</strong></div>)}</div>
       {routes.length > 0 && (
         <details className="why-row table-toggle">
-          <summary><span className="why-title">{routes.length} routes and how they render</span><span className="why-open" aria-hidden="true">Show</span></summary>
+          <summary><span className="why-title">{routes.length} routes and how they render</span><span className="why-open" aria-hidden="true" /></summary>
           <div className="table-wrap">
             <table className="table">
               <thead><tr><th>Route</th><th>Renders</th><th>Content data</th><th>Title & meta</th><th>Notes</th></tr></thead>

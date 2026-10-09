@@ -22,16 +22,16 @@ export function useResults(endpoint: string) {
   return { data, error, reload };
 }
 
-/** The latest finished analysis report: `undefined` while loading, `null` when no analysis has finished. */
+/** The latest finished analysis report: `undefined` while loading, `null` when no analysis has finished. `error` is set when it couldn't be read, so a failure isn't mistaken for "no analysis". */
 export function useLatestReport(siteId: string) {
-  const [report, setReport] = useState<Report | null | undefined>(undefined);
+  const [state, setState] = useState<{ report: Report | null | undefined; error: string }>({ report: undefined, error: "" });
   useEffect(() => {
-    setReport(undefined);
+    setState({ report: undefined, error: "" });
     api<{ analysis: { status: string; report?: Report } | null; previous: { report: Report } | null }>(`/api/sites/${siteId}/analyses`)
-      .then((latest) => setReport(latest.analysis?.status === "completed" && latest.analysis.report ? latest.analysis.report : latest.previous?.report ?? null))
-      .catch(() => setReport(null));
+      .then((latest) => setState({ report: latest.analysis?.status === "completed" && latest.analysis.report ? latest.analysis.report : latest.previous?.report ?? null, error: "" }))
+      .catch((cause) => setState({ report: null, error: errorMessage(cause) }));
   }, [siteId]);
-  return report;
+  return state;
 }
 
 export type Leads = { pages: number; views: number; ctaClicks: number; conversions: number; events28: number } | null;

@@ -839,10 +839,20 @@ export async function incrementPageMetric(
   await runStatements(db, statements);
 }
 
-export async function recordLandingSession(db: D1Like, input: { siteId: string; sessionId: string; pageId: string }): Promise<void> {
+/** Keeps the first Eumon page a session landed on, and where it came from (`search`, `ai:<assistant>`, `other`). */
+export async function recordLandingSession(db: D1Like, input: { siteId: string; sessionId: string; pageId: string; source?: string; at?: string }): Promise<void> {
   await db.prepare(
-    "INSERT OR IGNORE INTO page_sessions (session_id, site_id, page_id, first_seen_at) VALUES (?, ?, ?, ?)",
-  ).bind(input.sessionId, input.siteId, input.pageId, nowIso()).run();
+    "INSERT OR IGNORE INTO page_sessions (session_id, site_id, page_id, first_seen_at, source) VALUES (?, ?, ?, ?, ?)",
+  ).bind(input.sessionId, input.siteId, input.pageId, input.at ?? nowIso(), input.source ?? null).run();
+}
+
+/** One AI agent's request for a landing page (`fetch`, name = agent), or one visit an AI assistant sent (`referral`, name = assistant). */
+export async function recordAiSignal(db: D1Like, input: { siteId: string; pageId: string; signal: "fetch" | "referral"; name: string; day?: string; count?: number }): Promise<void> {
+  const count = input.count ?? 1;
+  await db.prepare(
+    `INSERT INTO ai_page_daily (site_id, page_id, day, signal, name, count) VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT(page_id, day, signal, name) DO UPDATE SET count = count + excluded.count`,
+  ).bind(input.siteId, input.pageId, input.day ?? nowIso().slice(0, 10), input.signal, input.name, count).run();
 }
 
 export async function replacePageSearchMetrics(

@@ -2,7 +2,7 @@
 
 import { countryName, type Compare, type SpeedMetric, type SpeedRating, type TopQuery } from "@organic-growth/core";
 import { formatDay, formatNumber } from "../api";
-import { BarList, Funnel, LineChart } from "../charts";
+import { BarList, Funnel, LineChart, Radar } from "../charts";
 import type { Navigate } from "../report-model";
 import type { Payload } from "../site-data";
 import { Badge, Button, Card, Kpi } from "../ui";
@@ -227,5 +227,102 @@ export function ConnectPrompt({ operator, what, onNavigate }: { operator: boolea
     <div className="empty-state">
       {operator ? <>Connect {what} to see 16 months of history. <Button small variant="secondary" onClick={() => onNavigate?.("setup")}>Open Setup</Button></> : `${what} is not connected yet.`}
     </div>
+  );
+}
+
+const share = (value: number, total: number) => (total ? ` · ${Math.round((value / total) * 100)}%` : "");
+
+/**
+ * Which AI assistants read Eumon's pages: a radar per company with crawls
+ * and live fetches over 28 days, then both per week. Live fetches are the
+ * stronger signal: an assistant opened the page to answer someone.
+ */
+export function AiReadersCard({ data, operator }: Section) {
+  const { ai, numbers } = data.results;
+  const subtitle = "Requests from AI agents to Eumon's landing pages, 28 days to yesterday. Crawls collect pages ahead of time; a live fetch is an assistant opening a page to answer someone. Google's AI answers fetch as Googlebot, counted under Search.";
+  if (!ai.since) {
+    return (
+      <Card title="AI assistants reading your pages" subtitle={subtitle}>
+        <p className="empty-state">{numbers.pages.live ? "No AI agent has fetched an Eumon page yet. Counting started with the first published page." : operator ? "Publish landing pages first: AI fetches are counted on Eumon's pages." : "Not measured yet."}</p>
+      </Card>
+    );
+  }
+  const crawls = ai.engines.reduce((total, entry) => total + (entry.crawler.current ?? 0), 0);
+  const live = ai.engines.reduce((total, entry) => total + (entry.live.current ?? 0), 0);
+  const liveBefore = ai.engines.some((entry) => entry.live.previous !== null) ? ai.engines.reduce((total, entry) => total + (entry.live.previous ?? 0), 0) : null;
+  return (
+    <Card title="AI assistants reading your pages" subtitle={subtitle}>
+      <div className="ruled-grid c21 ai-readers">
+        <Radar caption="AI fetches of Eumon pages by company, last 28 days" axes={ai.engines.map((entry) => entry.label)}
+          series={[{ name: "crawls", values: ai.engines.map((entry) => entry.crawler.current) }, { name: "live fetches", values: ai.engines.map((entry) => entry.live.current) }]} />
+        <div className="metrics-grid ai-kpis">
+          <Kpi label="Live fetches · 28 days" value={formatNumber(live)} caption={liveBefore === null ? `counted since ${day(ai.since)}` : `${formatNumber(liveBefore)} in the 28 days before`} />
+          <Kpi label="Crawls · 28 days" value={formatNumber(crawls)} caption={`by ${ai.engines.filter((entry) => entry.crawler.current).length} companies`} />
+        </div>
+      </div>
+      {ai.weeks.length > 1 && (
+        <>
+          <div className="section-title">AI fetches per week</div>
+          <LineChart series={["crawls", "live fetches"]} partialFrom={ai.weeks.find((week) => week.partial)?.week} points={ai.weeks.map((week) => ({ x: week.week, values: [week.crawler, week.live] }))} />
+        </>
+      )}
+      <p className="small muted">Counted from each request's user agent, which a bot can fake; the hub, sitemap and robots.txt aren't counted.</p>
+    </Card>
+  );
+}
+
+/** Visits AI assistants sent: to Eumon's pages (from the referrer), to the whole site (from GA4), and the enquiries they became. Never added together. */
+export function AiReferralsCard({ data, operator }: Section) {
+  const { ai, numbers } = data.results;
+  const eumon = ai.referrals.total;
+  const ga4 = ai.ga4;
+  const leads = ai.leadsBySource;
+  const leadTotal = leads ? leads.search + leads.ai + leads.other : 0;
+  return (
+    <Card title="Visits from AI answers" subtitle="People who clicked through from ChatGPT, Perplexity, Gemini, Copilot, Claude or Meta AI. Eumon's pages and the whole site are measured separately and never added together.">
+      <div className="metrics-grid">
+        <Kpi label="To Eumon pages · 28 days" value={eumon.current === null ? "—" : formatNumber(eumon.current)} caption={eumon.current === null ? (numbers.pages.live ? "None yet" : "Publish pages first") : versus(eumon)} />
+        <Kpi label="To the whole site · 28 days" value={ga4?.sessions.current == null ? "—" : formatNumber(ga4.sessions.current)} caption={ga4 ? versus(ga4.sessions) : analyticsState(data.site.analytics, operator)} />
+        <Kpi label="Key events from AI visits" value={ga4?.keyEvents.current == null ? "—" : formatNumber(ga4.keyEvents.current)} caption={ga4 ? "Google Analytics key events, 28 days" : "From Google Analytics"} />
+        <Kpi label="Enquiries via AI · 28 days" value={leads ? formatNumber(leads.ai) : "—"} caption={leads ? `of ${formatNumber(leadTotal)} from Eumon pages` : "Eumon-page sessions, by where they came from"} />
+      </div>
+      <div className="ruled-grid c11 results-pair ai-referrers">
+        <div>
+          <div className="section-title">Eumon pages, by assistant</div>
+          {eumon.current ? <BarList rows={ai.referrals.byAssistant.filter((entry) => entry.visits).map((entry) => ({ label: entry.label, value: entry.visits }))} />
+            : <p className="empty-state">No visits from AI assistants to Eumon's pages in these 28 days.</p>}
+        </div>
+        <div>
+          <div className="section-title">Whole site, by assistant</div>
+          {ga4?.sessions.current ? <BarList rows={ga4.byAssistant.filter((entry) => entry.sessions).map((entry) => ({ label: entry.label, value: entry.sessions }))} />
+            : <p className="empty-state">{ga4 ? "No AI-referred sessions in these 28 days." : operator ? "Connect Google Analytics in Setup to count AI visits to the whole site." : "Analytics not connected yet."}</p>}
+        </div>
+      </div>
+      {leads && leadTotal > 0 && (
+        <>
+          <div className="section-title">Eumon-page enquiries by where the visit came from</div>
+          <BarList format={(value) => `${formatNumber(value)}${share(value, leadTotal)}`} rows={[
+            { label: "Search engines", value: leads.search }, { label: "AI assistants", value: leads.ai }, { label: "Other or unknown", value: leads.other },
+          ]} />
+        </>
+      )}
+      <p className="small muted">AI apps often hide where a visitor came from, so these are lower bounds; a utm_source the assistant adds (such as chatgpt.com) counts too.</p>
+    </Card>
+  );
+}
+
+/** Question searches: the ones answer engines answer directly, from the latest 28 days of Search Console queries. */
+export function QuestionSearchesCard({ data, operator, onNavigate }: Section) {
+  const questions = data.results.ai.questions;
+  return (
+    <Card title="Question searches" subtitle="Searches phrased as a question (how, what, berapa, bagaimana…), the kind AI answers and Google's answer boxes respond to directly. From the latest 28 days of Search Console queries.">
+      {questions ? (
+        <div className="metrics-grid c3">
+          <Kpi label="Question searches" value={formatNumber(questions.queries)} caption={`28 days to ${day(questions.day)}`} />
+          <Kpi label="Their clicks" value={formatNumber(questions.clicks)} caption={questions.impressions ? `${((questions.clicks / questions.impressions) * 100).toFixed(1)}% click-through` : "—"} />
+          <Kpi label="Their impressions" value={formatNumber(questions.impressions)} caption="Times a result showed" />
+        </div>
+      ) : data.site.searchConnected ? <p className="empty-state">Counted after the next sync.</p> : <ConnectPrompt operator={operator} what="Search Console" onNavigate={onNavigate} />}
+    </Card>
   );
 }

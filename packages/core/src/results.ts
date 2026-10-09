@@ -3,6 +3,7 @@
  * the API, the client link, and the tests all compute the same numbers.
  */
 
+import { AI_ASSISTANTS, AI_ENGINES, type AiAssistant, type AiEngine } from "./ai-agents.js";
 import { keywordsView, type KeywordsInput } from "./keywords.js";
 import { SPEED_METRICS, speedRating, type SpeedMetric, type SpeedRating } from "./signals.js";
 
@@ -83,16 +84,30 @@ const BUCKET_METRICS = RANK_BUCKETS.flatMap((n) => [`queries_top${n}`, `queries_
  * property clears. `sync.*` markers record that a source has run.
  */
 export const METRICS = {
-  firstParty: ["leads", "leads_eumon", "googlebot_fetches", "eumon_page_views", "eumon_cta_clicks", "published_pages"],
-  analysis: ["site_health", "crawl_urls", "crawl_empty_shells", "crawl_http_errors", "crawl_noindex"],
+  /** Plus leads by landing source: Eumon-page sessions that came from search, an AI assistant, or anything else. */
+  firstParty: ["leads", "leads_eumon", "leads_eumon.search", "leads_eumon.ai", "leads_eumon.other", "googlebot_fetches", "eumon_page_views", "eumon_cta_clicks", "published_pages"],
+  /** AI agents fetching Eumon pages, per engine and kind, and the visits AI assistants sent them. */
+  ai: [
+    "ai_fetches", "ai_crawler_fetches", "ai_live_fetches", "ai_referral_visits",
+    ...AI_ENGINES.flatMap(({ engine }) => [`ai_crawler_fetches.${engine}`, `ai_live_fetches.${engine}`]),
+    ...AI_ASSISTANTS.map(({ assistant }) => `ai_referral_visits.${assistant}`),
+  ],
+  /** Plus how many of the AI robots.txt tokens the site allows, of how many checked. */
+  analysis: ["site_health", "crawl_urls", "crawl_empty_shells", "crawl_http_errors", "crawl_noindex", "ai_crawlers_allowed", "ai_crawlers_checked"],
   /** Search Console: daily series (whole site, Eumon pages, target markets), Monday ranking buckets, index status. */
   search: [
     "sync.search", "sync.search@markets", "sync.rankings",
     ...SEARCH, ...SEARCH.map((metric) => `${metric}@markets`), ...SEARCH.map((metric) => `eumon_${metric}`),
     ...BUCKET_METRICS, ...BUCKET_METRICS.map((metric) => `${metric}@markets`),
     "pages_indexed", "pages_not_indexed",
+    /** Question searches in the latest 28-day query list (a rolling snapshot, not a daily sum). */
+    "question_queries", "question_clicks", "question_impressions",
   ],
-  ga4: ["sync.ga4", "ga4_sessions", "ga4_organic_sessions", "ga4_organic_engaged_sessions", "ga4_organic_key_events"],
+  /** Plus sessions AI assistants sent to the whole site, by assistant, and their key events. */
+  ga4: [
+    "sync.ga4", "ga4_sessions", "ga4_organic_sessions", "ga4_organic_engaged_sessions", "ga4_organic_key_events",
+    "ga4_ai_sessions", "ga4_ai_key_events", ...AI_ASSISTANTS.map(({ assistant }) => `ga4_ai_sessions.${assistant}`),
+  ],
   crux: ["sync.crux", ...["lcp", "inp", "cls"].flatMap((metric) => [`crux_${metric}_p75.phone`, `crux_${metric}_p75.desktop`])],
   lab: ["sync.lab", "lab_score_home.phone", "lab_score_home.desktop", "lab_score_eumon.phone", "lab_score_eumon.desktop"],
   /** Plus `authority:<domain>` for each current competitor. */
@@ -177,6 +192,26 @@ export type ResultsView = {
   lab: { phone: { home: number | null; eumon: number | null }; desktop: { home: number | null; eumon: number | null } };
   authority: { site: number | null; competitors: Array<{ domain: string; score: number | null }>; history: Array<{ day: string; value: number }> };
   keywords: KeywordsView;
+  ai: AiView;
+};
+
+/** AI visibility: who reads Eumon's pages for AI assistants, who sends visitors, and what that brings. */
+export type AiView = {
+  /** The first day an AI fetch or referral was recorded on Eumon pages; null until one is. */
+  since: string | null;
+  /** Fetches of Eumon pages per engine over the last 28 days, beside the 28 before: crawls ahead of time, and live fetches to answer someone. */
+  engines: Array<{ engine: AiEngine; label: string; crawler: Compare; live: Compare }>;
+  weeks: Array<{ week: string; crawler: number | null; live: number | null; partial: boolean }>;
+  /** Visits AI assistants sent to Eumon pages. */
+  referrals: { total: Compare; byAssistant: Array<{ assistant: AiAssistant; label: string; visits: number | null }> };
+  /** Eumon-page enquiries over 28 days by where the session first landed from; null before sources were recorded. */
+  leadsBySource: { search: number; ai: number; other: number } | null;
+  /** Sessions AI assistants sent to the whole site, from Google Analytics; null without GA4. */
+  ga4: { sessions: Compare; keyEvents: Compare; byAssistant: Array<{ assistant: AiAssistant; label: string; sessions: number | null }> } | null;
+  /** Question searches in the latest 28 days of Search Console queries; null before a query list is synced. */
+  questions: { queries: number; clicks: number; impressions: number; day: string } | null;
+  /** AI robots.txt tokens the site allows, from the latest analysis. */
+  crawlersAllowed: { allowed: number; checked: number } | null;
 };
 
 const HISTORY_DAYS = 486;
@@ -260,6 +295,42 @@ export function resultsView(input: ResultsInput): ResultsView {
   const visibleTotal = visibilityRows.reduce((total, row) => total + (row.traffic ?? 0), 0);
   const keywords = { ...keywordsView(keywordLists), visibility: visibilityRows.map((row) => ({ ...row, share: visibleTotal && row.traffic !== null ? row.traffic / visibleTotal : null })) };
 
+  const aiSince = series.ai_fetches?.[0]?.day ?? null;
+  // Weeks start at the first full week after counting began: before it, nothing was counted.
+  const crawlerWeeks = aiSince ? weekly(series.ai_crawler_fetches, aiSince, today, addDays(today, -1)) : [];
+  const liveWeeks = aiSince ? weekly(series.ai_live_fetches, aiSince, today, addDays(today, -1)) : [];
+  const sourceLeads = (source: string) => sum(series[`leads_eumon.${source}`], firstParty.current);
+  const hasSources = ["search", "ai", "other"].some((source) => series[`leads_eumon.${source}`]?.length);
+  const questionDay = series.question_queries?.length ? series.question_queries[series.question_queries.length - 1]!.day : null;
+  const allowed = latest(series.ai_crawlers_allowed, today);
+  const checked = latest(series.ai_crawlers_checked, today);
+  const ai: AiView = {
+    since: aiSince,
+    engines: AI_ENGINES.map(({ engine, label }) => ({
+      engine, label,
+      crawler: compare(series[`ai_crawler_fetches.${engine}`], firstParty),
+      live: compare(series[`ai_live_fetches.${engine}`], firstParty),
+    })),
+    weeks: crawlerWeeks.map((week, index) => ({ week: week.week, crawler: week.value, live: liveWeeks[index]?.value ?? null, partial: week.partial })),
+    referrals: {
+      total: compare(series.ai_referral_visits, firstParty),
+      byAssistant: AI_ASSISTANTS.map(({ assistant, label }) => ({ assistant, label, visits: sum(series[`ai_referral_visits.${assistant}`], firstParty.current) })),
+    },
+    leadsBySource: hasSources ? { search: sourceLeads("search") ?? 0, ai: sourceLeads("ai") ?? 0, other: sourceLeads("other") ?? 0 } : null,
+    ga4: input.ga4Connected && series.ga4_ai_sessions?.length ? {
+      sessions: compare(series.ga4_ai_sessions, google),
+      keyEvents: compare(series.ga4_ai_key_events, google),
+      byAssistant: AI_ASSISTANTS.map(({ assistant, label }) => ({ assistant, label, sessions: sum(series[`ga4_ai_sessions.${assistant}`], google.current) })),
+    } : null,
+    questions: questionDay ? {
+      queries: latest(series.question_queries, today) ?? 0,
+      clicks: latest(series.question_clicks, today) ?? 0,
+      impressions: latest(series.question_impressions, today) ?? 0,
+      day: questionDay,
+    } : null,
+    crawlersAllowed: allowed === null || checked === null ? null : { allowed, checked },
+  };
+
   const ga4Sessions = weekly(series.ga4_organic_sessions, from, today, googleComplete);
   const ga4Events = weekly(series.ga4_organic_key_events, from, today, googleComplete);
 
@@ -288,6 +359,6 @@ export function resultsView(input: ResultsInput): ResultsView {
       value: latest(series.site_health, today),
       day: series.site_health?.length ? series.site_health[series.site_health.length - 1]!.day : null,
     },
-    speed, lab, authority, keywords,
+    speed, lab, authority, keywords, ai,
   };
 }

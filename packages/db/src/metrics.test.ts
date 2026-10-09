@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { METRICS, RESULT_METRICS } from "@organic-growth/core";
-import { analysisHealthPoints, clearMetricPoints, topEumonPage, indexStatusCounts, listSitesForResults, pagesToInspect, saveIndexStatus, bumpReportShareVersion, createAnalysis, dailyLeads, firstMetricDay, getSite, insertConversionEvent, listMetricSeries, publishedPages, recordLandingSession, saveAnalysisReport, syncFirstPartyResults, updateSiteGa4Property, upsertMetricPoints, upsertSite } from "./index.js";
+import { analysisHealthPoints, clearMetricPoints, topEumonPage, indexStatusCounts, listSitesForResults, pagesToInspect, saveIndexStatus, bumpReportShareVersion, createAnalysis, dailyLeads, firstMetricDay, getSite, insertConversionEvent, listMetricSeries, publishedPages, recordAiSignal, recordLandingSession, saveAnalysisReport, syncAiResults, syncFirstPartyResults, updateSiteGa4Property, upsertMetricPoints, upsertSite } from "./index.js";
 import { openSqliteD1 } from "./sqlite.js";
 
 const now = "2026-10-07T00:00:00.000Z";
@@ -45,19 +45,53 @@ describe("first-party results", async () => {
 
   it("counts a session once per day and attributes it to Eumon when it landed on an Eumon page", async () => {
     assert.deepEqual(await dailyLeads(db, "s", "2026-09-01"), [
-      { day: "2026-10-01", leads: 2, eumonLeads: 1 },
-      { day: "2026-10-02", leads: 1, eumonLeads: 1 },
+      { day: "2026-10-01", leads: 2, eumonLeads: 1, bySource: { search: 0, ai: 0, other: 1 } },
+      { day: "2026-10-02", leads: 1, eumonLeads: 1, bySource: { search: 0, ai: 0, other: 1 } },
     ]);
+  });
+
+  it("splits Eumon leads by where the session landed from", async () => {
+    await recordLandingSession(db, { siteId: "s", sessionId: "c", pageId: "p1", source: "ai:chatgpt" });
+    await event("e6", "whatsapp_click", "2026-10-03T02:00:00Z", "c");
+    const [day] = (await dailyLeads(db, "s", "2026-10-03"));
+    assert.deepEqual(day, { day: "2026-10-03", leads: 1, eumonLeads: 1, bySource: { search: 0, ai: 1, other: 0 } });
   });
 
   it("writes the daily points, and a re-run overwrites them", async () => {
     await syncFirstPartyResults(db, "s", new Date("2026-10-07T04:15:00Z"));
     await syncFirstPartyResults(db, "s", new Date("2026-10-07T04:15:00Z"));
     const series = await listMetricSeries(db, "s", ["leads", "leads_eumon", "published_pages"], "2026-09-01", "2026-10-31");
-    assert.deepEqual(series.leads!.map((point) => point.value), [2, 1, 0, 0, 0, 0], "event days, then zeros through yesterday");
+    assert.deepEqual(series.leads!.map((point) => point.value), [2, 1, 1, 0, 0, 0], "event days, then zeros through yesterday");
     assert.deepEqual(series.leads_eumon!.slice(0, 2), [{ day: "2026-10-01", value: 1 }, { day: "2026-10-02", value: 1 }]);
     assert.deepEqual(series.published_pages, [{ day: "2026-10-07", value: 0 }]);
     assert.deepEqual(await publishedPages(db, "s"), { published: 0, goLive: null });
+  });
+});
+
+describe("AI visibility points", async () => {
+  const db = openSqliteD1();
+  await upsertSite(db, { id: "s", name: "x.com", baseUrl: "https://x.com", createdAt: now, updatedAt: now });
+  await recordAiSignal(db, { siteId: "s", pageId: "p1", signal: "fetch", name: "GPTBot", day: "2026-10-04" });
+  await recordAiSignal(db, { siteId: "s", pageId: "p1", signal: "fetch", name: "GPTBot", day: "2026-10-04" });
+  await recordAiSignal(db, { siteId: "s", pageId: "p2", signal: "fetch", name: "ChatGPT-User", day: "2026-10-04" });
+  await recordAiSignal(db, { siteId: "s", pageId: "p1", signal: "fetch", name: "PerplexityBot", day: "2026-10-06" });
+  await recordAiSignal(db, { siteId: "s", pageId: "p1", signal: "referral", name: "perplexity", day: "2026-10-06" });
+
+  it("rolls fetches up by engine and kind, referrals by assistant, with zeros from the first signal on", async () => {
+    await syncAiResults(db, "s", new Date("2026-10-07T04:15:00Z"));
+    await syncAiResults(db, "s", new Date("2026-10-07T04:15:00Z"));
+    const series = await listMetricSeries(db, "s", ["ai_fetches", "ai_crawler_fetches.openai", "ai_live_fetches.openai", "ai_crawler_fetches.perplexity", "ai_referral_visits.perplexity"], "2026-10-01", "2026-10-31");
+    assert.deepEqual(series.ai_fetches!.map((point) => [point.day, point.value]), [["2026-10-04", 3], ["2026-10-05", 0], ["2026-10-06", 1], ["2026-10-07", 0]]);
+    assert.equal(series["ai_crawler_fetches.openai"]![0]!.value, 2);
+    assert.equal(series["ai_live_fetches.openai"]![0]!.value, 1);
+    assert.equal(series["ai_crawler_fetches.perplexity"]![2]!.value, 1);
+    assert.equal(series["ai_referral_visits.perplexity"]![2]!.value, 1);
+  });
+
+  it("writes nothing before any AI signal is recorded", async () => {
+    const empty = openSqliteD1();
+    await syncAiResults(empty, "s", new Date("2026-10-07T04:15:00Z"));
+    assert.equal(await firstMetricDay(empty, "s", "ai_fetches"), null);
   });
 });
 
@@ -66,6 +100,11 @@ describe("site health snapshots", async () => {
     const points = analysisHealthPoints({ coverage: { totalUrls: 120, completedUrls: 100, emptyShellUrls: 8, httpErrorUrls: 2, issues: { noindex: 5 } } }, "2026-10-07");
     assert.deepEqual(points.find((point) => point.metric === "site_health"), { metric: "site_health", day: "2026-10-07", value: 85 });
     assert.deepEqual(analysisHealthPoints({ coverage: null }, "2026-10-07"), []);
+    assert.deepEqual(analysisHealthPoints({ coverage: null, aiReadiness: { robots: "read", crawlers: [{ allowed: true }, { allowed: false }, { allowed: true }] } }, "2026-10-07"), [
+      { metric: "ai_crawlers_allowed", day: "2026-10-07", value: 2 },
+      { metric: "ai_crawlers_checked", day: "2026-10-07", value: 3 },
+    ]);
+    assert.deepEqual(analysisHealthPoints({ aiReadiness: { robots: "unreadable", crawlers: [{ allowed: true }] } }, "2026-10-07"), []);
     assert.deepEqual(analysisHealthPoints({ coverage: { totalUrls: 0, completedUrls: 0, emptyShellUrls: 0, httpErrorUrls: 0 } }, "2026-10-07"), []);
   });
 

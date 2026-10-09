@@ -16,8 +16,13 @@ export type RobotsPolicy = {
  * name, e.g. `googlebot`): the most specific matching user-agent group
  * applies, and within it the longest matching rule wins, with `allow` winning
  * ties. `*` and `$` wildcards are supported.
+ *
+ * By default a group also applies when its user-agent is part of the token
+ * (`googlebot` covers `googlebot-news`, as Google documents). `exact` matches
+ * the whole token only, for crawlers that share a prefix with a different one
+ * (`applebot` vs `applebot-extended`, `claudebot` vs `claude-searchbot`).
  */
-export function parseRobots(body: string, token: string): RobotsPolicy {
+export function parseRobots(body: string, token: string, options: { exact?: boolean } = {}): RobotsPolicy {
   const groups: Group[] = [];
   const sitemaps: string[] = [];
   let current: Group | null = null;
@@ -53,7 +58,7 @@ export function parseRobots(body: string, token: string): RobotsPolicy {
     }
   }
 
-  const specific = groups.filter((group) => group.agents.some((agent) => agent !== "*" && token.includes(agent)));
+  const specific = groups.filter((group) => group.agents.some((agent) => agent !== "*" && (options.exact ? agent === token : token.includes(agent))));
   const applicable = specific.length ? specific : groups.filter((group) => group.agents.includes("*"));
   const rules = applicable.flatMap((group) => group.rules);
   const crawlDelay = applicable.map((group) => group.crawlDelay).find((delay) => delay !== undefined);

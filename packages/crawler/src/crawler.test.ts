@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
 import type { CrawlCoverage } from "@organic-growth/core";
-import { auditSitemap, defaultFetcher, sitemapEntries, fetchGooglebotPage, findingsFromCrawlCoverage, headerNoindex, isBotChallenge, isEmptyShell, parseHtmlSignals, runTechnicalSeoAudit, type Fetcher } from "./index.js";
+import { aiReadiness, auditSitemap, defaultFetcher, robotsState, sitemapEntries, fetchGooglebotPage, findingsFromCrawlCoverage, headerNoindex, isBotChallenge, isEmptyShell, parseHtmlSignals, runTechnicalSeoAudit, type Fetcher } from "./index.js";
 import { classifyLanguage, classifyUrlType, isSameSite } from "./urls.js";
 
 describe("isSameSite", () => {
@@ -173,9 +173,17 @@ describe("robots.txt rules in the technical audit", () => {
   it("does not treat a block on AI crawlers as blocking the site", () => {
     const findings = audit("User-agent: *\nAllow: /\n\nUser-agent: GPTBot\nDisallow: /\n\nUser-agent: ClaudeBot\nDisallow: /");
     assert.equal(findings.some((finding) => finding.severity === "CRITICAL"), false);
-    const ai = findings.find((finding) => finding.title.includes("AI search crawlers"));
+    const ai = findings.find((finding) => finding.category === "ai_visibility");
     assert.equal(ai?.severity, "INFORMATIONAL");
+    assert.equal(ai?.title, "robots.txt blocks AI training crawlers", "search and live fetchers can still read the site");
     assert.deepEqual(ai?.evidence.blocked, ["GPTBot", "ClaudeBot"]);
+  });
+
+  it("matches AI tokens exactly, so a group for one crawler doesn't decide for a longer name", () => {
+    const findings = audit("User-agent: *\nAllow: /\n\nUser-agent: Applebot\nDisallow: /\n\nUser-agent: Claude-SearchBot\nDisallow: /");
+    const ai = findings.find((finding) => finding.category === "ai_visibility");
+    assert.deepEqual(ai?.evidence.blocked, ["Claude-SearchBot"], "Applebot's group says nothing about Applebot-Extended, and ClaudeBot stays allowed");
+    assert.equal(ai?.title, "robots.txt blocks AI assistants from reading the site");
   });
 
   it("flags a sitewide block that applies to Googlebot", () => {
@@ -306,5 +314,30 @@ describe("sitemapEntries", () => {
     const fake: Fetcher = async (url) => ({ url, finalUrl: url, headers: {}, status: files[url] ? 200 : 404, body: files[url] ?? "" });
     const { lastmod } = await auditSitemap("https://a.example", fake);
     assert.equal(lastmod.get("https://a.example/doctors/x"), "2026-09-30");
+  });
+});
+
+describe("AI readiness", () => {
+  const ok = (body: string, headers: Record<string, string> = {}) => ({ status: 200, body, headers });
+
+  it("reads robots.txt per AI token, finds llms.txt, and counts FAQ markup", () => {
+    const readiness = aiReadiness({
+      robots: ok("User-agent: GPTBot\nDisallow: /\n\nUser-agent: *\nAllow: /"),
+      llms: ok("# Example\n> A dental clinic\n"),
+      pages: [{ jsonLdTypes: ["FAQPage", "Organization"] }, { jsonLdTypes: ["Article"] }, {}],
+    });
+    assert.equal(readiness.robots, "read");
+    assert.equal(readiness.crawlers.find((crawler) => crawler.agent === "GPTBot")?.allowed, false);
+    assert.equal(readiness.crawlers.find((crawler) => crawler.agent === "OAI-SearchBot")?.allowed, true);
+    assert.equal(readiness.crawlers.find((crawler) => crawler.agent === "Google-Extended")?.kind, "control");
+    assert.equal(readiness.llmsTxt, true);
+    assert.deepEqual(readiness.faqPages, { pages: 1, of: 3 });
+  });
+
+  it("treats an error page as unreadable and a 404 as no robots.txt, and never mistakes HTML for llms.txt", () => {
+    assert.equal(robotsState(ok("<!doctype html><html>Just a moment…</html>")).robots, "unreadable");
+    assert.equal(robotsState({ status: 503, body: "" }).robots, "unreadable");
+    assert.equal(robotsState({ status: 404, body: "Not found" }).robots, "missing");
+    assert.equal(aiReadiness({ robots: null, llms: ok("<html><body>Home</body></html>", { "content-type": "text/html" }), pages: [] }).llmsTxt, false);
   });
 });

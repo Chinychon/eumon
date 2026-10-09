@@ -4,7 +4,8 @@ import { useEffect, useState } from "react";
 import type { PageSettings, SiteRecord } from "@organic-growth/core";
 import { PAGE_LANGUAGES } from "@organic-growth/pages/labels";
 import { api, errorMessage } from "./api";
-import { Button, Card, CheckIcon, CopyBlock, CrossIcon, Field, PartHead } from "./ui";
+import { WhyRow } from "./ReportTabs";
+import { Badge, Button, Card, CheckIcon, CopyBlock, CrossIcon, Field, PartHead } from "./ui";
 
 type Snippet = { id: string; label: string; when: string; language: string; code: string };
 type Integration = {
@@ -129,9 +130,81 @@ export function SetupView({ site }: { site: SiteRecord }) {
           <Card title="4 · Track conversions on your main site" subtitle="Paste before </body> on every page. Conversions (forms, WhatsApp, calls, emails) are credited to the landing page the visitor first arrived on.">
             <CopyBlock code={integration.trackingSnippet} />
             <p className="small muted">Track anything else with <span className="mono">eumonTrack(&quot;booking_complete&quot;)</span>. No personal data or form contents are sent.</p>
+            <RecentEvents siteId={site.id} />
           </Card>
         </>
       )}
+      <PartHead id="sync-history" title="Sync history" description="Each time Eumon fetched Search Console, Analytics, speed, authority and keywords for this site, and what every source said. A failure here is why a number stopped updating." />
+      <SyncHistory siteId={site.id} />
     </div>
+  );
+}
+
+const when = (iso: string) => new Date(iso).toLocaleString("en", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+const isProblem = (note: string) => /\b(failed|stopped|refused)\b/i.test(note);
+
+type SyncRun = { id: string; trigger: "manual" | "daily"; startedAt: string; finishedAt: string; notes: string[] };
+
+/** The latest syncs, newest first; a run with a failed source opens to say which and why. */
+function SyncHistory({ siteId }: { siteId: string }) {
+  const [runs, setRuns] = useState<SyncRun[] | null>(null);
+  const [error, setError] = useState("");
+  const load = () => api<{ runs: SyncRun[] }>(`/api/sites/${siteId}/sync-runs`).then((data) => { setRuns(data.runs); setError(""); }).catch((cause) => setError(errorMessage(cause)));
+  useEffect(() => { setRuns(null); void load(); }, [siteId]); // eslint-disable-line react-hooks/exhaustive-deps
+  return (
+    <Card title="Recent syncs" actions={<Button small variant="ghost" onClick={load}>Refresh</Button>}>
+      {error ? <p className="empty-state">{error}</p> : !runs ? <p className="empty-state">Loading…</p> : !runs.length ? <p className="empty-state">No syncs yet. Sync now on the Dashboard runs one; the daily run adds one a day.</p> : runs.map((run) => {
+        const problems = run.notes.filter(isProblem);
+        const seconds = Math.max(0, Math.round((Date.parse(run.finishedAt) - Date.parse(run.startedAt)) / 1000));
+        return (
+          <details key={run.id} className="why-row" open={problems.length > 0 && run === runs[0]}>
+            <summary>
+              {problems.length ? <Badge tone="red">{problems.length} failed</Badge> : <Badge tone="green">OK</Badge>}
+              <span className="why-title">{run.trigger === "manual" ? "Sync now" : "Daily sync"} · {when(run.startedAt)}</span>
+              <span className="why-aside small muted">{seconds < 60 ? `${seconds}s` : `${Math.round(seconds / 60)} min`}</span>
+              <span className="why-open" aria-hidden="true">Notes</span>
+            </summary>
+            <ul className="why-body sync-notes">
+              {run.notes.length ? run.notes.map((note, index) => <li key={index} className={isProblem(note) ? "bad-count" : undefined}>{note}</li>) : <li>Nothing to sync: no sources apply yet.</li>}
+            </ul>
+          </details>
+        );
+      })}
+    </Card>
+  );
+}
+
+type RecentEvent = { id: string; event: string; destination: string | null; pageUrl: string | null; occurredAt: string; landedOnEumon: boolean };
+
+/** The latest events the tracker sent, to check the snippet works without waiting for the counts. */
+function RecentEvents({ siteId }: { siteId: string }) {
+  const [events, setEvents] = useState<RecentEvent[] | null>(null);
+  const load = () => api<{ events: RecentEvent[] }>(`/api/sites/${siteId}/events/recent?limit=10`).then((data) => setEvents(data.events)).catch(() => setEvents([]));
+  useEffect(() => { setEvents(null); void load(); }, [siteId]); // eslint-disable-line react-hooks/exhaustive-deps
+  const path = (url: string | null) => (url ? url.replace(/^https?:\/\/[^/]+/, "") || "/" : "—");
+  return (
+    <>
+      <div className="row spread recent-events-head">
+        <div className="section-title">Recent events received</div>
+        <Button small variant="ghost" onClick={load}>Refresh</Button>
+      </div>
+      {!events ? <p className="empty-state">Loading…</p> : !events.length ? (
+        <p className="empty-state">No events received yet. Once the snippet is on your site, a WhatsApp tap, call or form submission shows up here within seconds.</p>
+      ) : (
+        <div className="table-wrap">
+          <table className="table">
+            <thead><tr><th>When</th><th>Event</th><th>Page</th><th>First landed on</th></tr></thead>
+            <tbody>{events.map((event) => (
+              <tr key={event.id}>
+                <td className="small">{when(event.occurredAt)}</td>
+                <td><code>{event.event}</code>{event.destination && <span className="was">{event.destination}</span>}</td>
+                <td className="small"><code>{path(event.pageUrl)}</code></td>
+                <td className="small">{event.landedOnEumon ? "An Eumon page" : <span className="muted">Your site</span>}</td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+      )}
+    </>
   );
 }

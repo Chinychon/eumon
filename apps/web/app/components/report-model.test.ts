@@ -15,22 +15,27 @@ describe("report model", () => {
         { title: "Resolve: No analytics or conversion tracking found", rationale: "", priorityScore: 20, intent: "technical_enabler" },
         { title: "Rank for “veneers”", rationale: "", priorityScore: 31, intent: "keyword_gap" },
         { title: "Resolve: A finding from an older run", rationale: "", priorityScore: 10, intent: "technical_enabler" },
+        { title: "Publish landing pages from your Dentists data", rationale: "", priorityScore: 5, intent: "unpublished_data" },
       ],
     }, 6);
     assert.deepEqual(actions.map((action) => [action.title, action.area]), [
       ["Resolve: Empty prices", "technical"],
       ["Push implants", "search"],
-      ["Rank for “veneers”", "competitors"],
+      ["Rank for “veneers”", "keywords"],
       ["Resolve: No analytics or conversion tracking found", "leads"],
       ["Resolve: A finding from an older run", "technical"],
+      ["Publish landing pages from your Dentists data", "data"],
     ]);
     assert.equal(doFirst({ findings: [], opportunities: [] }).length, 0);
   });
 
   it("sends old links to the page that now holds their content", () => {
-    assert.deepEqual(resolveLink("overview", "search"), { view: "results", tab: "search" });
-    assert.deepEqual(resolveLink("overview", "leads"), { view: "results", tab: "enquiries" });
-    assert.deepEqual(resolveLink("overview", "competitors"), { view: "keywords", tab: null });
+    assert.deepEqual(resolveLink("overview", "search"), { view: "overview", tab: "search" });
+    assert.deepEqual(resolveLink("overview", "leads"), { view: "overview", tab: "enquiries" });
+    assert.deepEqual(resolveLink("results", null), { view: "overview", tab: "search" });
+    assert.deepEqual(resolveLink("results", "enquiries"), { view: "overview", tab: "enquiries" });
+    assert.deepEqual(resolveLink("keywords", null), { view: "overview", tab: "keywords" });
+    assert.deepEqual(resolveLink("competitors", null), { view: "overview", tab: "competitors" });
     assert.deepEqual(resolveLink("overview", "technical"), { view: "overview", tab: "technical" });
     assert.deepEqual(resolveLink("connections", null), { view: "setup", tab: null });
   });

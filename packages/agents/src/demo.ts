@@ -1,8 +1,8 @@
-import type { DataRecord, Dataset, PageTemplate, PricedKeyword, RankedKeyword, SearchMetricRow } from "@organic-growth/core";
+import type { DataRecord, Dataset, KeywordsInput, PageTemplate, RankedKeyword, SearchMetricRow } from "@organic-growth/core";
 import { addDays, slugify } from "@organic-growth/core";
 import { crawlGooglebotBatch, researchSite, type Fetcher, type SiteResearch } from "@organic-growth/crawler";
 import {
-  chunks, createAnalysis, datasetCoverage, deleteSite, getAnalysisJob, getCrawlCoverage, getCrawlProgress, insertConversionEvent, listAllRecords,
+  chunks, createAnalysis, defaultPageSettings, recordSyncRun, upsertPageSettings, datasetCoverage, deleteSite, getAnalysisJob, getCrawlCoverage, getCrawlProgress, insertConversionEvent, listAllRecords,
   listCrawlPageResults, listPendingCrawlUrls, recordLandingSession, replaceCurrentSearchMetrics, replacePageSearchMetrics, runStatements, saveAnalysisReport, saveCrawlBatch,
   saveIndexStatus, saveSiteScope, saveSnapshot, saveTopQueriesSnapshot, saveUrlIndexStatus, listSiteCompetitorDomains, setSiteCompetitorDomains, syncFirstPartyResults, updateSiteGa4Property, upsertMetricPoints, type MetricPoint, setSiteMarkets, setTemplatePublication, syncTemplatePages, updateAnalysisProgress,
   updateAnalysisStatus, upsertDataset, upsertRecords, upsertSite, upsertTemplate, type D1Like,
@@ -177,7 +177,7 @@ export function demoFetcher(version: number, now = Date.now()): Fetcher {
     const target = new URL(url);
     const reply = (status: number, body: string, type = "text/html") => ({ url, status, finalUrl: url, headers: { "content-type": type }, body });
     if (target.hostname === "demo-clinic.example") {
-      if (target.pathname === "/robots.txt") return reply(200, "User-agent: *\nDisallow: /search\nDisallow: /blog/drafts/\nSitemap: https://demo-clinic.example/sitemap.xml\n", "text/plain");
+      if (target.pathname === "/robots.txt") return reply(200, "User-agent: *\nDisallow: /search\nDisallow: /blog/drafts/\n\nUser-agent: Bytespider\nUser-agent: CCBot\nDisallow: /\n\nSitemap: https://demo-clinic.example/sitemap.xml\n", "text/plain");
       if (target.pathname === "/sitemap.xml") {
         // Version 3 changed the price and dentist pages, so an update fetches only those again.
         return reply(200, sitemap(pages.map((page) => ({ loc: `${ORIGIN}${page.path}`, lastmod: version === 3 && (page.family === "prices" || page.family === "dentists") ? today : settled }))), "application/xml");
@@ -238,6 +238,161 @@ export function demoSearchRows(now = Date.now()): SearchMetricRow[] {
   return rows;
 }
 
+/*
+ * Fictional DataForSEO answers for the demo, shaped like real ones (the
+ * medbaycare.com answer in dataforseo.test.ts): brand and clinic-name searches
+ * that are navigational, Malay wording beside English, some keywords DataForSEO
+ * has no difficulty or intent for, and many rankings past page one.
+ */
+type Priced = [keyword: string, volume: number | null, difficulty: number | null, intent: string | null, position: number, clicks: number, impressions: number];
+type Ranked = [keyword: string, volume: number, difficulty: number | null, intent: string | null, position: number, url: string];
+
+const DEMO_PRICED: Record<string, Priced[]> = {
+  mys: [
+    ["dental implants kuala lumpur", 1900, 34, "commercial", 4.2, 64, 1830],
+    ["braces price malaysia", 2400, 41, "commercial", 6.1, 52, 2410],
+    ["demo dental clinic", null, null, null, 1.1, 48, 310],
+    ["scaling and polishing cost", 1300, 22, "commercial", 5.3, 37, 1480],
+    ["dentist penang", 880, 27, "commercial", 6.8, 24, 960],
+    ["wisdom tooth removal cost kl", 720, 19, "transactional", 5.9, 21, 770],
+    ["root canal treatment price", 590, 31, "commercial", 7.2, 18, 690],
+    ["teeth whitening johor bahru", 480, 15, "transactional", 9.6, 12, 540],
+    ["paediatric dentist petaling jaya", 260, 12, "commercial", 8.3, 9, 330],
+    ["harga implan gigi", 1600, 18, "commercial", 11.4, 8, 1240],
+    ["klinik gigi terdekat", 6600, 38, "transactional", 17.8, 7, 2950],
+    ["harga pasang braces", 2900, 25, "commercial", 12.6, 6, 1580],
+    ["cabut gigi bongsu harga", 1000, 14, "commercial", 9.1, 6, 610],
+    ["how much are dental implants in malaysia", 390, 21, "informational", 7.4, 5, 420],
+    ["invisalign price malaysia", 1600, 52, "commercial", 13.2, 4, 980],
+    ["veneers malaysia", 1300, 29, "commercial", 15.7, 3, 870],
+    ["dental crown price", 720, 26, "commercial", 14.1, 3, 560],
+    ["is root canal painful", 320, 9, "informational", 8.8, 3, 380],
+    ["klinik gigi kuala lumpur", 2400, 33, "transactional", 21.5, 2, 1120],
+    ["gigi palsu harga", 880, null, null, 18.2, 2, 640],
+    ["demo dental penang", null, null, null, 1.4, 11, 95],
+    ["dentist open sunday kl", 590, 16, "transactional", 10.3, 2, 300],
+    ["tampal gigi harga", 1300, 11, "commercial", 23.9, 1, 720],
+    ["dentist near me", 14800, 61, "transactional", 34.0, 1, 2100],
+  ],
+  sgp: [
+    ["invisalign singapore price", 2900, 58, "commercial", 8.7, 29, 2050],
+    ["dental implant singapore cost", 1900, 47, "commercial", 9.8, 11, 1360],
+    ["dentist singapore", 4400, 55, "transactional", 18.3, 6, 1890],
+    ["wisdom tooth surgery singapore", 1600, 36, "commercial", 12.4, 5, 990],
+    ["teeth whitening singapore", 1300, 39, "commercial", 16.0, 3, 760],
+    ["demo dental singapore", null, null, null, 1.2, 9, 70],
+    ["how much is scaling and polishing in singapore", 390, 17, "informational", 9.4, 3, 310],
+    ["braces singapore price", 1900, 44, "commercial", 14.6, 2, 880],
+  ],
+};
+
+const own = "demo-clinic.example";
+const DEMO_RANKED: Record<string, Record<string, Ranked[]>> = {
+  [own]: {
+    mys: [
+      ["dental implants kuala lumpur", 1900, 34, "commercial", 4, "/guides/dental-implants"], ["braces price malaysia", 2400, 41, "commercial", 6, "/guides/braces"],
+      ["scaling and polishing cost", 1300, 22, "commercial", 5, "/guides/scaling-and-polishing"], ["dentist penang", 880, 27, "commercial", 7, "/clinics/penang"],
+      ["demo dental clinic", 320, null, "navigational", 1, "/"], ["harga implan gigi", 1600, 18, "commercial", 11, "/guides/dental-implants"],
+      ["klinik gigi terdekat", 6600, 38, "transactional", 18, "/clinics"], ["harga pasang braces", 2900, 25, "commercial", 13, "/guides/braces"],
+      ["invisalign price malaysia", 1600, 52, "commercial", 13, "/guides/invisalign"], ["veneers malaysia", 1300, 29, "commercial", 16, "/prices/veneers"],
+      ["klinik gigi kuala lumpur", 2400, 33, "transactional", 22, "/clinics/kuala-lumpur"], ["dentist near me", 14800, 61, "transactional", 34, "/clinics"],
+      ["tampal gigi harga", 1300, 11, "commercial", 24, "/prices/fillings"], ["gigi palsu harga", 880, null, null, 19, "/prices/dentures"],
+    ],
+    sgp: [
+      ["invisalign singapore price", 2900, 58, "commercial", 9, "/clinics/singapore"], ["dental implant singapore cost", 1900, 47, "commercial", 10, "/clinics/singapore"],
+      ["dentist singapore", 4400, 55, "transactional", 18, "/clinics/singapore"], ["braces singapore price", 1900, 44, "commercial", 15, "/clinics/singapore"],
+    ],
+  },
+  "brightcare-dental.example": {
+    mys: [
+      ["brightcare dental", 1300, null, "navigational", 1, "/"], ["dental implants kuala lumpur", 1900, 34, "commercial", 2, "/implants"],
+      ["veneers price malaysia", 3600, 24, "commercial", 3, "/veneers-price"], ["emergency dentist kl", 1600, 9, "transactional", 2, "/emergency"],
+      ["gum disease treatment", 2200, 18, "informational", 5, "/gum-disease"], ["dental crown cost", 1300, 29, "commercial", 7, "/crowns"],
+      ["harga veneer gigi", 2400, 16, "commercial", 4, "/ms/veneer"], ["klinik gigi terdekat", 6600, 38, "transactional", 6, "/clinics"],
+      ["sakit gigi berlubang", 3600, 7, "informational", 9, "/ms/gigi-berlubang"], ["dental bridge cost", 880, 21, "commercial", 6, "/bridges"],
+      ["bad breath treatment", 1900, 12, "informational", 11, "/halitosis"], ["dentist near me", 14800, 61, "transactional", 12, "/clinics"],
+      ["teeth grinding night guard", 720, 14, "commercial", 8, "/night-guard"], ["dental clinic reviews kl", 590, 19, "commercial", 4, "/reviews"],
+      ["invisalign price malaysia", 1600, 52, "commercial", 9, "/invisalign"], ["full mouth dental implants cost", 480, 33, "commercial", 5, "/implants/full-mouth"],
+      ["gigi kuning", 2900, null, null, 14, "/ms/gigi-kuning"], ["dental check up price", 1000, 13, "commercial", 7, "/check-up"],
+    ],
+    sgp: [
+      ["dentist singapore", 4400, 55, "transactional", 7, "/sg"], ["veneers singapore price", 1900, 31, "commercial", 4, "/sg/veneers"],
+      ["emergency dentist singapore", 1300, 22, "transactional", 3, "/sg/emergency"], ["dental implant singapore cost", 1900, 47, "commercial", 6, "/sg/implants"],
+      ["gum treatment singapore", 590, 18, "commercial", 8, "/sg/gums"], ["brightcare dental singapore", 480, null, "navigational", 1, "/sg"],
+    ],
+  },
+  "smile-dental.example": {
+    mys: [
+      ["smile dental", 880, null, "navigational", 1, "/"], ["kids dentist kl", 900, 11, "commercial", 3, "/kids"],
+      ["teeth cleaning price", 2600, 21, "commercial", 4, "/cleaning"], ["veneers price malaysia", 3600, 24, "commercial", 8, "/veneers"],
+      ["braces price malaysia", 2400, 41, "commercial", 3, "/braces"], ["harga scaling gigi", 2900, 13, "commercial", 2, "/ms/scaling"],
+      ["dentist for children penang", 480, 8, "commercial", 2, "/kids/penang"], ["clear aligners malaysia", 1300, 37, "commercial", 6, "/aligners"],
+      ["dental x ray price", 390, 10, "commercial", 5, "/x-ray"], ["gigi sensitif", 1600, null, null, 10, "/ms/gigi-sensitif"],
+      ["klinik gigi kanak kanak", 720, 9, "commercial", 4, "/ms/kanak-kanak"], ["teeth whitening price malaysia", 1900, 23, "commercial", 7, "/whitening"],
+      ["fluoride treatment kids", 320, 6, "informational", 6, "/kids/fluoride"], ["dentist near me", 14800, 61, "transactional", 19, "/clinics"],
+    ],
+    sgp: [
+      ["kids dentist singapore", 1300, 19, "commercial", 2, "/sg/kids"], ["invisalign singapore price", 2900, 58, "commercial", 5, "/sg/invisalign"],
+      ["teeth cleaning singapore", 1600, 24, "commercial", 6, "/sg/cleaning"], ["smile dental singapore", 390, null, "navigational", 1, "/sg"],
+      ["braces singapore price", 1900, 44, "commercial", 4, "/sg/braces"],
+    ],
+  },
+};
+
+/** Estimated monthly visits for a ranking, the way DataForSEO's etv falls off past the top 3. */
+const estimatedTraffic = (volume: number, position: number) => Math.round(volume * (position <= 1 ? 0.3 : position <= 3 ? 0.15 : position <= 10 ? 0.04 : position <= 20 ? 0.008 : 0.002) * 10) / 10;
+
+/** The demo's keyword lists, as the analysis and the view read them. */
+export function demoKeywords(today: string): KeywordsInput {
+  return {
+    site: own,
+    competitors: COMPETITORS,
+    synced: true,
+    priced: Object.values(DEMO_PRICED).map((rows) => ({
+      periodEnd: addDays(today, -3),
+      rows: rows.map(([keyword, volume, difficulty, intent, position, clicks, impressions]) => ({ keyword, volume, difficulty, intent, position, clicks, impressions })),
+    })),
+    ranked: Object.entries(DEMO_RANKED).flatMap(([domain, markets]) => Object.values(markets).map((rows) => ({
+      domain, periodEnd: today,
+      rows: rows.map(([keyword, volume, difficulty, intent, position, url]): RankedKeyword => ({ keyword, volume, difficulty, intent, position, url, traffic: estimatedTraffic(volume, position) })),
+    }))),
+  };
+}
+
+/**
+ * Saves the demo's keyword lists per market as the sync would, and twelve
+ * weeks of top-10 counts and estimated traffic per domain, the clinic
+ * climbing since its guides went live.
+ */
+async function seedDemoKeywords(db: D1Like, now: number) {
+  const today = new Date(now).toISOString().slice(0, 10);
+  for (const [market, rows] of Object.entries(DEMO_PRICED)) {
+    await saveSnapshot(db, DEMO_SITE_ID, { kind: "keywords", scope: `sc-domain:demo-clinic.example|${market}`, periodEnd: addDays(today, -3),
+      rows: rows.map(([keyword, volume, difficulty, intent, position, clicks, impressions]) => ({ keyword, volume, difficulty, intent, position, clicks, impressions })) });
+  }
+  const points: MetricPoint[] = [{ metric: "sync.competitor_keywords", day: today, value: 1 }, { metric: "sync.keyword_volumes", day: today, value: 1 }];
+  for (const [domain, markets] of Object.entries(DEMO_RANKED)) {
+    const rows: RankedKeyword[] = [];
+    for (const [market, ranked] of Object.entries(markets)) {
+      const list = ranked.map(([keyword, volume, difficulty, intent, position, url]): RankedKeyword => ({ keyword, volume, difficulty, intent, position, url, traffic: estimatedTraffic(volume, position) }));
+      await saveSnapshot(db, DEMO_SITE_ID, { kind: "competitor_keywords", scope: `${domain}|${market}`, periodEnd: today, rows: list });
+      rows.push(...list);
+    }
+    const suffix = domain === own ? "" : `:${domain}`;
+    const top10 = rows.filter((row) => row.position <= 10).length;
+    const traffic = rows.reduce((total, row) => total + row.traffic, 0);
+    for (let week = 11; week >= 0; week--) {
+      // The clinic gained since go-live; competitors held roughly steady.
+      const back = domain === own ? 1 - week * 0.045 : 1 - (week % 3) * 0.02;
+      points.push(
+        { metric: `kw_top10${suffix}`, day: addDays(today, -7 * week), value: Math.max(0, Math.round(top10 * back)) },
+        { metric: `kw_traffic${suffix}`, day: addDays(today, -7 * week), value: Math.round(traffic * back) },
+      );
+    }
+  }
+  await upsertMetricPoints(db, DEMO_SITE_ID, points);
+}
+
 /** Analyses a crawled demo run with the real pipeline and saves the report. */
 async function analyzeDemo(db: D1Like, input: { analysisId: string; version: number; declared: number; reused?: { urls: number; from?: string }; now: number }) {
   const fetcher = demoFetcher(input.version, input.now);
@@ -261,6 +416,8 @@ async function analyzeDemo(db: D1Like, input: { analysisId: string; version: num
     competitorResearch: research,
     datasets,
     targetMarkets: ["mys", "sgp"],
+    // The keyword lists the growth plan prices queries and finds gaps with, as a synced site has them.
+    keywords: demoKeywords(new Date(input.now).toISOString().slice(0, 10)),
     crawlCoverage: { coverage, examples },
     renderPages: (urls) => renderDemo(urls, input.version),
   });
@@ -371,17 +528,64 @@ async function seedPageEngine(db: D1Like, now: number) {
     }
   }
   await replacePageSearchMetrics(db, DEMO_SITE_ID, searched);
+  // AI agents reading the guides since go-live: crawlers steady, live fetches (an assistant answering someone) growing. CCBot and Bytespider are blocked in robots.txt.
+  const agents: Array<[string, number, number]> = [
+    ["GPTBot", 3, 0], ["OAI-SearchBot", 2, 1], ["ChatGPT-User", 0, 6], ["ClaudeBot", 2, 0], ["Claude-SearchBot", 1, 1], ["Claude-User", 0, 2],
+    ["PerplexityBot", 2, 1], ["Perplexity-User", 0, 4], ["Meta-ExternalAgent", 2, 0], ["Amazonbot", 1, 0],
+  ];
+  for (let d = 79; d >= 0; d--) {
+    const day = new Date(now - d * DAY).toISOString().slice(0, 10);
+    const growth = Math.min(1, (80 - d) / 60);
+    const page = live[d % Math.max(1, Math.min(live.length, 12))];
+    if (!page) break;
+    for (const [agent, steady, rising] of agents) {
+      const count = Math.round(steady * (1 + ((d + agent.length) % 3) * 0.5) + rising * growth * (1 + 0.3 * Math.sin(d / 4)));
+      if (count) statements.push(db.prepare("INSERT INTO ai_page_daily (site_id, page_id, day, signal, name, count) VALUES (?, ?, ?, 'fetch', ?, ?)").bind(DEMO_SITE_ID, page.id, day, agent, count));
+    }
+    for (const [assistant, rate] of [["chatgpt", 3], ["perplexity", 1.2], ["gemini", 0.6], ["copilot", 0.3]] as const) {
+      const count = Math.round(rate * growth * (1 + 0.4 * Math.sin((d + rate) / 3)));
+      if (count) statements.push(db.prepare("INSERT INTO ai_page_daily (site_id, page_id, day, signal, name, count) VALUES (?, ?, ?, 'referral', ?, ?)").bind(DEMO_SITE_ID, page.id, day, assistant, count));
+    }
+  }
   for (const group of chunks(statements, 100)) await runStatements(db, group);
 
   for (let i = 0; i < 260; i++) {
     const page = live[i % Math.max(live.length, 1)];
     const occurredAt = new Date(now - ((i * 7919) % (88 * DAY / 60_000)) * 60_000 - DAY).toISOString();
     // The visitor first landed on a generated page, so the enquiry is attributed to it.
-    if (page) await recordLandingSession(db, { siteId: DEMO_SITE_ID, sessionId: `session_demo_${i % 180}`, pageId: page.id });
+    const source = i % 9 === 0 ? "ai:chatgpt" : i % 13 === 0 ? "ai:perplexity" : i % 3 === 0 ? "other" : "search";
+    if (page) await recordLandingSession(db, { siteId: DEMO_SITE_ID, sessionId: `session_demo_${i % 180}`, pageId: page.id, source });
     await insertConversionEvent(db, {
       id: `event_demo_${i}`, siteId: DEMO_SITE_ID, event: i % 5 === 0 ? "form_submit" : i % 11 === 0 ? "phone_click" : "whatsapp_click",
       ...(page ? { pageUrl: `${ORIGIN}${page.path}` } : {}), sessionId: `session_demo_${i % 180}`, occurredAt,
     });
+  }
+  // The proxy rule was verified when the guides went live, so the engine's pages count as live on the clinic's domain.
+  const goLive = new Date(now - 80 * DAY).toISOString();
+  await upsertPageSettings(db, {
+    ...defaultPageSettings(DEMO_SITE_ID, "Demo Dental Clinic", ORIGIN),
+    ctaLabel: "WhatsApp us", ctaUrl: "https://wa.me/60123456789", ctaCopy: "Ask about price and availability at your nearest clinic.",
+    verifiedAt: goLive, updatedAt: goLive,
+  });
+  // A CTA test that has run since go-live: the price-led copy is ahead.
+  for (const [id, label, copy, impressions, clicks] of [
+    ["cta_demo_a", "WhatsApp us", "Ask about price and availability at your nearest clinic.", 4120, 297],
+    ["cta_demo_b", "Get my price", "Send your treatment and get a written price on WhatsApp.", 4065, 388],
+  ] as const) {
+    await db.prepare("INSERT INTO cta_variants (id, site_id, label, copy, url, impressions, clicks, active, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)")
+      .bind(id, DEMO_SITE_ID, label, copy, "https://wa.me/60123456789", impressions, clicks, goLive).run();
+  }
+  // Three snippet rewrites Eumon suggested and the operator applied, far enough back to show their effect.
+  for (const [index, [field, back]] of ([["title", 40], ["description", 33], ["title", 26]] as const).entries()) {
+    const page = live[index * 5];
+    if (!page) continue;
+    const before = await db.prepare("SELECT title, description FROM generated_pages WHERE id = ?").bind(page.id).first<{ title: string; description: string }>();
+    const name = page.path.split("/").pop()!.replace(/-/g, " ").replace(/^\w/, (letter) => letter.toUpperCase());
+    const [after, reason] = field === "title"
+      ? [`${name}: price at 11 clinics in Malaysia, written quote on WhatsApp`, "Skipped on page one: the title didn't answer the price searches it ranks for"]
+      : [`${name} at 11 clinics in Malaysia and Singapore. See the price, then WhatsApp for a written quote.`, "Low click-through near the top of page one; the snippet now leads with the price"];
+    await db.prepare("INSERT INTO page_revisions (id, page_id, field, before_value, after_value, reason, author, created_at) VALUES (?, ?, ?, ?, ?, ?, 'operator', ?)")
+      .bind(`rev_demo_${index}`, page.id, field, (field === "title" ? before?.title : before?.description) ?? "", after, reason, new Date(now - back * DAY).toISOString()).run();
   }
   await saveSiteScope(db, DEMO_SITE_ID, {
     goal: "More WhatsApp enquiries for implants and braces from patients in Malaysia and Singapore",
@@ -496,6 +700,19 @@ async function seedDemoResults(db: D1Like, now: number) {
       { metric: "ga4_organic_engaged_sessions", day, value: Math.round(clicks * 0.8) },
       { metric: "ga4_organic_key_events", day, value: Math.round(clicks * 0.05) },
     );
+    // AI assistants have sent a trickle of visitors for a year, growing since the guides went live.
+    if (back <= 365) {
+      const chatgpt = Math.round(clicks * (live ? 0.05 * lift : 0.03) * (1 + ((back % 5) - 2) * 0.1));
+      const perplexity = Math.round(chatgpt * 0.35);
+      const gemini = Math.round(chatgpt * 0.2);
+      points.push(
+        { metric: "ga4_ai_sessions", day, value: chatgpt + perplexity + gemini },
+        { metric: "ga4_ai_sessions.chatgpt", day, value: chatgpt },
+        { metric: "ga4_ai_sessions.perplexity", day, value: perplexity },
+        { metric: "ga4_ai_sessions.gemini", day, value: gemini },
+        { metric: "ga4_ai_key_events", day, value: Math.round((chatgpt + perplexity + gemini) * 0.08) },
+      );
+    }
     if (live) {
       const eumonClicks = Math.round(clicks * Math.min(0.32, (80 - back + 1) / 200));
       points.push(
@@ -508,6 +725,12 @@ async function seedDemoResults(db: D1Like, now: number) {
   for (let week = 0; week < 16; week++) {
     const day = addDays(today, -7 * week);
     const growth = Math.max(0, 16 - week);
+    // Question searches ("how much does … cost") in each 28-day query list, as the daily sync derives them.
+    points.push(
+      { metric: "question_queries", day: addDays(day, -3), value: 31 + growth * 2 },
+      { metric: "question_clicks", day: addDays(day, -3), value: 120 + growth * 14 },
+      { metric: "question_impressions", day: addDays(day, -3), value: 5200 + growth * 310 },
+    );
     for (const [top, base] of [[3, 14], [10, 52], [20, 118], [100, 290]] as const) {
       const queries = base + growth * (top === 3 ? 1 : 3);
       for (const suffix of ["", "@markets"]) {
@@ -584,31 +807,13 @@ async function seedDemoResults(db: D1Like, now: number) {
       lastCrawlTime: state.startsWith("Submitted") || state.startsWith("Crawled") ? `${addDays(today, -(index % 40))}T02:00:00Z` : null,
     };
   }));
-  // Fictional keyword data for Malaysia: the demo's queries priced (one unknown to DataForSEO), and ranked lists for the clinic and both competitors.
-  const volumes: Array<[number | null, number, string]> = [[1900, 34, "commercial"], [2400, 41, "commercial"], [null, 0, "navigational"], [1300, 22, "commercial"], [2900, 58, "commercial"], [880, 27, "commercial"], [720, 19, "transactional"], [590, 31, "commercial"], [480, 15, "transactional"], [260, 12, "commercial"]];
-  const pricedRows: PricedKeyword[] = queries.map(([query, clicks, impressions, position], index) => {
-    const [volume, difficulty, intent] = volumes[index]!;
-    return { keyword: query, volume, difficulty: volume === null ? null : difficulty, intent: volume === null ? null : intent, position, clicks, impressions };
-  });
-  await saveSnapshot(db, DEMO_SITE_ID, { kind: "keywords", scope: "sc-domain:demo-clinic.example|mys", periodEnd: addDays(today, -3), rows: pricedRows });
-  const rankedRow = (keyword: string, volume: number, difficulty: number, intent: string, position: number, url: string): RankedKeyword =>
-    ({ keyword, volume, difficulty, intent, position, url, traffic: Math.round(volume * (position <= 3 ? 0.2 : position <= 10 ? 0.05 : 0.01)) });
-  const rankedLists: Record<string, RankedKeyword[]> = {
-    "demo-clinic.example": [rankedRow("dental implants kuala lumpur", 1900, 34, "commercial", 4, "/implants"), rankedRow("braces price malaysia", 2400, 41, "commercial", 6, "/braces"), rankedRow("demo dental clinic", 300, 0, "navigational", 1, "/")],
-    [competitors[0] ?? "brightcare-dental.example"]: [
-      rankedRow("veneers price malaysia", 3600, 24, "commercial", 3, "/veneers-price"), rankedRow("dental implants kuala lumpur", 1900, 34, "commercial", 2, "/implants"),
-      rankedRow("gum disease treatment", 2200, 18, "informational", 5, "/gum-disease"), rankedRow("emergency dentist kl", 1600, 9, "transactional", 2, "/emergency"), rankedRow("dental crown cost", 1300, 29, "commercial", 7, "/crowns"),
-    ],
-    [competitors[1] ?? "smile-dental.example"]: [
-      rankedRow("veneers price malaysia", 3600, 24, "commercial", 8, "/veneers"), rankedRow("kids dentist kl", 900, 11, "commercial", 3, "/kids"), rankedRow("teeth cleaning price", 2600, 21, "commercial", 4, "/cleaning"),
-    ],
-  };
-  const keywordPoints: MetricPoint[] = [{ metric: "sync.competitor_keywords", day: today, value: 1 }, { metric: "sync.keyword_volumes", day: today, value: 1 }];
-  for (const [domain, rows] of Object.entries(rankedLists)) {
-    await saveSnapshot(db, DEMO_SITE_ID, { kind: "competitor_keywords", scope: `${domain}|mys`, periodEnd: today, rows });
-    const suffix = domain === "demo-clinic.example" ? "" : `:${domain}`;
-    keywordPoints.push({ metric: `kw_top10${suffix}`, day: today, value: rows.filter((row) => row.position <= 10).length }, { metric: `kw_traffic${suffix}`, day: today, value: rows.reduce((total, row) => total + row.traffic, 0) });
-  }
-  await upsertMetricPoints(db, DEMO_SITE_ID, keywordPoints);
+  await seedDemoKeywords(db, now);
+  // Three syncs for the history in Setup: two clean daily runs, and a Sync now where Analytics refused the token.
+  const ran = (daysBack: number, hour: number) => new Date(now - daysBack * DAY + hour * 3600_000).toISOString();
+  const clean = ["speed: 2 weeks", "lab: 2 scores", "authority: 3 domains", "search: 7 days", "search@markets: 7 days", "rankings: skipped (Mondays)", "inspected 52 pages", "coverage: inspected 50", "analytics: 7 days", "keywords: lists fresh"];
+  await recordSyncRun(db, { id: "sync_demo_1", siteId: DEMO_SITE_ID, trigger: "daily", startedAt: ran(2, 4.25), finishedAt: ran(2, 4.27), notes: clean });
+  await recordSyncRun(db, { id: "sync_demo_2", siteId: DEMO_SITE_ID, trigger: "manual", startedAt: ran(1, 9.1), finishedAt: ran(1, 9.12),
+    notes: [...clean.filter((note) => !note.startsWith("analytics")), "analytics failed: Google Analytics report request failed (403): The caller does not have permission. Reconnect Google in Setup."] });
+  await recordSyncRun(db, { id: "sync_demo_3", siteId: DEMO_SITE_ID, trigger: "daily", startedAt: ran(1, 4.25), finishedAt: ran(1, 4.28), notes: clean });
   await syncFirstPartyResults(db, DEMO_SITE_ID, new Date(now));
 }

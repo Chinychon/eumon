@@ -1,4 +1,4 @@
-import { addDays } from "@organic-growth/core";
+import { addDays, AI_AGENTS, AI_ASSISTANTS, AI_ENGINES } from "@organic-growth/core";
 import { chunks, nowIso, runStatements, type D1Like } from "./d1.js";
 
 /*
@@ -57,11 +57,17 @@ export async function dailyLeads(db: D1Like, siteId: string, sinceDay: string) {
        WHERE site_id = ? AND occurred_at >= ? AND event IN (SELECT value FROM json_each(?))
        GROUP BY day, who
      )
-     SELECT c.day AS day, COUNT(*) AS leads, SUM(CASE WHEN s.session_id IS NULL THEN 0 ELSE 1 END) AS eumon
+     SELECT c.day AS day, COUNT(*) AS leads, SUM(CASE WHEN s.session_id IS NULL THEN 0 ELSE 1 END) AS eumon,
+            SUM(CASE WHEN s.source = 'search' THEN 1 ELSE 0 END) AS search,
+            SUM(CASE WHEN s.source LIKE 'ai:%' THEN 1 ELSE 0 END) AS ai
      FROM contacts c LEFT JOIN page_sessions s ON s.session_id = c.who AND s.site_id = ?
      GROUP BY c.day ORDER BY c.day`,
-  ).bind(siteId, sinceDay, JSON.stringify(LEAD_EVENTS), siteId).all<{ day: string; leads: number; eumon: number }>();
-  return results.map((row) => ({ day: row.day, leads: Number(row.leads), eumonLeads: Number(row.eumon) }));
+  ).bind(siteId, sinceDay, JSON.stringify(LEAD_EVENTS), siteId).all<{ day: string; leads: number; eumon: number; search: number; ai: number }>();
+  // A landing session without a recorded source (from before sources were kept) counts as "other".
+  return results.map((row) => ({
+    day: row.day, leads: Number(row.leads), eumonLeads: Number(row.eumon),
+    bySource: { search: Number(row.search ?? 0), ai: Number(row.ai ?? 0), other: Number(row.eumon) - Number(row.search ?? 0) - Number(row.ai ?? 0) },
+  }));
 }
 
 /** How many Eumon pages are published, and the day the first one went live. */
@@ -104,10 +110,14 @@ export async function syncFirstPartyResults(db: D1Like, siteId: string, now = ne
   const leadDays = [...new Set([...daysFrom(firsts?.events), ...leadsByDay.keys()])];
   const activityDays = [...new Set([...daysFrom(firsts?.activity), ...activityByDay.keys()])];
   await upsertMetricPoints(db, siteId, [
-    ...leadDays.flatMap((day) => [
-      { metric: "leads", day, value: leadsByDay.get(day)?.leads ?? 0 },
-      { metric: "leads_eumon", day, value: leadsByDay.get(day)?.eumonLeads ?? 0 },
-    ]),
+    ...leadDays.flatMap((day) => {
+      const row = leadsByDay.get(day);
+      return [
+        { metric: "leads", day, value: row?.leads ?? 0 },
+        { metric: "leads_eumon", day, value: row?.eumonLeads ?? 0 },
+        ...(["search", "ai", "other"] as const).map((source) => ({ metric: `leads_eumon.${source}`, day, value: row?.bySource[source] ?? 0 })),
+      ];
+    }),
     ...activityDays.flatMap((day) => {
       const row = activityByDay.get(day);
       return [
@@ -118,10 +128,69 @@ export async function syncFirstPartyResults(db: D1Like, siteId: string, now = ne
     }),
     { metric: "published_pages", day: today, value: pages.published },
   ]);
+  await syncAiResults(db, siteId, now);
+}
+
+const ENGINE_OF = new Map(AI_AGENTS.map((agent) => [agent.agent, agent]));
+
+/**
+ * AI fetches of Eumon pages per engine and kind (crawler, live), and visits
+ * AI assistants sent per assistant, from the raw daily counts. The first run
+ * backfills everything; later runs rewrite the last 7 days. Days are filled
+ * with 0 from the first recorded AI signal on: before it, nothing was counted.
+ */
+export async function syncAiResults(db: D1Like, siteId: string, now = new Date()): Promise<void> {
+  const today = now.toISOString().slice(0, 10);
+  const since = (await firstMetricDay(db, siteId, "ai_fetches")) ? addDays(today, -7) : "2000-01-01";
+  const [{ results }, first] = await Promise.all([
+    db.prepare("SELECT day, signal, name, SUM(count) AS count FROM ai_page_daily WHERE site_id = ? AND day >= ? GROUP BY day, signal, name")
+      .bind(siteId, since).all<{ day: string; signal: string; name: string; count: number }>(),
+    db.prepare("SELECT MIN(day) AS day FROM ai_page_daily WHERE site_id = ?").bind(siteId).first<{ day: string | null }>(),
+  ]);
+  if (!first?.day) return;
+  const totals = new Map<string, number>();
+  const add = (metric: string, day: string, value: number) => totals.set(`${metric}|${day}`, (totals.get(`${metric}|${day}`) ?? 0) + value);
+  for (const row of results) {
+    const count = Number(row.count);
+    if (row.signal === "fetch") {
+      const agent = ENGINE_OF.get(row.name);
+      if (!agent) continue;
+      add("ai_fetches", row.day, count);
+      add(`ai_${agent.kind}_fetches`, row.day, count);
+      add(`ai_${agent.kind}_fetches.${agent.engine}`, row.day, count);
+    } else if (row.signal === "referral") {
+      add("ai_referral_visits", row.day, count);
+      add(`ai_referral_visits.${row.name}`, row.day, count);
+    }
+  }
+  const metrics = [
+    "ai_fetches", "ai_crawler_fetches", "ai_live_fetches", "ai_referral_visits",
+    ...AI_ENGINES.flatMap(({ engine }) => [`ai_crawler_fetches.${engine}`, `ai_live_fetches.${engine}`]),
+    ...AI_ASSISTANTS.map(({ assistant }) => `ai_referral_visits.${assistant}`),
+  ];
+  const points: MetricPoint[] = [];
+  for (let day = first.day > since ? first.day : since; day <= today; day = addDays(day, 1)) {
+    for (const metric of metrics) points.push({ metric, day, value: totals.get(`${metric}|${day}`) ?? 0 });
+  }
+  await upsertMetricPoints(db, siteId, points);
 }
 
 /** Coverage counts and site health (share of crawled URLs with no error, empty shell, or noindex) from a report. */
 export function analysisHealthPoints(report: unknown, day: string): MetricPoint[] {
+  return [...coveragePoints(report, day), ...aiAccessPoints(report, day)];
+}
+
+/** How many AI robots.txt tokens the site allows, of how many checked; nothing when robots.txt couldn't be read. */
+function aiAccessPoints(report: unknown, day: string): MetricPoint[] {
+  const readiness = (report as { aiReadiness?: { robots?: string; crawlers?: Array<{ allowed: boolean }> } } | null)?.aiReadiness;
+  if (!readiness?.crawlers?.length || readiness.robots === "unreadable") return [];
+  return [
+    { metric: "ai_crawlers_allowed", day, value: readiness.crawlers.filter((crawler) => crawler.allowed).length },
+    { metric: "ai_crawlers_checked", day, value: readiness.crawlers.length },
+  ];
+}
+
+function coveragePoints(report: unknown, day: string): MetricPoint[] {
   const coverage = (report as { coverage?: { totalUrls?: number; completedUrls?: number; emptyShellUrls?: number; httpErrorUrls?: number; issues?: { noindex?: number } } | null } | null)?.coverage;
   if (!coverage?.completedUrls) return [];
   const empty = coverage.emptyShellUrls ?? 0;

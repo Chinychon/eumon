@@ -9,13 +9,13 @@ import {
   listCtaVariants,
   listPublishedPaths,
   listTemplates,
+  recordAiSignal,
   recordLandingSession,
   getDataset,
   getTemplate,
-  type PageHitKind,
 } from "@organic-growth/db";
 import { chooseArm, escapeHtml, htmlLang, labelsFor, renderHubPage, renderLandingPage, renderSitemap, type RenderCta } from "@organic-growth/pages";
-import { createId } from "@organic-growth/core";
+import { classifyUserAgent, createId, landingSource } from "@organic-growth/core";
 import { readJson, settingsFor } from "./server";
 
 const BEACON = "/__eumon/e";
@@ -32,10 +32,12 @@ function isProxied(request: Request, settings: PageSettings): boolean {
   return Boolean(forwarded && forwarded === new URL(settings.publicOrigin).host.toLowerCase());
 }
 
-function botKind(userAgent: string): PageHitKind | null {
-  if (/googlebot|google-inspectiontool|storebot-google/i.test(userAgent)) return "googlebot_hits";
-  if (/bot|crawler|spider|slurp|bingpreview|facebookexternalhit|embedly|preview/i.test(userAgent)) return "other_bot_hits";
-  return null;
+/** Counts a crawler's request for a published page: Googlebot and other bots on the page's daily row, AI agents by name. */
+function countCrawl(siteId: string, pageId: string, userAgent: string): Promise<void> | null {
+  const visitor = classifyUserAgent(userAgent);
+  if (!visitor) return null;
+  if (visitor.kind === "ai") return recordAiSignal(env.DB, { siteId, pageId, signal: "fetch", name: visitor.agent.agent });
+  return incrementPageMetric(env.DB, { siteId, pageId, kind: visitor.kind === "googlebot" ? "googlebot_hits" : "other_bot_hits" });
 }
 
 function html(body: string, status: number, headers: Record<string, string>): Response {
@@ -132,10 +134,8 @@ export async function servePublicGet(request: Request, site: SiteRecord, path: s
     cookieDomain: pageHost !== siteHost && pageHost.endsWith(`.${siteHost}`) ? siteHost : undefined,
   });
 
-  const bot = botKind(request.headers.get("user-agent") ?? "");
-  if (bot && page.status === "published") {
-    waitUntil(incrementPageMetric(env.DB, { siteId: site.id, pageId: page.id, kind: bot }).catch(() => undefined));
-  }
+  const crawl = page.status === "published" ? countCrawl(site.id, page.id, request.headers.get("user-agent") ?? "") : null;
+  if (crawl) waitUntil(crawl.catch(() => undefined));
   const headers: Record<string, string> = {
     // Short shared caching keeps CTA tests moving while absorbing crawl bursts.
     "Cache-Control": indexable ? "public, max-age=300" : "no-store",
@@ -151,20 +151,27 @@ function conversionEventFor(url: string): ConversionEventName {
   return "cta_click";
 }
 
-/** Beacon from rendered pages: human page views and CTA clicks, plus first-touch session attribution. */
+/**
+ * Beacon from rendered pages: human page views and CTA clicks, plus
+ * first-touch session attribution. A view carries the referrer's host (never
+ * the full URL) and `utm_source`, which say whether an AI assistant or a
+ * search engine sent the visitor.
+ */
 export async function servePublicBeacon(request: Request, site: SiteRecord): Promise<Response> {
-  const body = await readJson<{ t?: unknown; p?: unknown; v?: unknown; s?: unknown; x?: unknown }>(request, 2048);
+  const body = await readJson<{ t?: unknown; p?: unknown; v?: unknown; s?: unknown; x?: unknown; r?: unknown; u?: unknown }>(request, 2048);
   const noContent = new Response(null, { status: 204, headers: { "Cache-Control": "no-store" } });
   if (!body || typeof body.p !== "string" || (body.t !== "view" && body.t !== "cta")) return noContent;
-  if (botKind(request.headers.get("user-agent") ?? "")) return noContent;
+  if (classifyUserAgent(request.headers.get("user-agent") ?? "")) return noContent;
   const page = await getPage(env.DB, body.p);
   if (!page || page.siteId !== site.id || page.status !== "published") return noContent;
   const variantId = typeof body.v === "string" ? body.v : undefined;
   const sessionId = typeof body.s === "string" && /^[a-zA-Z0-9_-]{16,64}$/.test(body.s) ? body.s : undefined;
 
   if (body.t === "view") {
+    const source = landingSource(typeof body.r === "string" ? body.r.slice(0, 120) : "", typeof body.u === "string" ? body.u.slice(0, 80) : "");
     await incrementPageMetric(env.DB, { siteId: site.id, pageId: page.id, kind: "views", variantId });
-    if (sessionId) await recordLandingSession(env.DB, { siteId: site.id, sessionId, pageId: page.id });
+    if (source.startsWith("ai:")) await recordAiSignal(env.DB, { siteId: site.id, pageId: page.id, signal: "referral", name: source.slice(3) });
+    if (sessionId) await recordLandingSession(env.DB, { siteId: site.id, sessionId, pageId: page.id, source });
   } else {
     await incrementPageMetric(env.DB, { siteId: site.id, pageId: page.id, kind: "cta_clicks", variantId });
     const settings = await settingsFor(site);

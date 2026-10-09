@@ -76,6 +76,10 @@ export function CompetitorsPanel({ site, data, report, onNavigate }: { site: Sit
 
 /** Which AI assistants read the site's pages, the visits they send, question searches, and whether the site lets them in. */
 export function AiPanel({ data, report, onNavigate }: { data: Payload; report: Report | null; onNavigate: Navigate }) {
+  // A server still running packages built before AI visibility sends no `ai` section.
+  if (!data.results.ai) {
+    return <div className="callout error" role="alert">This server's results have no AI visibility section: its packages were built before it existed. Run <span className="mono">npm run build:packages</span> (or <span className="mono">npm run dev</span> from the repository root, which builds them first) and restart the dev server.</div>;
+  }
   return (
     <div className="results">
       <AiReadersCard data={data} operator onNavigate={onNavigate} />

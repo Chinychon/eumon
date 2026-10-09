@@ -193,6 +193,9 @@ code { font-family: var(--mono); }
 .view-header p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.6; max-width: 640px; }
 .view-actions { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
 .view-header .view-note { max-width: 340px; margin: 0; text-align: right; font-size: 12px; line-height: 1.5; color: var(--soft); }
+.text-link { border: 0; padding: 0; background: none; font: inherit; color: var(--green-ink); text-decoration: underline; text-decoration-color: var(--line-strong); text-underline-offset: 3px; cursor: pointer; }
+.text-link:hover:not(:disabled) { text-decoration-color: currentColor; }
+.text-link:disabled { opacity: .5; cursor: wait; }
 .card, .panel { background: var(--surface); border: 1px solid var(--line); min-width: 0; }
 .card { --pad: 22px; padding: 20px var(--pad); }
 .card + .card { margin-top: -1px; }
@@ -423,6 +426,11 @@ details.disclosure[open] > summary { margin-bottom: 10px; }
 /* The pixel garden: one plant per URL (or per few), sprouting as Googlebot fetches */
 .garden { position: relative; }
 .garden canvas { display: block; width: 100%; image-rendering: pixelated; cursor: crosshair; }
+/* Filling a card: the squares size themselves to the card's free height (set by the card beside it), never the other way round. */
+.card:has(> .garden.fill) { display: flex; flex-direction: column; }
+.garden.fill { flex: 1 1 auto; display: flex; flex-direction: column; }
+.garden.fill .garden-area { position: relative; flex: 1 1 auto; min-height: 150px; }
+.garden.fill canvas { position: absolute; top: 0; left: 0; }
 .garden-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 12px; font-family: var(--mono); font-size: 11px; color: var(--muted); }
 .garden-legend span { display: inline-flex; align-items: center; gap: 6px; }
 .garden-legend i { width: 8px; height: 8px; }
@@ -613,6 +621,11 @@ details.disclosure[open] > summary { margin-bottom: 10px; }
 .table-toggle[open] .why-open::before { content: "Hide"; }
 /* Do first: three ranked actions, each opening the tab that explains it. */
 .do-first { margin: 0 calc(-1 * var(--pad)); padding: 0; list-style: none; }
+/* Do first scrolls inside its card: the card takes the row's height from the heatmap beside it, and a fade says there is more below. */
+.card:has(> .do-first-scroll) { display: flex; flex-direction: column; padding-bottom: 0; }
+.do-first-scroll { position: relative; flex: 1 1 auto; min-height: 240px; margin: 0 calc(-1 * var(--pad)); }
+.do-first-scroll > .do-first { position: absolute; inset: 0; margin: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.do-first-scroll::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 28px; background: linear-gradient(transparent, var(--surface)); pointer-events: none; }
 .do-first li { border-top: 1px solid var(--line); }
 .do-first button { width: 100%; display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 6px 10px; align-items: start; padding: 12px var(--pad); border: 0; background: transparent; text-align: left; color: var(--ink); transition: background-color .15s; }
 .do-first button:hover { background: var(--surface-2); }
@@ -825,6 +838,8 @@ details.disclosure[open] > summary { margin-bottom: 10px; }
   .view-header h1 { font-size: 28px; }
   .view-actions { align-items: flex-start; }
   .view-header .view-note { text-align: left; max-width: none; }
+  .do-first-scroll { min-height: 0; }
+  .do-first-scroll > .do-first { position: static; max-height: 380px; }
   .steps-grid, .metrics-grid, .metrics-grid.c3 { grid-template-columns: repeat(2, 1fr); }
   .ruled-grid.c11, .ruled-grid.c21, .ruled-grid.c3 { grid-template-columns: minmax(0, 1fr); }
   .report-tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }

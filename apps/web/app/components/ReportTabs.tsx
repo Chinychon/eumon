@@ -79,6 +79,7 @@ export function TechnicalTab({ siteId, report, results, running, changes, busy, 
         <Card title="Every sitemap URL" subtitle={`${formatNumber(report.coverage?.totalUrls ?? report.sitemap.totalUrls)} URLs, one square each, as Googlebot received them.`}>
           {families.length ? (
             <CrawlGarden
+              fill
               label="Every sitemap URL by page type"
               families={families.map((family) => ({ family: family.family, total: family.urls, done: family.urls, blocked: Math.max(0, family.urls - family.crawled - family.errors), emptyShells: family.emptyShells, errors: family.errors }))}
             />

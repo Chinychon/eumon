@@ -75,6 +75,39 @@ describe("results math", () => {
     assert.equal(resultsView(base()).numbers.leadsSince, null);
   });
 
+  it("reports AI fetches per engine, referrals per assistant, and leads by source, null before anything is counted", () => {
+    const empty = resultsView(base());
+    assert.equal(empty.ai.since, null);
+    assert.equal(empty.ai.engines[0]!.crawler.current, null);
+    assert.equal(empty.ai.leadsBySource, null);
+    assert.equal(empty.ai.ga4, null);
+    assert.equal(empty.ai.questions, null);
+    const view = resultsView(base({ series: {
+      ai_fetches: days("2026-09-20", 17, () => 3),
+      ai_crawler_fetches: days("2026-09-20", 17, () => 2),
+      ai_live_fetches: days("2026-09-20", 17, () => 1),
+      "ai_crawler_fetches.openai": days("2026-09-20", 17, () => 2),
+      "ai_live_fetches.perplexity": days("2026-09-20", 17, () => 1),
+      "ai_referral_visits.chatgpt": [{ day: "2026-10-01", value: 4 }],
+      "leads_eumon.ai": [{ day: "2026-10-02", value: 1 }],
+      "leads_eumon.search": [{ day: "2026-10-02", value: 3 }],
+      question_queries: [{ day: "2026-10-04", value: 12 }],
+      question_clicks: [{ day: "2026-10-04", value: 40 }],
+      question_impressions: [{ day: "2026-10-04", value: 900 }],
+      ai_crawlers_allowed: [{ day: "2026-10-03", value: 14 }],
+      ai_crawlers_checked: [{ day: "2026-10-03", value: 18 }],
+    } }));
+    assert.equal(view.ai.since, "2026-09-20");
+    assert.equal(view.ai.engines.find((entry) => entry.engine === "openai")!.crawler.current, 34, "17 days at 2, within the 28 days to yesterday");
+    assert.equal(view.ai.engines.find((entry) => entry.engine === "perplexity")!.live.current, 17);
+    assert.equal(view.ai.engines.find((entry) => entry.engine === "meta")!.crawler.current, null);
+    assert.equal(view.ai.weeks[0]!.week, "2026-09-21", "weeks start at the first full week after counting began");
+    assert.equal(view.ai.referrals.byAssistant.find((entry) => entry.assistant === "chatgpt")!.visits, 4);
+    assert.deepEqual(view.ai.leadsBySource, { search: 3, ai: 1, other: 0 });
+    assert.deepEqual(view.ai.questions, { queries: 12, clicks: 40, impressions: 900, day: "2026-10-04" });
+    assert.deepEqual(view.ai.crawlersAllowed, { allowed: 14, checked: 18 });
+  });
+
   it("reports speed per form factor with ratings, lab scores, and authority for current competitors", () => {
     const view = resultsView(base({
       competitors: ["rival.example", "new.example"],

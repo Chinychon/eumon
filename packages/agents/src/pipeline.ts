@@ -25,6 +25,8 @@ import {
   samplePerFamily,
   testRepeatability,
   type Fetcher,
+  aiReadiness,
+  robotsState,
   type PageInspection,
   type RenderComparison,
   type SiteResearch,
@@ -300,13 +302,11 @@ export async function runFullAnalysis(input: RunAnalysisInput) {
     repeatability,
   }));
 
-  let robotsTxt: string | undefined;
-  try {
-    const robots = await fetcher(new URL("/robots.txt", input.baseUrl).toString());
-    robotsTxt = robots.body;
-  } catch {
-    robotsTxt = undefined;
-  }
+  // An error page or a challenge page is not robots.txt: only a real one is parsed.
+  const [robotsResponse, llmsResponse] = await Promise.all(["/robots.txt", "/llms.txt"].map((path) =>
+    fetcher(new URL(path, input.baseUrl).toString(), { maxBytes: 500_000 }).catch(() => null)));
+  const robotsTxt = robotsState(robotsResponse ?? null).body;
+  const aiAccess = aiReadiness({ robots: robotsResponse ?? null, llms: llmsResponse ?? null, pages: pageResults });
 
   findings.push(
     ...runTechnicalSeoAudit({
@@ -391,6 +391,7 @@ export async function runFullAnalysis(input: RunAnalysisInput) {
     },
     competition: competition ?? null,
     conversion,
+    aiReadiness: aiAccess,
     search: searchMetrics.length ? search : null,
     // Raw Search Console rows are persisted separately; the report keeps the
     // synthesis so it stays well under Workflow step and D1 row limits.

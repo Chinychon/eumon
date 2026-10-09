@@ -733,3 +733,4 @@ export * from "./competitors.js";
 export * from "./urls.js";
 export * from "./html.js";
 export * from "./robots.js";
+export * from "./ai-readiness.js";

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { fetchSearchDaily, ga4Days, inspectionResult, listGa4Properties } from "./index.js";
+import { fetchGa4AiReferrals, fetchSearchDaily, ga4AiPoints, ga4Days, inspectionResult, listGa4Properties } from "./index.js";
 
 /** A fetch that records requests and answers with a fixed JSON body. */
 function recorded(body: unknown) {
@@ -21,6 +21,27 @@ describe("Google clients", () => {
     assert.deepEqual(sent.dimensions, ["date"]);
     assert.equal(sent.dataState, "all", "fresh days are included and overwritten later");
     assert.deepEqual(sent.dimensionFilterGroups[0]!.filters.map((filter) => [filter.dimension, filter.expression]), [["page", "https://x.com/guides/"], ["country", "mys"]]);
+  });
+
+  it("asks GA4 for sessions by source filtered to AI assistants, and folds them per assistant", async () => {
+    const { fetchFn, requests } = recorded({ rows: [
+      { dimensionValues: [{ value: "20261001" }, { value: "chatgpt.com" }], metricValues: [{ value: "5" }, { value: "1" }] },
+      { dimensionValues: [{ value: "20261001" }, { value: "chat.openai.com" }], metricValues: [{ value: "2" }, { value: "0" }] },
+      { dimensionValues: [{ value: "20261001" }, { value: "perplexity.ai" }], metricValues: [{ value: "3" }, { value: "2" }] },
+      { dimensionValues: [{ value: "20261002" }, { value: "news.ycombinator.com" }], metricValues: [{ value: "9" }, { value: "0" }] },
+    ] });
+    const days = await fetchGa4AiReferrals("t", "properties/1", "2026-09-01", "2026-10-06", fetchFn);
+    assert.deepEqual(days, [
+      { day: "2026-10-01", assistant: "chatgpt", sessions: 7, keyEvents: 1 },
+      { day: "2026-10-01", assistant: "perplexity", sessions: 3, keyEvents: 2 },
+    ]);
+    const sent = requests[0]!.body as { dimensions: Array<{ name: string }>; dimensionFilter: { filter: { fieldName: string; stringFilter: { matchType: string; value: string } } } };
+    assert.deepEqual(sent.dimensions.map((dimension) => dimension.name), ["date", "sessionSource"]);
+    assert.equal(sent.dimensionFilter.filter.stringFilter.matchType, "PARTIAL_REGEXP");
+    assert.match("chatgpt.com", new RegExp(sent.dimensionFilter.filter.stringFilter.value));
+    const points = ga4AiPoints(days);
+    assert.deepEqual(points.filter((point) => point.metric === "ga4_ai_sessions"), [{ metric: "ga4_ai_sessions", day: "2026-10-01", value: 10 }]);
+    assert.deepEqual(points.find((point) => point.metric === "ga4_ai_key_events"), { metric: "ga4_ai_key_events", day: "2026-10-01", value: 3 });
   });
 
   it("reads an inspection verdict, and treats a missing index result as not checked", () => {

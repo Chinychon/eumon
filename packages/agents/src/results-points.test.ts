@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { mergePositions, rankingPoints, searchDayPoints, topQueries } from "./results-points.js";
+import { mergePositions, questionPoints, rankingPoints, searchDayPoints, topQueries } from "./results-points.js";
+import { isQuestionQuery } from "./search.js";
 
 describe("results points", () => {
   it("sums rows of the same day, so per-country fetches merge", () => {
@@ -47,6 +48,25 @@ describe("results points", () => {
       { query: "braces price", clicks: 40, impressions: 1200, position: 5, before: null },
       { query: "dentist kl", clicks: 40, impressions: 900, position: 3.2, before: { clicks: 25, impressions: 700, position: 4.1 } },
       { query: "new query", clicks: 5, impressions: 80, position: 9, before: null },
+    ]);
+  });
+
+  it("counts question searches, in English, Malay and Indonesian, and leaves buying searches out", () => {
+    for (const query of ["how much does an implant cost", "what is a root canal", "can i get braces at 40", "berapa harga scaling", "bagaimana cara pasang behel", "dentist open sunday?", "klinik gigi di mana"]) {
+      assert.ok(isQuestionQuery(query), query);
+    }
+    for (const query of ["best dentist kl", "dental implant price", "invisalign vs braces", "dentist near me", "klinik gigi terbaik", "isotretinoin side effects"]) {
+      assert.ok(!isQuestionQuery(query), query);
+    }
+    const points = questionPoints([
+      { query: "how much are veneers", position: 6, impressions: 300, clicks: 9 },
+      { query: "veneers price", position: 4, impressions: 900, clicks: 40 },
+      { query: "is teeth whitening safe", position: 12, impressions: 120, clicks: 2 },
+    ], "2026-10-04");
+    assert.deepEqual(points, [
+      { metric: "question_queries", day: "2026-10-04", value: 2 },
+      { metric: "question_clicks", day: "2026-10-04", value: 11 },
+      { metric: "question_impressions", day: "2026-10-04", value: 420 },
     ]);
   });
 });

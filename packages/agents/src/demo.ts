@@ -177,7 +177,7 @@ export function demoFetcher(version: number, now = Date.now()): Fetcher {
     const target = new URL(url);
     const reply = (status: number, body: string, type = "text/html") => ({ url, status, finalUrl: url, headers: { "content-type": type }, body });
     if (target.hostname === "demo-clinic.example") {
-      if (target.pathname === "/robots.txt") return reply(200, "User-agent: *\nDisallow: /search\nDisallow: /blog/drafts/\nSitemap: https://demo-clinic.example/sitemap.xml\n", "text/plain");
+      if (target.pathname === "/robots.txt") return reply(200, "User-agent: *\nDisallow: /search\nDisallow: /blog/drafts/\n\nUser-agent: Bytespider\nUser-agent: CCBot\nDisallow: /\n\nSitemap: https://demo-clinic.example/sitemap.xml\n", "text/plain");
       if (target.pathname === "/sitemap.xml") {
         // Version 3 changed the price and dentist pages, so an update fetches only those again.
         return reply(200, sitemap(pages.map((page) => ({ loc: `${ORIGIN}${page.path}`, lastmod: version === 3 && (page.family === "prices" || page.family === "dentists") ? today : settled }))), "application/xml");
@@ -371,13 +371,33 @@ async function seedPageEngine(db: D1Like, now: number) {
     }
   }
   await replacePageSearchMetrics(db, DEMO_SITE_ID, searched);
+  // AI agents reading the guides since go-live: crawlers steady, live fetches (an assistant answering someone) growing. CCBot and Bytespider are blocked in robots.txt.
+  const agents: Array<[string, number, number]> = [
+    ["GPTBot", 3, 0], ["OAI-SearchBot", 2, 1], ["ChatGPT-User", 0, 6], ["ClaudeBot", 2, 0], ["Claude-SearchBot", 1, 1], ["Claude-User", 0, 2],
+    ["PerplexityBot", 2, 1], ["Perplexity-User", 0, 4], ["Meta-ExternalAgent", 2, 0], ["Amazonbot", 1, 0],
+  ];
+  for (let d = 79; d >= 0; d--) {
+    const day = new Date(now - d * DAY).toISOString().slice(0, 10);
+    const growth = Math.min(1, (80 - d) / 60);
+    const page = live[d % Math.max(1, Math.min(live.length, 12))];
+    if (!page) break;
+    for (const [agent, steady, rising] of agents) {
+      const count = Math.round(steady * (1 + ((d + agent.length) % 3) * 0.5) + rising * growth * (1 + 0.3 * Math.sin(d / 4)));
+      if (count) statements.push(db.prepare("INSERT INTO ai_page_daily (site_id, page_id, day, signal, name, count) VALUES (?, ?, ?, 'fetch', ?, ?)").bind(DEMO_SITE_ID, page.id, day, agent, count));
+    }
+    for (const [assistant, rate] of [["chatgpt", 3], ["perplexity", 1.2], ["gemini", 0.6], ["copilot", 0.3]] as const) {
+      const count = Math.round(rate * growth * (1 + 0.4 * Math.sin((d + rate) / 3)));
+      if (count) statements.push(db.prepare("INSERT INTO ai_page_daily (site_id, page_id, day, signal, name, count) VALUES (?, ?, ?, 'referral', ?, ?)").bind(DEMO_SITE_ID, page.id, day, assistant, count));
+    }
+  }
   for (const group of chunks(statements, 100)) await runStatements(db, group);
 
   for (let i = 0; i < 260; i++) {
     const page = live[i % Math.max(live.length, 1)];
     const occurredAt = new Date(now - ((i * 7919) % (88 * DAY / 60_000)) * 60_000 - DAY).toISOString();
     // The visitor first landed on a generated page, so the enquiry is attributed to it.
-    if (page) await recordLandingSession(db, { siteId: DEMO_SITE_ID, sessionId: `session_demo_${i % 180}`, pageId: page.id });
+    const source = i % 9 === 0 ? "ai:chatgpt" : i % 13 === 0 ? "ai:perplexity" : i % 3 === 0 ? "other" : "search";
+    if (page) await recordLandingSession(db, { siteId: DEMO_SITE_ID, sessionId: `session_demo_${i % 180}`, pageId: page.id, source });
     await insertConversionEvent(db, {
       id: `event_demo_${i}`, siteId: DEMO_SITE_ID, event: i % 5 === 0 ? "form_submit" : i % 11 === 0 ? "phone_click" : "whatsapp_click",
       ...(page ? { pageUrl: `${ORIGIN}${page.path}` } : {}), sessionId: `session_demo_${i % 180}`, occurredAt,
@@ -496,6 +516,19 @@ async function seedDemoResults(db: D1Like, now: number) {
       { metric: "ga4_organic_engaged_sessions", day, value: Math.round(clicks * 0.8) },
       { metric: "ga4_organic_key_events", day, value: Math.round(clicks * 0.05) },
     );
+    // AI assistants have sent a trickle of visitors for a year, growing since the guides went live.
+    if (back <= 365) {
+      const chatgpt = Math.round(clicks * (live ? 0.05 * lift : 0.03) * (1 + ((back % 5) - 2) * 0.1));
+      const perplexity = Math.round(chatgpt * 0.35);
+      const gemini = Math.round(chatgpt * 0.2);
+      points.push(
+        { metric: "ga4_ai_sessions", day, value: chatgpt + perplexity + gemini },
+        { metric: "ga4_ai_sessions.chatgpt", day, value: chatgpt },
+        { metric: "ga4_ai_sessions.perplexity", day, value: perplexity },
+        { metric: "ga4_ai_sessions.gemini", day, value: gemini },
+        { metric: "ga4_ai_key_events", day, value: Math.round((chatgpt + perplexity + gemini) * 0.08) },
+      );
+    }
     if (live) {
       const eumonClicks = Math.round(clicks * Math.min(0.32, (80 - back + 1) / 200));
       points.push(
@@ -508,6 +541,12 @@ async function seedDemoResults(db: D1Like, now: number) {
   for (let week = 0; week < 16; week++) {
     const day = addDays(today, -7 * week);
     const growth = Math.max(0, 16 - week);
+    // Question searches ("how much does … cost") in each 28-day query list, as the daily sync derives them.
+    points.push(
+      { metric: "question_queries", day: addDays(day, -3), value: 31 + growth * 2 },
+      { metric: "question_clicks", day: addDays(day, -3), value: 120 + growth * 14 },
+      { metric: "question_impressions", day: addDays(day, -3), value: 5200 + growth * 310 },
+    );
     for (const [top, base] of [[3, 14], [10, 52], [20, 118], [100, 290]] as const) {
       const queries = base + growth * (top === 3 ? 1 : 3);
       for (const suffix of ["", "@markets"]) {

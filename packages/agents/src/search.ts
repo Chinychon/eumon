@@ -6,6 +6,18 @@ import { estimateDemand } from "./demand.js";
 export const COMMERCIAL_QUERY_PATTERN =
   /\b(cost|costs|price|prices|pricing|cheap|cheapest|affordable|quote|book|booking|appointment|buy|hire|near me|best|top|review|reviews|vs|compare|comparison|service|services|clinic|package|packages|biaya|harga|terbaik|murah|paket|kos|terdekat)\b/i;
 
+/**
+ * Wording that makes a search a question, the kind answer engines and AI
+ * assistants answer directly: question words anywhere, auxiliaries only at the
+ * start ("can I…", "is it…"), or a trailing "?". English, Malay and
+ * Indonesian. Buying words (best, top, vs, near me, terbaik) are left to the
+ * commercial pattern: they ask for a list, not an answer.
+ */
+export const QUESTION_QUERY_PATTERN =
+  /(\b(who|what|when|where|why|how|which|whose|apa|siapa|bila|bilakah|kapan|mengapa|kenapa|bagaimana|berapa|dimana|di mana|apakah|adakah)\b|^(can|could|does|do|did|is|are|should|boleh|bolehkah)\b|\?\s*$)/i;
+
+export const isQuestionQuery = (query: string) => QUESTION_QUERY_PATTERN.test(query.trim());
+
 type QueryPage = { query: string; page: string; clicks: number; impressions: number; position: number };
 
 /** What first-party search data says about where traffic comes from and what to do next. */

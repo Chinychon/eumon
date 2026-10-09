@@ -1,16 +1,7 @@
 import type { CrawlPageResult, Finding, SitemapAudit } from "@organic-growth/core";
-import { createId, organicImpactScore, severityFromImpact } from "@organic-growth/core";
+import { AI_ROBOTS_CHECKS, createId, organicImpactScore, severityFromImpact } from "@organic-growth/core";
 import { GOOGLEBOT_TOKEN, parseRobots } from "./robots.js";
 import { classifyLanguage, isSameSite, sameDocument } from "./urls.js";
-
-/** Crawlers that collect content for AI assistants and answer engines. */
-const AI_CRAWLERS = [
-  { name: "GPTBot", token: "gptbot", product: "OpenAI" },
-  { name: "OAI-SearchBot", token: "oai-searchbot", product: "ChatGPT search" },
-  { name: "ClaudeBot", token: "claudebot", product: "Anthropic" },
-  { name: "PerplexityBot", token: "perplexitybot", product: "Perplexity" },
-  { name: "Google-Extended", token: "google-extended", product: "Gemini" },
-];
 
 /**
  * Technical SEO audit rules ranked by expected organic impact.
@@ -135,19 +126,22 @@ export function runTechnicalSeoAudit(input: {
 
   // Blocking AI crawlers is a legitimate business choice, but it removes the
   // site from AI search answers; report it without treating it as an error.
+  // Exact tokens: a `User-agent: Applebot` group must not decide for Applebot-Extended.
   const blockedAiCrawlers = input.robotsTxt
-    ? AI_CRAWLERS.filter((crawler) => !parseRobots(input.robotsTxt!, crawler.token).isAllowed("/"))
+    ? AI_ROBOTS_CHECKS.filter((crawler) => !parseRobots(input.robotsTxt!, crawler.agent.toLowerCase(), { exact: true }).isAllowed("/"))
     : [];
   if (blockedAiCrawlers.length) {
+    const blockedSearch = blockedAiCrawlers.filter((crawler) => crawler.kind !== "crawler" || /search/i.test(crawler.agent));
     findings.push({
       id: createId("finding"),
       siteId,
       analysisId,
-      category: "indexing",
+      // Its own category: not an indexing problem, and never a candidate for an automatic fix.
+      category: "ai_visibility",
       severity: "INFORMATIONAL",
-      title: "robots.txt blocks AI search crawlers",
-      summary: `robots.txt disallows ${blockedAiCrawlers.map((crawler) => `${crawler.name} (${crawler.product})`).join(", ")}. These crawlers feed AI assistants and answer engines, so the site will not be cited there.`,
-      evidence: { blocked: blockedAiCrawlers.map((crawler) => crawler.name) },
+      title: blockedSearch.length ? "robots.txt blocks AI assistants from reading the site" : "robots.txt blocks AI training crawlers",
+      summary: `robots.txt disallows ${blockedAiCrawlers.map((crawler) => `${crawler.agent} (${crawler.purpose})`).join("; ")}. ${blockedSearch.length ? "Assistants that can't read the site won't cite it in their answers." : "AI search and live answers can still read the site."}`,
+      evidence: { blocked: blockedAiCrawlers.map((crawler) => crawler.agent) },
       organicImpactScore: 10,
       recommendation: "Keep the block if it is deliberate. To be cited in AI answers, allow the search-facing crawlers (e.g. OAI-SearchBot, PerplexityBot, Claude-SearchBot) while still blocking training crawlers if you prefer.",
       pagesAffected: [],

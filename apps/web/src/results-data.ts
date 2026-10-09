@@ -33,7 +33,7 @@ export type ResultsPayload = {
   results: ResultsView;
 };
 
-/** What the Results view receives. The client link gets no site health and no property IDs. */
+/** What the Results view receives. The client link gets no site health, no AI-crawler access count (an operator's setup detail), and no property IDs. */
 export async function resultsPayload(db: D1Like, site: SiteRecord, options: { client?: boolean; keys?: SignalKeys } = {}): Promise<ResultsPayload> {
   const [results, scopes] = await Promise.all([loadResults(db, site), site.ga4Property ? googleScopes(db, site.id) : Promise.resolve([])]);
   return {
@@ -44,6 +44,6 @@ export async function resultsPayload(db: D1Like, site: SiteRecord, options: { cl
       analytics: !site.ga4Property ? "none" : scopes.includes(ANALYTICS_SCOPE) ? "connected" : "reconnect",
       signals: { speed: Boolean(options.keys?.googleApiKey), authority: Boolean(options.keys?.openPageRankKey), keywords: Boolean(options.keys?.dataForSeo) },
     },
-    results: options.client ? { ...results, health: { value: null, day: null } } : results,
+    results: options.client ? { ...results, health: { value: null, day: null }, ai: { ...results.ai, crawlersAllowed: null } } : results,
   };
 }

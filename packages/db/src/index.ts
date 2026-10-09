@@ -81,7 +81,7 @@ export async function updateSiteFingerprint(db: D1Like, siteId: string, fingerpr
 export async function deleteSite(db: D1Like, siteId: string): Promise<void> {
   // Child tables without ON DELETE CASCADE are cleared explicitly first.
   const tables = [
-    "page_metrics_daily", "page_sessions", "page_search_metrics", "cta_variants", "page_settings", "site_scopes",
+    "page_metrics_daily", "ai_page_daily", "page_sessions", "page_search_metrics", "cta_variants", "page_settings", "site_scopes",
     "generated_pages", "page_templates", "data_records", "data_sources", "jobs", "datasets",
     "pages", "search_metrics", "changes", "conversion_events", "oauth_credentials", "site_competitor_domains", "site_markets", "analyses",
   ];

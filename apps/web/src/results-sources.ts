@@ -4,8 +4,8 @@
  * when to run it, writes its marker, and isolates its failures.
  */
 import {
-  authorityDomain, dataForSeoLocation, fetchAuthority, fetchCruxHistory, fetchGa4Daily, fetchKeywordOverview, fetchLabScore, fetchQueryPositions, fetchRankedKeywords, fetchSearchDaily,
-  mergePositions, rankingPoints, searchDayPoints, topQueries, type FormFactor, type QueryPosition,
+  authorityDomain, dataForSeoLocation, fetchAuthority, fetchCruxHistory, fetchGa4AiReferrals, fetchGa4Daily, fetchKeywordOverview, fetchLabScore, fetchQueryPositions, fetchRankedKeywords, fetchSearchDaily,
+  ga4AiPoints, mergePositions, questionPoints, rankingPoints, searchDayPoints, topQueries, type FormFactor, type QueryPosition,
 } from "@organic-growth/agents";
 import { addDays, countryNumeric, type PricedKeyword, type RankedKeyword, type SiteRecord } from "@organic-growth/core";
 import {
@@ -132,7 +132,11 @@ const rankings: Source = {
   },
 };
 
-/** The queries with the most clicks over the last 28 finalized days, each beside the 28 before; scoped to the target markets when set. */
+/**
+ * The queries with the most clicks over the last 28 finalized days, each
+ * beside the 28 before; scoped to the target markets when set. The same list
+ * gives the question-search counts, at no extra request.
+ */
 const topQueryList: Source = {
   name: "top queries", cadence: "daily", google: true,
   applies: ({ site }) => Boolean(site.gscProperty),
@@ -147,7 +151,7 @@ const topQueryList: Source = {
     const last28 = { startDate: addDays(today, -30), endDate: addDays(today, -3) };
     const [recent, earlier] = await Promise.all([queriesIn(last28), queriesIn({ startDate: addDays(today, -58), endDate: addDays(today, -31) })]);
     await saveTopQueriesSnapshot(db, site.id, { property, markets, periodEnd: last28.endDate, rows: topQueries(recent, earlier) });
-    return {};
+    return { points: questionPoints(recent, last28.endDate) };
   },
 };
 
@@ -182,7 +186,12 @@ const inspection: Source = {
   },
 };
 
-/** GA4 sessions and organic key events: 16 months the first time, then the last 7 days. Needs the Analytics scope, granted on reconnect for older connections. */
+/**
+ * GA4 sessions and organic key events, and sessions AI assistants sent:
+ * 16 months the first time, then the last 7 days. Needs the Analytics scope,
+ * granted on reconnect for older connections. A day GA4 reports with no AI
+ * session is a real 0.
+ */
 const analytics: Source = {
   name: "analytics", cadence: "daily", marker: "sync.ga4", google: true,
   applies: ({ site }) => Boolean(site.ga4Property),
@@ -191,15 +200,25 @@ const analytics: Source = {
     const { site, today, fetchFn } = ctx;
     const { token } = await ctx.google();
     const span = first ? BACKFILL_DAYS : 7;
-    const days = await fetchGa4Daily(token, site.ga4Property!, addDays(today, -span), addDays(today, -1), fetchFn);
+    const [start, end] = [addDays(today, -span), addDays(today, -1)];
+    const [days, aiDays] = await Promise.all([
+      fetchGa4Daily(token, site.ga4Property!, start, end, fetchFn),
+      fetchGa4AiReferrals(token, site.ga4Property!, start, end, fetchFn).catch(() => null),
+    ]);
+    const ai = aiDays ? ga4AiPoints(aiDays) : [];
+    const aiTotals = new Set(ai.filter((point) => point.metric === "ga4_ai_sessions").map((point) => point.day));
     return {
-      points: days.flatMap((day) => [
-        { metric: "ga4_sessions", day: day.day, value: day.sessions },
-        { metric: "ga4_organic_sessions", day: day.day, value: day.organicSessions },
-        { metric: "ga4_organic_engaged_sessions", day: day.day, value: day.organicEngagedSessions },
-        { metric: "ga4_organic_key_events", day: day.day, value: day.organicKeyEvents },
-      ]),
-      notes: [`analytics: ${span} days`],
+      points: [
+        ...days.flatMap((day) => [
+          { metric: "ga4_sessions", day: day.day, value: day.sessions },
+          { metric: "ga4_organic_sessions", day: day.day, value: day.organicSessions },
+          { metric: "ga4_organic_engaged_sessions", day: day.day, value: day.organicEngagedSessions },
+          { metric: "ga4_organic_key_events", day: day.day, value: day.organicKeyEvents },
+          ...(aiDays && !aiTotals.has(day.day) ? [{ metric: "ga4_ai_sessions", day: day.day, value: 0 }, { metric: "ga4_ai_key_events", day: day.day, value: 0 }] : []),
+        ]),
+        ...ai,
+      ],
+      notes: [`analytics: ${span} days`, ...(aiDays ? [] : ["analytics: AI referrals failed"])],
     };
   },
 };

@@ -23,7 +23,9 @@ export type FindingCategory =
   | "conversion"
   | "competitors"
   | "search"
-  | "repository";
+  | "repository"
+  /** AI assistants' access to the site (robots.txt for AI crawlers): reported, never auto-fixed. */
+  | "ai_visibility";
 
 export type CompetitorCategory =
   | "business"

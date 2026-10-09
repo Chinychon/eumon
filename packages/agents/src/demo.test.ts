@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { addDays, RESULT_METRICS, resultsView } from "@organic-growth/core";
+import { listSnapshots } from "@organic-growth/db";
 import { getAnalysisJob, getCrawlProgress, getLinkGraph, getSite, getTopQueriesSnapshot, indexStatusCounts, listMetricSeries, publishedPages } from "@organic-growth/db";
 import { openSqliteD1 } from "@organic-growth/db/sqlite";
 import { advanceDemoRun, DEMO_SITE_ID, isLocalHost, seedDemoSite, startDemoRun } from "./demo.js";
@@ -73,6 +74,13 @@ describe("demo site", () => {
     const signals = await listMetricSeries(db, DEMO_SITE_ID, ["crux_lcp_p75.phone", "crux_lcp_p75.desktop", "lab_score_eumon.phone", "authority", "authority:brightcare-dental.example"], addDays(today, -400), today);
     assert.ok(signals["crux_lcp_p75.phone"]!.length >= 20 && signals["crux_lcp_p75.desktop"]!.length >= 20, "weekly speed history for both form factors");
     assert.ok(signals["lab_score_eumon.phone"]!.length && signals.authority!.length && signals["authority:brightcare-dental.example"]!.length);
+    const priced = await listSnapshots<{ keyword: string; volume: number | null }>(db, DEMO_SITE_ID, "keywords");
+    const ranked = await listSnapshots<{ keyword: string }>(db, DEMO_SITE_ID, "competitor_keywords");
+    assert.equal(priced.length, 1, "the demo's queries are priced for Malaysia");
+    assert.ok(priced[0]!.rows.length >= 8 && priced[0]!.rows.some((row) => row.volume === null), "a query DataForSEO doesn't know shows no volume");
+    assert.deepEqual(ranked.map((list) => list.scope).sort(), ["brightcare-dental.example|mys", "demo-clinic.example|mys", "smile-dental.example|mys"]);
+    const kw = await listMetricSeries(db, DEMO_SITE_ID, ["sync.competitor_keywords", "sync.keyword_volumes", "kw_traffic", "kw_traffic:brightcare-dental.example"], addDays(today, -40), today);
+    assert.ok(kw["sync.competitor_keywords"]!.length && kw["sync.keyword_volumes"]!.length && kw.kw_traffic!.length && kw["kw_traffic:brightcare-dental.example"]!.length, "keyword markers and visibility points");
     const coverage = await db.prepare("SELECT COUNT(*) AS n FROM url_index_status WHERE site_id = ?").bind(DEMO_SITE_ID).first<{ n: number }>();
     assert.ok(Number(coverage?.n) > 300, "a sample of sitemap URLs checked with Google");
   });

@@ -1,10 +1,10 @@
-import type { DataRecord, Dataset, PageTemplate, SearchMetricRow } from "@organic-growth/core";
+import type { DataRecord, Dataset, PageTemplate, PricedKeyword, RankedKeyword, SearchMetricRow } from "@organic-growth/core";
 import { addDays, slugify } from "@organic-growth/core";
 import { crawlGooglebotBatch, researchSite, type Fetcher, type SiteResearch } from "@organic-growth/crawler";
 import {
   chunks, createAnalysis, datasetCoverage, deleteSite, getAnalysisJob, getCrawlCoverage, getCrawlProgress, insertConversionEvent, listAllRecords,
   listCrawlPageResults, listPendingCrawlUrls, recordLandingSession, replaceCurrentSearchMetrics, replacePageSearchMetrics, runStatements, saveAnalysisReport, saveCrawlBatch,
-  saveIndexStatus, saveSiteScope, saveTopQueriesSnapshot, saveUrlIndexStatus, listSiteCompetitorDomains, setSiteCompetitorDomains, syncFirstPartyResults, updateSiteGa4Property, upsertMetricPoints, type MetricPoint, setSiteMarkets, setTemplatePublication, syncTemplatePages, updateAnalysisProgress,
+  saveIndexStatus, saveSiteScope, saveSnapshot, saveTopQueriesSnapshot, saveUrlIndexStatus, listSiteCompetitorDomains, setSiteCompetitorDomains, syncFirstPartyResults, updateSiteGa4Property, upsertMetricPoints, type MetricPoint, setSiteMarkets, setTemplatePublication, syncTemplatePages, updateAnalysisProgress,
   updateAnalysisStatus, upsertDataset, upsertRecords, upsertSite, upsertTemplate, type D1Like,
 } from "@organic-growth/db";
 import { generatePages } from "@organic-growth/pages";
@@ -584,5 +584,31 @@ async function seedDemoResults(db: D1Like, now: number) {
       lastCrawlTime: state.startsWith("Submitted") || state.startsWith("Crawled") ? `${addDays(today, -(index % 40))}T02:00:00Z` : null,
     };
   }));
+  // Fictional keyword data for Malaysia: the demo's queries priced (one unknown to DataForSEO), and ranked lists for the clinic and both competitors.
+  const volumes: Array<[number | null, number, string]> = [[1900, 34, "commercial"], [2400, 41, "commercial"], [null, 0, "navigational"], [1300, 22, "commercial"], [2900, 58, "commercial"], [880, 27, "commercial"], [720, 19, "transactional"], [590, 31, "commercial"], [480, 15, "transactional"], [260, 12, "commercial"]];
+  const pricedRows: PricedKeyword[] = queries.map(([query, clicks, impressions, position], index) => {
+    const [volume, difficulty, intent] = volumes[index]!;
+    return { keyword: query, volume, difficulty: volume === null ? null : difficulty, intent: volume === null ? null : intent, position, clicks, impressions };
+  });
+  await saveSnapshot(db, DEMO_SITE_ID, { kind: "keywords", scope: "sc-domain:demo-clinic.example|mys", periodEnd: addDays(today, -3), rows: pricedRows });
+  const rankedRow = (keyword: string, volume: number, difficulty: number, intent: string, position: number, url: string): RankedKeyword =>
+    ({ keyword, volume, difficulty, intent, position, url, traffic: Math.round(volume * (position <= 3 ? 0.2 : position <= 10 ? 0.05 : 0.01)) });
+  const rankedLists: Record<string, RankedKeyword[]> = {
+    "demo-clinic.example": [rankedRow("dental implants kuala lumpur", 1900, 34, "commercial", 4, "/implants"), rankedRow("braces price malaysia", 2400, 41, "commercial", 6, "/braces"), rankedRow("demo dental clinic", 300, 0, "navigational", 1, "/")],
+    [competitors[0] ?? "brightcare-dental.example"]: [
+      rankedRow("veneers price malaysia", 3600, 24, "commercial", 3, "/veneers-price"), rankedRow("dental implants kuala lumpur", 1900, 34, "commercial", 2, "/implants"),
+      rankedRow("gum disease treatment", 2200, 18, "informational", 5, "/gum-disease"), rankedRow("emergency dentist kl", 1600, 9, "transactional", 2, "/emergency"), rankedRow("dental crown cost", 1300, 29, "commercial", 7, "/crowns"),
+    ],
+    [competitors[1] ?? "smile-dental.example"]: [
+      rankedRow("veneers price malaysia", 3600, 24, "commercial", 8, "/veneers"), rankedRow("kids dentist kl", 900, 11, "commercial", 3, "/kids"), rankedRow("teeth cleaning price", 2600, 21, "commercial", 4, "/cleaning"),
+    ],
+  };
+  const keywordPoints: MetricPoint[] = [{ metric: "sync.competitor_keywords", day: today, value: 1 }, { metric: "sync.keyword_volumes", day: today, value: 1 }];
+  for (const [domain, rows] of Object.entries(rankedLists)) {
+    await saveSnapshot(db, DEMO_SITE_ID, { kind: "competitor_keywords", scope: `${domain}|mys`, periodEnd: today, rows });
+    const suffix = domain === "demo-clinic.example" ? "" : `:${domain}`;
+    keywordPoints.push({ metric: `kw_top10${suffix}`, day: today, value: rows.filter((row) => row.position <= 10).length }, { metric: `kw_traffic${suffix}`, day: today, value: rows.reduce((total, row) => total + row.traffic, 0) });
+  }
+  await upsertMetricPoints(db, DEMO_SITE_ID, keywordPoints);
   await syncFirstPartyResults(db, DEMO_SITE_ID, new Date(now));
 }

@@ -66,7 +66,9 @@ export function KeywordsCard({ keywords, host, operator, hasCredentials, hasMark
           ) : <p className="empty-state">No gaps found: you appear for every keyword your competitors rank for.</p>}
 
           <div className="section-title">Share of visibility</div>
-          <BarList format={(value) => `${formatNumber(value)} visits/mo`} rows={keywords.visibility.map((row, index) => ({ label: index === 0 ? host : row.domain, value: row.traffic }))} />
+          <BarList format={(value) => `${formatNumber(value)} visits/mo`} rows={keywords.visibility.map((row, index) => ({
+            label: `${index === 0 ? host : row.domain}${row.share === null ? "" : ` · ${Math.round(row.share * 100)}%`}`, value: row.traffic,
+          }))} />
           <p className="small muted">
             Estimated monthly visits from Google, in DataForSEO's index, which knows fewer of your keywords than Search Console does
             {you?.top10 !== null && you?.top10 !== undefined ? `: it sees you in the top 10 for ${formatNumber(you.top10)} searches${searchTop10 !== null ? `, Search Console counts ${formatNumber(searchTop10)}` : ""}` : ""}.

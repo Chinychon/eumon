@@ -429,7 +429,7 @@ async function analyzeDemo(db: D1Like, input: { analysisId: string; version: num
       suggestions: demoSuggestions(),
       links: demoLinks(demoConnectorInput(), new Date(input.now).toISOString().slice(0, 10)),
       logCoverage: await crawlLogCoverage(db, DEMO_SITE_ID, input.analysisId, new Date(input.now).toISOString().slice(0, 10)),
-      searchConsole: await searchConsoleReconciliation(db, DEMO_SITE_ID),
+      searchConsole: await searchConsoleReconciliation(db, DEMO_SITE_ID, input.analysisId),
     },
     crawlCoverage: { coverage, examples },
     renderPages: (urls) => renderDemo(urls, input.version),

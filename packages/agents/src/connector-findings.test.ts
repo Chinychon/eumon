@@ -101,7 +101,7 @@ describe("Search Console import findings", () => {
 
   it("names a low indexed share, noindex URLs that are indexable now, and dead URLs with their redirects", () => {
     const findings = findingsFromSearchConsoleImport({ siteId: "s", analysisId: "a", view: {
-      importedAt: "2026-10-09T00:00:00.000Z", summary: summary(1561, 24498), remainingChecks: 0,
+      importedAt: "2026-10-09T00:00:00.000Z", summary: summary(1561, 24498), remainingChecks: 0, counts: null,
       reasons: [
         { reason: "noindex", reasonText: "Excluded by 'noindex' tag", urls: 468, today: today({ indexable: 207, redirect: 199, noindex: 35, gone: 27 }), examples: { indexable: ["https://x.com/doctors/dr-a"] } },
         { reason: "not_found", reasonText: "Not found (404)", urls: 6, today: today({ gone: 6 }), examples: {} },
@@ -122,9 +122,17 @@ describe("Search Console import findings", () => {
   it("stays quiet under the thresholds, and without an import", () => {
     assert.deepEqual(findingsFromSearchConsoleImport({ siteId: "s", analysisId: "a", view: null }), []);
     const quiet = findingsFromSearchConsoleImport({ siteId: "s", analysisId: "a", view: {
-      importedAt: "2026-10-09T00:00:00.000Z", summary: summary(900, 100), remainingChecks: 0,
+      importedAt: "2026-10-09T00:00:00.000Z", summary: summary(900, 100), remainingChecks: 0, counts: null,
       reasons: [{ reason: "noindex", reasonText: "Excluded by 'noindex' tag", urls: 12, today: today({ indexable: 9, gone: 3 }), examples: {} }], suggestions: [],
     } });
     assert.deepEqual(quiet, [], "90% indexed, 9 indexable, 3 gone: none reaches its threshold");
+  });
+
+  it("takes Google's indexed count from the chart when the table has no Indexed row, as the real export does", () => {
+    const table = { importedAt: "2026-10-09", rows: [{ reason: "discovered" as const, reasonText: "Discovered - currently not indexed", source: "Google systems", validation: "Not Started", pages: 23100 }] };
+    const withChart = findingsFromSearchConsoleImport({ siteId: "s", analysisId: "a", view: { importedAt: null, summary: table, counts: { day: "2026-10-04", indexed: 1561, notIndexed: 24498 }, reasons: [], suggestions: [], remainingChecks: 0 } });
+    assert.deepEqual(withChart.map((finding) => finding.title), ["Google has indexed 1,561 of the 26,059 URLs it knows (6%)"]);
+    const tableOnly = findingsFromSearchConsoleImport({ siteId: "s", analysisId: "a", view: { importedAt: null, summary: table, counts: null, reasons: [], suggestions: [], remainingChecks: 0 } });
+    assert.deepEqual(tableOnly, [], "the table alone never says how many are indexed");
   });
 });

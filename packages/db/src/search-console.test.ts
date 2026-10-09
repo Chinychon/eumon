@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import type { CrawlPageResult } from "@organic-growth/core";
 import {
   createAnalysis, enqueueAnalysisCrawlUrls, getSnapshot, importSearchConsoleUrls, listMetricSeries, liveUrlsOfFamily, saveAnalysisReport, saveCrawlBatch,
-  saveSearchConsoleChart, saveSearchConsoleChecks, saveSearchConsoleSummary, searchConsoleReconciliation, searchConsoleUrlsToCheck, upsertSite, type D1Like,
+  saveSearchConsoleChart, saveSearchConsoleChecks, saveSearchConsoleSuggestions, saveSearchConsoleSummary, searchConsoleGoneUnsuggested, searchConsoleReconciliation, searchConsoleUrlsToCheck, upsertSite, type D1Like,
 } from "./index.js";
 import { openSqliteD1 } from "./sqlite.js";
 
@@ -81,5 +81,35 @@ describe("Search Console import", () => {
     const db = await siteWithCrawl();
     assert.deepEqual(await liveUrlsOfFamily(db, "s", "doctors"), [u("/doctors/dr-a"), u("/doctors/dr-b"), u("/doctors/dr-c")], "served pages only: not the 404 or the 503");
     assert.deepEqual(await liveUrlsOfFamily(db, "s", "guides"), []);
+  });
+
+  it("replaces a reason's list on re-import, so a URL Google no longer lists is gone from Eumon too", async () => {
+    const db = await siteWithCrawl();
+    await importSearchConsoleUrls(db, "s", { reason: "noindex", reasonText: "noindex", urls: list(["/doctors/dr-a", "/old/one", "/old/two"]), importedAt: AT });
+    await importSearchConsoleUrls(db, "s", { reason: "noindex", reasonText: "noindex", urls: list(["/old/one"]), importedAt: "2026-10-02T00:00:00.000Z" });
+    const rows = await db.prepare("SELECT url FROM search_console_urls WHERE site_id = 's' AND reason = 'noindex' ORDER BY url").all<{ url: string }>();
+    assert.deepEqual(rows.results.map((row) => row.url), [u("/old/one")]);
+  });
+
+  it("reconciles against the crawl it is told about, so an analysis being built reads its own crawl", async () => {
+    const db = await siteWithCrawl();
+    await createAnalysis(db, { id: "a2", siteId: "s", status: "running", createdAt: "2026-10-05T00:00:00.000Z" });
+    await enqueueAnalysisCrawlUrls(db, { analysisId: "a2", siteId: "s", urls: [{ url: u("/doctors/dr-a"), routeFamily: "doctors" }] });
+    await saveCrawlBatch(db, { analysisId: "a2", outcomes: [{ url: u("/doctors/dr-a"), page: page(u("/doctors/dr-a"), 404) }] });
+    await importSearchConsoleUrls(db, "s", { reason: "noindex", reasonText: "noindex", urls: list(["/doctors/dr-a"]), importedAt: AT });
+    assert.equal((await searchConsoleReconciliation(db, "s")).reasons[0]!.today.indexable, 1, "the latest finished crawl says live");
+    assert.equal((await searchConsoleReconciliation(db, "s", "a2")).reasons[0]!.today.gone, 1, "the running crawl says gone");
+  });
+
+  it("carries Google's latest indexed counts from the chart, and pairs crawl-known gone URLs with a live page on request", async () => {
+    const db = await siteWithCrawl();
+    await saveSearchConsoleChart(db, "s", [{ day: "2026-09-19", indexed: 1774, notIndexed: 3309 }, { day: "2026-09-22", indexed: 1561, notIndexed: 24498 }]);
+    await importSearchConsoleUrls(db, "s", { reason: "not_found", reasonText: "Not found (404)", urls: list(["/doctors/dr-d", "/old/x"]), importedAt: AT });
+    const view = await searchConsoleReconciliation(db, "s");
+    assert.deepEqual(view.counts, { day: "2026-09-22", indexed: 1561, notIndexed: 24498 });
+    assert.deepEqual(await searchConsoleGoneUnsuggested(db, "s", undefined, 10), [u("/doctors/dr-d")], "gone in the crawl, no suggestion yet; the unknown URL waits for its live check");
+    await saveSearchConsoleSuggestions(db, "s", [{ url: u("/doctors/dr-d"), suggestedUrl: u("/doctors/dr-a") }]);
+    assert.deepEqual(await searchConsoleGoneUnsuggested(db, "s", undefined, 10), []);
+    assert.deepEqual((await searchConsoleReconciliation(db, "s")).suggestions, [{ url: u("/doctors/dr-d"), suggestedUrl: u("/doctors/dr-a") }]);
   });
 });

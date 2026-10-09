@@ -9,6 +9,9 @@ OAUTH_ENCRYPTION_KEY=replace-with-base64url-encoded-32-byte-key
 GOOGLE_API_KEY=
 # Optional: an Open PageRank key (free, openpagerank.keywordseverywhere.com) for the authority estimate.
 OPEN_PAGERANK_KEY=
+# Optional: DataForSEO API login and API password (app.dataforseo.com → API Access), for keyword volume, difficulty and competitor keywords.
+DATAFORSEO_LOGIN=
+DATAFORSEO_PASSWORD=
 # Optional language model for scoping, extraction, and page copy. The first key that is set wins:
 # DEEPSEEK_API_KEY (default model deepseek-flash), then ANTHROPIC_API_KEY (claude-opus-5-5), then Workers AI.
 # ANTHROPIC_API_KEY and LLM_MODEL are only loaded locally once declared in cloudflare.config.ts (see the note there).

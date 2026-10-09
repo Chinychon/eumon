@@ -2,7 +2,7 @@ import { WorkflowEntrypoint } from "cloudflare:workers";
 import type { WorkflowEvent, WorkflowStep } from "cloudflare:workers";
 import type { AppEnv } from "../cloudflare.config";
 import { getSite, listSitesForResults, publishedPages } from "@organic-growth/db";
-import { googleAccess } from "./results-access";
+import { googleAccess, signalKeys } from "./results-access";
 import { syncResults } from "./results-sync";
 import { COVERAGE_STEP, coverageRound } from "./url-inspection";
 import { syncGeneratedPageSearch } from "./search-sync";
@@ -26,7 +26,7 @@ export class SearchSyncWorkflow extends WorkflowEntrypoint<AppEnv, Record<string
           }
         }
         try {
-          notes.push(...await syncResults(this.env.DB, site, new Date(), googleAccess(this.env, siteId), { googleApiKey: this.env.GOOGLE_API_KEY, openPageRankKey: this.env.OPEN_PAGERANK_KEY }, COVERAGE_STEP));
+          notes.push(...await syncResults(this.env.DB, site, new Date(), googleAccess(this.env, siteId), signalKeys(this.env), COVERAGE_STEP));
         } catch (error) {
           // A database error on one site must not stop the sites after it.
           notes.push(`results failed: ${error instanceof Error ? error.message : String(error)}`);

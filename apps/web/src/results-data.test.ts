@@ -12,7 +12,7 @@ describe("results payload", () => {
     await upsertSite(db, { id: "s", name: "x.com", baseUrl: "https://x.com", createdAt: at, updatedAt: at });
     await updateSiteGscProperty(db, "s", "sc-domain:x.com");
     await updateSiteGa4Property(db, "s", "properties/9");
-    await upsertOAuthCredential(db, { id: "o", siteId: "s", provider: "google_search_console", encryptedBlob: "x", scopes: "webmasters.readonly" });
+    await upsertOAuthCredential(db, { id: "o", siteId: "s", provider: "google", encryptedBlob: "x", scopes: "webmasters.readonly" });
     const site = (await getSite(db, "s"))!;
     const operator = await resultsPayload(db, site);
     assert.deepEqual(operator.site, { name: "x.com", baseUrl: "https://x.com", searchConnected: true, analytics: "reconnect", signals: { speed: false, authority: false, keywords: false } });

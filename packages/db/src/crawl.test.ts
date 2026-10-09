@@ -197,7 +197,7 @@ describe("run lifecycle", () => {
     const now = new Date().toISOString();
     await upsertSite(db, { id: "site", name: "z.com", baseUrl: "https://z.com", createdAt: now, updatedAt: now });
     await createAnalysis(db, { id: "r1", siteId: "site", status: "queued", createdAt: now });
-    assert.equal(await updateAnalysisStatus(db, "r1", "running", { startedAt: now }), true);
+    assert.equal(await updateAnalysisStatus(db, "r1", "running"), true);
     assert.equal(await updateAnalysisProgress(db, "r1", "crawl", "Crawled 100"), true, "an open run takes progress");
     assert.equal(await updateAnalysisStatus(db, "r1", "cancelled", { completedAt: now }), true);
 

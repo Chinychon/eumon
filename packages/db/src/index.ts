@@ -79,17 +79,15 @@ export async function updateSiteFingerprint(db: D1Like, siteId: string, fingerpr
     .bind(JSON.stringify(fingerprint), nowIso(), siteId).run();
 }
 
+/**
+ * Deletes a site and everything it owns: every table cascades from `sites`.
+ * The two largest (crawl results and links) are cleared first so no single
+ * statement carries the whole cascade.
+ */
 export async function deleteSite(db: D1Like, siteId: string): Promise<void> {
-  // Child tables without ON DELETE CASCADE are cleared explicitly first.
-  const tables = [
-    "page_metrics_daily", "ai_page_daily", "sync_runs", "page_sessions", "page_search_metrics", "cta_variants", "page_settings", "site_scopes",
-    "generated_pages", "page_templates", "data_records", "data_sources", "jobs", "datasets",
-    "pages", "search_metrics", "changes", "conversion_events", "oauth_credentials", "site_competitor_domains", "site_markets", "analyses",
-  ];
   await runStatements(db, [
-    db.prepare("DELETE FROM page_revisions WHERE page_id IN (SELECT id FROM generated_pages WHERE site_id = ?)").bind(siteId),
-    db.prepare("DELETE FROM scrape_queue WHERE job_id IN (SELECT id FROM jobs WHERE site_id = ?)").bind(siteId),
-    ...tables.map((table) => db.prepare(`DELETE FROM ${table} WHERE site_id = ?`).bind(siteId)),
+    db.prepare("DELETE FROM page_links WHERE site_id = ?").bind(siteId),
+    db.prepare("DELETE FROM pages WHERE analysis_id IN (SELECT id FROM analyses WHERE site_id = ?)").bind(siteId),
     db.prepare("DELETE FROM sites WHERE id = ?").bind(siteId),
   ]);
 }
@@ -98,7 +96,7 @@ export async function deleteSite(db: D1Like, siteId: string): Promise<void> {
 export async function listTopQueries(db: D1Like, siteId: string, limit = 50): Promise<Array<{ query: string; impressions: number; position: number }>> {
   const { results } = await db.prepare(
     `SELECT query, SUM(impressions) AS impressions, SUM(position * impressions) / MAX(SUM(impressions), 1) AS position
-     FROM search_metrics WHERE site_id = ? AND analysis_id IS NULL GROUP BY query ORDER BY impressions DESC LIMIT ?`,
+     FROM search_metrics WHERE site_id = ? GROUP BY query ORDER BY impressions DESC LIMIT ?`,
   ).bind(siteId, limit).all<{ query: string; impressions: number; position: number }>();
   return results.map((row) => ({ query: row.query, impressions: Number(row.impressions), position: Number(row.position) }));
 }
@@ -289,10 +287,9 @@ export async function reuseCrawlResults(
   const createdAt = nowIso();
   const statements = chunks(input.urls, 90).map((group) => db.prepare(
     `INSERT OR IGNORE INTO pages (
-      id, site_id, analysis_id, url, status, title, is_empty_shell, result_json,
-      crawl_state, crawl_error, crawled_at, created_at
-    ) SELECT 'page_' || lower(hex(randomblob(16))), site_id, ?, url, status, title, is_empty_shell,
-      json_set(result_json, '$.reusedFrom', ?), 'complete', NULL, crawled_at, ?
+      analysis_id, url, status, title, is_empty_shell, route_family, reused_from, result_json,
+      crawl_state, crawled_at, created_at
+    ) SELECT ?, url, status, title, is_empty_shell, route_family, ?, result_json, 'complete', crawled_at, ?
     FROM pages WHERE analysis_id = ? AND crawl_state = 'complete' AND url IN (${group.map(() => "?").join(",")})`,
   ).bind(input.analysisId, input.previousAnalysisId, createdAt, input.previousAnalysisId, ...group));
   for (const group of chunks(statements, 50)) await runStatements(db, group);
@@ -432,13 +429,12 @@ export async function updateAnalysisStatus(
   db: D1Like,
   id: string,
   status: string,
-  extra?: { summary?: string; error?: string; completedAt?: string; startedAt?: string },
+  extra?: { summary?: string; error?: string; completedAt?: string },
 ): Promise<boolean> {
   return Boolean(await db
     .prepare(
       `UPDATE analyses SET status = ?, summary = COALESCE(?, summary),
-       error = COALESCE(?, error), completed_at = COALESCE(?, completed_at),
-       started_at = COALESCE(?, started_at)
+       error = COALESCE(?, error), completed_at = COALESCE(?, completed_at)
        WHERE id = ? AND ${OPEN} RETURNING id`,
     )
     .bind(
@@ -446,7 +442,6 @@ export async function updateAnalysisStatus(
       extra?.summary ?? null,
       extra?.error ?? null,
       extra?.completedAt ?? null,
-      extra?.startedAt ?? null,
       id,
     )
     .first());
@@ -465,16 +460,12 @@ export async function enqueueAnalysisCrawlUrls(
   const createdAt = nowIso();
   for (const group of chunks(urls, 100)) {
     const statements = group.map((entry) => db.prepare(
-      `INSERT OR IGNORE INTO pages (
-        id, site_id, analysis_id, url, status, is_empty_shell, result_json,
-        crawl_state, created_at
-      ) VALUES (?, ?, ?, ?, NULL, 0, ?, ?, ?)`,
+      `INSERT OR IGNORE INTO pages (analysis_id, url, route_family, result_json, crawl_state, created_at)
+       VALUES (?, ?, ?, '{}', ?, ?)`,
     ).bind(
-      `page_${crypto.randomUUID()}`,
-      input.siteId,
       input.analysisId,
       entry.url,
-      JSON.stringify({ routeFamily: entry.routeFamily }),
+      entry.routeFamily,
       entry.blocked ? "blocked" : "pending",
       createdAt,
     ));
@@ -507,10 +498,9 @@ export async function saveCrawlBatch(
   const statements = input.outcomes.map((outcome) => {
     if (!outcome.page) {
       return db.prepare(
-        `UPDATE pages SET crawl_state = 'failed', crawl_error = ?, crawled_at = ?, result_json = json_set(result_json, '$.error', ?)
+        `UPDATE pages SET crawl_state = 'failed', crawled_at = ?, result_json = json_set(result_json, '$.error', ?)
          WHERE analysis_id = ? AND url = ?`,
       ).bind(
-        outcome.error ?? "The crawler could not fetch this URL.",
         crawledAt,
         outcome.error ?? "The crawler could not fetch this URL.",
         input.analysisId,
@@ -546,13 +536,14 @@ export async function saveCrawlBatch(
     };
     return db.prepare(
       `UPDATE pages SET status = ?, title = ?, is_empty_shell = ?, result_json = ?,
-       crawl_state = 'complete', crawl_error = NULL, crawled_at = ?
+       route_family = COALESCE(?, route_family), crawl_state = 'complete', crawled_at = ?
        WHERE analysis_id = ? AND url = ?`,
     ).bind(
       page.status,
       page.title ?? null,
       page.isEmptyShell ? 1 : 0,
       JSON.stringify(result),
+      page.routeFamily ?? null,
       crawledAt,
       input.analysisId,
       outcome.url,
@@ -594,7 +585,7 @@ export async function getLinkGraph(db: D1Like, siteId: string): Promise<LinkGrap
   const latest = await getPreviousCompletedAnalysis(db, siteId, "");
   const [families, familyEdges, coverageRow, published, templates] = await Promise.all([
     latest ? db.prepare(
-      `SELECT COALESCE(${crawlField("routeFamily")}, 'other') AS family, COUNT(*) AS pages FROM pages WHERE analysis_id = ? GROUP BY family`,
+      `SELECT route_family AS family, COUNT(*) AS pages FROM pages WHERE analysis_id = ? GROUP BY family`,
     ).bind(latest.id).all<{ family: string; pages: number }>() : { results: [] },
     latest ? db.prepare(
       `SELECT source_family, target_family, COUNT(*) AS links FROM page_links
@@ -671,7 +662,7 @@ export async function getLinkGraph(db: D1Like, siteId: string): Promise<LinkGrap
 }
 
 /** A page's family, as the crawl classified it. */
-const PAGE_FAMILY = "COALESCE(json_extract(p.result_json, '$.routeFamily'), 'other')";
+const PAGE_FAMILY = "p.route_family";
 /** Links into page `p` from other pages (a page linking to itself doesn't count). */
 const LINKS_IN = `SELECT 1 FROM page_links l WHERE l.site_id = ? AND l.target_path = ${URL_PATH("p.url")} AND l.source_url != p.url`;
 
@@ -744,7 +735,7 @@ const crawlField = (path: string) => `json_extract(result_json, '$.${path}')`;
 /** A fetched page that served real content (not an error or a bot challenge). */
 const SERVED = `crawl_state = 'complete' AND status < 400`;
 const CHALLENGE = `COALESCE(${crawlField("botChallenge")}, 0) = 1`;
-const DETAIL_PAGE = `COALESCE(${crawlField("routeFamily")}, '') NOT IN ('home', 'page')`;
+const DETAIL_PAGE = "route_family NOT IN ('home', 'page')";
 
 /** SQL conditions for each crawl issue, plus the stored value worth showing beside an example URL. */
 const CRAWL_ISSUES: Record<Exclude<CrawlIssue, "duplicateTitle">, { where: string; detail?: string }> = {
@@ -810,7 +801,7 @@ export async function getCrawlCoverage(
     db.prepare(`SELECT COUNT(*) AS groups, COALESCE(SUM(n), 0) AS urls FROM (${DUPLICATE_TITLES})`).bind(analysisId).first<{ groups: number; urls: number }>(),
     db.prepare(`${DUPLICATE_TITLES} ORDER BY n DESC, title LIMIT 8`).bind(analysisId).all<{ title: string; n: number; urls: string }>(),
     db.prepare(
-      `SELECT COALESCE(${crawlField("routeFamily")}, 'other') AS family,
+      `SELECT route_family AS family,
         COUNT(*) AS urls,
         SUM(CASE WHEN crawl_state = 'complete' THEN 1 ELSE 0 END) AS crawled,
         SUM(CASE WHEN crawl_state = 'complete' AND is_empty_shell = 1 THEN 1 ELSE 0 END) AS empty_shells,
@@ -872,7 +863,7 @@ export type CrawlProgress = {
   recent: Array<{ url: string; status: number | null; family: string; emptyShell: boolean; failed: boolean; crawledAt: string }>;
 };
 
-const FRESH = `${crawlField("reusedFrom")} IS NULL`;
+const FRESH = "reused_from IS NULL";
 
 /** Live crawl counts while an analysis runs: what the progress view shows every few seconds. */
 export async function getCrawlProgress(db: D1Like, analysisId: string): Promise<CrawlProgress> {
@@ -894,7 +885,7 @@ export async function getCrawlProgress(db: D1Like, analysisId: string): Promise<
        FROM pages WHERE analysis_id = ?`,
     ).bind(analysisId).first<Record<string, number | string | null>>(),
     db.prepare(
-      `SELECT COALESCE(${crawlField("routeFamily")}, 'other') AS family, COUNT(*) AS total,
+      `SELECT route_family AS family, COUNT(*) AS total,
         SUM(CASE WHEN crawl_state != 'pending' THEN 1 ELSE 0 END) AS done,
         SUM(CASE WHEN crawl_state IN ('complete', 'failed') AND ${FRESH} THEN 1 ELSE 0 END) AS fetched,
         SUM(CASE WHEN crawl_state = 'blocked' THEN 1 ELSE 0 END) AS blocked,
@@ -903,7 +894,7 @@ export async function getCrawlProgress(db: D1Like, analysisId: string): Promise<
        FROM pages WHERE analysis_id = ? GROUP BY family ORDER BY total DESC, family LIMIT 40`,
     ).bind(analysisId).all<Record<string, number | string>>(),
     db.prepare(
-      `SELECT url, status, is_empty_shell, crawl_state, crawled_at, COALESCE(${crawlField("routeFamily")}, 'other') AS family
+      `SELECT url, status, is_empty_shell, crawl_state, crawled_at, route_family AS family
        FROM pages WHERE analysis_id = ? AND crawl_state IN ('complete', 'failed') AND ${FRESH}
        ORDER BY crawled_at DESC, url LIMIT 8`,
     ).bind(analysisId).all<Record<string, number | string | null>>(),
@@ -1131,19 +1122,18 @@ export async function replaceCurrentSearchMetrics(
   siteId: string,
   rows: SearchMetricRow[],
 ): Promise<void> {
-  await db.prepare("DELETE FROM search_metrics WHERE site_id = ? AND analysis_id IS NULL")
+  await db.prepare("DELETE FROM search_metrics WHERE site_id = ?")
     .bind(siteId).run();
   const createdAt = nowIso();
   for (const group of chunks(rows, 100)) {
     const statements = group.map((row) => db.prepare(
         `INSERT INTO search_metrics (
-          id, site_id, analysis_id, query, page, country, device,
+          id, site_id, query, page, country, device,
           impressions, clicks, ctr, position, period_start, period_end, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).bind(
         `sm_${crypto.randomUUID()}`,
         siteId,
-        null,
         row.query,
         row.page,
         row.country,

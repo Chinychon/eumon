@@ -7,10 +7,8 @@ import { AskDrawer, AskView } from "./components/Ask";
 import { ConnectionsView } from "./components/ConnectionsView";
 import { api, errorMessage } from "./components/api";
 import { DataView } from "./components/DataView";
-import { OverviewView, type Repository } from "./components/OverviewView";
+import { OVERVIEW_TABS, OverviewView, type Repository } from "./components/OverviewView";
 import { PagesView } from "./components/PagesView";
-import { CompetitorsView, KeywordsView } from "./components/KeywordsView";
-import { ResultsView } from "./components/ResultsView";
 import { PageResultsView } from "./components/PageResultsView";
 import { resolveLink, type View } from "./components/report-model";
 import { SetupView } from "./components/SetupView";
@@ -20,15 +18,12 @@ import { Button, LeafIcon, ThemeToggle } from "./components/ui";
 /**
  * `steps` are the pipeline steps (README) a view covers; `group` labels the run of views it starts.
  * View keys stay as they were when labels changed, so saved and shared links keep working.
- * Each question has one page: Overview (is it working, what first, technical),
- * Performance (search, enquiries), Keywords (searches worth winning), Competitors (how we compare).
+ * The Dashboard (view key `overview`) holds every report on the site, one tab
+ * per question (Overview · Technical · Search · Enquiries · Keywords · Competitors).
  */
 const NAV: Array<{ view: View; label: string; steps?: string; group?: string }> = [
   { view: "ask", label: "Home" },
-  { view: "overview", label: "Overview" },
-  { view: "results", label: "Performance" },
-  { view: "keywords", label: "Keywords" },
-  { view: "competitors", label: "Competitors" },
+  { view: "overview", label: "Dashboard" },
   { view: "data", label: "Data", steps: "1–3", group: "Landing page engine" },
   { view: "pages", label: "Landing pages", steps: "4–5" },
   { view: "performance", label: "Page results", steps: "6–7" },
@@ -105,6 +100,7 @@ export default function Home() {
 
   const site = sites?.find((entry) => entry.id === siteId) ?? null;
   const run = useSiteRun(siteId);
+  const tabLabel = view === "overview" && tab ? OVERVIEW_TABS.find((entry) => entry.tab === tab)?.label : undefined;
   const navigate = (next: View, nextTab?: string) => {
     const link = resolveLink(next, nextTab ?? null);
     setView(link.view);
@@ -144,7 +140,7 @@ export default function Home() {
 
       <section className="main-area" id="top" inert={covered}>
         <header className="topbar">
-          <div className="breadcrumb">{site ? <>{new URL(site.baseUrl).hostname} <span>/</span> {adding ? "Add website" : NAV.find((item) => item.view === view)?.label}</> : "Welcome"}</div>
+          <div className="breadcrumb">{site ? <>{new URL(site.baseUrl).hostname} <span>/</span> {adding ? "Add website" : NAV.find((item) => item.view === view)?.label}{!adding && tabLabel && <> <span>/</span> {tabLabel}</>}</> : "Welcome"}</div>
           {run && (view !== "overview" || adding) && <button className="top-actions run-chip" onClick={() => { setAdding(false); navigate("overview"); }}>{runLabel(run)}</button>}
           {site && view !== "ask" && !adding && <button ref={askToggle} className="top-actions ask-toggle" aria-expanded={drawerOpen} onClick={() => setDrawer((value) => !value)}><LeafIcon />Ask Eumon</button>}
           {site && <a className="top-actions" href={site.baseUrl} target="_blank" rel="noreferrer">Open site</a>}
@@ -162,9 +158,6 @@ export default function Home() {
           ) : (
             <div key={`${site.id}:${view}`} className="view-enter">
               {view === "overview" && <OverviewView site={site} tab={tab} onTab={setTab} onNavigate={navigate} />}
-              {view === "results" && <ResultsView site={site} tab={tab} onTab={setTab} onNavigate={navigate} />}
-              {view === "keywords" && <KeywordsView site={site} />}
-              {view === "competitors" && <CompetitorsView site={site} onNavigate={navigate} />}
               {view === "ask" && <AskView key={site.id} site={site} threadId={askThread} onThreadChange={setAskThread} />}
               {view === "data" && <DataView site={site} onNavigate={navigate} />}
               {view === "pages" && <PagesView site={site} onNavigate={navigate} />}
@@ -183,7 +176,7 @@ export default function Home() {
       {site && (
         <AskDrawer
           site={site}
-          view={NAV.find((item) => item.view === view)?.label ?? "Overview"}
+          view={tabLabel ?? NAV.find((item) => item.view === view)?.label ?? "Overview"}
           open={drawerOpen}
           modal={covered}
           onClose={closeDrawer}

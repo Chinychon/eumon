@@ -2,22 +2,29 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { SiteRecord } from "@organic-growth/core";
-import { api, errorMessage, formatNumber } from "./api";
+import { api, errorMessage, formatDay, formatNumber } from "./api";
 import { AnalysisProgress, isFinished, useRun, type RunDelta, type RunProgress } from "./AnalysisProgress";
 import { Heatmap, PairedBars, Scatter } from "./charts";
 import { LeadFunnel, TechnicalTab, searchPoints, type Change } from "./ReportTabs";
 import { AREA_PLACE, doFirst, gapsFirst, HEALTH_COLUMNS, pageTypeHealth, type Navigate, type Place, type Report } from "./report-model";
 import { KeyNumbers, ProofHeadline } from "./results/sections";
+import { CompetitorsPanel, EnquiriesPanel, KeywordsPanel, SearchPanel } from "./SitePanels";
 import { useLeads, useResults, type Leads } from "./site-data";
 import { Button, Card, ViewHeader } from "./ui";
 
 export type Repository = { id: number; name: string; fullName: string; owner: string; defaultBranch: string; isPrivate: boolean };
 
-type Tab = "overview" | "technical";
-const TABS: Array<{ tab: Tab; label: string }> = [
+type Tab = "overview" | "technical" | "search" | "enquiries" | "keywords" | "competitors";
+/** The first tab has no `?tab=`; the others' keys are what links carry. */
+export const OVERVIEW_TABS: Array<{ tab: Tab; label: string }> = [
   { tab: "overview", label: "Overview" },
   { tab: "technical", label: "Technical" },
+  { tab: "search", label: "Search" },
+  { tab: "enquiries", label: "Enquiries" },
+  { tab: "keywords", label: "Keywords" },
+  { tab: "competitors", label: "Competitors" },
 ];
+const TABS = OVERVIEW_TABS;
 
 /** The figures a finished run compares with the report it replaced. */
 function deltasBetween(before: Report | null, after: Report): RunDelta[] {
@@ -58,7 +65,9 @@ export function OverviewView({ site, tab, onTab, onNavigate }: {
   const leads = useLeads(site.id);
   const results = useResults(`/api/sites/${site.id}/results`);
   const reloadResults = results.reload;
-  const current: Tab = tab === "technical" ? "technical" : "overview";
+  const current: Tab = TABS.find((entry) => entry.tab === tab && entry.tab !== "overview")?.tab ?? "overview";
+  const [syncing, setSyncing] = useState(false);
+  const [shared, setShared] = useState(false);
 
   const loadChanges = useCallback(async (analysisId: string) => {
     const data = await api<{ changes: Change[] }>(`/api/analyses/${analysisId}/changes`).catch(() => ({ changes: [] }));
@@ -150,21 +159,41 @@ export function OverviewView({ site, tab, onTab, onNavigate }: {
 
   const hasRepo = Boolean(site.githubRepo);
   const openTab = (next: Tab) => onTab(next === "overview" ? null : next);
-  /** Opens the page and tab that explain something; the Technical tab is on this page. */
-  const go = (place: Place) => (place.view === "overview" ? openTab(place.tab === "technical" ? "technical" : "overview") : onNavigate(place.view, place.tab ?? undefined));
+  /** Opens the tab, or the page, that explains something. */
+  const go = (place: Place) => (place.view === "overview" ? onTab(place.tab) : onNavigate(place.view, place.tab ?? undefined));
+
+  /** Fetches Search Console, Analytics, speed, authority and keywords now, instead of waiting for the daily run. */
+  async function syncNow() {
+    setSyncing(true); setError("");
+    try {
+      await api(`/api/sites/${site.id}/results/sync`, { method: "POST" });
+      await reloadResults();
+    } catch (cause) { setError(errorMessage(cause)); } finally { setSyncing(false); }
+  }
+
+  async function shareLink() {
+    setError("");
+    try {
+      const { url } = await api<{ url: string }>(`/api/sites/${site.id}/share`, { method: "POST" });
+      await navigator.clipboard.writeText(url);
+      setShared(true);
+    } catch (cause) { setError(errorMessage(cause)); }
+  }
 
   return (
     <div>
       <ViewHeader
         title={site.name}
-        description={<>Whether organic search is working for <a href={site.baseUrl} target="_blank" rel="noreferrer">{site.baseUrl}</a>, what to do first, and what Google receives from it.</>}
-        actions={running ? undefined : (
+        description={<>Whether organic search is working for <a href={site.baseUrl} target="_blank" rel="noreferrer">{site.baseUrl}</a>, what to do first, and the detail behind it, one tab per question. {results.data?.results.searchThrough ? `Google data through ${formatDay(results.data.results.searchThrough)}.` : ""}</>}
+        actions={(
           <div className="view-actions">
             <div className="row">
-              {report && <Button variant="ghost" disabled={busy === "analysis"} onClick={() => runAnalysis(true)}>Re-crawl every page</Button>}
-              <Button busy={busy === "analysis"} onClick={() => runAnalysis()}>{run?.stalled ? "Start a new run" : report ? "Update analysis" : "Run analysis"}</Button>
+              <Button variant="ghost" onClick={shareLink}>{shared ? "Link copied" : "Copy client link"}</Button>
+              <Button variant="secondary" busy={syncing} onClick={syncNow}>Sync now</Button>
+              {!running && report && <Button variant="ghost" disabled={busy === "analysis"} onClick={() => runAnalysis(true)}>Re-crawl every page</Button>}
+              {!running && <Button busy={busy === "analysis"} onClick={() => runAnalysis()}>{run?.stalled ? "Start a new run" : report ? "Update analysis" : "Run analysis"}</Button>}
             </div>
-            {report && !run?.stalled && (
+            {!running && report && !run?.stalled && (
               <p className="view-note">
                 Update reuses pages that haven't changed.{pace ? ` Re-crawling all ${formatNumber(report.sitemap.totalUrls)} takes about ${Math.max(1, Math.round(report.sitemap.totalUrls / pace.perMinute))} min.` : ""}
               </p>
@@ -175,36 +204,43 @@ export function OverviewView({ site, tab, onTab, onNavigate }: {
       {error && <div className="callout error" role="alert" style={{ marginBottom: 14 }}>{error}</div>}
       {failure && <div className="callout error" role="alert" style={{ marginBottom: 14 }}>The last analysis stopped before it finished. Run it again; if it stops the same way, this is what failed:<div className="mono small" style={{ marginTop: 6, overflowWrap: "anywhere" }}>{failure}</div></div>}
       {note && <div className="callout" role="status" style={{ marginBottom: 14 }}>{note}</div>}
-      <div className="results overview-proof">
-        {results.data ? (
-          <>
-            <ProofHeadline data={results.data} operator onNavigate={onNavigate} />
-            <KeyNumbers data={results.data} operator />
-          </>
-        ) : <Card title="Google clicks per week"><p className="empty-state">{results.error || "Loading…"}</p></Card>}
-      </div>
       {pendingId ? <AnalysisProgress run={run} analysisId={pendingId} />
         : finished && <AnalysisProgress run={finished.run} analysisId={finished.analysisId} finish={finished} onDismiss={() => setFinished(null)} />}
-      <button className="connections-strip" onClick={() => onNavigate("setup")}>
-        <span className="connections-label">Connections</span>
-        <span className="on">Website</span>
-        <span className={hasRepo ? "on" : ""}>{hasRepo ? "GitHub" : "GitHub not connected"}</span>
-        <span className={site.gscProperty ? "on" : ""}>{site.gscProperty ? "Search Console" : "Search Console missing"}</span>
-        <span className={markets ? "on" : ""}>{markets ? `${markets} ${markets === 1 ? "market" : "markets"}` : "No markets"}</span>
-        <span className={competitorCount ? "on" : ""}>{competitorCount ? `${competitorCount} ${competitorCount === 1 ? "competitor" : "competitors"}` : competitorCount === 0 ? "No competitors" : "Competitors"}</span>
-        <span className="connections-open">Open Setup →</span>
-      </button>
-
       <div className="tabs report-tabs" role="tablist" aria-label="Report">
         {TABS.map((entry) => (
           <button key={entry.tab} role="tab" aria-selected={current === entry.tab} className={current === entry.tab ? "active" : undefined} onClick={() => openTab(entry.tab)}>{entry.label}</button>
         ))}
       </div>
       <div key={current} className="view-enter" role="tabpanel">
-        {!loaded ? <div className="empty">Loading…</div> : (
+        {!loaded || (current !== "overview" && current !== "technical" && !results.data) ? <div className={results.error && loaded ? "callout error" : "empty"}>{loaded && results.error ? results.error : "Loading…"}</div> : (
           <>
-            {current === "overview" && <Briefing report={report} running={Boolean(pendingId)} leads={leads} hasSearch={Boolean(site.gscProperty)} competitorCount={competitorCount} onOpen={go} onNavigate={onNavigate} />}
+            {current === "overview" && (
+              <>
+              <div className="results overview-proof">
+                {results.data ? (
+                  <>
+                    <ProofHeadline data={results.data} operator onNavigate={onNavigate} />
+                    <KeyNumbers data={results.data} operator />
+                  </>
+                ) : <Card title="Google clicks per week"><p className="empty-state">{results.error || "Loading…"}</p></Card>}
+              </div>
+              <button className="connections-strip" onClick={() => onNavigate("setup")}>
+                <span className="connections-label">Connections</span>
+                <span className="on">Website</span>
+                <span className={hasRepo ? "on" : ""}>{hasRepo ? "GitHub" : "GitHub not connected"}</span>
+                <span className={site.gscProperty ? "on" : ""}>{site.gscProperty ? "Search Console" : "Search Console missing"}</span>
+                <span className={markets ? "on" : ""}>{markets ? `${markets} ${markets === 1 ? "market" : "markets"}` : "No markets"}</span>
+                <span className={competitorCount ? "on" : ""}>{competitorCount ? `${competitorCount} ${competitorCount === 1 ? "competitor" : "competitors"}` : competitorCount === 0 ? "No competitors" : "Competitors"}</span>
+                <span className="connections-open">Open Setup →</span>
+              </button>
+              <Briefing report={report} running={Boolean(pendingId)} leads={leads} hasSearch={Boolean(site.gscProperty)} competitorCount={competitorCount} onOpen={go} onNavigate={onNavigate} />
+              </>
+            )}
             {current === "technical" && <TechnicalTab siteId={site.id} report={report} results={results.data} running={Boolean(pendingId)} changes={changes} busy={busy} hasRepo={hasRepo} onGenerateChange={generateChange} onOpenPullRequest={openPullRequest} onRecrawl={() => runAnalysis(true)} />}
+            {results.data && current === "search" && <SearchPanel site={site} data={results.data} report={report} onNavigate={onNavigate} />}
+            {results.data && current === "enquiries" && <EnquiriesPanel data={results.data} report={report} leads={leads} onNavigate={onNavigate} />}
+            {results.data && current === "keywords" && <KeywordsPanel site={site} data={results.data} />}
+            {results.data && current === "competitors" && <CompetitorsPanel site={site} data={results.data} report={report} onNavigate={onNavigate} />}
           </>
         )}
       </div>

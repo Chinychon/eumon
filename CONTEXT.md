@@ -4,7 +4,7 @@ Short definitions of the domain terms that name modules and seams. Architecture 
 
 ## Performance
 
-- **Performance** (view `results`): how search and enquiries are going, on two tabs (Search · Enquiries). Formerly *Results*; the code still says `results` in file and route names. The synced numbers' sections (`results/sections.tsx`) are spread over the pages that ask each question: the proof (clicks since go-live, the key numbers) leads the Overview, speed sits in its Technical tab, authority beside competitors. The read-only **client link** (`/r/<token>`) stacks every section into one report, without site health.
+- **Results**: the synced numbers (Search Console, GA4, speed, authority, keywords). Their sections (`results/sections.tsx`) sit in the Dashboard's tabs: the proof (clicks since go-live, the key numbers) on Overview, then Search, Enquiries, Technical (speed), Keywords and Competitors (authority). The page once called *Performance* (view key `results`, still used in file and route names) is now those tabs; old links redirect. The read-only **client link** (`/r/<token>`) stacks every section into one report, without site health.
 - **Page results** (view `performance`): the landing page engine's steps 6–7, how each generated page performs. Formerly *Page performance*.
 - **Ledger**: `metric_points`, one value per site, metric and day. Numbers over time live here, and every ratio is derived by the reader. Upserts overwrite, so re-runs and Google's revised days never double count.
 - **Metric group** (`METRICS` in `packages/core/src/results.ts`): the ledger metrics one upstream connection writes. A group is what its sync may write, what the view reads, and what a changed property clears.

@@ -280,9 +280,7 @@ export function CompetitorsSection({ report, site, competitors, onNavigate }: { 
   const competition = report?.competition;
   if (competitors > 0 && !competition?.rows.length) {
     return (
-      <Card title="Competitors not compared yet" subtitle={`${competitors} ${competitors === 1 ? "competitor is" : "competitors are"} set up. ${report ? "The last analysis ran before they were added; run it again" : "Run an analysis"} to compare the kinds of pages they publish with yours.`}>
-        <Button onClick={() => onNavigate("overview")}>Open Overview</Button>
-      </Card>
+      <Card title="Competitors not compared yet" subtitle={`${competitors} ${competitors === 1 ? "competitor is" : "competitors are"} set up. ${report ? "The last analysis ran before they were added; update it" : "Run an analysis"} (top of this page) to compare the kinds of pages they publish with yours.`} />
     );
   }
   if (!report || !competition?.rows.length) {

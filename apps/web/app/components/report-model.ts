@@ -69,30 +69,33 @@ type Fingerprint = { framework: string; router?: string; rendering?: string; dep
 /** What a finding or opportunity is about, which decides the page that explains it. */
 export type Area = "technical" | "search" | "keywords" | "competitors" | "leads" | "data";
 
-/** Rail pages, by the keys their links use. Keys stay as they were when labels changed, so saved and shared links keep working. */
+/** Rail pages, by the keys their links use. Keys stay as they were when labels changed, so saved and shared links keep working; `results`, `keywords` and `competitors` were pages and are now Overview tabs. */
 export type View = "overview" | "results" | "keywords" | "competitors" | "ask" | "connections" | "data" | "pages" | "performance" | "setup";
 export type Navigate = (view: View, tab?: string) => void;
 
-/** A rail page and, where it has tabs, the tab. */
+/** A rail page and, where it has tabs, the tab (null is the first). */
 export type Place = { view: View; tab: string | null };
 
-/** The page and tab that explain each area, and the name a link to it carries. */
+/** The tab that explains each area, and the name a link to it carries. */
 export const AREA_PLACE: Record<Area, Place & { label: string }> = {
   technical: { view: "overview", tab: "technical", label: "Technical" },
-  search: { view: "results", tab: "search", label: "Search" },
-  keywords: { view: "keywords", tab: null, label: "Keywords" },
-  competitors: { view: "competitors", tab: null, label: "Competitors" },
-  leads: { view: "results", tab: "enquiries", label: "Enquiries" },
+  search: { view: "overview", tab: "search", label: "Search" },
+  keywords: { view: "overview", tab: "keywords", label: "Keywords" },
+  competitors: { view: "overview", tab: "competitors", label: "Competitors" },
+  leads: { view: "overview", tab: "enquiries", label: "Enquiries" },
   data: { view: "data", tab: null, label: "Data" },
 };
 
 /**
- * Where a link lands. Connections moved into Setup, and the Overview's Search,
- * Competitors and Leads tabs moved to the pages that now hold their content.
+ * Where a link lands. Connections moved into Setup; Performance, Keywords and
+ * Competitors were pages and are now Overview tabs; the old Leads tab is
+ * Enquiries.
  */
 export function resolveLink(view: View, tab: string | null): Place {
   if (view === "connections") return { view: "setup", tab: null };
-  if (view === "overview" && (tab === "search" || tab === "competitors" || tab === "leads")) return { view: AREA_PLACE[tab].view, tab: AREA_PLACE[tab].tab };
+  if (view === "results") return { view: "overview", tab: tab === "enquiries" ? "enquiries" : "search" };
+  if (view === "keywords" || view === "competitors") return { view: "overview", tab: view };
+  if (view === "overview" && tab === "leads") return { view: "overview", tab: "enquiries" };
   return { view, tab };
 }
 

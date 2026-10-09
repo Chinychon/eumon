@@ -19,8 +19,6 @@ export type SyncContext = {
   today: string;
   now: Date;
   keys: SignalKeys;
-  /** Sitemap URLs to inspect in this sync; the daily workflow runs more rounds after it. */
-  coverageLimit: number;
   fetchFn?: typeof fetch;
   google: () => Promise<{ token: string; scopes: string[] }>;
 };
@@ -46,19 +44,16 @@ export type Source = {
   run: (ctx: SyncContext, first: boolean) => Promise<{ points?: MetricPoint[]; notes?: string[] }>;
 };
 
-/** URL inspections in a "Sync now": batches of ten wait on Google's slowest answer, so 50 keeps the button to about half a minute. */
-const SYNC_NOW_COVERAGE = 50;
-
 const reason = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 /**
  * One site's Results sync: every source in turn, each failing on its own.
  * The notes say what ran, what was skipped and why.
  */
-export async function syncResults(db: D1Like, site: SiteRecord, now: Date, google: GoogleAccess, keys: SignalKeys = {}, coverageLimit = SYNC_NOW_COVERAGE): Promise<string[]> {
+export async function syncResults(db: D1Like, site: SiteRecord, now: Date, google: GoogleAccess, keys: SignalKeys = {}): Promise<string[]> {
   const today = now.toISOString().slice(0, 10);
   let access: Promise<{ token: string; scopes: string[] }> | undefined;
-  const ctx: SyncContext = { db, site, today, now, keys, coverageLimit, fetchFn: google.fetchFn, google: () => (access ??= google.connect()) };
+  const ctx: SyncContext = { db, site, today, now, keys, fetchFn: google.fetchFn, google: () => (access ??= google.connect()) };
   const notes: string[] = [];
   let googleFailed = false;
   // The demo's domains are fictional and its data is seeded: asking Google, CrUX, Open PageRank or DataForSEO

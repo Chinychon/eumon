@@ -47,6 +47,18 @@ function deltasBetween(before: Report | null, after: Report): RunDelta[] {
  * and two tabs: a one-screen briefing and the technical report. The open tab
  * lives in the address (`?tab=`), kept by the shell.
  */
+/** The run a Sync now started, once it is recorded: polled every four seconds for up to fifteen minutes (a site's 2,000 inspections take about ten). */
+async function waitForSyncRun(siteId: string, startedAt: string): Promise<{ notes: string[] } | null> {
+  const deadline = Date.now() + 15 * 60_000;
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 4000));
+    const { runs } = await api<{ runs: Array<{ startedAt: string; notes: string[] }> }>(`/api/sites/${siteId}/sync-runs`);
+    const run = runs.find((entry) => entry.startedAt >= startedAt);
+    if (run) return run;
+  }
+  return null;
+}
+
 export function OverviewView({ site, tab, onTab, onNavigate }: {
   site: SiteRecord;
   tab: string | null;
@@ -167,14 +179,19 @@ export function OverviewView({ site, tab, onTab, onNavigate }: {
   /** Opens the tab, or the page, that explains something. */
   const go = (place: Place) => (place.view === "overview" ? onTab(place.tab) : onNavigate(place.view, place.tab ?? undefined));
 
-  /** Fetches Search Console, Analytics, speed, authority and keywords now, instead of waiting for the daily run. */
+  /** Starts the sync workflow for this site (Search Console, Analytics, speed, authority, keywords, URL inspections) and waits for its run to be recorded. */
   async function syncNow() {
     setSyncing(true); setError("");
     try {
-      const { notes } = await api<{ notes: string[] }>(`/api/sites/${site.id}/results/sync`, { method: "POST" });
+      const { startedAt } = await api<{ startedAt: string }>(`/api/sites/${site.id}/results/sync`, { method: "POST" });
+      const run = await waitForSyncRun(site.id, startedAt);
+      if (!run) {
+        setError("The sync is still running. Setup → Sync history shows its result when it finishes; the numbers refresh on the next load.");
+        return;
+      }
       await reloadResults();
       // Say which sources failed, instead of numbers quietly not moving.
-      const problems = notes.filter(isProblemNote);
+      const problems = run.notes.filter(isProblemNote);
       if (problems.length) setError(`Sync finished, but ${problems.length === 1 ? "one source" : `${problems.length} sources`} didn't update: ${problems.join("; ")}. Setup → Sync history keeps the details.`);
     } catch (cause) { setError(errorMessage(cause)); } finally { setSyncing(false); }
   }

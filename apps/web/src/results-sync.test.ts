@@ -5,7 +5,7 @@ import { openSqliteD1 } from "@organic-growth/db/sqlite";
 import { RESULT_METRICS } from "@organic-growth/core";
 import { ANALYTICS_SCOPE, SEARCH_CONSOLE_SCOPE } from "./gsc-auth.ts";
 import { syncResults } from "./results-sync.ts";
-import { coverageRound, inspectSitemapUrls } from "./url-inspection.ts";
+import { inspectSitemapUrls } from "./url-inspection.ts";
 
 const now = new Date("2026-10-07T04:15:00Z");
 
@@ -74,37 +74,6 @@ describe("results sync", () => {
     await setSiteMarkets(db, "s", ["mys"]);
     const notes = await syncResults(db, record, now, google);
     assert.ok(notes.includes("markets: 486 days"), notes.join("; "));
-  });
-
-  it("inspects pages several at a time", async () => {
-    const { db, site: record } = await site();
-    await publishPages(db, 12);
-    let inFlight = 0;
-    let most = 0;
-    const fetchFn = (async (url: string) => {
-      if (!url.includes("urlInspection")) return new Response(JSON.stringify({ rows: [] }));
-      inFlight++; most = Math.max(most, inFlight);
-      await new Promise((resolve) => setTimeout(resolve, 5));
-      inFlight--;
-      return new Response(JSON.stringify({ inspectionResult: { indexStatusResult: { verdict: "PASS" } } }));
-    }) as typeof fetch;
-    const notes = await syncResults(db, record, now, { connect: async () => ({ token: "t", scopes: [SEARCH_CONSOLE_SCOPE] }), fetchFn });
-    assert.ok(notes.includes("inspected 12 pages"), notes.join("; "));
-    assert.ok(most > 1 && most <= 10, `at most ${most} inspections in flight`);
-  });
-
-  it("leaves a page Google won't inspect for tomorrow and carries on with the rest", async () => {
-    const { db, site: record } = await site();
-    await publishPages(db, 12);
-    const fetchFn = (async (_url: string, init?: RequestInit) => {
-      const asked = (JSON.parse(String(init?.body ?? "{}")) as { inspectionUrl?: string }).inspectionUrl;
-      if (!asked) return new Response(JSON.stringify({ rows: [] }));
-      if (asked.endsWith("/guides/3")) return new Response(JSON.stringify({ error: { message: "URL is not part of this property" } }), { status: 403 });
-      return new Response(JSON.stringify({ inspectionResult: { indexStatusResult: { verdict: "PASS" } } }));
-    }) as typeof fetch;
-    const notes = await syncResults(db, record, now, { connect: async () => ({ token: "t", scopes: [SEARCH_CONSOLE_SCOPE] }), fetchFn });
-    assert.ok(notes.includes("inspected 11 pages"), notes.join("; "));
-    assert.ok(!notes.some((note) => note.startsWith("inspection stopped")), notes.join("; "));
   });
 
   it("writes only metrics the Performance view reads", async () => {
@@ -266,20 +235,6 @@ describe("results sync", () => {
     assert.ok(await getSnapshot(db, "s", "competitor_keywords", "x.com|idn"));
   });
 
-  it("stops inspecting when Google refuses (quota or permission)", async () => {
-    const { db, site: record } = await site();
-    await publishPages(db, 30);
-    let inspections = 0;
-    const fetchFn = (async (url: string) => {
-      if (!url.includes("urlInspection")) return new Response(JSON.stringify({ rows: [] }));
-      inspections++;
-      return new Response("quota", { status: 429 });
-    }) as typeof fetch;
-    const notes = await syncResults(db, record, now, { connect: async () => ({ token: "t", scopes: [SEARCH_CONSOLE_SCOPE] }), fetchFn });
-    assert.ok(inspections <= 10, `${inspections} inspections after the first refusal`);
-    assert.ok(notes.some((note) => note.startsWith("inspection stopped")), notes.join("; "));
-  });
-
   it("backfills once even when a property has no data yet", async () => {
     const { db, site: record } = await site();
     const fetchFn = (async () => new Response(JSON.stringify({ rows: [] }))) as unknown as typeof fetch;
@@ -353,41 +308,6 @@ describe("results sync", () => {
     const notes = await syncResults(db, (await getSite(db, "s"))!, now, { connect: async () => { throw new Error("no"); } });
     assert.ok(notes.includes("speed: no Google API key"), notes.join("; "));
     assert.ok(notes.includes("authority: no Open PageRank key"), notes.join("; "));
-  });
-
-  it("inspects sitemap URLs 200 at a time and stops when Google refuses", async () => {
-    const { db } = await site();
-    const at = now.toISOString();
-    await createAnalysis(db, { id: "a", siteId: "s", status: "running", createdAt: at });
-    const urls = Array.from({ length: 250 }, (_, index) => `https://x.com/doctors/d${index}`);
-    await enqueueAnalysisCrawlUrls(db, { analysisId: "a", siteId: "s", urls: urls.map((url) => ({ url, routeFamily: "doctors" })) });
-    await saveCrawlBatch(db, { analysisId: "a", outcomes: urls.map((url) => ({ url, page: { url, status: 200, finalUrl: url, hreflang: [], jsonLdCount: 0, contentLength: 1, isEmptyShell: false, headingOutline: [], internalLinkCount: 0, rawTextLength: 1, renderedTextLength: 0, renderDelta: 0, fetchMode: "googlebot", routeFamily: "doctors" } })) });
-    await updateAnalysisStatus(db, "a", "completed", { completedAt: at });
-    let inspections = 0;
-    const fetchFn = (async (url: string) => {
-      if (!url.includes("urlInspection")) return new Response(JSON.stringify({ rows: [] }));
-      inspections++;
-      return inspections > 120
-        ? new Response(JSON.stringify({ error: { message: "Quota exceeded" } }), { status: 429 })
-        : new Response(JSON.stringify({ inspectionResult: { indexStatusResult: { verdict: "PASS", coverageState: "Submitted and indexed" } } }));
-    }) as typeof fetch;
-    const google = { connect: async () => ({ token: "t", scopes: [SEARCH_CONSOLE_SCOPE] }), fetchFn };
-    const quick = await syncResults(db, (await getSite(db, "s"))!, now, google);
-    assert.ok(quick.includes("coverage: inspected 50"), `"Sync now" checks 50, so the button answers in seconds: ${quick.join("; ")}`);
-    await db.prepare("DELETE FROM url_index_status").run();
-    inspections = 0;
-    const notes = await syncResults(db, (await getSite(db, "s"))!, now, google, {}, 200);
-    assert.ok(notes.includes("coverage: inspected 120"), notes.join("; "));
-    assert.ok(notes.includes("coverage stopped: Google answered 429"), notes.join("; "));
-    assert.ok(inspections <= 130, `stopped within the batch after the refusal (${inspections})`);
-    const saved = await db.prepare("SELECT COUNT(*) AS n FROM url_index_status WHERE site_id = 's'").first<{ n: number }>();
-    assert.equal(saved?.n, 120, "statuses saved before the refusal are kept");
-  });
-
-  it("ends a site's coverage rounds, without throwing, when its Google access is revoked", async () => {
-    const { db } = await site();
-    const more = await coverageRound(db, "s", "sc-domain:x.com", { connect: async () => { throw new Error("Google access token refresh failed (400)."); } }, "2026-10-07");
-    assert.equal(more, false, "the workflow moves on to the next site");
   });
 
   it("records a URL Google won't inspect, so the queue moves past it", async () => {

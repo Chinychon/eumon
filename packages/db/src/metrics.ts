@@ -34,6 +34,11 @@ export async function firstMetricDay(db: D1Like, siteId: string, metric: string)
   return row?.day ?? null;
 }
 
+export async function lastMetricDay(db: D1Like, siteId: string, metric: string): Promise<string | null> {
+  const row = await db.prepare("SELECT MAX(day) AS day FROM metric_points WHERE site_id = ? AND metric = ?").bind(siteId, metric).first<{ day: string | null }>();
+  return row?.day ?? null;
+}
+
 export async function updateSiteGa4Property(db: D1Like, siteId: string, property: string | null): Promise<void> {
   await db.prepare("UPDATE sites SET ga4_property = ?, updated_at = ? WHERE id = ?").bind(property, nowIso(), siteId).run();
 }

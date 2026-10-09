@@ -11,7 +11,7 @@ import type { Report } from "./report-model";
  * card loads what the card needs; no endpoint knows about pages.
  */
 
-export type Payload = { site: { name: string; baseUrl: string; searchConnected: boolean; analytics: "connected" | "reconnect" | "none"; signals: { speed: boolean; authority: boolean; keywords: boolean } }; results: Results };
+export type Payload = { site: { name: string; baseUrl: string; searchConnected: boolean; analytics: "connected" | "reconnect" | "none"; signals: { speed: boolean; authority: boolean; keywords: boolean; bing: boolean } }; results: Results };
 
 /** The synced numbers (Search Console, GA4, speed, authority, keywords). `reload` refetches after a sync. */
 export function useResults(endpoint: string) {

@@ -400,3 +400,4 @@ export * from "./results-points.js";
 export * from "./site-signals.js";
 export * from "./google-analytics.js";
 export * from "./dataforseo.js";
+export * from "./bing.js";

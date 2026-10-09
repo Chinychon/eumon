@@ -5,6 +5,8 @@ import { AiReadinessCard, CompetitorsSection, ConversionSections, IndexCoverageC
 import type { Navigate, Report } from "./report-model";
 import { KeywordsCard } from "./results/KeywordsCard";
 import { AiReadersCard, AiReferralsCard, AUTHORITY_NOTE, AuthoritySection, ConnectPrompt, EnquiriesCard, GoogleSearchCard, OrganicSessions, QuestionSearchesCard } from "./results/sections";
+import { ExportMenu } from "./export/ExportMenu";
+import { competitorSheets, pick } from "./export/report-sheets";
 import type { Leads, Payload } from "./site-data";
 import { Card } from "./ui";
 
@@ -66,7 +68,7 @@ export function CompetitorsPanel({ site, data, report, onNavigate }: { site: Sit
   return (
     <div className="results">
       <CompetitorsSection report={report} site={site} competitors={data.results.authority.competitors.length} onNavigate={onNavigate} />
-      <Card title="Authority" subtitle="An authority estimate for you and each competitor.">
+      <Card title="Authority" subtitle="An authority estimate for you and each competitor." actions={<ExportMenu title="Authority" sheets={() => pick(competitorSheets(report, data.results, new URL(site.baseUrl).hostname), "Authority")} />}>
         <AuthoritySection data={data} operator />
         <p className="small muted">{AUTHORITY_NOTE}</p>
       </Card>

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { fetchGa4AiReferrals, fetchSearchDaily, ga4AiPoints, ga4Days, inspectionResult, listGa4Properties } from "./index.js";
+import { createSpreadsheet, fetchGa4AiReferrals, fetchSearchDaily, ga4AiPoints, ga4Days, inspectionResult, listGa4Properties } from "./index.js";
 
 /** A fetch that records requests and answers with a fixed JSON body. */
 function recorded(body: unknown) {
@@ -42,6 +42,23 @@ describe("Google clients", () => {
     const points = ga4AiPoints(days);
     assert.deepEqual(points.filter((point) => point.metric === "ga4_ai_sessions"), [{ metric: "ga4_ai_sessions", day: "2026-10-01", value: 10 }]);
     assert.deepEqual(points.find((point) => point.metric === "ga4_ai_key_events"), { metric: "ga4_ai_key_events", day: "2026-10-01", value: 3 });
+  });
+
+  it("creates a Google Sheet with every table in one request: bold, frozen headers and numbers as numbers", async () => {
+    const { fetchFn, requests } = recorded({ spreadsheetId: "abc", spreadsheetUrl: "https://docs.google.com/spreadsheets/d/abc/edit" });
+    const url = await createSpreadsheet("t", "Search · Demo", [
+      { name: "Top queries", columns: ["Query", "Clicks"], rows: [["braces price", 52], ["veneers", null]] },
+      { name: "Top queries", columns: ["Country"], rows: [["Malaysia"]] },
+    ], fetchFn);
+    assert.equal(url, "https://docs.google.com/spreadsheets/d/abc/edit");
+    const sent = requests[0]!.body as { properties: { title: string }; sheets: Array<{ properties: { title: string; gridProperties: { frozenRowCount: number } }; data: Array<{ rowData: Array<{ values: Array<Record<string, unknown>> }> }> }> };
+    assert.equal(sent.properties.title, "Search · Demo");
+    assert.deepEqual(sent.sheets.map((sheet) => sheet.properties.title), ["Top queries", "Top queries 2"], "titles made unique");
+    assert.equal(sent.sheets[0]!.properties.gridProperties.frozenRowCount, 1);
+    const [header, first, second] = sent.sheets[0]!.data[0]!.rowData;
+    assert.deepEqual(header!.values[0], { userEnteredValue: { stringValue: "Query" }, userEnteredFormat: { textFormat: { bold: true } } });
+    assert.deepEqual(first!.values[1], { userEnteredValue: { numberValue: 52 } });
+    assert.deepEqual(second!.values[1], {}, "an empty cell stays empty");
   });
 
   it("reads an inspection verdict, and treats a missing index result as not checked", () => {

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { CtaVariant, SiteRecord } from "@organic-growth/core";
 import type { PerformanceReport, Suggestion } from "@organic-growth/pages";
 import { api, errorMessage, formatNumber, percent } from "./api";
+import { ExportContext, ExportMenu } from "./export/ExportMenu";
 import { Badge, Button, Card, Field, Kpi, ViewHeader } from "./ui";
 
 type WindowMetrics = { views: number; ctaClicks: number; searchClicks: number; searchImpressions: number };
@@ -52,6 +53,7 @@ export function PageResultsView({ site, onNavigate }: { site: SiteRecord; onNavi
   const ctr = totals && totals.impressions ? totals.clicks / totals.impressions : 0;
 
   return (
+    <ExportContext.Provider value={{ siteId: site.id, siteName: site.name }}>
     <div>
       <ViewHeader
         title="What's working"
@@ -85,14 +87,18 @@ export function PageResultsView({ site, onNavigate }: { site: SiteRecord; onNavi
             <Kpi label="Conversions" value={formatNumber(totals.conversions)} caption="From visitors who landed on a page" />
           </div>
 
-          <Card title="What to do next" subtitle="Ranked by the size of the opportunity. Every suggestion shows the evidence behind it.">
+          <Card title="What to do next" subtitle="Ranked by the size of the opportunity. Every suggestion shows the evidence behind it."
+            actions={report.suggestions.length > 0 && <ExportMenu title="Page suggestions" sheets={() => [{ name: "What to do next", columns: ["Kind", "Suggestion", "Detail", "Impact", "Queries"],
+              rows: report.suggestions.map((entry) => [KIND_LABEL[entry.kind], entry.title, entry.detail, Math.round(entry.impact), (entry.queries ?? []).join("; ")]) }]} />}>
             {report.suggestions.length === 0
               ? <div className="empty">No changes recommended yet. Suggestions appear as pages collect search impressions and visits{data?.searchConnected ? "" : " — connect Search Console to unlock most of them"}.</div>
               : report.suggestions.map((suggestion, index) => <SuggestionRow key={index} suggestion={suggestion} siteId={site.id} onApplied={load} />)}
           </Card>
 
           <div className="split">
-            <Card title="By template" subtitle="Which kinds of page earn traffic and conversions.">
+            <Card title="By template" subtitle="Which kinds of page earn traffic and conversions." actions={<ExportMenu title="Pages by template" sheets={() => [{ name: "By template",
+              columns: ["Template", "Pages", "Pages with impressions", "Impressions", "Clicks", "Views", "CTA clicks", "CTA rate", "Conversions"],
+              rows: report.templates.map((template) => [template.name, template.pages, template.pagesWithImpressions, template.impressions, template.clicks, template.views, template.ctaClicks, Number(template.ctaRate.toFixed(4)), template.conversions]) }]} />}>
               <div className="table-wrap">
                 <table className="table">
                   <thead><tr><th>Template</th><th className="num">Pages</th><th className="num">Impr.</th><th className="num">Clicks</th><th className="num">Views</th><th className="num">CTA rate</th><th className="num">Conv.</th></tr></thead>
@@ -109,7 +115,9 @@ export function PageResultsView({ site, onNavigate }: { site: SiteRecord; onNavi
             <CtaTest siteId={site.id} variants={data?.variants ?? []} onChanged={load} />
           </div>
 
-          <Card title="Best performing pages" subtitle="Scored by conversions, CTA clicks, search clicks, and visits.">
+          <Card title="Best performing pages" subtitle="Scored by conversions, CTA clicks, search clicks, and visits." actions={report.topPages.length > 0 && <ExportMenu title="Best performing pages" sheets={() => [{ name: "Best performing pages",
+            columns: ["Page", "Path", "Position", "Impressions", "Clicks", "Views", "CTA clicks", "Conversions"],
+            rows: report.topPages.map((page) => [page.title, page.path, page.position == null ? null : Number(page.position.toFixed(1)), page.impressions, page.clicks, page.views, page.ctaClicks, page.conversions]) }]} />}>
             {report.topPages.length === 0 ? <div className="empty">No traffic recorded yet.</div> : (
               <div className="table-wrap">
                 <table className="table">
@@ -127,7 +135,11 @@ export function PageResultsView({ site, onNavigate }: { site: SiteRecord; onNavi
             )}
           </Card>
 
-          <Card title="Changes and their effect" subtitle="Every edit is logged. Equal windows before and after each change show whether it helped.">
+          <Card title="Changes and their effect" subtitle="Every edit is logged. Equal windows before and after each change show whether it helped." actions={Boolean(data?.revisions.length) && <ExportMenu title="Page changes" sheets={() => [{ name: "Changes and their effect",
+            columns: ["Day", "Page", "Field", "Before", "After", "Reason", "Window (days)", "Search clicks before", "Search clicks after", "Impressions before", "Impressions after", "Views before", "Views after", "CTA clicks before", "CTA clicks after"],
+            rows: (data?.revisions ?? []).map((revision) => [revision.createdAt.slice(0, 10), revision.path, revision.field, revision.before, revision.after, revision.reason, revision.windowDays,
+              revision.metricsBefore.searchClicks, revision.metricsAfter.searchClicks, revision.metricsBefore.searchImpressions, revision.metricsAfter.searchImpressions,
+              revision.metricsBefore.views, revision.metricsAfter.views, revision.metricsBefore.ctaClicks, revision.metricsAfter.ctaClicks]) }]} />}>
             {!data?.revisions.length ? <div className="empty">No page changes yet. Apply a suggestion above to start measuring.</div> : (
               <div className="table-wrap">
                 <table className="table">
@@ -153,6 +165,7 @@ export function PageResultsView({ site, onNavigate }: { site: SiteRecord; onNavi
         </div>
       )}
     </div>
+    </ExportContext.Provider>
   );
 }
 

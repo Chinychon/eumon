@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import { createId, signToken } from "@organic-growth/core";
 import { getSite } from "@organic-growth/db";
-import { ANALYTICS_SCOPE, SEARCH_CONSOLE_SCOPE } from "../../../../../../src/gsc-auth";
+import { ANALYTICS_SCOPE, DRIVE_FILE_SCOPE, SEARCH_CONSOLE_SCOPE } from "../../../../../../src/gsc-auth";
 
 export async function GET(request: Request, context: { params: Promise<{ siteId: string }> }) {
   const { siteId } = await context.params;
@@ -13,7 +13,7 @@ export async function GET(request: Request, context: { params: Promise<{ siteId:
     client_id: env.GOOGLE_CLIENT_ID,
     redirect_uri: callback,
     response_type: "code",
-    scope: `${SEARCH_CONSOLE_SCOPE} ${ANALYTICS_SCOPE}`,
+    scope: `${SEARCH_CONSOLE_SCOPE} ${ANALYTICS_SCOPE} ${DRIVE_FILE_SCOPE}`,
     access_type: "offline",
     prompt: "consent",
     state,

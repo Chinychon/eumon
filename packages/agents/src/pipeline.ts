@@ -3,6 +3,7 @@ import {
   rankSeverityByOrganicImpact,
   type CrawlCoverage,
   type CrawlPageResult,
+  type KeywordsInput,
   type SiteRecord,
 } from "@organic-growth/core";
 import {
@@ -150,6 +151,8 @@ export interface RunAnalysisInput {
   targetMarkets?: string[];
   /** Record keys of collected datasets, to recognize searches that name one entity. */
   entityKeys?: Array<{ key: string; entityType: string }>;
+  /** Keyword lists from the Performance sync (DataForSEO), when synced. */
+  keywords?: KeywordsInput;
 }
 
 /** Competitors researched per analysis; each costs a sitemap profile and a handful of page fetches. */
@@ -363,6 +366,7 @@ export async function runFullAnalysis(input: RunAnalysisInput) {
     competition,
     datasets: input.datasets,
     search,
+    keywords: input.keywords,
   };
 
   const opportunities = buildOpportunities(bundle);

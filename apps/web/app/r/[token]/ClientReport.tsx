@@ -6,7 +6,7 @@ import { ResultsView } from "../../components/ResultsView";
 export function ClientReport({ token }: { token: string }) {
   return (
     <main className="client-report">
-      <ResultsView endpoint={`/api/r/${token}`} operator={false} />
+      <ResultsView endpoint={`/api/r/${token}`} operator={false} withKeywords />
       <footer className="client-report-credit">Report by Eumon</footer>
     </main>
   );

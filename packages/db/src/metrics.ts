@@ -1,4 +1,4 @@
-import { addDays, type TopQuery } from "@organic-growth/core";
+import { addDays } from "@organic-growth/core";
 import { chunks, nowIso, runStatements, type D1Like } from "./d1.js";
 
 /*
@@ -189,32 +189,7 @@ export async function topEumonPage(db: D1Like, siteId: string, today: string): P
   return row?.path ?? null;
 }
 
-/** Every Search Console metric, as `LIKE` patterns (a property change starts their history over). */
-export const SEARCH_METRIC_PATTERNS = ["search\\_%", "eumon\\_search\\_%", "queries\\_%", "pages\\_indexed", "pages\\_not\\_indexed", "sync.search%"];
-/** Every GA4 metric. */
-export const GA4_METRIC_PATTERNS = ["ga4\\_%", "sync.ga4"];
-
-/** Deletes a source's points (by `LIKE` pattern), so the next sync backfills them from the new source. */
-export async function clearMetricPoints(db: D1Like, siteId: string, patterns: string[]): Promise<void> {
-  await runStatements(db, patterns.map((pattern) => db.prepare("DELETE FROM metric_points WHERE site_id = ? AND metric LIKE ? ESCAPE '\\'").bind(siteId, pattern)));
-}
-
-/** Which fetch a top-queries list belongs to: a different property or set of markets makes it stale. */
-type QueryScope = { property: string; markets: string[] };
-const scopeKey = (markets: string[]) => [...markets].sort().join(",");
-
-/** Replaces the site's top-queries list with the latest sync's. */
-export async function saveTopQueriesSnapshot(db: D1Like, siteId: string, input: QueryScope & { periodEnd: string; rows: TopQuery[] }): Promise<void> {
-  await db.prepare(
-    `INSERT INTO search_top_queries (site_id, property, markets, period_end, rows_json, updated_at) VALUES (?, ?, ?, ?, ?, ?)
-     ON CONFLICT(site_id) DO UPDATE SET property = excluded.property, markets = excluded.markets, period_end = excluded.period_end,
-       rows_json = excluded.rows_json, updated_at = excluded.updated_at`,
-  ).bind(siteId, input.property, scopeKey(input.markets), input.periodEnd, JSON.stringify(input.rows), nowIso()).run();
-}
-
-/** The site's top-queries list, if it was fetched for this property and these markets. */
-export async function getTopQueriesSnapshot(db: D1Like, siteId: string, scope: QueryScope): Promise<{ periodEnd: string; rows: TopQuery[] } | null> {
-  const row = await db.prepare("SELECT period_end, rows_json FROM search_top_queries WHERE site_id = ? AND property = ? AND markets = ?")
-    .bind(siteId, scope.property, scopeKey(scope.markets)).first<{ period_end: string; rows_json: string }>();
-  return row ? { periodEnd: row.period_end, rows: JSON.parse(row.rows_json) as TopQuery[] } : null;
+/** Deletes a source's points (a group from `METRICS`), so the next sync backfills them from the new source. */
+export async function clearMetricPoints(db: D1Like, siteId: string, metrics: string[]): Promise<void> {
+  await db.prepare("DELETE FROM metric_points WHERE site_id = ? AND metric IN (SELECT value FROM json_each(?))").bind(siteId, JSON.stringify(metrics)).run();
 }

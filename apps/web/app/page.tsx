@@ -9,13 +9,14 @@ import { api, errorMessage } from "./components/api";
 import { DataView } from "./components/DataView";
 import { OverviewView, type Repository } from "./components/OverviewView";
 import { PagesView } from "./components/PagesView";
+import { KeywordsView } from "./components/KeywordsView";
 import { ResultsView } from "./components/ResultsView";
 import { PerformanceView } from "./components/PerformanceView";
 import { SetupView } from "./components/SetupView";
 import { BrandMark } from "./components/pixel";
 import { Button, LeafIcon, ThemeToggle } from "./components/ui";
 
-type View = "overview" | "results" | "ask" | "connections" | "data" | "pages" | "performance" | "setup";
+type View = "overview" | "results" | "keywords" | "ask" | "connections" | "data" | "pages" | "performance" | "setup";
 
 /**
  * `steps` are the pipeline steps (README) a view covers; `group` labels the run of views it starts.
@@ -24,6 +25,7 @@ type View = "overview" | "results" | "ask" | "connections" | "data" | "pages" | 
 const NAV: Array<{ view: View; label: string; steps?: string; group?: string }> = [
   { view: "overview", label: "Overview" },
   { view: "results", label: "Performance" },
+  { view: "keywords", label: "Keywords" },
   { view: "ask", label: "Ask" },
   { view: "data", label: "Data", steps: "1–3", group: "Landing page engine" },
   { view: "pages", label: "Landing pages", steps: "4–5" },
@@ -152,6 +154,7 @@ export default function Home() {
             <div key={`${site.id}:${view}`} className="view-enter">
               {view === "overview" && <OverviewView site={site} onNavigate={navigate} />}
               {view === "results" && <ResultsView endpoint={`/api/sites/${site.id}/results`} operator onNavigate={navigate} />}
+              {view === "keywords" && <KeywordsView endpoint={`/api/sites/${site.id}/results`} />}
               {view === "ask" && <AskView key={site.id} site={site} threadId={askThread} onThreadChange={setAskThread} />}
               {view === "data" && <DataView site={site} onNavigate={navigate} />}
               {view === "pages" && <PagesView site={site} onNavigate={navigate} />}

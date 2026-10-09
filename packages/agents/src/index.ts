@@ -1,10 +1,14 @@
 import {
   countryName,
   createId,
+  demandFromSnapshots,
+  keywordGaps,
   type CompetitorProfile,
   type Finding,
   type FrameworkFingerprint,
   type GrowthPlan,
+  type KeywordGap,
+  type KeywordsInput,
   type Opportunity,
   type SearchMetricRow,
   type SitemapAudit,
@@ -12,6 +16,7 @@ import {
 } from "@organic-growth/core";
 import type { RepoAnalysisResult } from "@organic-growth/repo-analyzer";
 import { competitionOpportunities, counted, type CompetitionReport } from "./competition.js";
+import { estimateDemand } from "./demand.js";
 import { analyzeSearch, searchOpportunities, type SearchInsights } from "./search.js";
 
 export interface AnalysisBundle {
@@ -33,6 +38,8 @@ export interface AnalysisBundle {
   datasets?: Array<{ name: string; entityType: string; records: number; livePages: number }>;
   /** Search Console analysis (market alignment, intent mix, striking distance). */
   search?: SearchInsights;
+  /** The site's and competitors' keyword lists from the Performance sync, for real demand and keyword gaps. */
+  keywords?: KeywordsInput;
 }
 
 /** The legacy search summary shape stored in reports as `searchNarrative`. */
@@ -58,6 +65,7 @@ export function buildOpportunities(bundle: AnalysisBundle): Opportunity[] {
   const technical = bundle.findings.map((finding) => {
     const impact = Math.max(1, finding.organicImpactScore);
     const effort = finding.category === "rendering" ? 4 : 2;
+    const estimate = estimateDemand({ kind: "technical", effort });
     // Squared so severity dominates: informational fixes can't outrank a large
     // content gap, while critical blockers stay on top.
     const priorityScore = (impact * impact) / (50 * effort);
@@ -66,10 +74,10 @@ export function buildOpportunities(bundle: AnalysisBundle): Opportunity[] {
       siteId: bundle.siteId,
       analysisId: bundle.analysisId,
       title: `Resolve: ${finding.title}`,
-      searchDemand: 0,
+      searchDemand: estimate.searchDemand,
+      estimatedDifficulty: estimate.estimatedDifficulty,
       intent: "technical_enabler",
       competitorStrength: 0,
-      estimatedDifficulty: Math.min(100, effort * 15),
       businessValue: impact,
       conversionPotential: 0,
       technicalEffort: effort,
@@ -80,23 +88,26 @@ export function buildOpportunities(bundle: AnalysisBundle): Opportunity[] {
     };
   });
   const search = bundle.search ?? analyzeSearch(bundle.searchMetrics, { brandTerms: bundle.brandTerms });
-  const fromSearch = searchOpportunities(search, bundle.siteId, bundle.analysisId);
+  const demand = bundle.keywords ? demandFromSnapshots(bundle.keywords.priced.flatMap((list) => list.rows)) : undefined;
+  const fromSearch = searchOpportunities(search, bundle.siteId, bundle.analysisId, demand);
   const contentGaps = bundle.competition ? competitionOpportunities(bundle.competition, bundle.siteId, bundle.analysisId) : [];
+  const gaps = bundle.keywords ? gapOpportunities(keywordGaps(bundle.keywords), bundle.siteId, bundle.analysisId) : [];
   // Data already collected but not published: the cheapest landing pages to add.
   const coveredByGap = new Set(bundle.competition?.rows.filter((row) => row.status === "gap" && row.data).map((row) => row.data!.dataset));
   const unpublishedData = (bundle.datasets ?? [])
     .filter((dataset) => dataset.records - dataset.livePages >= 20 && !coveredByGap.has(dataset.name))
     .map((dataset) => {
       const waiting = dataset.records - dataset.livePages;
+      const estimate = estimateDemand({ kind: "unpublished_data" });
       return {
         id: createId("opp"),
         siteId: bundle.siteId,
         analysisId: bundle.analysisId,
         title: `Publish landing pages from your ${dataset.name} data (${waiting.toLocaleString()} records without a page)`,
-        searchDemand: 0,
+        searchDemand: estimate.searchDemand,
+        estimatedDifficulty: estimate.estimatedDifficulty,
         intent: "unpublished_data",
         competitorStrength: 0,
-        estimatedDifficulty: 20,
         businessValue: 1.2,
         conversionPotential: 1,
         technicalEffort: 1,
@@ -105,7 +116,31 @@ export function buildOpportunities(bundle: AnalysisBundle): Opportunity[] {
         rationale: `“${dataset.name}” holds ${dataset.records.toLocaleString()} ${dataset.entityType} records and ${dataset.livePages.toLocaleString()} published pages. Each record with enough facts can become a landing page for searches that name it; the Data step shows how many pass the quality gate.`,
       };
     });
-  return [...technical, ...fromSearch, ...contentGaps, ...unpublishedData].sort((a, b) => b.priorityScore - a.priorityScore);
+  return [...technical, ...fromSearch, ...contentGaps, ...unpublishedData, ...gaps].sort((a, b) => b.priorityScore - a.priorityScore);
+}
+
+const COMMERCIAL_INTENT = new Set(["commercial", "transactional"]);
+
+/** The biggest searches competitors win and the site doesn't, as pages to build: volume ≥ 100, difficulty ≤ 40, commercial intent first. A competitor's own name (navigational) is not a page to build. */
+export function gapOpportunities(gaps: KeywordGap[], siteId: string, analysisId: string): Opportunity[] {
+  const commercial = (gap: KeywordGap) => COMMERCIAL_INTENT.has(gap.intent ?? "");
+  return gaps
+    .filter((gap) => (gap.volume ?? 0) >= 100 && gap.difficulty !== null && gap.difficulty <= 40 && gap.intent !== "navigational")
+    .sort((a, b) => Number(commercial(b)) - Number(commercial(a)) || (b.volume ?? 0) - (a.volume ?? 0))
+    .slice(0, 6)
+    .map((gap) => {
+      const volume = gap.volume!;
+      const weight = commercial(gap) ? 1.5 : 1;
+      return {
+        id: createId("opp"), siteId, analysisId,
+        title: `Rank for “${gap.keyword}”: ${volume.toLocaleString("en")} searches a month; ${gap.domain} ranks ${gap.position}`,
+        searchDemand: volume, estimatedDifficulty: gap.difficulty!, intent: "keyword_gap", competitorStrength: gap.position,
+        potentialPage: `https://${gap.domain}${gap.url}`,
+        businessValue: weight, conversionPotential: commercial(gap) ? 1 : 0.5, technicalEffort: 1, contentEffort: 3,
+        priorityScore: Number((Math.log10(volume + 1) * 12 * (1 - gap.difficulty! / 100) * weight).toFixed(2)),
+        rationale: `${volume.toLocaleString("en")} searches a month in your target markets, difficulty ${gap.difficulty} of 100, ${gap.intent ?? "unknown"} intent (DataForSEO). ${gap.domain} ranks ${gap.position} with ${gap.url}; you don't appear. A page that answers this search directly is the usual way in.`,
+      };
+    });
 }
 
 /** Below this priority, the top opportunity is housekeeping rather than growth. */
@@ -168,17 +203,23 @@ export function synthesizeGrowthPlan(bundle: AnalysisBundle): GrowthPlan {
     expectedObjective: opp.rationale,
     whyThisMatters: opp.intent === "technical_enabler"
       ? "Prioritized from the observed technical finding. Search demand and conversion value are not yet available."
+      : opp.intent === "keyword_gap"
+        ? `${opp.rationale} Real searches, measured monthly: this is demand you can see before building.`
       : opp.intent === "content_gap"
         ? `${opp.rationale} Competitors that invest this heavily in a page type usually do so because it brings them traffic.`
         : /prioritization aid/i.test(opp.rationale) ? opp.rationale : `${opp.rationale} This opportunity score is a prioritization aid, not a traffic forecast.`,
     pagesAffected: opp.potentialPage ? [opp.potentialPage] : opp.currentPage ? [opp.currentPage] : [],
     implementationRequired: opp.intent === "technical_enabler"
       ? "Review the affected route and implement a targeted change in a Git branch."
+      : opp.intent === "keyword_gap"
+        ? "Build a landing page that answers this search (a dataset and template in Data, or a page by hand), and link it from related pages."
       : opp.intent === "content_gap" || opp.intent === "unpublished_data"
         ? "Create a dataset for this entity type in Data (or reuse the existing one), add sources, and generate one landing page per record with a template."
         : "Review the page against the query intent, then improve its title, content coverage, or internal links as evidence supports.",
     contentRequired: opp.intent === "technical_enabler"
       ? "No content change inferred from technical crawl data alone."
+      : opp.intent === "keyword_gap"
+        ? `Study ${opp.potentialPage} for the facts searchers expect, then answer the search more completely, in the market's language.`
       : opp.intent === "unpublished_data"
         ? "Fill missing fields on thin records first; publish only pages that pass the quality gate."
       : opp.intent === "content_gap"
@@ -187,6 +228,8 @@ export function synthesizeGrowthPlan(bundle: AnalysisBundle): GrowthPlan {
     dependencies: [bundle.searchMetrics.length ? "Confirm the query and page in Search Console before implementation." : "Connect Search Console to validate organic demand and measure impact."],
     risk: opp.intent === "technical_enabler"
       ? "The crawl is sampled; confirm the issue across the relevant page template before changing production code."
+      : opp.intent === "keyword_gap"
+        ? "Volume is a monthly average for the country; check that the search's intent matches what the business sells before building."
       : "The query-intent label is heuristic; validate it manually and avoid rewriting a page based only on average position.",
     measurementMethod: "Compare Search Console impressions, clicks, CTR, and position for the query and landing page after changes; then check conversion events.",
   }));
@@ -356,3 +399,4 @@ export * from "./demo.js";
 export * from "./results-points.js";
 export * from "./site-signals.js";
 export * from "./google-analytics.js";
+export * from "./dataforseo.js";

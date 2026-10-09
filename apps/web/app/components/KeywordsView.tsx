@@ -15,7 +15,7 @@ import { Card, ViewHeader } from "./ui";
  */
 export function KeywordsView({ site, onNavigate }: { site: SiteRecord; onNavigate: Navigate }) {
   const { data, error } = useResults(`/api/sites/${site.id}/results`);
-  const report = useLatestReport(site.id);
+  const { report, error: reportError } = useLatestReport(site.id);
 
   if (error) return <div className="callout error" role="alert">{error}</div>;
   if (!data || report === undefined) return <div className="empty">Loading…</div>;
@@ -30,7 +30,9 @@ export function KeywordsView({ site, onNavigate }: { site: SiteRecord; onNavigat
       <div className="results">
         <KeywordsCard keywords={results.keywords} host={host} operator hasCredentials={data.site.signals.keywords} hasMarkets={results.markets.length > 0}
           searchTop10={results.search?.buckets.find((bucket) => bucket.top === 10)?.queries ?? null} />
-        <CompetitorsSection report={report} site={site} onNavigate={onNavigate} />
+        {reportError
+          ? <div className="callout error" role="alert">The competitor comparison couldn't be loaded: {reportError}</div>
+          : <CompetitorsSection report={report} site={site} competitors={results.authority.competitors.length} onNavigate={onNavigate} />}
         <Card title="Authority" subtitle="An authority estimate for you and each competitor.">
           <AuthoritySection data={data} operator />
           <p className="small muted">{AUTHORITY_NOTE}</p>

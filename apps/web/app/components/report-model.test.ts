@@ -15,6 +15,7 @@ describe("report model", () => {
         { title: "Resolve: No analytics or conversion tracking found", rationale: "", priorityScore: 20, intent: "technical_enabler" },
         { title: "Rank for “veneers”", rationale: "", priorityScore: 31, intent: "keyword_gap" },
         { title: "Resolve: A finding from an older run", rationale: "", priorityScore: 10, intent: "technical_enabler" },
+        { title: "Publish landing pages from your Dentists data", rationale: "", priorityScore: 5, intent: "unpublished_data" },
       ],
     }, 6);
     assert.deepEqual(actions.map((action) => [action.title, action.area]), [
@@ -23,6 +24,7 @@ describe("report model", () => {
       ["Rank for “veneers”", "competitors"],
       ["Resolve: No analytics or conversion tracking found", "leads"],
       ["Resolve: A finding from an older run", "technical"],
+      ["Publish landing pages from your Dentists data", "data"],
     ]);
     assert.equal(doFirst({ findings: [], opportunities: [] }).length, 0);
   });

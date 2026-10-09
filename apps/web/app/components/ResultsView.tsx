@@ -23,7 +23,8 @@ const TABS = [
 export function ResultsView({ site, tab, onTab, onNavigate }: { site: SiteRecord; tab: string | null; onTab: (tab: string | null) => void; onNavigate: Navigate }) {
   const endpoint = `/api/sites/${site.id}/results`;
   const { data, error, reload } = useResults(endpoint);
-  const report = useLatestReport(site.id);
+  const { report, error: reportError } = useLatestReport(site.id);
+  const analysisError = reportError && <div className="callout error" role="alert">The latest analysis couldn't be loaded: {reportError}</div>;
   const leads = useLeads(site.id);
   const [syncing, setSyncing] = useState(false);
   const [actionError, setActionError] = useState("");
@@ -39,6 +40,7 @@ export function ResultsView({ site, tab, onTab, onNavigate }: { site: SiteRecord
   }
 
   async function shareLink() {
+    setActionError("");
     try {
       const { url } = await api<{ url: string }>(`/api/sites/${site.id}/share`, { method: "POST" });
       await navigator.clipboard.writeText(url);
@@ -82,12 +84,12 @@ export function ResultsView({ site, tab, onTab, onNavigate }: { site: SiteRecord
             ) : (
               <>
                 <GoogleSearchCard data={data} operator onNavigate={onNavigate} />
-                {report && report.search ? <SearchAnalysis report={report} /> : report !== undefined && (
+                {analysisError || (report && report.search ? <SearchAnalysis report={report} /> : report !== undefined && (
                   <Card title="Queries near page one">
                     <p className="empty-state">Run an analysis on the Overview to see the queries closest to page one, where searchers are, and the pages searchers skip.</p>
                     <Button small variant="secondary" onClick={() => onNavigate("overview")}>Open Overview</Button>
                   </Card>
-                )}
+                ))}
                 <IndexCoverageCard siteId={site.id} onNavigate={onNavigate} />
               </>
             )}
@@ -95,6 +97,7 @@ export function ResultsView({ site, tab, onTab, onNavigate }: { site: SiteRecord
         ) : (
           <div className="results">
             <EnquiriesCard data={data} operator />
+            {analysisError}
             <ConversionSections report={report ?? null} leads={leads} onNavigate={onNavigate} />
           </div>
         )}

@@ -155,7 +155,7 @@ export default function Home() {
               repositories={repositories}
               githubInstalled={githubInstalled}
               onCancel={sites.length ? () => setAdding(false) : undefined}
-              onAdded={async (siteId) => { setAdding(false); await loadSites(siteId); setView("overview"); }}
+              onAdded={async (siteId) => { setAdding(false); await loadSites(siteId); navigate("overview"); }}
             />
           ) : (
             <div key={`${site.id}:${view}`} className="view-enter">

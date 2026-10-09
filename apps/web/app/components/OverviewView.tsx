@@ -50,10 +50,14 @@ export function OverviewView({ site, tab, onTab, onNavigate }: {
   const [failure, setFailure] = useState("");
   const [changes, setChanges] = useState<Change[]>([]);
   const [busy, setBusy] = useState("");
-  const [competitorCount, setCompetitorCount] = useState(0);
+  /** Whether the latest analysis has been read: until then the tabs say "Loading…", not "Run an analysis". */
+  const [loaded, setLoaded] = useState(false);
+  /** Null until the competitor list has loaded, so "Add competitors" shows only when there really are none. */
+  const [competitorCount, setCompetitorCount] = useState<number | null>(null);
   const [markets, setMarkets] = useState(0);
   const leads = useLeads(site.id);
   const results = useResults(`/api/sites/${site.id}/results`);
+  const reloadResults = results.reload;
   const current: Tab = tab === "technical" ? "technical" : "overview";
 
   const loadChanges = useCallback(async (analysisId: string) => {
@@ -62,7 +66,7 @@ export function OverviewView({ site, tab, onTab, onNavigate }: {
   }, []);
 
   useEffect(() => {
-    setReport(null); setPendingId(""); setFinished(null); setNote(""); setError(""); setChanges([]);
+    setReport(null); setPendingId(""); setFinished(null); setNote(""); setError(""); setChanges([]); setLoaded(false); setCompetitorCount(null);
     void (async () => {
       try {
         const latest = await api<{
@@ -89,9 +93,9 @@ export function OverviewView({ site, tab, onTab, onNavigate }: {
             void loadChanges(latest.previous.analysisId);
           }
         }
-      } catch (cause) { setError(errorMessage(cause)); }
+      } catch (cause) { setError(errorMessage(cause)); } finally { setLoaded(true); }
     })();
-    api<{ domains: string[] }>(`/api/sites/${site.id}/competitors`).then((data) => setCompetitorCount(data.domains.length)).catch(() => undefined);
+    api<{ domains: string[] }>(`/api/sites/${site.id}/competitors`).then((data) => setCompetitorCount(data.domains.length)).catch(() => setCompetitorCount(0));
     api<{ countries: string[] }>(`/api/sites/${site.id}/markets`).then((data) => setMarkets(data.countries.length)).catch(() => undefined);
   }, [site.id, loadChanges]);
 
@@ -107,11 +111,13 @@ export function OverviewView({ site, tab, onTab, onNavigate }: {
         setFinished({ run, analysisId: pendingId, deltas: deltasBetween(reportBefore.current, job.report), first: !reportBefore.current });
         setReport(job.report);
         void loadChanges(pendingId);
+        // Site health on the Technical tab is written by the analysis.
+        void reloadResults();
       } else if (job?.status === "cancelled") setNote(reportBefore.current ? "Analysis cancelled. The last report is still shown below." : "Analysis cancelled.");
       else setFailure(job?.error ?? run.error ?? "No error was recorded.");
       setPendingId("");
     })();
-  }, [pendingId, run, loadChanges]);
+  }, [pendingId, run, loadChanges, reloadResults]);
 
   /** A stalled run no longer blocks the header action, so a new run can replace it. */
   const running = Boolean(pendingId) && !run?.stalled;
@@ -185,7 +191,7 @@ export function OverviewView({ site, tab, onTab, onNavigate }: {
         <span className={hasRepo ? "on" : ""}>{hasRepo ? "GitHub" : "GitHub not connected"}</span>
         <span className={site.gscProperty ? "on" : ""}>{site.gscProperty ? "Search Console" : "Search Console missing"}</span>
         <span className={markets ? "on" : ""}>{markets ? `${markets} ${markets === 1 ? "market" : "markets"}` : "No markets"}</span>
-        <span className={competitorCount ? "on" : ""}>{competitorCount ? `${competitorCount} ${competitorCount === 1 ? "competitor" : "competitors"}` : "No competitors"}</span>
+        <span className={competitorCount ? "on" : ""}>{competitorCount ? `${competitorCount} ${competitorCount === 1 ? "competitor" : "competitors"}` : competitorCount === 0 ? "No competitors" : "Competitors"}</span>
         <span className="connections-open">Open Setup →</span>
       </button>
 
@@ -195,8 +201,12 @@ export function OverviewView({ site, tab, onTab, onNavigate }: {
         ))}
       </div>
       <div key={current} className="view-enter" role="tabpanel">
-        {current === "overview" && <Briefing report={report} running={Boolean(pendingId)} leads={leads} hasSearch={Boolean(site.gscProperty)} competitorCount={competitorCount} onOpen={go} onNavigate={onNavigate} />}
-        {current === "technical" && <TechnicalTab siteId={site.id} report={report} results={results.data} changes={changes} busy={busy} hasRepo={hasRepo} onGenerateChange={generateChange} onOpenPullRequest={openPullRequest} onRecrawl={() => runAnalysis(true)} />}
+        {!loaded ? <div className="empty">Loading…</div> : (
+          <>
+            {current === "overview" && <Briefing report={report} running={Boolean(pendingId)} leads={leads} hasSearch={Boolean(site.gscProperty)} competitorCount={competitorCount} onOpen={go} onNavigate={onNavigate} />}
+            {current === "technical" && <TechnicalTab siteId={site.id} report={report} results={results.data} running={Boolean(pendingId)} changes={changes} busy={busy} hasRepo={hasRepo} onGenerateChange={generateChange} onOpenPullRequest={openPullRequest} onRecrawl={() => runAnalysis(true)} />}
+          </>
+        )}
       </div>
     </div>
   );
@@ -208,7 +218,7 @@ function Briefing({ report, running, leads, hasSearch, competitorCount, onOpen, 
   running: boolean;
   leads: Leads;
   hasSearch: boolean;
-  competitorCount: number;
+  competitorCount: number | null;
   onOpen: (place: Place) => void;
   onNavigate: Navigate;
 }) {
@@ -256,6 +266,7 @@ function Briefing({ report, running, leads, hasSearch, competitorCount, onOpen, 
                 label: row.label,
                 values: [row.you.pages, ...domains.map((competitor) => row.competitors.find((entry) => entry.domain === competitor.domain)?.pages ?? 0)],
               }))} />
+            : competitorCount === null ? <p className="empty-state">Loading…</p>
             : !competitorCount ? <><p className="empty-state">Add competitor domains to compare what you publish.</p><Button small variant="secondary" onClick={() => onNavigate("setup")}>Add competitors</Button></>
             : <p className="empty-state">{report ? "Run the analysis again to compare with the competitors you added." : runFirst}</p>}
         </Card>

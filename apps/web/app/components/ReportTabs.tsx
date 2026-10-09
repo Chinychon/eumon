@@ -45,10 +45,12 @@ export function WhyRow({ lead, title, aside, children }: { lead?: ReactNode; tit
 export const Severity = ({ value }: { value: string }) => <span className={`severity ${SEVERITY_CLASS[value] ?? "info"}`}>{value}</span>;
 
 /** The site as Google receives it, where it breaks, how fast it is, and the fixes, most impact first. Speed comes from the sync, so it shows before any analysis. */
-export function TechnicalTab({ siteId, report, results, changes, busy, hasRepo, onGenerateChange, onOpenPullRequest, onRecrawl }: {
+export function TechnicalTab({ siteId, report, results, running, changes, busy, hasRepo, onGenerateChange, onOpenPullRequest, onRecrawl }: {
   siteId: string;
   report: Report | null;
   results: Payload | null;
+  /** An analysis is under way, so the empty states wait for it rather than ask for one. */
+  running: boolean;
   changes: Change[];
   busy: string;
   hasRepo: boolean;
@@ -60,8 +62,8 @@ export function TechnicalTab({ siteId, report, results, changes, busy, hasRepo, 
   if (!report) {
     return (
       <div className="results">
-        <TechnicalNumbers report={null} results={results} />
-        <Card title="Every sitemap URL"><p className="empty-state">Run an analysis to fetch every sitemap URL as Googlebot does and see where pages break.</p></Card>
+        <TechnicalNumbers report={null} results={results} running={running} />
+        <Card title="Every sitemap URL"><p className="empty-state">{running ? "Fills in when the analysis finishes: every sitemap URL, fetched as Googlebot does, and where pages break." : "Run an analysis to fetch every sitemap URL as Googlebot does and see where pages break."}</p></Card>
         {speed}
       </div>
     );
@@ -72,7 +74,7 @@ export function TechnicalTab({ siteId, report, results, changes, busy, hasRepo, 
   const flaky = (report.rendering?.repeatability ?? []).filter((entry) => entry.failed);
   return (
     <div className="results">
-      <TechnicalNumbers report={report} results={results} />
+      <TechnicalNumbers report={report} results={results} running={running} />
       <div className="ruled-grid c11">
         <Card title="Every sitemap URL" subtitle={`${formatNumber(report.coverage?.totalUrls ?? report.sitemap.totalUrls)} URLs, one square each, as Googlebot received them.`}>
           {families.length ? (
@@ -115,7 +117,7 @@ export function TechnicalTab({ siteId, report, results, changes, busy, hasRepo, 
 }
 
 /** Sitemap size, how much of it reaches Google intact, site health, and the fixes found. */
-function TechnicalNumbers({ report, results }: { report: Report | null; results: Payload | null }) {
+function TechnicalNumbers({ report, results, running }: { report: Report | null; results: Payload | null; running: boolean }) {
   const coverage = report?.coverage;
   const served = servedShare(coverage);
   const health = results?.results.health;
@@ -123,7 +125,7 @@ function TechnicalNumbers({ report, results }: { report: Report | null; results:
   const urgent = fixes?.filter((finding) => finding.severity === "CRITICAL" || finding.severity === "HIGH").length ?? 0;
   return (
     <div className="metrics-grid">
-      <Kpi label="URLs in sitemap" value={report ? formatNumber(report.sitemap.totalUrls) : "—"} caption={!report ? "Run an analysis to fill these in" : report.sitemap.errors[0] ? "See the sitemap note below" : "Declared to search engines"} />
+      <Kpi label="URLs in sitemap" value={report ? formatNumber(report.sitemap.totalUrls) : "—"} caption={!report ? (running ? "Fills in when the analysis finishes" : "Run an analysis to fill these in") : report.sitemap.errors[0] ? "See the sitemap note below" : "Declared to search engines"} />
       <Kpi label="Reach Google intact" value={served === null ? "—" : `${Math.round(served * 100)}%`} caption={coverage ? `${formatNumber(coverage.emptyShellUrls)} empty · ${formatNumber(coverage.httpErrorUrls)} errors` : "Every sitemap URL, fetched as Google"} />
       <Kpi label="Site health" value={health?.value == null ? "—" : `${health.value}%`} caption={health?.day ? `No error, empty HTML, or noindex · ${formatDay(health.day)}` : "Crawled pages with no error, empty HTML, or noindex"} />
       <Kpi label="Technical fixes" value={fixes ? formatNumber(fixes.length) : "—"} caption={fixes ? (urgent ? `${urgent} critical or high` : "None critical or high") : "Found by each analysis"} />
@@ -274,8 +276,15 @@ const GAP_STATUS: Record<string, { label: string; tone: string }> = {
 };
 
 /** Pages per section against each competitor, your advantage, the competitors, and what stands out. */
-export function CompetitorsSection({ report, site, onNavigate }: { report: Report | null; site: SiteRecord; onNavigate: Navigate }) {
+export function CompetitorsSection({ report, site, competitors, onNavigate }: { report: Report | null; site: SiteRecord; competitors: number; onNavigate: Navigate }) {
   const competition = report?.competition;
+  if (competitors > 0 && !competition?.rows.length) {
+    return (
+      <Card title="Competitors not compared yet" subtitle={`${competitors} ${competitors === 1 ? "competitor is" : "competitors are"} set up. ${report ? "The last analysis ran before they were added; run it again" : "Run an analysis"} to compare the kinds of pages they publish with yours.`}>
+        <Button onClick={() => onNavigate("overview")}>Open Overview</Button>
+      </Card>
+    );
+  }
   if (!report || !competition?.rows.length) {
     return (
       <Card title="No competitors compared yet" subtitle="Add competitor domains in Setup. The next analysis reads their sitemaps and a few pages per section to show which kinds of pages they publish that you don't.">

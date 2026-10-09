@@ -22,6 +22,7 @@ export * from "./snapshots.js";
 export * from "./leads.js";
 export * from "./server-logs.js";
 export * from "./history.js";
+export * from "./search-console.js";
 import { saveFindingKeys } from "./history.js";
 import { analysisHealthPoints, upsertMetricPoints } from "./metrics.js";
 

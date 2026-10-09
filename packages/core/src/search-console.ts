@@ -53,9 +53,11 @@ export function reasonFromFileName(name: string): GscReason | null {
   return reason === "other" ? null : reason;
 }
 
+export type GscSummaryRow = { reason: GscReason; reasonText: string; source: string | null; validation: string | null; pages: number };
+
 export type ParsedExport =
   | { kind: "urls"; urls: Array<{ url: string; lastCrawled: string | null }>; otherHost: number }
-  | { kind: "table"; rows: Array<{ reason: GscReason; reasonText: string; source: string | null; validation: string | null; pages: number }> }
+  | { kind: "table"; rows: GscSummaryRow[] }
   | { kind: "chart"; points: Array<{ day: string; indexed: number; notIndexed: number }> }
   | { kind: "unknown"; why: string };
 

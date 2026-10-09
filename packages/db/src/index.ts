@@ -293,6 +293,7 @@ export async function reuseCrawlResults(
     FROM pages WHERE analysis_id = ? AND crawl_state = 'complete' AND url IN (${group.map(() => "?").join(",")})`,
   ).bind(input.analysisId, input.previousAnalysisId, createdAt, input.previousAnalysisId, ...group));
   for (const group of chunks(statements, 50)) await runStatements(db, group);
+  await recountCrawl(db, input.analysisId);
 }
 
 /**
@@ -315,9 +316,12 @@ const MAX_REPORT_BYTES = 1_500_000;
  * sampled page records, then evidence beyond the top findings, then route
  * lists. The summary fields the dashboard leads with are never dropped.
  */
+/** Size as D1 stores it: UTF-8 bytes, not UTF-16 characters (an accented or Chinese title is two or three bytes a character). */
+const byteLength = (text: string) => new TextEncoder().encode(text).byteLength;
+
 export function compactReport(report: unknown, maxBytes = MAX_REPORT_BYTES): string {
   let json = JSON.stringify(report);
-  if (json.length <= maxBytes || !report || typeof report !== "object") return json;
+  if (byteLength(json) <= maxBytes || !report || typeof report !== "object") return json;
   const copy = JSON.parse(json) as Record<string, unknown>;
   const steps: Array<() => void> = [
     () => { copy.pages = []; },
@@ -335,7 +339,7 @@ export function compactReport(report: unknown, maxBytes = MAX_REPORT_BYTES): str
   for (const step of steps) {
     step();
     json = JSON.stringify(copy);
-    if (json.length <= maxBytes) return json;
+    if (byteLength(json) <= maxBytes) return json;
   }
   return json;
 }
@@ -356,6 +360,34 @@ export async function saveAnalysisReport(
   } catch {
     // The report is what matters; a missing ledger (code deployed before its migration) only costs the health point.
   }
+  try {
+    if (site) await pruneCrawlResults(db, site.site_id);
+  } catch {
+    // Pruning is housekeeping; the next finished analysis tries again.
+  }
+}
+
+/** Finished analyses whose crawl rows are kept; older ones keep their report and counters. */
+export const KEPT_CRAWLS = 2;
+
+/**
+ * Deletes the crawl rows of a site's older analyses: everything but the
+ * latest finished ones (`keep`) and any run newer than the latest finished
+ * one, which a re-run may still reuse. Reports and crawl counters stay, so
+ * history and crawl pace are unaffected; a 25,000-page crawl is tens of MB,
+ * and a D1 database on the Free plan holds 500 MB.
+ */
+export async function pruneCrawlResults(db: D1Like, siteId: string, keep = KEPT_CRAWLS): Promise<number> {
+  const { results } = await db.prepare(
+    `SELECT a.id FROM analyses a
+     WHERE a.site_id = ?
+       AND a.id NOT IN (SELECT id FROM analyses WHERE site_id = ? AND status = 'completed' ORDER BY created_at DESC LIMIT ?)
+       AND a.created_at < (SELECT MAX(created_at) FROM analyses WHERE site_id = ? AND status = 'completed')
+       AND EXISTS (SELECT 1 FROM pages p WHERE p.analysis_id = a.id)`,
+  ).bind(siteId, siteId, keep, siteId).all<{ id: string }>();
+  // One analysis per statement, so no single delete carries every old crawl at once.
+  for (const { id } of results) await db.prepare("DELETE FROM pages WHERE analysis_id = ?").bind(id).run();
+  return results.length;
 }
 
 export async function upsertOAuthCredential(
@@ -471,6 +503,7 @@ export async function enqueueAnalysisCrawlUrls(
     ));
     await runStatements(db, statements);
   }
+  await recountCrawl(db, input.analysisId);
   return urls.length;
 }
 
@@ -495,11 +528,11 @@ export async function saveCrawlBatch(
   },
 ): Promise<void> {
   const crawledAt = nowIso();
-  const statements = input.outcomes.map((outcome) => {
+  const save = (outcome: { url: string; page?: CrawlPageResult; error?: string }) => {
     if (!outcome.page) {
       return db.prepare(
         `UPDATE pages SET crawl_state = 'failed', crawled_at = ?, result_json = json_set(result_json, '$.error', ?)
-         WHERE analysis_id = ? AND url = ?`,
+         WHERE analysis_id = ? AND url = ? AND crawl_state = 'pending'`,
       ).bind(
         crawledAt,
         outcome.error ?? "The crawler could not fetch this URL.",
@@ -537,7 +570,7 @@ export async function saveCrawlBatch(
     return db.prepare(
       `UPDATE pages SET status = ?, title = ?, is_empty_shell = ?, result_json = ?,
        route_family = COALESCE(?, route_family), crawl_state = 'complete', crawled_at = ?
-       WHERE analysis_id = ? AND url = ?`,
+       WHERE analysis_id = ? AND url = ? AND crawl_state = 'pending'`,
     ).bind(
       page.status,
       page.title ?? null,
@@ -548,7 +581,22 @@ export async function saveCrawlBatch(
       input.analysisId,
       outcome.url,
     );
-  });
+  };
+  // Each group saves its pages with the counters beside them, in one batch: the rows' pending counts
+  // come off, the rows change, their new counts go on. Only pending rows change, and only rows stamped
+  // with this save's time are added, so a retried save moves nothing twice.
+  const urls = input.outcomes.map((outcome) => outcome.url);
+  for (const group of chunks(input.outcomes, 40)) {
+    const list = group.map(() => "?").join(",");
+    const groupUrls = group.map((outcome) => outcome.url);
+    await runStatements(db, [
+      countDelta(db, input.analysisId, -1, `crawl_state = 'pending' AND url IN (${list})`, groupUrls),
+      ...group.map(save),
+      countDelta(db, input.analysisId, 1, `crawled_at = ? AND url IN (${list})`, [crawledAt, ...groupUrls]),
+    ]);
+  }
+  // The progress view's "just fetched" list, newest first.
+  await db.prepare("UPDATE analyses SET crawl_recent = ? WHERE id = ?").bind(JSON.stringify(urls.slice(-8).reverse()), input.analysisId).run();
   // A fetched page's links replace the ones it had; pages reused from an earlier crawl keep theirs.
   const site = "(SELECT site_id FROM analyses WHERE id = ?)";
   const links = input.outcomes.flatMap((outcome) => (outcome.page?.internalLinks ? [
@@ -558,7 +606,7 @@ export async function saveCrawlBatch(
        SELECT ${site}, ?, ?, json_extract(value, '$.path'), json_extract(value, '$.family') FROM json_each(?)`,
     ).bind(input.analysisId, outcome.url, outcome.page.routeFamily ?? "page", JSON.stringify(outcome.page.internalLinks)),
   ] : []));
-  for (const group of chunks([...statements, ...links], 100)) await runStatements(db, group);
+  for (const group of chunks(links, 100)) await runStatements(db, group);
 }
 
 /** A URL's path as `page_links` stores targets: no trailing slash, `` for the homepage. */
@@ -865,64 +913,94 @@ export type CrawlProgress = {
 
 const FRESH = "reused_from IS NULL";
 
-/** Live crawl counts while an analysis runs: what the progress view shows every few seconds. */
-export async function getCrawlProgress(db: D1Like, analysisId: string): Promise<CrawlProgress> {
-  const [totals, families, recent] = await Promise.all([
-    db.prepare(
-      `SELECT COUNT(*) AS total,
-        SUM(CASE WHEN crawl_state = 'pending' THEN 1 ELSE 0 END) AS pending,
-        SUM(CASE WHEN crawl_state IN ('complete', 'failed') AND ${FRESH} THEN 1 ELSE 0 END) AS crawled,
-        SUM(CASE WHEN crawl_state = 'failed' THEN 1 ELSE 0 END) AS failed,
-        SUM(CASE WHEN crawl_state = 'blocked' THEN 1 ELSE 0 END) AS blocked,
-        SUM(CASE WHEN crawl_state = 'complete' AND NOT (${FRESH}) THEN 1 ELSE 0 END) AS reused,
-        SUM(CASE WHEN ${SERVED} AND NOT (${CHALLENGE}) THEN 1 ELSE 0 END) AS ok,
-        SUM(CASE WHEN crawl_state = 'complete' AND status >= 400 AND NOT (${CHALLENGE}) THEN 1 ELSE 0 END) AS http_errors,
-        SUM(CASE WHEN crawl_state = 'complete' AND is_empty_shell = 1 THEN 1 ELSE 0 END) AS empty_shells,
-        SUM(CASE WHEN ${CRAWL_ISSUES.noindex.where} THEN 1 ELSE 0 END) AS noindex,
-        SUM(CASE WHEN crawl_state = 'complete' AND ${CHALLENGE} THEN 1 ELSE 0 END) AS challenges,
-        MIN(CASE WHEN crawl_state IN ('complete', 'failed') AND ${FRESH} THEN crawled_at END) AS first_at,
-        MAX(CASE WHEN crawl_state IN ('complete', 'failed') AND ${FRESH} THEN crawled_at END) AS last_at
-       FROM pages WHERE analysis_id = ?`,
-    ).bind(analysisId).first<Record<string, number | string | null>>(),
-    db.prepare(
-      `SELECT route_family AS family, COUNT(*) AS total,
-        SUM(CASE WHEN crawl_state != 'pending' THEN 1 ELSE 0 END) AS done,
-        SUM(CASE WHEN crawl_state IN ('complete', 'failed') AND ${FRESH} THEN 1 ELSE 0 END) AS fetched,
-        SUM(CASE WHEN crawl_state = 'blocked' THEN 1 ELSE 0 END) AS blocked,
-        SUM(CASE WHEN crawl_state = 'complete' AND is_empty_shell = 1 THEN 1 ELSE 0 END) AS empty_shells,
-        SUM(CASE WHEN crawl_state = 'failed' OR (crawl_state = 'complete' AND status >= 400 AND NOT (${CHALLENGE})) THEN 1 ELSE 0 END) AS errors
-       FROM pages WHERE analysis_id = ? GROUP BY family ORDER BY total DESC, family LIMIT 40`,
-    ).bind(analysisId).all<Record<string, number | string>>(),
-    db.prepare(
-      `SELECT url, status, is_empty_shell, crawl_state, crawled_at, route_family AS family
-       FROM pages WHERE analysis_id = ? AND crawl_state IN ('complete', 'failed') AND ${FRESH}
-       ORDER BY crawled_at DESC, url LIMIT 8`,
-    ).bind(analysisId).all<Record<string, number | string | null>>(),
+/**
+ * The crawl counters (`crawl_counts`, one row per analysis and page type),
+ * each a condition on a crawl row. The progress view reads these rows
+ * instead of counting a 25,000-row crawl on every poll.
+ */
+const COUNTS: Array<[column: string, condition: string]> = [
+  ["total", "1"],
+  ["pending", "crawl_state = 'pending'"],
+  ["blocked", "crawl_state = 'blocked'"],
+  ["fetched", `crawl_state IN ('complete', 'failed') AND ${FRESH}`],
+  ["failed", "crawl_state = 'failed'"],
+  ["reused", `crawl_state = 'complete' AND NOT (${FRESH})`],
+  ["ok", `${SERVED} AND NOT (${CHALLENGE})`],
+  ["http_errors", `crawl_state = 'complete' AND status >= 400 AND NOT (${CHALLENGE})`],
+  ["empty_shells", "crawl_state = 'complete' AND is_empty_shell = 1"],
+  ["noindex", CRAWL_ISSUES.noindex.where],
+  ["challenges", `crawl_state = 'complete' AND ${CHALLENGE}`],
+];
+
+/**
+ * Adds (`sign` 1) or takes away (-1) the counts of the crawl rows matching
+ * `where`, per page type. Adding also widens the first and last fetch times.
+ */
+function countDelta(db: D1Like, analysisId: string, sign: 1 | -1, where: string, params: unknown[]) {
+  const columns = COUNTS.map(([column]) => column);
+  const fetched = COUNTS.find(([column]) => column === "fetched")![1];
+  return db.prepare(
+    `INSERT INTO crawl_counts (analysis_id, family, ${columns.join(", ")}, first_at, last_at)
+     SELECT analysis_id, route_family, ${COUNTS.map(([, condition]) => `${sign} * SUM(CASE WHEN ${condition} THEN 1 ELSE 0 END)`).join(", ")},
+       ${sign > 0 ? `MIN(CASE WHEN ${fetched} THEN crawled_at END), MAX(CASE WHEN ${fetched} THEN crawled_at END)` : "NULL, NULL"}
+     FROM pages WHERE analysis_id = ? AND ${where} GROUP BY route_family
+     ON CONFLICT (analysis_id, family) DO UPDATE SET ${columns.map((column) => `${column} = ${column} + excluded.${column}`).join(", ")},
+       first_at = CASE WHEN excluded.first_at IS NOT NULL AND (first_at IS NULL OR excluded.first_at < first_at) THEN excluded.first_at ELSE first_at END,
+       last_at = CASE WHEN excluded.last_at IS NOT NULL AND (last_at IS NULL OR excluded.last_at > last_at) THEN excluded.last_at ELSE last_at END`,
+  ).bind(analysisId, ...params);
+}
+
+/** Counts an analysis's crawl rows from scratch: after queueing, and after anything that edits rows directly. */
+export async function recountCrawl(db: D1Like, analysisId: string): Promise<void> {
+  await runStatements(db, [
+    db.prepare("DELETE FROM crawl_counts WHERE analysis_id = ?").bind(analysisId),
+    countDelta(db, analysisId, 1, "1 = 1", []),
   ]);
-  const count = (key: string) => Number(totals?.[key] ?? 0);
+}
+
+/** Live crawl counts while an analysis runs: what the progress view shows every few seconds, read from the counters. */
+export async function getCrawlProgress(db: D1Like, analysisId: string): Promise<CrawlProgress> {
+  const [{ results: rows }, analysis] = await Promise.all([
+    db.prepare("SELECT * FROM crawl_counts WHERE analysis_id = ?").bind(analysisId).all<Record<string, number | string | null>>(),
+    db.prepare("SELECT crawl_recent FROM analyses WHERE id = ?").bind(analysisId).first<{ crawl_recent: string | null }>(),
+  ]);
+  let recentUrls: string[] = [];
+  try { recentUrls = JSON.parse(analysis?.crawl_recent ?? "[]") as string[]; } catch { /* no list yet */ }
+  const { results: recent } = recentUrls.length ? await db.prepare(
+    `SELECT url, status, is_empty_shell, crawl_state, crawled_at, route_family AS family
+     FROM pages WHERE analysis_id = ? AND crawl_state IN ('complete', 'failed') AND ${FRESH} AND url IN (${recentUrls.map(() => "?").join(",")})
+     ORDER BY crawled_at DESC, url`,
+  ).bind(analysisId, ...recentUrls).all<Record<string, number | string | null>>() : { results: [] };
+  const sum = (key: string) => rows.reduce((total, row) => total + Number(row[key] ?? 0), 0);
+  const times = (key: "first_at" | "last_at") => rows.map((row) => row[key]).filter((value): value is string => typeof value === "string").sort();
+  const [first, last] = [times("first_at")[0], times("last_at").at(-1)];
   return {
-    total: count("total"),
-    pending: count("pending"),
-    crawled: count("crawled"),
-    failed: count("failed"),
-    blocked: count("blocked"),
-    reused: count("reused"),
-    ok: count("ok"),
-    httpErrors: count("http_errors"),
-    emptyShells: count("empty_shells"),
-    noindex: count("noindex"),
-    challenges: count("challenges"),
-    ...(totals?.first_at ? { firstCrawledAt: String(totals.first_at), lastCrawledAt: String(totals.last_at) } : {}),
-    families: families.results.map((row) => ({
-      family: String(row.family),
-      total: Number(row.total ?? 0),
-      done: Number(row.done ?? 0),
-      fetched: Number(row.fetched ?? 0),
-      blocked: Number(row.blocked ?? 0),
-      emptyShells: Number(row.empty_shells ?? 0),
-      errors: Number(row.errors ?? 0),
-    })),
-    recent: recent.results.map((row) => ({
+    total: sum("total"),
+    pending: sum("pending"),
+    crawled: sum("fetched"),
+    failed: sum("failed"),
+    blocked: sum("blocked"),
+    reused: sum("reused"),
+    ok: sum("ok"),
+    httpErrors: sum("http_errors"),
+    emptyShells: sum("empty_shells"),
+    noindex: sum("noindex"),
+    challenges: sum("challenges"),
+    ...(first && last ? { firstCrawledAt: first, lastCrawledAt: last } : {}),
+    families: rows
+      .map((row) => ({
+        family: String(row.family),
+        total: Number(row.total ?? 0),
+        done: Number(row.total ?? 0) - Number(row.pending ?? 0),
+        fetched: Number(row.fetched ?? 0),
+        blocked: Number(row.blocked ?? 0),
+        emptyShells: Number(row.empty_shells ?? 0),
+        errors: Number(row.failed ?? 0) + Number(row.http_errors ?? 0),
+      }))
+      .filter((family) => family.total > 0)
+      .sort((a, b) => b.total - a.total || a.family.localeCompare(b.family))
+      .slice(0, 40),
+    recent: recent.map((row) => ({
       url: String(row.url),
       status: row.status == null ? null : Number(row.status),
       family: String(row.family),
@@ -940,15 +1018,13 @@ export async function getCrawlProgress(db: D1Like, analysisId: string): Promise<
  */
 export async function crawlPace(db: D1Like, siteId: string): Promise<{ perMinute: number } | null> {
   const { results } = await db.prepare(
-    "SELECT id FROM analyses WHERE site_id = ? AND status = 'completed' ORDER BY created_at DESC LIMIT 5",
-  ).bind(siteId).all<{ id: string }>();
-  for (const { id } of results) {
-    const row = await db.prepare(
-      `SELECT COUNT(*) AS n, MIN(crawled_at) AS first_at, MAX(crawled_at) AS last_at FROM pages
-       WHERE analysis_id = ? AND crawl_state IN ('complete', 'failed') AND ${FRESH}`,
-    ).bind(id).first<{ n: number; first_at: string | null; last_at: string | null }>();
-    const minutes = row?.first_at && row.last_at ? (Date.parse(row.last_at) - Date.parse(row.first_at)) / 60_000 : 0;
-    if (Number(row?.n) >= 500 && minutes >= 1) return { perMinute: Math.round(Number(row!.n) / minutes) };
+    `SELECT a.id, SUM(c.fetched) AS n, MIN(c.first_at) AS first_at, MAX(c.last_at) AS last_at
+     FROM (SELECT id, created_at FROM analyses WHERE site_id = ? AND status = 'completed' ORDER BY created_at DESC LIMIT 5) a
+     JOIN crawl_counts c ON c.analysis_id = a.id GROUP BY a.id ORDER BY a.created_at DESC`,
+  ).bind(siteId).all<{ id: string; n: number; first_at: string | null; last_at: string | null }>();
+  for (const row of results) {
+    const minutes = row.first_at && row.last_at ? (Date.parse(row.last_at) - Date.parse(row.first_at)) / 60_000 : 0;
+    if (Number(row.n) >= 500 && minutes >= 1) return { perMinute: Math.round(Number(row.n) / minutes) };
   }
   return null;
 }

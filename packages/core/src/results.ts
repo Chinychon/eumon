@@ -3,6 +3,7 @@
  * the API, the client link, and the tests all compute the same numbers.
  */
 
+import { keywordsView, type KeywordsInput } from "./keywords.js";
 import { SPEED_METRICS, speedRating, type SpeedMetric, type SpeedRating } from "./signals.js";
 
 export type DayValue = { day: string; value: number };
@@ -96,6 +97,8 @@ export const METRICS = {
   lab: ["sync.lab", "lab_score_home.phone", "lab_score_home.desktop", "lab_score_eumon.phone", "lab_score_eumon.desktop"],
   /** Plus `authority:<domain>` for each current competitor. */
   authority: ["sync.authority", "authority"],
+  /** DataForSEO lists live in snapshots; these are the counts that trend. Plus `kw_top10:<domain>` and `kw_traffic:<domain>` for each current competitor. */
+  keywords: ["sync.competitor_keywords", "sync.keyword_volumes", "kw_top10", "kw_traffic"],
 };
 
 /** Every metric the Results view reads. */
@@ -124,9 +127,14 @@ export type ResultsInput = {
   topQueries?: { periodEnd: string; rows: TopQuery[] } | null;
   /** The site's current competitor domains, for `authority:<domain>` series. */
   competitors?: string[];
+  /** The keyword lists, scoped to the current property, markets and competitors. */
+  keywords?: KeywordsInput;
 };
 
 export type SpeedValue = { p75: number | null; rating: SpeedRating | null };
+
+/** The Keywords card: the lists' view plus each domain's share of estimated search visits. */
+export type KeywordsView = ReturnType<typeof keywordsView> & { visibility: Array<{ domain: string; traffic: number | null; top10: number | null; share: number | null }> };
 
 export type ResultsView = {
   today: string;
@@ -168,6 +176,7 @@ export type ResultsView = {
   };
   lab: { phone: { home: number | null; eumon: number | null }; desktop: { home: number | null; eumon: number | null } };
   authority: { site: number | null; competitors: Array<{ domain: string; score: number | null }>; history: Array<{ day: string; value: number }> };
+  keywords: KeywordsView;
 };
 
 const HISTORY_DAYS = 486;
@@ -243,6 +252,14 @@ export function resultsView(input: ResultsInput): ResultsView {
     history: series.authority ?? [],
   };
 
+  const keywordLists = input.keywords ?? { site: "", competitors: input.competitors ?? [], synced: false, priced: [], ranked: [] };
+  const visibilityRows = [
+    { domain: keywordLists.site, traffic: latest(series.kw_traffic, today), top10: latest(series.kw_top10, today) },
+    ...(input.competitors ?? []).map((domain) => ({ domain, traffic: latest(series[`kw_traffic:${domain}`], today), top10: latest(series[`kw_top10:${domain}`], today) })),
+  ];
+  const visibleTotal = visibilityRows.reduce((total, row) => total + (row.traffic ?? 0), 0);
+  const keywords = { ...keywordsView(keywordLists), visibility: visibilityRows.map((row) => ({ ...row, share: visibleTotal && row.traffic !== null ? row.traffic / visibleTotal : null })) };
+
   const ga4Sessions = weekly(series.ga4_organic_sessions, from, today, googleComplete);
   const ga4Events = weekly(series.ga4_organic_key_events, from, today, googleComplete);
 
@@ -271,6 +288,6 @@ export function resultsView(input: ResultsInput): ResultsView {
       value: latest(series.site_health, today),
       day: series.site_health?.length ? series.site_health[series.site_health.length - 1]!.day : null,
     },
-    speed, lab, authority,
+    speed, lab, authority, keywords,
   };
 }

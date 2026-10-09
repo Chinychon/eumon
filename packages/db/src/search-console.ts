@@ -53,6 +53,16 @@ export async function searchConsoleUrlsToCheck(db: D1Like, siteId: string, limit
   return results.map((row) => String(row.url));
 }
 
+/** How many imported URLs outside the latest crawl still wait for a live fetch. */
+export async function searchConsoleChecksRemaining(db: D1Like, siteId: string): Promise<number> {
+  const crawl = (await latestCrawl(db, siteId)) ?? "";
+  const row = await db.prepare(
+    `SELECT COUNT(*) AS n FROM search_console_urls s WHERE s.site_id = ? AND s.checked_at IS NULL
+       AND NOT EXISTS (SELECT 1 FROM pages p WHERE p.analysis_id = ? AND p.url = s.url AND p.crawl_state = 'complete')`,
+  ).bind(siteId, crawl).first<{ n: number }>();
+  return Number(row?.n ?? 0);
+}
+
 /** What live fetches found, and for gone URLs the live page suggested. */
 export async function saveSearchConsoleChecks(
   db: D1Like, siteId: string,
@@ -113,10 +123,7 @@ export async function searchConsoleReconciliation(db: D1Like, siteId: string): P
        SELECT reason, reason_text, today, n, url FROM ranked WHERE rn <= ? ORDER BY reason, today, url`,
     ).bind(crawl, siteId, EXAMPLES).all<{ reason: GscReason; reason_text: string; today: TodayStatus; n: number; url: string }>(),
     db.prepare("SELECT url, suggested_url FROM search_console_urls WHERE site_id = ? AND suggested_url IS NOT NULL ORDER BY url LIMIT 200").bind(siteId).all<{ url: string; suggested_url: string }>(),
-    db.prepare(
-      `SELECT COUNT(*) AS n FROM search_console_urls s WHERE s.site_id = ? AND s.checked_at IS NULL
-         AND NOT EXISTS (SELECT 1 FROM pages p WHERE p.analysis_id = ? AND p.url = s.url AND p.crawl_state = 'complete')`,
-    ).bind(siteId, crawl).first<{ n: number }>(),
+    searchConsoleChecksRemaining(db, siteId),
   ]);
   const reasons = new Map<GscReason, SearchConsoleReconciliation["reasons"][number]>();
   for (const row of ranked) {
@@ -131,6 +138,6 @@ export async function searchConsoleReconciliation(db: D1Like, siteId: string): P
     summary: summary ? { rows: summary.rows, importedAt: summary.periodEnd } : null,
     reasons: [...reasons.values()].sort((a, b) => (order.get(a.reason) ?? 99) - (order.get(b.reason) ?? 99)),
     suggestions: suggested.map((row) => ({ url: String(row.url), suggestedUrl: String(row.suggested_url) })),
-    remainingChecks: Number(remaining?.n ?? 0),
+    remainingChecks: remaining,
   };
 }

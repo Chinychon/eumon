@@ -444,6 +444,16 @@ export async function listTemplates(db: D1Like, siteId: string): Promise<Array<P
   });
 }
 
+/** Pages published per day and template, newest day first: the engine's publication log. */
+export async function listPublications(db: D1Like, siteId: string): Promise<Array<{ templateId: string; template: string; day: string; pages: number }>> {
+  const { results } = await db.prepare(
+    `SELECT p.template_id, t.name, substr(p.published_at, 1, 10) AS day, COUNT(*) AS n
+     FROM generated_pages p JOIN page_templates t ON t.id = p.template_id
+     WHERE p.site_id = ? AND p.published_at IS NOT NULL GROUP BY p.template_id, day ORDER BY day DESC, t.name`,
+  ).bind(siteId).all<Row>();
+  return results.map((row) => ({ templateId: String(row.template_id), template: String(row.name), day: String(row.day), pages: Number(row.n) }));
+}
+
 /** Deletes a template; its pages, their revisions and daily counters cascade with it. */
 export async function deleteTemplate(db: D1Like, id: string): Promise<void> {
   await db.prepare("DELETE FROM page_templates WHERE id = ?").bind(id).run();

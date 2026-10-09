@@ -1,8 +1,8 @@
-import type { DataRecord, Dataset, KeywordsInput, PageTemplate, RankedKeyword, SearchMetricRow } from "@organic-growth/core";
-import { addDays, REF_ALPHABET, REF_LENGTH, slugify } from "@organic-growth/core";
+import type { DataRecord, Dataset, Finding, KeywordsInput, PageTemplate, RankedKeyword, SearchMetricRow } from "@organic-growth/core";
+import { addDays, findingKey, REF_ALPHABET, REF_LENGTH, slugify } from "@organic-growth/core";
 import { crawlGooglebotBatch, researchSite, type Fetcher, type SiteResearch } from "@organic-growth/crawler";
 import {
-  chunks, createAnalysis, createLead, recordLeadClick, updateLead, defaultPageSettings, recordSyncRun, recountCrawl, upsertPageSettings, datasetCoverage, deleteSite, getAnalysisJob, getCrawlCoverage, getCrawlProgress, insertConversionEvent, listAllRecords,
+  chunks, createAnalysis, createLead, recordLeadClick, updateLead, defaultPageSettings, recordSyncRun, recountCrawl, upsertPageSettings, datasetCoverage, deleteSite, getAnalysisJob, getCrawlCoverage, getCrawlProgress, insertChange, insertConversionEvent, listAllRecords,
   listCrawlPageResults, listPendingCrawlUrls, recordLandingSession, replaceCurrentSearchMetrics, replacePageSearchMetrics, runStatements, saveAnalysisReport, saveCrawlBatch,
   saveIndexStatus, saveSiteScope, saveSnapshot, saveTopQueriesSnapshot, saveUrlIndexStatus, listSiteCompetitorDomains, setSiteCompetitorDomains, syncFirstPartyResults, updateSiteGa4Property, upsertMetricPoints, type MetricPoint, setSiteMarkets, setTemplatePublication, syncTemplatePages, updateAnalysisProgress,
   updateAnalysisStatus, upsertDataset, upsertRecords, upsertSite, upsertTemplate, type D1Like,
@@ -460,7 +460,8 @@ async function completedAnalysis(db: D1Like, id: string, version: number, at: nu
   const queued = await queueFullCrawl(db, { analysisId: id, siteId: DEMO_SITE_ID, baseUrl: ORIGIN, maxUrls: 25_000, full: true, fetcher: demoFetcher(version, at), now: at });
   await crawlAll(db, id, version, at - 60_000, 6);
   await analyzeDemo(db, { analysisId: id, version, declared: queued.declared, now: at });
-  await updateAnalysisStatus(db, id, "completed", { completedAt: new Date(at).toISOString() });
+  // The save stamps the real clock; this run finished at its simulated time.
+  await db.prepare("UPDATE analyses SET completed_at = ? WHERE id = ?").bind(new Date(at).toISOString(), id).run();
 }
 
 const DENTIST_FIELDS: Dataset["fields"] = [
@@ -638,6 +639,20 @@ async function seedDemoLeads(db: D1Like, live: Array<{ id: string; path: string 
   }
 }
 
+/** One pull request, merged between the two analyses, for a first-run finding the second run no longer reports: History's "Fixed with Eumon" row. */
+async function seedDemoFix(db: D1Like, now: number) {
+  type Reported = { findings: Finding[] };
+  const [first, second] = await Promise.all([getAnalysisJob(db, "analysis_demo_1"), getAnalysisJob(db, "analysis_demo_2")]);
+  const after = new Set((second?.report as Reported | undefined)?.findings.map(findingKey) ?? []);
+  const fixed = (first?.report as Reported | undefined)?.findings.find((finding) => !after.has(findingKey(finding)));
+  if (!fixed) return;
+  await insertChange(db, {
+    id: "change_demo_1", siteId: DEMO_SITE_ID, analysisId: "analysis_demo_1", findingId: fixed.id, title: fixed.title,
+    reason: fixed.recommendation ?? fixed.summary, evidence: {}, filesChanged: ["app/prices/[city]/page.tsx"], pagesAffected: fixed.pagesAffected ?? [], patch: "",
+    status: "merged", prUrl: "https://github.com/demo-clinic/site/pull/12", prNumber: 12, author: "eumon", createdAt: new Date(now - 20 * DAY).toISOString(),
+  });
+}
+
 /**
  * Rebuilds the demo site: two finished analyses a month apart (so changes
  * show), Search Console rows, datasets with a live template, and conversions.
@@ -654,6 +669,7 @@ export async function seedDemoSite(db: D1Like, now = Date.now()): Promise<{ site
   await seedDemoConnectors(db, demoConnectorInput(), now);
   await completedAnalysis(db, "analysis_demo_1", 1, now - 30 * DAY);
   await completedAnalysis(db, "analysis_demo_2", 2, now - 2 * DAY);
+  await seedDemoFix(db, now);
   await seedDemoResults(db, now);
   return { siteId: DEMO_SITE_ID };
 }

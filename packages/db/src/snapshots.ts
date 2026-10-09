@@ -8,12 +8,17 @@ import { nowIso, type D1Like } from "./d1.js";
 
 export type Snapshot<T> = { periodEnd: string; rows: T[] };
 
+/** The statement that saves the list of this kind and scope, for batching: it replaces an existing list, or with `keepExisting` leaves one alone. */
+export function snapshotStatement<T>(db: D1Like, siteId: string, input: { kind: string; scope: string; periodEnd: string; rows: T[] }, keepExisting = false) {
+  return db.prepare(
+    `INSERT INTO site_snapshots (site_id, kind, scope, period_end, rows_json, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT(site_id, kind, scope) DO ${keepExisting ? "NOTHING" : "UPDATE SET period_end = excluded.period_end, rows_json = excluded.rows_json, updated_at = excluded.updated_at"}`,
+  ).bind(siteId, input.kind, input.scope, input.periodEnd, JSON.stringify(input.rows), nowIso());
+}
+
 /** Replaces the list of this kind and scope. */
 export async function saveSnapshot<T>(db: D1Like, siteId: string, input: { kind: string; scope: string; periodEnd: string; rows: T[] }): Promise<void> {
-  await db.prepare(
-    `INSERT INTO site_snapshots (site_id, kind, scope, period_end, rows_json, updated_at) VALUES (?, ?, ?, ?, ?, ?)
-     ON CONFLICT(site_id, kind, scope) DO UPDATE SET period_end = excluded.period_end, rows_json = excluded.rows_json, updated_at = excluded.updated_at`,
-  ).bind(siteId, input.kind, input.scope, input.periodEnd, JSON.stringify(input.rows), nowIso()).run();
+  await snapshotStatement(db, siteId, input).run();
 }
 
 export async function getSnapshot<T>(db: D1Like, siteId: string, kind: string, scope: string): Promise<Snapshot<T> | null> {

@@ -4,6 +4,7 @@ import type {
   CrawlIssue,
   CrawlIssueExample,
   CrawlPageResult,
+  Finding,
   FrameworkFingerprint,
   ProposedChange,
   SearchMetricRow,
@@ -20,6 +21,8 @@ export * from "./activity.js";
 export * from "./snapshots.js";
 export * from "./leads.js";
 export * from "./server-logs.js";
+export * from "./history.js";
+import { saveFindingKeys } from "./history.js";
 import { analysisHealthPoints, upsertMetricPoints } from "./metrics.js";
 
 export async function upsertSite(
@@ -361,6 +364,11 @@ export async function saveAnalysisReport(
     if (site) await upsertMetricPoints(db, site.site_id, points);
   } catch {
     // The report is what matters; a missing ledger (code deployed before its migration) only costs the health point.
+  }
+  try {
+    if (site) await saveFindingKeys(db, site.site_id, id, completedAt.slice(0, 10), report as { findings?: Finding[] });
+  } catch {
+    // History's key list; without a snapshots table (code deployed before its migration) History fills it from the report later.
   }
   try {
     if (site) await pruneCrawlResults(db, site.site_id);

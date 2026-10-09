@@ -21,7 +21,7 @@ describe("report model", () => {
     assert.deepEqual(actions.map((action) => [action.title, action.area]), [
       ["Resolve: Empty prices", "technical"],
       ["Push implants", "search"],
-      ["Rank for “veneers”", "competitors"],
+      ["Rank for “veneers”", "keywords"],
       ["Resolve: No analytics or conversion tracking found", "leads"],
       ["Resolve: A finding from an older run", "technical"],
       ["Publish landing pages from your Dentists data", "data"],
@@ -32,7 +32,7 @@ describe("report model", () => {
   it("sends old links to the page that now holds their content", () => {
     assert.deepEqual(resolveLink("overview", "search"), { view: "results", tab: "search" });
     assert.deepEqual(resolveLink("overview", "leads"), { view: "results", tab: "enquiries" });
-    assert.deepEqual(resolveLink("overview", "competitors"), { view: "keywords", tab: null });
+    assert.deepEqual(resolveLink("overview", "competitors"), { view: "competitors", tab: null });
     assert.deepEqual(resolveLink("overview", "technical"), { view: "overview", tab: "technical" });
     assert.deepEqual(resolveLink("connections", null), { view: "setup", tab: null });
   });

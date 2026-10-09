@@ -9,7 +9,7 @@ import { api, errorMessage } from "./components/api";
 import { DataView } from "./components/DataView";
 import { OverviewView, type Repository } from "./components/OverviewView";
 import { PagesView } from "./components/PagesView";
-import { KeywordsView } from "./components/KeywordsView";
+import { CompetitorsView, KeywordsView } from "./components/KeywordsView";
 import { ResultsView } from "./components/ResultsView";
 import { PageResultsView } from "./components/PageResultsView";
 import { resolveLink, type View } from "./components/report-model";
@@ -21,13 +21,14 @@ import { Button, LeafIcon, ThemeToggle } from "./components/ui";
  * `steps` are the pipeline steps (README) a view covers; `group` labels the run of views it starts.
  * View keys stay as they were when labels changed, so saved and shared links keep working.
  * Each question has one page: Overview (is it working, what first, technical),
- * Performance (search, enquiries), Keywords (how we compare).
+ * Performance (search, enquiries), Keywords (searches worth winning), Competitors (how we compare).
  */
 const NAV: Array<{ view: View; label: string; steps?: string; group?: string }> = [
+  { view: "ask", label: "Home" },
   { view: "overview", label: "Overview" },
   { view: "results", label: "Performance" },
   { view: "keywords", label: "Keywords" },
-  { view: "ask", label: "Ask" },
+  { view: "competitors", label: "Competitors" },
   { view: "data", label: "Data", steps: "1–3", group: "Landing page engine" },
   { view: "pages", label: "Landing pages", steps: "4–5" },
   { view: "performance", label: "Page results", steps: "6–7" },
@@ -46,7 +47,8 @@ function setQuery(params: Record<string, string | null>) {
 export default function Home() {
   const [sites, setSites] = useState<SiteRecord[] | null>(null);
   const [siteId, setSiteId] = useState("");
-  const [view, setView] = useState<View>("overview");
+  /** Home (the Ask conversation) is where the console opens unless the address names a page. */
+  const [view, setView] = useState<View>("ask");
   /** The open tab on a page with tabs (Overview, Performance); null is its first tab. */
   const [tab, setTab] = useState<string | null>(null);
   const [repositories, setRepositories] = useState<Repository[]>([]);
@@ -161,7 +163,8 @@ export default function Home() {
             <div key={`${site.id}:${view}`} className="view-enter">
               {view === "overview" && <OverviewView site={site} tab={tab} onTab={setTab} onNavigate={navigate} />}
               {view === "results" && <ResultsView site={site} tab={tab} onTab={setTab} onNavigate={navigate} />}
-              {view === "keywords" && <KeywordsView site={site} onNavigate={navigate} />}
+              {view === "keywords" && <KeywordsView site={site} />}
+              {view === "competitors" && <CompetitorsView site={site} onNavigate={navigate} />}
               {view === "ask" && <AskView key={site.id} site={site} threadId={askThread} onThreadChange={setAskThread} />}
               {view === "data" && <DataView site={site} onNavigate={navigate} />}
               {view === "pages" && <PagesView site={site} onNavigate={navigate} />}

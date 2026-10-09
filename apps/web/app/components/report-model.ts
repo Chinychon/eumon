@@ -67,10 +67,10 @@ type RouteInspection = { pathPattern: string; source: string; dynamic: boolean; 
 type Fingerprint = { framework: string; router?: string; rendering?: string; deployment?: string; cms?: string; database?: string; analytics: string[]; seoTooling: string[]; contentSource?: string; language: string; packageManager: string };
 
 /** What a finding or opportunity is about, which decides the page that explains it. */
-export type Area = "technical" | "search" | "competitors" | "leads" | "data";
+export type Area = "technical" | "search" | "keywords" | "competitors" | "leads" | "data";
 
 /** Rail pages, by the keys their links use. Keys stay as they were when labels changed, so saved and shared links keep working. */
-export type View = "overview" | "results" | "keywords" | "ask" | "connections" | "data" | "pages" | "performance" | "setup";
+export type View = "overview" | "results" | "keywords" | "competitors" | "ask" | "connections" | "data" | "pages" | "performance" | "setup";
 export type Navigate = (view: View, tab?: string) => void;
 
 /** A rail page and, where it has tabs, the tab. */
@@ -80,7 +80,8 @@ export type Place = { view: View; tab: string | null };
 export const AREA_PLACE: Record<Area, Place & { label: string }> = {
   technical: { view: "overview", tab: "technical", label: "Technical" },
   search: { view: "results", tab: "search", label: "Search" },
-  competitors: { view: "keywords", tab: null, label: "Competitors" },
+  keywords: { view: "keywords", tab: null, label: "Keywords" },
+  competitors: { view: "competitors", tab: null, label: "Competitors" },
   leads: { view: "results", tab: "enquiries", label: "Enquiries" },
   data: { view: "data", tab: null, label: "Data" },
 };
@@ -133,7 +134,8 @@ export function servedShare(coverage: Report["coverage"]): number | null {
 export function opportunityArea(opportunity: Pick<Report["opportunities"][number], "title" | "intent">, findings: Pick<Finding, "title" | "category">[] = []): Area {
   const { intent } = opportunity;
   if (intent === "unpublished_data") return "data";
-  if (intent === "content_gap" || intent === "keyword_gap") return "competitors";
+  if (intent === "keyword_gap") return "keywords";
+  if (intent === "content_gap") return "competitors";
   if (intent === "technical_enabler") {
     const finding = findings.find((entry) => opportunity.title === `Resolve: ${entry.title}`);
     return finding ? findingArea(finding.category) : "technical";

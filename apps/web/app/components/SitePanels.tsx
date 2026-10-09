@@ -5,6 +5,7 @@ import { AiReadinessCard, CompetitorsSection, ConversionSections, IndexCoverageC
 import type { Navigate, Report } from "./report-model";
 import { BacklinksCard, BingCard, CompetitorSuggestionsCard, SearchResultsCard } from "./results/ConnectorCards";
 import { KeywordsCard } from "./results/KeywordsCard";
+import { SearchConsoleCard } from "./results/SearchConsoleCard";
 import { LeadsDesk, OutcomesCard } from "./results/LeadsCards";
 import { AiReadersCard, AiReferralsCard, AUTHORITY_NOTE, AuthoritySection, ConnectPrompt, EnquiriesCard, GoogleSearchCard, OrganicSessions, QuestionSearchesCard } from "./results/sections";
 import { ExportMenu } from "./export/ExportMenu";
@@ -41,6 +42,7 @@ export function SearchPanel({ site, data, report, onNavigate }: { site: SiteReco
         </Card>
       )}
       <IndexCoverageCard siteId={site.id} onNavigate={onNavigate} />
+      <SearchConsoleCard siteId={site.id} onNavigate={onNavigate} />
       <BingCard data={data} operator />
     </div>
   );

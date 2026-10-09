@@ -889,3 +889,11 @@ details.disclosure[open] > summary { margin-bottom: 10px; }
 
 .client-report { width: min(1190px, 100% - 32px); margin: 0 auto; padding: 44px 0 32px; }
 .client-report-credit { margin-top: 40px; padding-top: 16px; border-top: 1px solid var(--line); font-family: var(--mono); font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--soft); }
+
+/* Search Console import: what a listed URL is today. */
+.today-indexable { --c: var(--green); } .coverage-bar .today-indexable { background: var(--green); }
+.today-noindex { --c: var(--soft); } .coverage-bar .today-noindex { background: var(--soft); }
+.today-redirect { --c: var(--amber-fill); } .coverage-bar .today-redirect { background: var(--amber-fill); }
+.today-gone { --c: var(--red); } .coverage-bar .today-gone { background: var(--red); }
+.today-error { --c: var(--red-tint); } .coverage-bar .today-error { background: var(--red-tint); }
+.today-unchecked { --c: var(--line-strong); } .coverage-bar .today-unchecked { background: var(--line-strong); }

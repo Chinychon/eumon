@@ -62,3 +62,12 @@ describe("report model", () => {
     assert.deepEqual(rows.map((row) => row.key), ["prices", "reviews", "blog"]);
   });
 });
+
+import * as model from "./report-model.ts";
+
+describe("urlPath", () => {
+  it("keeps the path and query of a URL and shows the homepage as /", () => {
+    assert.equal(model.urlPath("https://x.com/doctors/amy?lang=id"), "/doctors/amy?lang=id");
+    assert.equal(model.urlPath("https://x.com"), "/");
+  });
+});

@@ -186,6 +186,13 @@ describe("robots.txt rules in the technical audit", () => {
     assert.equal(ai?.title, "robots.txt blocks AI assistants from reading the site");
   });
 
+  it("tells search-facing blocks from training-only ones by each agent's role, not its name", () => {
+    const training = audit("User-agent: *\nAllow: /\n\nUser-agent: Google-Extended\nDisallow: /").find((finding) => finding.category === "ai_visibility");
+    assert.equal(training?.title, "robots.txt blocks AI training crawlers", "Google-Extended is a training opt-out; Google's AI answers still fetch as Googlebot");
+    const search = audit("User-agent: *\nAllow: /\n\nUser-agent: PerplexityBot\nDisallow: /").find((finding) => finding.category === "ai_visibility");
+    assert.equal(search?.title, "robots.txt blocks AI assistants from reading the site", "PerplexityBot feeds Perplexity's answers");
+  });
+
   it("flags a sitewide block that applies to Googlebot", () => {
     assert.ok(audit("User-agent: *\nDisallow: /").some((finding) => finding.title === "robots.txt blocks Googlebot from the entire site"));
   });
@@ -339,5 +346,21 @@ describe("AI readiness", () => {
     assert.equal(robotsState({ status: 503, body: "" }).robots, "unreadable");
     assert.equal(robotsState({ status: 404, body: "Not found" }).robots, "missing");
     assert.equal(aiReadiness({ robots: null, llms: ok("<html><body>Home</body></html>", { "content-type": "text/html" }), pages: [] }).llmsTxt, false);
+  });
+});
+
+describe("robotsState", () => {
+  it("reads a 404 as no robots.txt, but a 403 challenge page as unreadable, never as 'everything allowed'", () => {
+    const challenge = "<!DOCTYPE html><html><head><title>Just a moment...</title></head><body>cf-chl</body></html>";
+    assert.equal(robotsState({ status: 404, body: "<html><body>Not found</body></html>", headers: { "content-type": "text/html" } }).robots, "missing");
+    assert.equal(robotsState({ status: 403, body: challenge, headers: { "content-type": "text/html" } }).robots, "unreadable");
+    assert.equal(robotsState({ status: 429, body: challenge }).robots, "unreadable");
+  });
+
+  it("trusts a body that is robots.txt even when the server labels it text/html", () => {
+    const state = robotsState({ status: 200, body: "User-agent: *\nDisallow: /\n", headers: { "content-type": "text/html; charset=utf-8" } });
+    assert.equal(state.robots, "read");
+    assert.equal(state.body, "User-agent: *\nDisallow: /\n");
+    assert.equal(robotsState({ status: 200, body: "<!doctype html><html><body>Soft 404</body></html>", headers: { "content-type": "text/plain" } }).robots, "unreadable");
   });
 });

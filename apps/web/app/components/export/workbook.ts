@@ -1,3 +1,4 @@
+import { sheetTitles } from "@organic-growth/core";
 import { strToU8, zipSync } from "fflate";
 
 /*
@@ -11,10 +12,13 @@ export type Sheet = { name: string; columns: string[]; rows: Cell[][] };
 
 const text = (cell: Cell) => (cell === null ? "" : String(cell));
 
+/** Text a spreadsheet would run as a formula (starting =, +, - or @) gets a leading apostrophe, which Excel and Sheets show as text. Numbers stay numbers. */
+const safeText = (cell: Cell) => (typeof cell === "string" && /^[=+\-@]/.test(cell) ? `'${cell}` : text(cell));
+
 /** RFC 4180 CSV: fields with a comma, quote or line break are quoted, quotes doubled; CRLF line ends. */
 export function toCsv(sheet: Sheet): string {
   const field = (cell: Cell) => {
-    const value = text(cell);
+    const value = safeText(cell);
     return /[",\r\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
   };
   return [sheet.columns, ...sheet.rows].map((row) => row.map(field).join(",")).join("\r\n") + "\r\n";
@@ -22,22 +26,13 @@ export function toCsv(sheet: Sheet): string {
 
 /** Tab-separated rows; several sheets are separated by a blank line under each one's name. */
 export function toTsv(sheets: Sheet[]): string {
-  const clean = (cell: Cell) => text(cell).replace(/[\t\r\n]+/g, " ");
+  const clean = (cell: Cell) => safeText(cell).replace(/[\t\r\n]+/g, " ");
   const one = (sheet: Sheet) => [sheet.columns, ...sheet.rows].map((row) => row.map(clean).join("\t")).join("\n");
   return sheets.length === 1 ? one(sheets[0]!) : sheets.map((sheet) => `${sheet.name}\n${one(sheet)}`).join("\n\n");
 }
 
 /** Excel sheet names: at most 31 characters, none of []:*?/\, unique in the workbook. */
-export function sheetNames(names: string[]): string[] {
-  const used = new Set<string>();
-  return names.map((name) => {
-    const base = name.replace(/[[\]:*?/\\]/g, " ").replace(/\s+/g, " ").trim().slice(0, 31) || "Sheet";
-    let candidate = base;
-    for (let n = 2; used.has(candidate.toLowerCase()); n++) candidate = `${base.slice(0, 31 - String(n).length - 1)} ${n}`;
-    used.add(candidate.toLowerCase());
-    return candidate;
-  });
-}
+export const sheetNames = (names: string[]) => sheetTitles(names, 31);
 
 const xml = (value: string) => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;")
   // Characters XML 1.0 forbids would make Excel refuse the file.

@@ -170,8 +170,9 @@ export async function servePublicBeacon(request: Request, site: SiteRecord): Pro
   if (body.t === "view") {
     const source = landingSource(typeof body.r === "string" ? body.r.slice(0, 120) : "", typeof body.u === "string" ? body.u.slice(0, 80) : "");
     await incrementPageMetric(env.DB, { siteId: site.id, pageId: page.id, kind: "views", variantId });
-    if (source.startsWith("ai:")) await recordAiSignal(env.DB, { siteId: site.id, pageId: page.id, signal: "referral", name: source.slice(3) });
-    if (sessionId) await recordLandingSession(env.DB, { siteId: site.id, sessionId, pageId: page.id, source });
+    // One referral per visit: a reload keeps the referrer but isn't a new visitor. Without a session id every view counts.
+    const landed = sessionId ? await recordLandingSession(env.DB, { siteId: site.id, sessionId, pageId: page.id, source }) : true;
+    if (source.startsWith("ai:") && landed) await recordAiSignal(env.DB, { siteId: site.id, pageId: page.id, signal: "referral", name: source.slice(3) });
   } else {
     await incrementPageMetric(env.DB, { siteId: site.id, pageId: page.id, kind: "cta_clicks", variantId });
     const settings = await settingsFor(site);

@@ -298,7 +298,7 @@ export function AiReferralsCard({ data, operator }: Section) {
         <div>
           <div className="section-title">Whole site, by assistant</div>
           {ga4?.sessions.current ? <BarList rows={ga4.byAssistant.filter((entry) => entry.sessions).map((entry) => ({ label: entry.label, value: entry.sessions }))} />
-            : <p className="empty-state">{ga4 ? "No AI-referred sessions in these 28 days." : operator ? "Connect Google Analytics in Setup to count AI visits to the whole site." : "Analytics not connected yet."}</p>}
+            : <p className="empty-state">{ga4 ? "No AI-referred sessions in these 28 days." : analyticsState(data.site.analytics, operator)}</p>}
         </div>
       </div>
       {leads && leadTotal > 0 && (

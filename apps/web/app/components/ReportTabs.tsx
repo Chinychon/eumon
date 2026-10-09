@@ -8,7 +8,7 @@ import { BarList, Funnel, Heatmap, PairedBars, Scatter } from "./charts";
 import { CrawlGarden } from "./pixel";
 import { SPEED_SUBTITLE, SpeedSection } from "./results/sections";
 import { SiteGraph } from "./SiteGraph";
-import { familyLabel, findingArea, gapsFirst, HEALTH_COLUMNS, opportunityArea, pageTypeHealth, servedShare, type Finding, type Navigate, type Report } from "./report-model";
+import { familyLabel, findingArea, gapsFirst, HEALTH_COLUMNS, opportunityArea, pageTypeHealth, servedShare, urlPath, type Finding, type Navigate, type Report } from "./report-model";
 import { ExportMenu } from "./export/ExportMenu";
 import { aiReadinessSheets, competitorSheets, conversionSheets, coverageSheets, fixSheets, pageTypeSheets, pick, pushSheets, renderingSheets, routeSheets, searchAnalysisSheets, speedSheets } from "./export/report-sheets";
 import type { Leads, Payload } from "./site-data";
@@ -26,7 +26,7 @@ import { Badge, Button, Card, Kpi } from "./ui";
 export type Change = { id: string; findingId?: string; title: string; reason: string; patch: string; prUrl?: string };
 
 const SEVERITY_CLASS: Record<string, string> = { CRITICAL: "critical", HIGH: "high", MEDIUM: "medium", LOW: "low", INFORMATIONAL: "info" };
-const path = (url: string) => url.replace(/^https?:\/\/[^/]+/, "") || "/";
+const path = urlPath;
 const share = (value: number) => `${Math.round(value * 100)}%`;
 
 /** One line that opens in place to say why it matters and what to do. */

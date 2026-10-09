@@ -27,7 +27,7 @@ The growth plan's striking-distance and snippet opportunities carry real volume 
 | DataForSEO Labs `google/keyword_overview/live` | same | 700 keywords per call; location and language required; $0.012 + $0.00012 per keyword | Volume, difficulty, intent for the site's own Search Console queries |
 | Search Console `searchAnalytics/query` | Google OAuth | existing | The queries to enrich (last 28 days, per market) |
 
-- **Location:** `location_name` = `countryName(market)` from `packages/core/src/countries.ts`; DataForSEO uses the same English names for every market listed there. An unknown name fails that market with a note.
+- **Location:** `location_code` = 2000 + the market's ISO 3166-1 numeric code (`countryNumeric` in `packages/core/src/countries.ts`); the rule matches DataForSEO's country list. A market DataForSEO doesn't cover (Myanmar, Hong Kong, Taiwan, China, Nepal, Turkey, Russia, Qatar, Kuwait, Oman, Brunei, Laos) is skipped with a note.
 - **Language:** `ranked_keywords` runs without a language (every language in the country). `keyword_overview` uses the site's page language (`page_settings.language`, e.g. `id`, `ms`, `en`).
 - **Cost per sync:** (competitors + 1) × markets × at most $0.132, plus markets × at most $0.096. Medbay (2 competitors, 1 market): about $0.25. Monthly.
 - `DATAFORSEO_LOGIN` and `DATAFORSEO_PASSWORD` are new Worker secrets: add them to `cloudflare.config.ts` and `.dev.vars.example`. `SignalKeys` gains `dataForSeo?: { login: string; password: string }`.
@@ -69,7 +69,7 @@ Subtitle: "Searches per month and difficulty from DataForSEO, updated monthly. P
 
 Empty states: no credentials ("Add DataForSEO credentials to price keywords and see competitor gaps", operator only; "Not measured yet" on the client link); no markets ("Set target markets in Setup", operator only); synced but nothing found ("DataForSEO has no keywords for these domains in <markets>").
 
-`ResultsView` gains `keywords: { asOf: string | null; top: Row[]; gaps: Gap[]; visibility: Array<{ domain: string; traffic: number | null; top10: number | null }> }`; `ResultsInput` gains the snapshot lists; `resultsPayload.site.signals.keywords` says whether credentials are set. This is the first new card, so the Performance render splits by card (`CONTEXT.md` deferred item): `ResultsView.tsx` keeps the header, key numbers and card order; each card takes its slice.
+`ResultsView` gains `keywords: { asOf: string | null; top: Row[]; gaps: Gap[]; visibility: Array<{ domain: string; traffic: number | null; top10: number | null }> }`; `ResultsInput` gains the snapshot lists; `resultsPayload.site.signals.keywords` says whether credentials are set. `KeywordsCard.tsx` under `apps/web/app/components/results/` is the first card module; the existing cards move out of `ResultsView.tsx` when they are next touched.
 
 ## 4. Growth plan
 

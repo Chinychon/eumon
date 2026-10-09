@@ -27,7 +27,7 @@ import {
   queueFullCrawl,
   runFullAnalysis,
   synthesizePlanNarrative,
-} from "@organic-growth/agents";
+loadTrendSignals } from "@organic-growth/agents";
 import {
   buildRepoSnapshotFromGitHub,
   createGitHubApiClient,
@@ -167,7 +167,7 @@ export class SiteAnalysisWorkflow extends WorkflowEntrypoint<AppEnv, AnalysisPay
             loadConnectorLists(db, { id: siteId, baseUrl: site.baseUrl }, { markets: targetMarkets, competitors }),
             crawlLogCoverage(db, siteId, analysisId),
             searchConsoleReconciliation(db, siteId, analysisId).catch(() => null),
-          ]).then(([lists, coverage, searchConsole]) => connectorSignals(lists, coverage, searchConsole)).catch(() => undefined);
+          ]).then(async ([lists, coverage, searchConsole]) => connectorSignals(lists, coverage, searchConsole, await loadTrendSignals(db, siteId, lists.crawlLog).catch(() => null))).catch(() => undefined);
           const raw = await runFullAnalysis({
             analysisId,
             siteId,

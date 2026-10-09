@@ -16,3 +16,4 @@ export * from "./links.js";
 export * from "./server-logs.js";
 export * from "./history.js";
 export * from "./search-console.js";
+export * from "./trends.js";

@@ -436,3 +436,4 @@ export * from "./dataforseo.js";
 export * from "./bing.js";
 export * from "./connector-findings.js";
 export * from "./log-coverage.js";
+export * from "./trend-signals.js";

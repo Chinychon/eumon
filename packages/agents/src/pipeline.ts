@@ -45,7 +45,7 @@ import {
   type AnalysisBundle,
 } from "./index.js";
 import { findingsFromCode } from "./code-findings.js";
-import { findingsFromCrawlLog, findingsFromSearchConsoleImport, type ConnectorSignals } from "./connector-findings.js";
+import { findingsFromCrawlLog, findingsFromSearchConsoleImport, findingsFromTrends, type ConnectorSignals } from "./connector-findings.js";
 import { auditConversion, findingsFromConversion } from "./conversion.js";
 import {
   compareCompetition,
@@ -354,6 +354,7 @@ export async function runFullAnalysis(input: RunAnalysisInput) {
 
   if (input.connectors?.logCoverage) findings.push(...findingsFromCrawlLog({ siteId: input.siteId, analysisId, coverage: input.connectors.logCoverage }));
   findings.push(...findingsFromSearchConsoleImport({ siteId: input.siteId, analysisId, view: input.connectors?.searchConsole ?? null }));
+  findings.push(...findingsFromTrends({ siteId: input.siteId, analysisId, trends: input.connectors?.trends ?? null, sitemapUrls: sitemap.totalUrls ?? null, discovered: input.connectors?.searchConsole?.summary?.rows.find((row) => row.reason === "discovered")?.pages ?? null }));
   const rankedFindings = rankSeverityByOrganicImpact(findings);
 
   const bundle: AnalysisBundle = {

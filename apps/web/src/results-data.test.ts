@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import { getSite, saveSnapshot, saveTopQueriesSnapshot, setSiteCompetitorDomains, setSiteMarkets, upsertMetricPoints, updateSiteGa4Property, updateSiteGscProperty, upsertOAuthCredential, upsertSite } from "@organic-growth/db";
 import { openSqliteD1 } from "@organic-growth/db/sqlite";
 import { loadKeywords } from "./keywords-data.ts";
+import { DEMO_SITE_ID } from "@organic-growth/agents";
 import { resultsPayload } from "./results-data.ts";
 
 describe("results payload", () => {
@@ -19,6 +20,16 @@ describe("results payload", () => {
     const client = await resultsPayload(db, site, { client: true });
     assert.equal(JSON.stringify(client).includes("properties/9"), false);
     assert.deepEqual(client.results.health, { value: null, day: null });
+  });
+
+  it("treats the demo site's Analytics as connected: its numbers are seeded, there is no Google to reconnect", async () => {
+    const db = openSqliteD1();
+    const at = new Date().toISOString();
+    await upsertSite(db, { id: DEMO_SITE_ID, name: "Demo", baseUrl: "https://demo-clinic.example", createdAt: at, updatedAt: at });
+    await updateSiteGscProperty(db, DEMO_SITE_ID, "sc-domain:demo-clinic.example");
+    await updateSiteGa4Property(db, DEMO_SITE_ID, "properties/0");
+    const payload = await resultsPayload(db, (await getSite(db, DEMO_SITE_ID))!);
+    assert.equal(payload.site.analytics, "connected");
   });
 
   it("shows the stored top queries for the site's current property", async () => {

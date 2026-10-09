@@ -26,6 +26,14 @@ describe("AI agents", () => {
     assert.equal(agentOf("Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/605.1.15 Version/17.5 Safari/605.1.15"), null);
   });
 
+  it("counts DeepSeek: its reported crawler token, its chat host as a referrer, and an axis of its own", () => {
+    assert.equal(agentOf("Mozilla/5.0 (compatible; DeepSeekBot/1.0; +https://www.deepseek.com/bot)"), "DeepSeekBot");
+    assert.equal(aiAssistantFrom("chat.deepseek.com"), "deepseek");
+    assert.equal(aiAssistantFrom("deepseek"), "deepseek");
+    assert.equal(landingSource("chat.deepseek.com"), "ai:deepseek");
+    assert.ok(AI_ENGINES.some((entry) => entry.engine === "deepseek"), "radar axis");
+  });
+
   it("maps every agent to a radar engine", () => {
     const engines = new Set(AI_ENGINES.map((entry) => entry.engine));
     for (const agent of AI_AGENTS) assert.ok(engines.has(agent.engine), agent.agent);

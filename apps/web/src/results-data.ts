@@ -1,4 +1,5 @@
 import { addDays, RESULT_METRICS, resultsView, type ResultsView, type SiteRecord } from "@organic-growth/core";
+import { DEMO_SITE_ID } from "@organic-growth/agents";
 import { getPageSettings, getTopQueriesSnapshot, indexStatusCounts, listMetricSeries, listSiteCompetitorDomains, listSiteMarkets, outcomesByPageType, publishedPages, type D1Like } from "@organic-growth/db";
 import { ANALYTICS_SCOPE, googleScopes } from "./gsc-auth.ts";
 import { loadConnectorLists } from "./connectors-data.ts";
@@ -47,7 +48,8 @@ export async function resultsPayload(db: D1Like, site: SiteRecord, options: { cl
       name: site.name,
       baseUrl: site.baseUrl,
       searchConnected: Boolean(site.gscProperty),
-      analytics: !site.ga4Property ? "none" : scopes.includes(ANALYTICS_SCOPE) ? "connected" : "reconnect",
+      // The demo's Analytics numbers are seeded, so there is no Google connection to renew.
+      analytics: !site.ga4Property ? "none" : site.id === DEMO_SITE_ID || scopes.includes(ANALYTICS_SCOPE) ? "connected" : "reconnect",
       signals: { speed: Boolean(options.keys?.googleApiKey), authority: Boolean(options.keys?.openPageRankKey), keywords: Boolean(options.keys?.dataForSeo), bing: Boolean(options.keys?.bingApiKey) },
     },
     // The client link also leaves out the crawl log (an operator's server detail) and competitor suggestions (a setup step).

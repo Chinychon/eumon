@@ -544,7 +544,7 @@ async function seedPageEngine(db: D1Like, now: number) {
   // AI agents reading the guides since go-live: crawlers steady, live fetches (an assistant answering someone) growing. CCBot and Bytespider are blocked in robots.txt.
   const agents: Array<[string, number, number]> = [
     ["GPTBot", 3, 0], ["OAI-SearchBot", 2, 1], ["ChatGPT-User", 0, 6], ["ClaudeBot", 2, 0], ["Claude-SearchBot", 1, 1], ["Claude-User", 0, 2],
-    ["PerplexityBot", 2, 1], ["Perplexity-User", 0, 4], ["Meta-ExternalAgent", 2, 0], ["Amazonbot", 1, 0],
+    ["PerplexityBot", 2, 1], ["Perplexity-User", 0, 4], ["Meta-ExternalAgent", 2, 0], ["Amazonbot", 1, 0], ["DeepSeekBot", 1, 0],
   ];
   for (let d = 79; d >= 0; d--) {
     const day = new Date(now - d * DAY).toISOString().slice(0, 10);
@@ -555,7 +555,7 @@ async function seedPageEngine(db: D1Like, now: number) {
       const count = Math.round(steady * (1 + ((d + agent.length) % 3) * 0.5) + rising * growth * (1 + 0.3 * Math.sin(d / 4)));
       if (count) statements.push(db.prepare("INSERT INTO ai_page_daily (site_id, page_id, day, signal, name, count) VALUES (?, ?, ?, 'fetch', ?, ?)").bind(DEMO_SITE_ID, page.id, day, agent, count));
     }
-    for (const [assistant, rate] of [["chatgpt", 3], ["perplexity", 1.2], ["gemini", 0.6], ["copilot", 0.3]] as const) {
+    for (const [assistant, rate] of [["chatgpt", 3], ["perplexity", 1.2], ["gemini", 0.6], ["copilot", 0.3], ["deepseek", 0.4]] as const) {
       const count = Math.round(rate * growth * (1 + 0.4 * Math.sin((d + rate) / 3)));
       if (count) statements.push(db.prepare("INSERT INTO ai_page_daily (site_id, page_id, day, signal, name, count) VALUES (?, ?, ?, 'referral', ?, ?)").bind(DEMO_SITE_ID, page.id, day, assistant, count));
     }
@@ -767,12 +767,14 @@ async function seedDemoResults(db: D1Like, now: number) {
       const chatgpt = Math.round(clicks * (live ? 0.05 * lift : 0.03) * (1 + ((back % 5) - 2) * 0.1));
       const perplexity = Math.round(chatgpt * 0.35);
       const gemini = Math.round(chatgpt * 0.2);
+      const deepseek = Math.round(chatgpt * 0.12);
       points.push(
-        { metric: "ga4_ai_sessions", day, value: chatgpt + perplexity + gemini },
+        { metric: "ga4_ai_sessions", day, value: chatgpt + perplexity + gemini + deepseek },
         { metric: "ga4_ai_sessions.chatgpt", day, value: chatgpt },
         { metric: "ga4_ai_sessions.perplexity", day, value: perplexity },
         { metric: "ga4_ai_sessions.gemini", day, value: gemini },
-        { metric: "ga4_ai_key_events", day, value: Math.round((chatgpt + perplexity + gemini) * 0.08) },
+        { metric: "ga4_ai_sessions.deepseek", day, value: deepseek },
+        { metric: "ga4_ai_key_events", day, value: Math.round((chatgpt + perplexity + gemini + deepseek) * 0.08) },
       );
     }
     if (live) {

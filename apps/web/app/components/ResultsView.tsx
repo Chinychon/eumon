@@ -7,7 +7,7 @@ import { BarList, Funnel, LineChart } from "./charts";
 import { KeywordsCard } from "./results/KeywordsCard";
 import { Badge, Button, Card, Kpi, ViewHeader } from "./ui";
 
-type Payload = { site: { name: string; baseUrl: string; searchConnected: boolean; analytics: "connected" | "reconnect" | "none"; signals: { speed: boolean; authority: boolean; keywords: boolean } }; results: Results };
+export type Payload = { site: { name: string; baseUrl: string; searchConnected: boolean; analytics: "connected" | "reconnect" | "none"; signals: { speed: boolean; authority: boolean; keywords: boolean } }; results: Results };
 
 const SPEED_LABEL: Record<SpeedMetric, string> = { lcp: "Loading", inp: "Responding to taps", cls: "Staying still while loading" };
 const SPEED_HINT: Record<SpeedMetric, string> = { lcp: "Main content on screen", inp: "Reaction to a tap or click", cls: "Layout shift while loading" };
@@ -28,9 +28,11 @@ function versus(compare: Compare, format: (value: number) => string = formatNumb
 
 /**
  * Is it working? Google clicks over 16 months with the go-live marked, the
- * key numbers against before Eumon, then one section per question.
+ * key numbers against before Eumon, then one section per question. In the
+ * console, keywords have their own page; the client link's single report
+ * keeps them here (`withKeywords`).
  */
-export function ResultsView({ endpoint, operator, onNavigate }: { endpoint: string; operator: boolean; onNavigate?: (view: "connections" | "overview") => void }) {
+export function ResultsView({ endpoint, operator, withKeywords = false, onNavigate }: { endpoint: string; operator: boolean; withKeywords?: boolean; onNavigate?: (view: "connections" | "overview") => void }) {
   const [data, setData] = useState<Payload | null>(null);
   const [error, setError] = useState("");
   const [syncing, setSyncing] = useState(false);
@@ -125,8 +127,10 @@ export function ResultsView({ endpoint, operator, onNavigate }: { endpoint: stri
           )}
         </Card>
 
-        <KeywordsCard keywords={results.keywords} host={host} operator={operator} hasCredentials={site.signals.keywords} hasMarkets={results.markets.length > 0}
-          searchTop10={results.search?.buckets.find((bucket) => bucket.top === 10)?.queries ?? null} />
+        {withKeywords && (
+          <KeywordsCard keywords={results.keywords} host={host} operator={operator} hasCredentials={site.signals.keywords} hasMarkets={results.markets.length > 0}
+            searchTop10={results.search?.buckets.find((bucket) => bucket.top === 10)?.queries ?? null} />
+        )}
 
         <Card title="Enquiries" subtitle="Eumon's pages from a Google search to an enquiry, over the last 28 days of Search Console data.">
           {results.leads.funnel ? <Funnel steps={results.leads.funnel} /> : <p className="empty-state">The funnel appears once Eumon's pages have Google impressions.</p>}

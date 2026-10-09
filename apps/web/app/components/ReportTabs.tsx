@@ -410,6 +410,54 @@ export function ConversionSections({ report, leads, onNavigate }: { report: Repo
   );
 }
 
+const KIND_LABEL: Record<string, string> = { live: "Live answers", crawler: "Crawler", control: "Control token" };
+
+/**
+ * Whether AI assistants may read the site, from the latest analysis:
+ * robots.txt per AI agent, llms.txt, and question-and-answer markup.
+ * Blocking is a choice; this says what it costs, it never "fixes" it.
+ */
+export function AiReadinessCard({ report }: { report: Report | null }) {
+  const readiness = report?.aiReadiness;
+  if (!readiness) {
+    return <Card title="Can AI assistants read the site?"><p className="empty-state">{report ? "The last analysis ran before AI readiness was checked. Run it again to see it." : "Run an analysis to check robots.txt for each AI crawler, llms.txt, and question markup."}</p></Card>;
+  }
+  const blocked = readiness.crawlers.filter((crawler) => !crawler.allowed);
+  const findings = report!.findings.filter((finding) => finding.category === "ai_visibility");
+  return (
+    <Card title="Can AI assistants read the site?" subtitle="From the latest analysis: robots.txt as it applies to each AI agent, an llms.txt guide for AI tools, and FAQ markup on the sampled pages.">
+      <div className="metrics-grid c3">
+        <Kpi label="AI agents allowed" value={readiness.robots === "unreadable" ? "—" : `${readiness.crawlers.length - blocked.length} of ${readiness.crawlers.length}`}
+          caption={readiness.robots === "missing" ? "No robots.txt: everything is allowed" : readiness.robots === "unreadable" ? "robots.txt couldn't be read" : blocked.length ? `${blocked.length} blocked in robots.txt` : "None blocked"} />
+        <Kpi label="llms.txt" value={readiness.llmsTxt ? "Present" : "None"} caption={readiness.llmsTxt ? "A plain-text guide AI tools can read" : "Optional: a short guide to the site for AI tools"} />
+        <Kpi label="Pages with FAQ markup" value={`${readiness.faqPages.pages} of ${readiness.faqPages.of}`} caption="Sampled pages with FAQPage or QAPage data" />
+      </div>
+      {findings.map((finding) => (
+        <WhyRow key={finding.id} lead={<Severity value={finding.severity} />} title={finding.title}>
+          <p>{finding.summary}</p>
+          {finding.recommendation && <p><strong>Next step.</strong> {finding.recommendation}</p>}
+        </WhyRow>
+      ))}
+      <details className="why-row table-toggle" open={blocked.length > 0}>
+        <summary><span className="why-title">Every AI agent and what robots.txt says</span><span className="why-open" aria-hidden="true" /></summary>
+        <div className="table-wrap">
+          <table className="table">
+            <thead><tr><th>Agent</th><th>What it does</th><th>Kind</th><th>robots.txt</th></tr></thead>
+            <tbody>{readiness.crawlers.map((crawler) => (
+              <tr key={crawler.agent}>
+                <td><code>{crawler.agent}</code></td>
+                <td className="small">{crawler.purpose}</td>
+                <td className="small">{KIND_LABEL[crawler.kind] ?? crawler.kind}</td>
+                <td>{crawler.allowed ? <Badge tone="green">Allowed</Badge> : <Badge tone="red">Blocked</Badge>}</td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+      </details>
+    </Card>
+  );
+}
+
 const RENDERING_LABEL: Record<string, { label: string; tone: string }> = {
   static: { label: "Static", tone: "green" },
   isr: { label: "Static + revalidate", tone: "green" },

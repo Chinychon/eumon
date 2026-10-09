@@ -8,13 +8,13 @@ import { Heatmap, PairedBars, Scatter } from "./charts";
 import { LeadFunnel, TechnicalTab, searchPoints, type Change } from "./ReportTabs";
 import { AREA_PLACE, doFirst, gapsFirst, HEALTH_COLUMNS, pageTypeHealth, type Navigate, type Place, type Report } from "./report-model";
 import { KeyNumbers, ProofHeadline } from "./results/sections";
-import { CompetitorsPanel, EnquiriesPanel, KeywordsPanel, SearchPanel } from "./SitePanels";
+import { AiPanel, CompetitorsPanel, EnquiriesPanel, KeywordsPanel, SearchPanel } from "./SitePanels";
 import { useLeads, useResults, type Leads } from "./site-data";
 import { Button, Card, ViewHeader } from "./ui";
 
 export type Repository = { id: number; name: string; fullName: string; owner: string; defaultBranch: string; isPrivate: boolean };
 
-type Tab = "overview" | "technical" | "search" | "enquiries" | "keywords" | "competitors";
+type Tab = "overview" | "technical" | "search" | "enquiries" | "keywords" | "competitors" | "ai";
 /** The first tab has no `?tab=`; the others' keys are what links carry. */
 export const OVERVIEW_TABS: Array<{ tab: Tab; label: string }> = [
   { tab: "overview", label: "Overview" },
@@ -23,6 +23,7 @@ export const OVERVIEW_TABS: Array<{ tab: Tab; label: string }> = [
   { tab: "enquiries", label: "Enquiries" },
   { tab: "keywords", label: "Keywords" },
   { tab: "competitors", label: "Competitors" },
+  { tab: "ai", label: "AI visibility" },
 ];
 const TABS = OVERVIEW_TABS;
 
@@ -241,6 +242,7 @@ export function OverviewView({ site, tab, onTab, onNavigate }: {
             {results.data && current === "enquiries" && <EnquiriesPanel data={results.data} report={report} leads={leads} onNavigate={onNavigate} />}
             {results.data && current === "keywords" && <KeywordsPanel site={site} data={results.data} />}
             {results.data && current === "competitors" && <CompetitorsPanel site={site} data={results.data} report={report} onNavigate={onNavigate} />}
+            {results.data && current === "ai" && <AiPanel data={results.data} report={report} onNavigate={onNavigate} />}
           </>
         )}
       </div>

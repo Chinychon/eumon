@@ -181,6 +181,7 @@ code { font-family: var(--mono); }
 .intro { font-size: 15px; line-height: 1.65; color: var(--muted); max-width: 540px; margin: 0; }
 .steps-grid, .metrics-grid, .kpi-grid { display: grid; border: 1px solid var(--line); background: var(--surface); overflow: hidden; }
 .steps-grid, .metrics-grid { grid-template-columns: repeat(4, 1fr); }
+.metrics-grid.c3 { grid-template-columns: repeat(3, 1fr); }
 .step-card { border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); margin: 0 -1px -1px 0; padding: 18px; min-height: 150px; }
 .step-top span { font-family: var(--mono); font-size: 12px; color: var(--soft); }
 .step-card h3 { font-size: 14px; font-weight: 500; margin: 22px 0 6px; }
@@ -736,6 +737,25 @@ details.disclosure[open] > summary { margin-bottom: 10px; }
 .paired-tracks { display: grid; gap: 3px; }
 .paired-row { display: grid; grid-template-columns: minmax(0, 1fr) 6ch; gap: 10px; align-items: center; }
 .paired-row .chart-bar-track { height: 8px; }
+/* AI visibility: the radar beside its two headline counts, stacked. */
+.ai-readers { align-items: center; gap: 0 24px; margin-bottom: 6px; }
+.ai-kpis { grid-template-columns: minmax(0, 1fr); }
+/* Radar: rings and spokes on the shared rule colour; each series a translucent shape in its series colour. */
+.radar svg { display: block; width: 100%; max-width: 440px; margin: 0 auto; overflow: visible; }
+.radar-ring { fill: none; stroke: var(--line); }
+.radar-spoke { stroke: var(--line); }
+.radar-shape { transform-origin: 50% 50%; animation: radar-in .6s var(--ease) both; }
+.radar-shape polygon { stroke-width: 1.6; stroke-linejoin: round; }
+.radar-shape.s0 polygon { fill: color-mix(in srgb, var(--s1) 16%, transparent); stroke: var(--s1); }
+.radar-shape.s1 polygon { fill: color-mix(in srgb, var(--s2) 16%, transparent); stroke: var(--s2); }
+.radar-shape.s1 { animation-delay: .12s; }
+.radar-shape.s0 circle { fill: var(--s1); }
+.radar-shape.s1 circle { fill: var(--s2); }
+.radar-label { font-family: var(--mono); font-size: 10.5px; letter-spacing: .04em; fill: var(--muted); }
+.radar-value { fill: var(--ink-2); font-variant-numeric: tabular-nums; }
+.radar .chart-legend { justify-content: center; }
+@keyframes radar-in { from { opacity: 0; transform: scale(.6); } to { opacity: 1; transform: scale(1); } }
+@media (prefers-reduced-motion: reduce) { .radar-shape { animation: none; } }
 .paired-row.s0 i { background: var(--s1); }
 .paired-row.s1 i { background: var(--s3); }
 .paired-row.s2 i { background: var(--s4); }
@@ -799,7 +819,7 @@ details.disclosure[open] > summary { margin-bottom: 10px; }
   .view-header h1 { font-size: 28px; }
   .view-actions { align-items: flex-start; }
   .view-header .view-note { text-align: left; max-width: none; }
-  .steps-grid, .metrics-grid { grid-template-columns: repeat(2, 1fr); }
+  .steps-grid, .metrics-grid, .metrics-grid.c3 { grid-template-columns: repeat(2, 1fr); }
   .ruled-grid.c11, .ruled-grid.c21, .ruled-grid.c3 { grid-template-columns: minmax(0, 1fr); }
   .report-tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
   .why-row .severity { width: auto; }

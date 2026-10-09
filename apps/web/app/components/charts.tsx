@@ -280,3 +280,59 @@ export function PairedBars({ groups, series }: { groups: Array<{ label: string; 
     </div>
   );
 }
+
+/**
+ * Shapes over a handful of axes on one scale, one polygon per series. The
+ * radius is a square root of the value, so a small axis stays visible beside
+ * a large one, and every axis label carries its real numbers. A table with
+ * the same numbers follows for screen readers.
+ */
+export function Radar({ axes, series, caption }: { axes: string[]; series: Array<{ name: string; values: Array<number | null> }>; caption: string }) {
+  const size = 340;
+  const center = size / 2;
+  const radius = 108;
+  const max = Math.max(1, ...series.flatMap((entry) => entry.values.map((value) => value ?? 0)));
+  const angle = (index: number) => -Math.PI / 2 + (index * 2 * Math.PI) / axes.length;
+  const point = (index: number, share: number) => [center + Math.cos(angle(index)) * radius * share, center + Math.sin(angle(index)) * radius * share] as const;
+  const scaled = (value: number | null) => Math.sqrt(Math.max(0, value ?? 0) / max);
+  return (
+    <div className="chart-box radar">
+      <svg viewBox={`0 0 ${size} ${size}`} role="img" aria-label={`${caption}: ${axes.map((axis, index) => `${axis} ${series.map((entry) => `${entry.name} ${entry.values[index] ?? "none"}`).join(", ")}`).join("; ")}`}>
+        {[0.25, 0.5, 0.75, 1].map((ring) => (
+          <polygon key={ring} className="radar-ring" points={axes.map((_, index) => point(index, ring).join(",")).join(" ")} />
+        ))}
+        {axes.map((axis, index) => {
+          const [x, y] = point(index, 1);
+          return <line key={axis} className="radar-spoke" x1={center} y1={center} x2={x} y2={y} />;
+        })}
+        {series.map((entry, seriesIndex) => (
+          <g key={entry.name} className={`radar-shape s${seriesIndex}`}>
+            <polygon points={entry.values.map((value, index) => point(index, scaled(value)).join(",")).join(" ")} />
+            {entry.values.map((value, index) => {
+              const [x, y] = point(index, scaled(value));
+              return value ? <circle key={axes[index]} cx={x} cy={y} r={2.6} /> : null;
+            })}
+          </g>
+        ))}
+        {axes.map((axis, index) => {
+          const [x, y] = point(index, 1.2);
+          const cos = Math.cos(angle(index));
+          const anchor = Math.abs(cos) < 0.2 ? "middle" : cos > 0 ? "start" : "end";
+          const values = series.map((entry) => (entry.values[index] === null ? "—" : formatNumber(entry.values[index]!)));
+          return (
+            <text key={axis} className="radar-label" x={x} y={y} textAnchor={anchor} dominantBaseline="middle">
+              <tspan x={x} dy="-0.45em">{axis}</tspan>
+              <tspan x={x} dy="1.25em" className="radar-value">{values.join(" · ")}</tspan>
+            </text>
+          );
+        })}
+      </svg>
+      <div className="chart-legend">{series.map((entry, index) => <span key={entry.name} className={`s${index}`}>{entry.name}</span>)}</div>
+      <table className="sr-only">
+        <caption>{caption}</caption>
+        <thead><tr><th>Axis</th>{series.map((entry) => <th key={entry.name}>{entry.name}</th>)}</tr></thead>
+        <tbody>{axes.map((axis, index) => <tr key={axis}><td>{axis}</td>{series.map((entry) => <td key={entry.name}>{entry.values[index] ?? "—"}</td>)}</tr>)}</tbody>
+      </table>
+    </div>
+  );
+}

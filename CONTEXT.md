@@ -12,6 +12,15 @@ Short definitions of the domain terms that name modules and seams. Architecture 
 - **Snapshot** (`site_snapshots`, `packages/db/src/snapshots.ts`): a "latest list" that replaces itself, keyed by kind and scope: `top_queries` (property|markets), `keywords` (property|market: the site's Search Console queries priced by DataForSEO), `competitor_keywords` (domain|market: a domain's ranked keywords). The scope names what made the list, so a changed property, market or competitor hides the old list until the next sync. Counts derived from a list (`kw_top10`, `kw_traffic`) go in the ledger so they trend.
 - **Keyword gap**: a competitor's ranked keyword the site appears for in none of its lists; the best-placed competitor stands for it. The Keywords card shows the 25 biggest; the growth plan turns the reachable ones (volume ≥ 100, difficulty ≤ 40) into `keyword_gap` opportunities.
 
+## AI visibility
+
+- **AI agent** (`packages/core/src/ai-agents.ts`): a user agent that reads pages for an AI company, mapped to an **engine** (the radar's axes: OpenAI, Anthropic, Perplexity, Meta, Common Crawl, others). A **crawler** collects pages ahead of time (training or an AI search index); a **live fetch** is an assistant opening a page to answer someone. Google has no AI user agent: its AI answers fetch as Googlebot, and `Google-Extended` is a robots.txt token only.
+- **AI fetch**: an AI agent's request for a published Eumon page, counted per page, day and agent in `ai_page_daily` (signal `fetch`) and rolled into `ai_crawler_fetches.<engine>` / `ai_live_fetches.<engine>`. Only Eumon's pages are seen; the rest of the client's site isn't.
+- **AI referral**: a visit an AI assistant sent, from the referrer host or `utm_source` (signal `referral`, `ai_referral_visits.<assistant>`). The whole site's AI-referred sessions come from GA4 (`ga4_ai_sessions`); the two are never added.
+- **Landing source**: where a session first landed from (`search`, `ai:<assistant>`, `other`), kept on `page_sessions.source`; it splits Eumon-page leads (`leads_eumon.<source>`).
+- **Question search**: a query phrased as a question (`QUESTION_QUERY_PATTERN`), counted from the 28-day query list the sync already fetches.
+- **AI readiness**: an analysis's robots.txt verdict per AI token (exact token match), llms.txt, and FAQ markup. Blocking is reported (`ai_visibility` findings), never auto-fixed.
+
 ## Sync
 
 - **Source** (`apps/web/src/results-sources.ts`): one thing the sync collects: Search Console daily series, rankings, top queries, URL inspection, GA4, CrUX, PageSpeed, Open PageRank, the site's own numbers. Each knows its upstream, its cadence and its points. Adding a feed means adding a source, not editing the runner.

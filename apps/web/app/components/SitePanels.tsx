@@ -1,10 +1,10 @@
 "use client";
 
 import type { SiteRecord } from "@organic-growth/core";
-import { CompetitorsSection, ConversionSections, IndexCoverageCard, SearchAnalysis } from "./ReportTabs";
+import { AiReadinessCard, CompetitorsSection, ConversionSections, IndexCoverageCard, SearchAnalysis } from "./ReportTabs";
 import type { Navigate, Report } from "./report-model";
 import { KeywordsCard } from "./results/KeywordsCard";
-import { AUTHORITY_NOTE, AuthoritySection, ConnectPrompt, EnquiriesCard, GoogleSearchCard, OrganicSessions } from "./results/sections";
+import { AiReadersCard, AiReferralsCard, AUTHORITY_NOTE, AuthoritySection, ConnectPrompt, EnquiriesCard, GoogleSearchCard, OrganicSessions, QuestionSearchesCard } from "./results/sections";
 import type { Leads, Payload } from "./site-data";
 import { Card } from "./ui";
 
@@ -70,6 +70,18 @@ export function CompetitorsPanel({ site, data, report, onNavigate }: { site: Sit
         <AuthoritySection data={data} operator />
         <p className="small muted">{AUTHORITY_NOTE}</p>
       </Card>
+    </div>
+  );
+}
+
+/** Which AI assistants read the site's pages, the visits they send, question searches, and whether the site lets them in. */
+export function AiPanel({ data, report, onNavigate }: { data: Payload; report: Report | null; onNavigate: Navigate }) {
+  return (
+    <div className="results">
+      <AiReadersCard data={data} operator onNavigate={onNavigate} />
+      <AiReferralsCard data={data} operator onNavigate={onNavigate} />
+      <QuestionSearchesCard data={data} operator onNavigate={onNavigate} />
+      <AiReadinessCard report={report} />
     </div>
   );
 }

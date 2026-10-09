@@ -270,7 +270,7 @@ These came out of reviewing the operator's Semrush project for medbaycare.com, a
    - Pages live shows how many are indexed, not indexed, and not checked yet.
    - Results shows the headline Google-clicks chart with site and Eumon-page lines and a go-live marker, the Google clicks, enquiries, and pages-live key numbers, section 1 (with ranking buckets, new and lost queries, the top-queries table, and target-market scope), section 4 with the search-to-enquiry funnel, and site health as a percentage from analysis runs.
    - The client link opens the same numbers read-only and stops working after revoke.
-2. **Free GEO and AEO signals.**
+2. **Free GEO and AEO signals.** Built on `claude/ai-visibility` (the AI visibility tab). Differences from this plan: per-agent counts go to a raw table (`ai_page_daily`) rolled up by the sync, since the ledger overwrites; question searches come from the 28-day query list already fetched, without buying words (best, top, vs, near me); robots.txt verdicts cover every counted agent plus Google-Extended and Applebot-Extended; rich results wait until `searchAppearance` × `date` is verified against a live property.
    - AI crawler and live-fetch counts appear by engine.
    - AI-referred visits are counted, and Eumon leads split by landing source.
    - Question-query and rich-result series appear, along with the FAQ-page counts and the search-visibility line.

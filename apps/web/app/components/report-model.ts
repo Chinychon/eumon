@@ -38,6 +38,12 @@ export type Report = {
     insights: string[];
     aiLabels: boolean;
   } | null;
+  aiReadiness?: {
+    robots: "read" | "missing" | "unreadable";
+    crawlers: Array<{ agent: string; purpose: string; kind: "crawler" | "live" | "control"; allowed: boolean }>;
+    llmsTxt: boolean;
+    faqPages: { pages: number; of: number };
+  } | null;
   conversion?: {
     templates: Array<{ family: string; url: string; paths: string[]; prices: boolean; tracking: string[] }>;
     tracking: string[];
@@ -67,7 +73,7 @@ type RouteInspection = { pathPattern: string; source: string; dynamic: boolean; 
 type Fingerprint = { framework: string; router?: string; rendering?: string; deployment?: string; cms?: string; database?: string; analytics: string[]; seoTooling: string[]; contentSource?: string; language: string; packageManager: string };
 
 /** What a finding or opportunity is about, which decides the page that explains it. */
-export type Area = "technical" | "search" | "keywords" | "competitors" | "leads" | "data";
+export type Area = "technical" | "search" | "keywords" | "competitors" | "leads" | "ai" | "data";
 
 /** Rail pages, by the keys their links use. Keys stay as they were when labels changed, so saved and shared links keep working; `results`, `keywords` and `competitors` were pages and are now Overview tabs. */
 export type View = "overview" | "results" | "keywords" | "competitors" | "ask" | "connections" | "data" | "pages" | "performance" | "setup";
@@ -83,6 +89,7 @@ export const AREA_PLACE: Record<Area, Place & { label: string }> = {
   keywords: { view: "overview", tab: "keywords", label: "Keywords" },
   competitors: { view: "overview", tab: "competitors", label: "Competitors" },
   leads: { view: "overview", tab: "enquiries", label: "Enquiries" },
+  ai: { view: "overview", tab: "ai", label: "AI visibility" },
   data: { view: "data", tab: null, label: "Data" },
 };
 
@@ -148,7 +155,7 @@ export function opportunityArea(opportunity: Pick<Report["opportunities"][number
 
 /** Which area explains a finding. */
 export const findingArea = (category: string): Area =>
-  category === "search" ? "search" : category === "competitors" ? "competitors" : category === "conversion" ? "leads" : "technical";
+  category === "search" ? "search" : category === "competitors" ? "competitors" : category === "conversion" ? "leads" : category === "ai_visibility" ? "ai" : "technical";
 
 export type Action = { title: string; score: number; area: Area };
 

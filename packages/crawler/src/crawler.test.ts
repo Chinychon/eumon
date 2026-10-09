@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
 import type { CrawlCoverage } from "@organic-growth/core";
-import { aiReadiness, auditSitemap, defaultFetcher, robotsState, sitemapEntries, fetchGooglebotPage, findingsFromCrawlCoverage, headerNoindex, isBotChallenge, isEmptyShell, parseHtmlSignals, runTechnicalSeoAudit, type Fetcher } from "./index.js";
+import { aiReadiness, auditSitemap, defaultFetcher, robotsState, sitemapEntries, fetchGooglebotPage, findingsFromCrawlCoverage, headerNoindex, isBotChallenge, isEmptyShell, parseHtmlSignals, runTechnicalSeoAudit, type Fetcher, probeNotFound } from "./index.js";
+import { hamming, nearDuplicate } from "@organic-growth/core";
 import { classifyLanguage, classifyUrlType, isSameSite } from "./urls.js";
 
 describe("isSameSite", () => {
@@ -362,5 +363,108 @@ describe("robotsState", () => {
     assert.equal(state.robots, "read");
     assert.equal(state.body, "User-agent: *\nDisallow: /\n");
     assert.equal(robotsState({ status: 200, body: "<!doctype html><html><body>Soft 404</body></html>", headers: { "content-type": "text/plain" } }).robots, "unreadable");
+  });
+});
+
+describe("soft 404s, hashes and locales on a crawled page", () => {
+  const longText = Array.from({ length: 40 }, (_, i) => `Sentence number ${i} about implants, braces and whitening for patients in the city.`).join(" ");
+  const html = (title: string, body: string) => `<!doctype html><html><head><title>${title}</title></head><body><h1>${title}</h1><p>${body}</p></body></html>`;
+  const serve = (pages: Record<string, { status?: number; html: string }>): Fetcher => async (url) => {
+    const page = pages[url] ?? { status: 404, html: html("Not found", "Nothing here.") };
+    return { url, status: page.status ?? 200, finalUrl: url, headers: {}, body: page.html };
+  };
+
+  it("marks a 200 page that says it is missing as a soft 404, and leaves real pages and long pages alone", async () => {
+    const fetcher = serve({
+      "https://x.com/treatments/old": { html: html("Page not found", "Sorry, this treatment is no longer offered.") },
+      "https://x.com/id/treatments/lama": { html: html("Halaman tidak ditemukan", "Maaf.") },
+      "https://x.com/blog/404-errors": { html: html("What a 404 error means", longText) },
+      "https://x.com/doctors/dr-lee": { html: html("Dr Lee", longText) },
+    });
+    const soft = await fetchGooglebotPage("https://x.com/treatments/old", fetcher);
+    assert.equal(soft.softNotFound, true);
+    assert.equal(soft.locale, "default");
+    assert.equal((await fetchGooglebotPage("https://x.com/id/treatments/lama", fetcher)).softNotFound, true, "in Indonesian too");
+    assert.equal((await fetchGooglebotPage("https://x.com/id/treatments/lama", fetcher)).locale, "id");
+    const post = await fetchGooglebotPage("https://x.com/blog/404-errors", fetcher);
+    assert.equal(post.softNotFound, undefined, "a long page about 404s is a page");
+    const doctor = await fetchGooglebotPage("https://x.com/doctors/dr-lee", fetcher);
+    assert.equal(doctor.softNotFound, undefined);
+    assert.match(doctor.textHash ?? "", /^[0-9a-f]{16}$/, "enough text for a hash");
+    assert.equal(soft.textHash, undefined, "too little text for a hash");
+    assert.equal((await fetchGooglebotPage("https://x.com/gone", fetcher)).softNotFound, undefined, "a real 404 is not soft");
+  });
+
+  it("fingerprints the main content, so the same name over a mega-menu is not the same page, and the same bio at two hospitals is", async () => {
+    const chrome = `<nav>${Array.from({ length: 120 }, (_, i) => `<a href="/s/${i}">Service ${i} for patients in Kuala Lumpur and Penang</a>`).join(" ")}</nav><header><h2>Demo Hospital Group</h2><p>${longText}</p></header>`;
+    const footer = `<footer>${Array.from({ length: 60 }, (_, i) => `<a href="/c/${i}">Clinic ${i}</a> Open daily 8am to 8pm, call 03-1234 ${i}`).join(" ")}</footer>`;
+    const bio = (hospital: string) => `Dr Lim Ai Wei is a consultant obstetrician and gynaecologist at ${hospital} with eighteen years of experience in high-risk pregnancy, minimally invasive surgery, fertility assessment and menopause care. She trained at the University of Malaya and in Singapore, sees patients for antenatal care, screening, contraception and the management of fibroids and endometriosis, speaks English, Malay and Mandarin, and consults on weekdays with Saturday sessions for returning patients. Appointments run through the patient line or WhatsApp; most insurers are accepted. Her clinical interests include recurrent miscarriage, polycystic ovary syndrome, adolescent gynaecology and the long-term follow-up of women after cancer treatment. She teaches undergraduate students, examines for the national college, has published on caesarean recovery and laparoscopic technique, and chairs the hospital's maternal safety committee. Outside the clinic she runs free antenatal classes twice a month and answers questions on the hospital's health talk series.`;
+    const derm = "Dr Lim Ai Wei is a dermatologist treating acne, eczema, psoriasis and skin cancer screening. She trained in dermatology in Glasgow and offers laser treatments, mole checks and paediatric skin care, with clinics Monday to Friday and same-day appointments for urgent rashes. Patients value her clear explanations, careful follow-up and practical advice on sun protection and skincare routines for Malaysian weather.";
+    const page = (body: string) => `<!doctype html><html><head><title>Dr Lim Ai Wei</title></head><body>${chrome}<main><h1>Dr Lim Ai Wei</h1><p>${body}</p></main>${footer}</body></html>`;
+    const fetcher = serve({ "https://x.com/doctors/a": { html: page(bio("Pantai Hospital")) }, "https://x.com/doctors/b": { html: page(bio("Gleneagles Hospital Penang")) }, "https://x.com/doctors/c": { html: page(derm) } });
+    const [a, b, other] = await Promise.all(["a", "b", "c"].map((slug) => fetchGooglebotPage(`https://x.com/doctors/${slug}`, fetcher)));
+    assert.ok(nearDuplicate(a!.textHash!, b!.textHash!), `same bio, two hospitals: ${hamming(a!.textHash!, b!.textHash!)} bits`);
+    assert.equal(nearDuplicate(a!.textHash!, other!.textHash!), false, `a different person: ${hamming(a!.textHash!, other!.textHash!)} bits`);
+    const soft = await fetchGooglebotPage("https://x.com/gone-but-200", serve({ "https://x.com/gone-but-200": { html: `<!doctype html><html><head><title>Page not found</title></head><body>${chrome}<main><h1>Page not found</h1><p>Sorry.</p></main>${footer}</body></html>` } }));
+    assert.equal(soft.softNotFound, true, "a not-found page under a big menu is still a not-found page");
+  });
+
+  it("reads 404 in a title only beside error, page or not found", async () => {
+    const fetcher = serve({
+      "https://x.com/blog/veneers-guide-404": { html: html("Veneers Guide 404", "Our 404th guide: veneers.") },
+      "https://x.com/old": { html: html("404 - Page not found", "Sorry.") },
+      "https://x.com/older": { html: html("Error 404", "Sorry.") },
+    });
+    assert.equal((await fetchGooglebotPage("https://x.com/blog/veneers-guide-404", fetcher)).softNotFound, undefined);
+    assert.equal((await fetchGooglebotPage("https://x.com/old", fetcher)).softNotFound, true);
+    assert.equal((await fetchGooglebotPage("https://x.com/older", fetcher)).softNotFound, true);
+  });
+
+  it("probes a URL that cannot exist and reports what the site answered", async () => {
+    const ok = await probeNotFound("https://x.com", "run_1", serve({}));
+    assert.deepEqual([ok.status, ok.title, ok.url.startsWith("https://x.com/eumon-404-probe-")], [404, "Not found", true]);
+    const soft = await probeNotFound("https://x.com", "run_1", async (url) => ({ url, status: 200, finalUrl: url, headers: {}, body: html("Oops", "Something went wrong.") }));
+    assert.deepEqual([soft.status, soft.title], [200, "Oops"]);
+    const home = await probeNotFound("https://x.com", "run_1", async (url) => ({ url, status: 200, finalUrl: "https://x.com/", headers: {}, body: html("Demo Clinic", "Welcome.") }));
+    assert.deepEqual([home.status, home.finalUrl, home.title], [200, "https://x.com/", "Demo Clinic"], "a redirect to the homepage is recorded as such");
+  });
+});
+
+describe("coverage findings for soft 404s, near-duplicates and languages", () => {
+  const base = { totalUrls: 14000, completedUrls: 14000, failedUrls: 0, pendingUrls: 0, emptyShellUrls: 0, httpErrorUrls: 0, missingTitleUrls: 0 };
+  it("names soft 404s and the same page twice, with suffixed slugs called out", () => {
+    const findings = findingsFromCrawlCoverage({ siteId: "s", analysisId: "a", coverage: {
+      ...base,
+      issues: { softNotFound: 4, nearDuplicate: 40, duplicateTitle: 40 },
+      issueExamples: { softNotFound: [{ url: "https://x.com/treatments/old", detail: "Page not found" }] },
+      nearDuplicateGroups: [
+        { title: "Dr Lim Ai Wei", urls: ["https://x.com/doctors/dr-lim-ai-wei", "https://x.com/doctors/dr-lim-ai-wei-7f3a2b"], suffixed: true },
+        { title: "Dr Chen San San", urls: ["https://x.com/doctors/dr-chen-san-san", "https://x.com/doctors/dr-chen-san-san-sunway"], suffixed: false },
+      ],
+      notFoundTitle: "Oops",
+    } });
+    const soft = findings.find((finding) => finding.title === "Pages that say not found but answer 200")!;
+    assert.equal(soft.category, "indexing");
+    assert.match(soft.summary, /4 pages/);
+    assert.match(soft.summary, /Oops/);
+    assert.deepEqual(soft.pagesAffected, ["https://x.com/treatments/old"]);
+    const twice = findings.find((finding) => finding.title === "Pages that are the same page twice")!;
+    assert.equal(twice.category, "content");
+    assert.match(twice.summary, /40 pages/);
+    assert.match(twice.summary, /1 pair differs only by a code at the end of the address/);
+    assert.ok(twice.pagesAffected!.includes("https://x.com/doctors/dr-lim-ai-wei-7f3a2b"));
+  });
+
+  it("ends a finding's summary with the split by language when the crawl has more than one, and not otherwise", () => {
+    const locales = [
+      { locale: "default", urls: 7000, crawled: 7000, emptyShells: 0, errors: 0, noindex: 26, redirected: 0, missingDescription: 0, missingStructuredData: 0, softNotFound: 0 },
+      { locale: "id", urls: 7000, crawled: 7000, emptyShells: 0, errors: 0, noindex: 9, redirected: 0, missingDescription: 0, missingStructuredData: 0, softNotFound: 0 },
+    ];
+    const split = findingsFromCrawlCoverage({ siteId: "s", analysisId: "a", coverage: { ...base, issues: { noindex: 35 }, locales } });
+    const noindex = split.find((finding) => finding.title === "Sitemap lists pages that are marked noindex")!;
+    assert.match(noindex.summary, /By language: 26 without a prefix, 9 under \/id\/\.$/);
+    assert.deepEqual(noindex.evidence.byLocale, { default: 26, id: 9 });
+    const single = findingsFromCrawlCoverage({ siteId: "s", analysisId: "a", coverage: { ...base, issues: { noindex: 35 } } });
+    assert.doesNotMatch(single.find((finding) => finding.title === "Sitemap lists pages that are marked noindex")!.summary, /By language/);
   });
 });

@@ -46,6 +46,7 @@ import {
 } from "./index.js";
 import { findingsFromCode } from "./code-findings.js";
 import { findingsFromCrawlLog, findingsFromSearchConsoleImport, findingsFromTrends, type ConnectorSignals } from "./connector-findings.js";
+import { notFoundProbeFinding } from "./not-found-probe.js";
 import { auditConversion, findingsFromConversion } from "./conversion.js";
 import {
   compareCompetition,
@@ -158,6 +159,8 @@ export interface RunAnalysisInput {
   keywords?: KeywordsInput;
   /** Search results pages, suggested competitors, links and crawl-log coverage from the sync, when synced. */
   connectors?: ConnectorSignals;
+  /** What the site answered for a URL that cannot exist (`probeNotFound`), when the caller probed. */
+  notFoundProbe?: { url: string; finalUrl?: string; status: number; title?: string };
 }
 
 /** Competitors researched per analysis; each costs a sitemap profile and a handful of page fetches. */
@@ -355,9 +358,12 @@ export async function runFullAnalysis(input: RunAnalysisInput) {
   if (input.connectors?.logCoverage) findings.push(...findingsFromCrawlLog({ siteId: input.siteId, analysisId, coverage: input.connectors.logCoverage }));
   findings.push(...findingsFromSearchConsoleImport({ siteId: input.siteId, analysisId, view: input.connectors?.searchConsole ?? null }));
   findings.push(...findingsFromTrends({ siteId: input.siteId, analysisId, trends: input.connectors?.trends ?? null, sitemapUrls: sitemap.totalUrls ?? null, discovered: input.connectors?.searchConsole?.summary?.rows.find((row) => row.reason === "discovered")?.pages ?? null }));
+  const probeFinding = input.notFoundProbe ? notFoundProbeFinding(input.notFoundProbe, input.siteId, analysisId) : null;
+  if (probeFinding) findings.push(probeFinding);
   const rankedFindings = rankSeverityByOrganicImpact(findings);
 
   const bundle: AnalysisBundle = {
+    ...(input.notFoundProbe ? { notFoundProbe: input.notFoundProbe } : {}),
     brandTerms,
     siteId: input.siteId,
     analysisId,
@@ -381,6 +387,7 @@ export async function runFullAnalysis(input: RunAnalysisInput) {
   const searchNarrative = analyzeSearchTraffic(searchMetrics, brandTerms, search);
 
   return {
+    ...(input.notFoundProbe ? { notFoundProbe: input.notFoundProbe } : {}),
     site,
     analysisId,
     // Content-heavy repositories can declare thousands of routes; the inspected ones carry the detail.

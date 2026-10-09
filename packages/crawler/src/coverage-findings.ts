@@ -1,4 +1,4 @@
-import type { CrawlCoverage, CrawlFamilyStats, CrawlIssue, CrawlPageResult, Finding, FindingCategory } from "@organic-growth/core";
+import type { CrawlCoverage, CrawlFamilyStats, CrawlIssue, CrawlLocaleStats, CrawlPageResult, Finding, FindingCategory } from "@organic-growth/core";
 import { createId, organicImpactScore, severityFromImpact } from "@organic-growth/core";
 
 type Draft = {
@@ -300,6 +300,50 @@ export function findingsFromCrawlCoverage(input: {
   }
 
   const createdAt = new Date().toISOString();
+  const softNotFound = issues.softNotFound ?? 0;
+  if (softNotFound > 0) {
+    drafts.push({
+      category: "indexing",
+      impact: Math.min(organicImpactScore({ category: "indexing", pagesAffected: softNotFound }), 60),
+      title: "Pages that say not found but answer 200",
+      summary: `${pages(softNotFound)} answer 200 but say they are missing${coverage.notFoundTitle ? `, or carry the title the site gives a page that doesn't exist (“${coverage.notFoundTitle}”)` : ""}. Google calls these soft 404s: it crawls them, indexes nothing, and comes back.`,
+      evidence: { softNotFoundUrls: softNotFound, notFoundTitle: coverage.notFoundTitle ?? null, examples: examples.softNotFound ?? [] },
+      recommendation: "Return 404 or 410 for pages that are gone (or redirect to the page that replaced them), and take them out of the sitemap, so Google stops spending crawls on them.",
+      pagesAffected: exampleUrls("softNotFound"),
+    });
+  }
+
+  const nearDuplicates = issues.nearDuplicate ?? 0;
+  if (nearDuplicates > 0) {
+    const groups = coverage.nearDuplicateGroups ?? [];
+    const suffixed = groups.filter((group) => group.suffixed).length;
+    drafts.push({
+      category: "content",
+      impact: Math.min(organicImpactScore({ category: "content", pagesAffected: nearDuplicates }), 55),
+      title: "Pages that are the same page twice",
+      summary: `${coverage.nearDuplicateTruncated ? "At least " : ""}${pages(nearDuplicates)} are near-duplicates of another indexable page: the same title and nearly the same text${suffixed ? `; ${count(suffixed)} ${suffixed === 1 ? "pair differs" : "pairs differ"} only by a code at the end of the address — the same record listed twice` : ""}. Google picks one and ignores the rest, not always the one you'd choose.`,
+      evidence: { nearDuplicateUrls: nearDuplicates, suffixedGroups: suffixed, groups },
+      recommendation: "Keep one page per record: merge the duplicates in the data, or give the copies a canonical pointing at the page to keep.",
+      pagesAffected: groups.flatMap((group) => group.urls).slice(0, 20),
+    });
+  }
+
+  // The same problem split by language version, when the crawl has more than one.
+  if ((coverage.locales?.length ?? 0) > 1) {
+    const split: Record<string, keyof CrawlLocaleStats> = {
+      "Sitemap lists pages that are marked noindex": "noindex", "Sitemap lists URLs that redirect": "redirected", "Googlebot receives empty or thin HTML on sitemap URLs": "emptyShells",
+      "Missing or very short meta descriptions": "missingDescription", "Detail pages have no structured data": "missingStructuredData", "Pages that say not found but answer 200": "softNotFound",
+    };
+    for (const draft of drafts) {
+      const key = split[draft.title];
+      if (!key) continue;
+      const byLocale = Object.fromEntries(coverage.locales!.filter((entry) => Number(entry[key]) > 0).map((entry) => [entry.locale, Number(entry[key])]));
+      if (!Object.keys(byLocale).length) continue;
+      draft.summary = `${draft.summary.replace(/\s+$/, "")} By language: ${Object.entries(byLocale).map(([locale, n]) => `${count(n)} ${locale === "default" ? "without a prefix" : `under /${locale}/`}`).join(", ")}.`;
+      draft.evidence = { ...draft.evidence, byLocale };
+    }
+  }
+
   return drafts.map((draft) => ({
     id: createId("finding"),
     siteId: input.siteId,

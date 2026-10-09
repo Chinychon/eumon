@@ -39,7 +39,7 @@ describe("queueFullCrawl", async () => {
   };
   const page = (url: string): CrawlPageResult => ({
     url, status: 200, finalUrl: url, title: "A title long enough", hreflang: [], jsonLdCount: 1, contentLength: 4000, isEmptyShell: false,
-    headingOutline: [], internalLinkCount: 3, rawTextLength: 2000, renderedTextLength: 0, renderDelta: 0, fetchMode: "googlebot", routeFamily: "blog",
+    headingOutline: [], internalLinkCount: 3, rawTextLength: 2000, renderedTextLength: 0, renderDelta: 0, fetchMode: "googlebot", routeFamily: "blog", locale: "default",
   });
   const db = openSqliteD1();
   const created = new Date().toISOString();

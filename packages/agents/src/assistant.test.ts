@@ -69,6 +69,25 @@ describe("runAssistantTurn", async () => {
     assert.deepEqual(turn.tools.map((tool) => tool.name), ["crawl_coverage", "show"]);
   });
 
+  it("names the new crawl issues and counts pages titled like the probe's answer, when the report carries the probe", async () => {
+    await upsertSite(db, site("c"));
+    await createAnalysis(db, { id: "an3", siteId: "c", status: "running", createdAt: now });
+    // Twelve pages: the homepage and two doctors carry the probe's title (under the one-in-five template guard), nine doctors their own.
+    const pages = ["/", "/doctors/x", "/doctors/y", ...Array.from({ length: 9 }, (_, index) => `/doctors/d${index}`)].map((path) => `https://c.com${path}`);
+    const family = (url: string) => (url.endsWith(".com/") ? "home" : "doctors");
+    await enqueueAnalysisCrawlUrls(db, { analysisId: "an3", siteId: "c", urls: pages.map((url) => ({ url, routeFamily: family(url) })) });
+    await saveCrawlBatch(db, { analysisId: "an3", outcomes: pages.map((url) => ({ url, page: { ...page(url), routeFamily: family(url), title: /\/(x|y)$|\.com\/$/.test(url) ? "Oops" : `Dr ${url.slice(-2)}`, locale: "default" } })) });
+    await saveAnalysisReport(db, "an3", { sitemap: { totalUrls: 12 }, findings: [], notFoundProbe: { url: "https://c.com/eumon-404-probe-1", finalUrl: "https://c.com/eumon-404-probe-1", status: 200, title: "Oops" } }, "summary");
+    const { chat, sent } = scriptedChat([
+      () => [{ type: "tool_calls", calls: [{ id: "c1", name: "crawl_issues", arguments: "{}" }] }, { type: "finish", reason: "tool_calls" }],
+      () => [{ type: "text", text: "Two pages." }, { type: "finish", reason: "stop" }],
+    ]);
+    await runAssistantTurn({ env: {}, db, site: site("c"), history: [], question: "Which pages are soft 404s?", emit: () => undefined, chat });
+    const result = sent[1]!.messages.find((message) => message.role === "tool");
+    const rows = (JSON.parse(result?.role === "tool" ? result.content : "{}") as { rows?: Row[] }).rows ?? [];
+    assert.deepEqual(rows.find((row) => row.issue === "Says not found but answers 200")?.urls, 2, "x and y carry the probe's title; the homepage never counts; the raw key is never shown");
+  });
+
   it("only reads the current site", async () => {
     const { chat, sent } = scriptedChat([
       () => [{ type: "tool_calls", calls: [{ id: "c1", name: "crawl_coverage", arguments: "{}" }] }, { type: "finish", reason: "tool_calls" }],

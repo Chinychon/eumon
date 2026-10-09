@@ -97,4 +97,13 @@ describe("demo site", () => {
     }
     assert.deepEqual(left, []);
   });
+
+  it("has Googlebot logs, so the latest analysis says how long one pass of the sitemap takes", async () => {
+    const db = openSqliteD1();
+    await seedDemoSite(db, Date.now());
+    const report = (await getAnalysisJob(db, "analysis_demo_2"))!.report as { findings: Array<{ title: string }> };
+    const pace = report.findings.find((finding) => finding.title.startsWith("At Googlebot's pace"));
+    assert.ok(pace, report.findings.map((finding) => finding.title).join(" | "));
+    assert.ok(!report.findings.some((finding) => /^Search impressions fell|^Google's indexed count fell/.test(finding.title)), "the demo's numbers rise");
+  });
 });

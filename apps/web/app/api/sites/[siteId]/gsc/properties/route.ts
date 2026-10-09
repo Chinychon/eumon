@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
-import { getSite, updateSiteGscProperty } from "@organic-growth/db";
-import { listSearchConsoleProperties } from "@organic-growth/agents";
+import { clearMetricPoints, getSite, listRecordKeys, listSiteMarkets, replaceCurrentSearchMetrics, SEARCH_METRIC_PATTERNS, setLatestReportSearch, updateSiteGscProperty } from "@organic-growth/db";
+import { analyzeSearch, fetchSearchConsoleMetrics, listSearchConsoleProperties, siteBrandTerms } from "@organic-growth/agents";
 import { googleAccessToken } from "../../../../../../src/gsc-auth";
 
 export async function GET(_request: Request, context: { params: Promise<{ siteId: string }> }) {
@@ -27,8 +27,16 @@ export async function POST(request: Request, context: { params: Promise<{ siteId
     const token = await googleAccessToken(env.DB, siteId, env.GOOGLE_CLIENT_ID, env.GOOGLE_CLIENT_SECRET, env.OAUTH_ENCRYPTION_KEY);
     const properties = await listSearchConsoleProperties(token);
     if (!properties.some((entry) => entry.siteUrl === property)) return Response.json({ error: "That property is not accessible to this Google account." }, { status: 403 });
+    // Another property's history is not this site's "before Eumon": clear it so the next sync backfills.
+    if (site.gscProperty && site.gscProperty !== property) await clearMetricPoints(env.DB, siteId, SEARCH_METRIC_PATTERNS);
     await updateSiteGscProperty(env.DB, siteId, property);
-    return Response.json({ selected: property });
+    // Fill the last report's Search section now instead of on the next analysis.
+    const [rows, targetMarkets, entityKeys] = await Promise.all([
+      fetchSearchConsoleMetrics(token, property), listSiteMarkets(env.DB, siteId), listRecordKeys(env.DB, siteId),
+    ]);
+    await replaceCurrentSearchMetrics(env.DB, siteId, rows);
+    if (rows.length) await setLatestReportSearch(env.DB, siteId, analyzeSearch(rows, { brandTerms: siteBrandTerms(site), targetMarkets, entityKeys }));
+    return Response.json({ selected: property, searchRows: rows.length });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "Could not save the property." }, { status: 400 });
   }

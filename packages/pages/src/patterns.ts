@@ -1,16 +1,5 @@
 import type { JsonValue } from "@organic-growth/core";
 
-export function slugify(value: string): string {
-  return value
-    .normalize("NFKD")
-    .replace(/[̀-ͯ]/g, "")
-    .toLowerCase()
-    .replace(/&/g, " and ")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 80);
-}
-
 export function formatValue(value: JsonValue): string {
   if (value == null) return "";
   if (Array.isArray(value)) return value.map(formatValue).filter(Boolean).join(", ");

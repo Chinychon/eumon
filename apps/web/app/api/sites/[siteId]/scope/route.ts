@@ -1,13 +1,13 @@
 import { env } from "cloudflare:workers";
 import { createId } from "@organic-growth/core";
-import { deleteUnusedProposedDatasets, getPageSettings, getSiteScope, saveSiteScope, upsertDataset, upsertPageSettings, upsertSource } from "@organic-growth/db";
+import { deleteUnusedProposedDatasets, getPageSettings, getSite, getSiteScope, saveSiteScope, upsertDataset, upsertPageSettings, upsertSource } from "@organic-growth/db";
 import { proposeScope } from "@organic-growth/scraper";
 import { gatherSiteEvidence } from "../../../../../src/page-engine";
-import { appLlm, fail, findSite, json, llmFailure, readJson, settingsFor } from "../../../../../src/server";
+import { appLlm, fail, json, llmFailure, readJson, settingsFor } from "../../../../../src/server";
 
 export async function GET(_request: Request, context: { params: Promise<{ siteId: string }> }) {
   const { siteId } = await context.params;
-  if (!(await findSite(siteId))) return fail("Site not found.", 404);
+  if (!(await getSite(env.DB, siteId))) return fail("Site not found.", 404);
   return json({ scope: await getSiteScope(env.DB, siteId) });
 }
 
@@ -18,7 +18,7 @@ export async function GET(_request: Request, context: { params: Promise<{ siteId
  */
 export async function POST(request: Request, context: { params: Promise<{ siteId: string }> }) {
   const { siteId } = await context.params;
-  const site = await findSite(siteId);
+  const site = await getSite(env.DB, siteId);
   if (!site) return fail("Site not found.", 404);
   const body = (await readJson<{ goal?: unknown }>(request)) ?? {};
   const goal = typeof body.goal === "string" ? body.goal.trim().slice(0, 600) : undefined;

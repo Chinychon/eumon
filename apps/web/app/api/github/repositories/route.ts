@@ -1,9 +1,6 @@
 import { env } from "cloudflare:workers";
-import {
-  createInstallationToken,
-  listInstallationRepositories,
-  verifySignedInstallationCookie,
-} from "@organic-growth/repo-analyzer";
+import { verifyToken } from "@organic-growth/core";
+import { createInstallationToken, listInstallationRepositories } from "@organic-growth/repo-analyzer";
 
 function getCookie(request: Request): string | null {
   return request.headers.get("Cookie")?.split(";").map((part) => part.trim())
@@ -15,7 +12,7 @@ export async function GET(request: Request) {
   if (!installationCookie) {
     return Response.json({ error: "No GitHub installation cookie reached Eumon. The GitHub Setup URL must point to this app's callback, then the install flow must finish in this same browser." }, { status: 401, headers: { "Cache-Control": "no-store" } });
   }
-  const installationId = await verifySignedInstallationCookie(installationCookie, env.SESSION_SECRET);
+  const installationId = (await verifyToken<{ id: string }>(installationCookie, env.SESSION_SECRET))?.id;
   if (!installationId) {
     return Response.json({ error: "Eumon received the installation cookie but could not verify it. Restart the dev server after changing SESSION_SECRET, and use one consistent SESSION_SECRET for the callback and app." }, { status: 401, headers: { "Cache-Control": "no-store" } });
   }

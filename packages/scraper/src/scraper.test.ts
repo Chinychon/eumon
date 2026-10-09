@@ -1,15 +1,17 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { Fetcher } from "@organic-growth/crawler";
+import { RESEARCH_TOKEN, parseRobots as parseRobotsFor, type Fetcher } from "@organic-growth/crawler";
 import { expandSource } from "./discover.js";
 import type { JsonLlm, JsonRequest } from "@organic-growth/ai";
-import { coerceField, extractRecordsFromHtml, mapCsvRows, normalizeRecords, parseCsv, slugify } from "./extract.js";
+import { coerceField, extractRecordsFromHtml, mapCsvRows, normalizeRecords, parseCsv } from "./extract.js";
+import { slugify } from "@organic-growth/core";
 import { PoliteFetcher } from "./fetch.js";
 import { extractJsonLd, extractLinks, extractMeta, findNextPage, htmlToText } from "./html.js";
-import { parseRobots } from "./robots.js";
 import { findDuplicateRecords, mergeRecordData } from "./resolve.js";
 import { proposeScope, validateProposal } from "./scope.js";
 import { compilePathPattern, summarizeRoutePatterns } from "./url-pattern.js";
+
+const parseRobots = (body: string) => parseRobotsFor(body, RESEARCH_TOKEN);
 
 describe("parseRobots", () => {
   const robots = parseRobots(`
@@ -372,5 +374,16 @@ describe("duplicate resolution", () => {
       { name: "1st Avenue Mall Penang", city: "George Town", clients: ["Pepper Lunch", "hanzo"] },
     ]);
     assert.deepEqual(merged, { name: "1st Avenue", city: "George Town", clients: ["Hanzo", "Pepper Lunch"] });
+  });
+});
+
+describe("htmlToText on large malformed pages", () => {
+  it("handles lists and tables without end tags in linear time", () => {
+    const html = `<html><body><main><h1>Malls</h1><ul>${"<li>Gurney Plaza, Penang ".repeat(20_000)}</ul><table>${"<tr><td>Mall<td>Penang ".repeat(5_000)}</table></main></body></html>`;
+    const started = performance.now();
+    const text = htmlToText(html, 1_000_000);
+    assert.ok(performance.now() - started < 1500, `took ${Math.round(performance.now() - started)} ms`);
+    assert.ok(text.startsWith("# Malls\n- Gurney Plaza, Penang\n- Gurney Plaza, Penang"), text.slice(0, 80));
+    assert.ok(text.includes("| Mall | Penang |"), "table rows keep their shape without end tags");
   });
 });

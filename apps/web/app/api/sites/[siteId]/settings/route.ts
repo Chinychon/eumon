@@ -1,19 +1,19 @@
 import { env } from "cloudflare:workers";
 import type { PageSettings } from "@organic-growth/core";
-import { upsertPageSettings } from "@organic-growth/db";
+import { getSite, upsertPageSettings } from "@organic-growth/db";
 import { normalizeMountPath } from "@organic-growth/pages";
-import { fail, findSite, isPublicHttpUrl, json, readJson, settingsFor } from "../../../../../src/server";
+import { fail, isPublicHttpUrl, json, readJson, settingsFor } from "../../../../../src/server";
 
 export async function GET(_request: Request, context: { params: Promise<{ siteId: string }> }) {
   const { siteId } = await context.params;
-  const site = await findSite(siteId);
+  const site = await getSite(env.DB, siteId);
   if (!site) return fail("Site not found.", 404);
   return json({ settings: await settingsFor(site) });
 }
 
 export async function PUT(request: Request, context: { params: Promise<{ siteId: string }> }) {
   const { siteId } = await context.params;
-  const site = await findSite(siteId);
+  const site = await getSite(env.DB, siteId);
   if (!site) return fail("Site not found.", 404);
   const body = await readJson<Partial<PageSettings>>(request);
   if (!body) return fail("Send the page settings as JSON.");
@@ -48,6 +48,10 @@ export async function PUT(request: Request, context: { params: Promise<{ siteId:
     const value = typeof body.ctaUrl === "string" ? body.ctaUrl.trim() : "";
     if (!/^(https?:\/\/|mailto:|tel:)/i.test(value) || value.length > 500) return fail("The CTA link must be an https, mailto:, or tel: URL (WhatsApp links use https://wa.me/…).");
     next.ctaUrl = value;
+  }
+  if (body.language !== undefined) {
+    if (typeof body.language !== "string" || !/^[a-z]{2,3}(-[A-Za-z0-9]{2,8})?$/.test(body.language)) return fail("Use a language code such as en, id, or ms.");
+    next.language = body.language;
   }
   if (body.brandColor !== undefined) {
     if (typeof body.brandColor !== "string" || !/^#[0-9a-f]{6}$/i.test(body.brandColor)) return fail("Use a hex colour such as #176b50.");

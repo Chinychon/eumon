@@ -1,6 +1,8 @@
-import type { CrawlCoverage, CrawlPageResult, Finding, SitemapAudit } from "@organic-growth/core";
+import type { CrawlPageResult, Finding, SitemapAudit } from "@organic-growth/core";
 import { createId, organicImpactScore, severityFromImpact } from "@organic-growth/core";
-import { classifyLanguage, classifyUrlType, isSameSite } from "./urls.js";
+import { contentMarkup, elementSpans, findTags, hasToken, innerText, parseAttributes, visibleText } from "./html.js";
+import { GOOGLEBOT_TOKEN, parseRobots, type RobotsPolicy } from "./robots.js";
+import { classifyLanguage, classifyUrlType, isSameSite, sameDocument } from "./urls.js";
 
 export const GOOGLEBOT_UA =
   "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)";
@@ -40,7 +42,8 @@ export function isSafePublicUrl(value: string, expectedOrigin?: string): boolean
 async function boundedText(response: Response, maxBytes = 2_000_000): Promise<string> {
   if (!response.body) return "";
   const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
+  const decoder = new TextDecoder();
+  let text = "";
   let total = 0;
   try {
     while (true) {
@@ -51,15 +54,12 @@ async function boundedText(response: Response, maxBytes = 2_000_000): Promise<st
         await reader.cancel("response body limit exceeded");
         throw new Error(`Response exceeded the ${maxBytes} byte crawl limit.`);
       }
-      chunks.push(value);
+      text += decoder.decode(value, { stream: true });
     }
   } finally {
     reader.releaseLock();
   }
-  const bytes = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
-  return new TextDecoder().decode(bytes);
+  return text + decoder.decode();
 }
 
 export const defaultFetcher: Fetcher = async (url, init) => {
@@ -91,96 +91,176 @@ export const defaultFetcher: Fetcher = async (url, init) => {
   throw new Error("Crawler stopped after an unsafe or excessive redirect chain.");
 };
 
-export function parseHtmlSignals(html: string): {
+/** robots.txt as it applies to `token`, or null when the site has none (4xx/5xx). Throws when the site is unreachable. */
+export async function fetchRobots(baseUrl: string, token: string, userAgent: string, fetcher: Fetcher = defaultFetcher): Promise<RobotsPolicy | null> {
+  const response = await fetcher(new URL("/robots.txt", baseUrl).toString(), { userAgent, maxBytes: 500_000 });
+  return response.status < 400 ? parseRobots(response.body, token) : null;
+}
+
+export type HtmlSignals = {
   title?: string;
   description?: string;
   canonical?: string;
   robots?: string;
   hreflang: Array<{ lang: string; href: string }>;
   jsonLdCount: number;
+  jsonLdTypes: string[];
+  invalidJsonLd: number;
   headingOutline: string[];
+  h1Count: number;
   internalLinkCount: number;
+  /** Distinct same-site link paths (no query, fragment, or trailing slash; `` is the homepage). */
+  internalLinks: string[];
+  /** Characters of visible text; scripts, styles, JSON-LD, and framework payloads excluded. */
   textLength: number;
   hasRootMount: boolean;
+  /** A robots or googlebot meta tag excludes the page from the index. */
+  metaNoindex: boolean;
+  /** Target of a `<meta http-equiv="refresh">` redirect (delay of 10 s or less). */
+  metaRefresh?: string;
   bodyTextSample: string;
-} {
-  const title = matchContent(html, /<title[^>]*>([\s\S]*?)<\/title>/i);
-  const description = matchAttr(
-    html,
-    /<meta[^>]+name=["']description["'][^>]+content=["']([^"']*)["']/i,
-  ) ?? matchAttr(
-    html,
-    /<meta[^>]+content=["']([^"']*)["'][^>]+name=["']description["']/i,
-  );
-  const canonical = matchAttr(
-    html,
-    /<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']*)["']/i,
-  );
-  const robots = matchAttr(
-    html,
-    /<meta[^>]+name=["']robots["'][^>]+content=["']([^"']*)["']/i,
-  );
-  const hreflang: Array<{ lang: string; href: string }> = [];
-  const hreflangRe =
-    /<link[^>]+rel=["']alternate["'][^>]+hreflang=["']([^"']+)["'][^>]+href=["']([^"']+)["']/gi;
-  let m: RegExpExecArray | null;
-  while ((m = hreflangRe.exec(html))) {
-    hreflang.push({ lang: m[1], href: m[2] });
-  }
-  const jsonLdCount = (html.match(/application\/ld\+json/gi) ?? []).length;
+};
+
+/**
+ * Reads the SEO-relevant signals a non-rendering crawler gets from an HTML
+ * response. Tags are matched by attribute, so attribute order and quoting
+ * don't matter. `pageUrl` lets absolute same-site links count as internal.
+ */
+export function parseHtmlSignals(html: string, pageUrl?: string): HtmlSignals {
+  const markup = contentMarkup(html);
+  const metas = findTags(markup, "meta");
+  const links = findTags(markup, "link");
+  const metaContent = (name: string) => metas.find((meta) => meta.name?.toLowerCase() === name)?.content;
+
+  const titleSpan = elementSpans(markup, ["title"])[0];
+  const title = titleSpan ? markup.slice(titleSpan.contentStart, titleSpan.contentEnd) : undefined;
+  const canonical = links.find((link) => hasToken(link.rel, "canonical") && link.href)?.href;
+  const hreflang = links
+    .filter((link) => hasToken(link.rel, "alternate") && link.hreflang && link.href)
+    .map((link) => ({ lang: link.hreflang!, href: link.href! }));
+  const robots = metaContent("robots");
+  const googlebot = metaContent("googlebot");
+  const refresh = metas.find((meta) => meta["http-equiv"]?.toLowerCase() === "refresh")?.content?.match(/^\s*(\d+(?:\.\d+)?)\s*[;,]\s*url\s*=\s*['"]?([^'"]+)/i);
+  const jsonLd = readJsonLd(html);
+
   const headingOutline: string[] = [];
-  const headingRe = /<(h[1-3])[^>]*>([\s\S]*?)<\/\1>/gi;
-  while ((m = headingRe.exec(html))) {
-    headingOutline.push(`${m[1]}:${stripTags(m[2]).slice(0, 120)}`);
+  let h1Count = 0;
+  for (const heading of elementSpans(markup, ["h1", "h2", "h3"])) {
+    if (heading.tag === "h1") h1Count++;
+    if (headingOutline.length < 20) headingOutline.push(`${heading.tag}:${innerText(markup.slice(heading.contentStart, Math.min(heading.contentEnd, heading.contentStart + 2000))).slice(0, 120)}`);
   }
-  const internalLinkCount = (html.match(/<a\s+[^>]*href=["']\//gi) ?? []).length;
-  const text = stripTags(html).replace(/\s+/g, " ").trim();
-  const hasRootMount =
-    /id=["']root["']/i.test(html) ||
-    /id=["']app["']/i.test(html) ||
-    /id=["']__next["']/i.test(html);
+
+  let internalLinkCount = 0;
+  const internalLinks = new Set<string>();
+  for (const anchor of findTags(markup, "a")) {
+    const href = anchor.href?.trim();
+    if (!href || href.startsWith("#") || /^(mailto|tel|javascript|data):/i.test(href)) continue;
+    const internal = href.startsWith("/") ? !href.startsWith("//") : Boolean(pageUrl && isSameSite(resolveUrl(href, pageUrl), pageUrl));
+    if (!internal) continue;
+    internalLinkCount++;
+    // ponytail: 300 distinct targets per page covers mega-menus; raise if sites need more.
+    const path = linkPath(href, pageUrl);
+    if (path !== null && internalLinks.size < 300) internalLinks.add(path);
+  }
+
+  const text = visibleText(markup);
   return {
-    title: title ? stripTags(title).trim() : undefined,
-    description,
+    title: title ? innerText(title) : undefined,
+    description: metaContent("description"),
     canonical,
     robots,
     hreflang,
-    jsonLdCount,
-    headingOutline: headingOutline.slice(0, 20),
+    jsonLdCount: jsonLd.blocks,
+    jsonLdTypes: jsonLd.types,
+    invalidJsonLd: jsonLd.invalid,
+    headingOutline,
+    h1Count,
     internalLinkCount,
+    internalLinks: [...internalLinks],
     textLength: text.length,
-    hasRootMount,
+    hasRootMount: /\bid=["']?(root|app|__next|__nuxt|svelte)["'\s>]/i.test(markup),
+    metaNoindex: [robots, googlebot].some((value) => /\b(noindex|none)\b/i.test(value ?? "")),
+    metaRefresh: refresh && Number(refresh[1]) <= 10 ? refresh[2]!.trim() : undefined,
     bodyTextSample: text.slice(0, 280),
   };
 }
 
-export function isEmptyShell(html: string, signals = parseHtmlSignals(html)): boolean {
-  // SPA shell: mount point + little meaningful content, generic/missing title
-  if (signals.textLength < 400 && signals.hasRootMount) return true;
-  if (signals.textLength < 200) return true;
-  if (
-    signals.hasRootMount &&
-    signals.jsonLdCount === 0 &&
-    signals.headingOutline.length === 0 &&
-    signals.textLength < 800
-  ) {
-    return true;
+/** A link's path as the link graph stores it: no query, fragment, or trailing slash. */
+export function linkPath(href: string, base = "https://site.invalid/"): string | null {
+  try {
+    return decodeURI(new URL(href, base).pathname).replace(/\/+$/, "");
+  } catch {
+    return null;
+  }
+}
+
+function resolveUrl(href: string, base: string): string {
+  try {
+    return new URL(href, base).toString();
+  } catch {
+    return "";
+  }
+}
+
+/** Counts JSON-LD blocks and collects their schema.org types; malformed blocks are counted, not thrown. */
+function readJsonLd(html: string): { blocks: number; types: string[]; invalid: number } {
+  const types = new Set<string>();
+  let blocks = 0;
+  let invalid = 0;
+  const visit = (value: unknown): void => {
+    if (Array.isArray(value)) value.forEach(visit);
+    else if (value && typeof value === "object") {
+      const node = value as Record<string, unknown>;
+      const type = node["@type"];
+      for (const entry of Array.isArray(type) ? type : [type]) {
+        if (typeof entry === "string" && entry) types.add(entry.replace(/^https?:\/\/schema\.org\//i, ""));
+      }
+      if (Array.isArray(node["@graph"])) visit(node["@graph"]);
+    }
+  };
+  for (const script of elementSpans(html, ["script"])) {
+    if (parseAttributes(script.attrs).type?.toLowerCase() !== "application/ld+json") continue;
+    blocks++;
+    try {
+      visit(JSON.parse(html.slice(script.contentStart, script.contentEnd).trim()));
+    } catch {
+      invalid++;
+    }
+  }
+  return { blocks, types: [...types].slice(0, 30), invalid };
+}
+
+/**
+ * True when an `X-Robots-Tag` header excludes the page from Google's index.
+ * Directives may be scoped to a crawler (`googlebot: noindex`); ones scoped
+ * to other crawlers don't apply.
+ */
+export function headerNoindex(value: string | undefined): boolean {
+  if (!value) return false;
+  const valued = new Set(["unavailable_after", "max-snippet", "max-image-preview", "max-video-preview"]);
+  let agent: string | null = null;
+  for (const part of value.split(",")) {
+    let directive = part.trim().toLowerCase();
+    const scoped = directive.match(/^([a-z0-9_-]+)\s*:\s*(.*)$/);
+    if (scoped && !valued.has(scoped[1]!)) {
+      agent = scoped[1]!;
+      directive = scoped[2]!;
+    }
+    if ((agent === null || agent === GOOGLEBOT_TOKEN) && /^(noindex|none)$/.test(directive)) return true;
   }
   return false;
 }
 
-function matchContent(html: string, re: RegExp): string | undefined {
-  const m = html.match(re);
-  return m?.[1];
-}
-
-function matchAttr(html: string, re: RegExp): string | undefined {
-  const m = html.match(re);
-  return m?.[1];
-}
-
-function stripTags(input: string): string {
-  return input.replace(/<[^>]+>/g, " ");
+/**
+ * A page that gives a non-rendering crawler nothing to index: little visible
+ * text, typically with a client-side mount point waiting for JavaScript.
+ */
+export function isEmptyShell(html: string, signals = parseHtmlSignals(html)): boolean {
+  // A meta-refresh stub is a redirect, not a page that failed to render.
+  if (signals.metaRefresh) return false;
+  if (signals.textLength < 400 && signals.hasRootMount) return true;
+  if (signals.textLength < 200) return true;
+  return signals.hasRootMount && signals.jsonLdCount === 0 && signals.headingOutline.length === 0 && signals.textLength < 800;
 }
 
 export async function fetchPageAudit(
@@ -220,17 +300,49 @@ export async function fetchPageAudit(
   };
 }
 
+/** Responses that usually mean a firewall or rate limiter refused the request, not that the page is broken. */
+const REFUSED_STATUSES = new Set([401, 403, 429, 503]);
+
+/**
+ * A bot-protection interstitial (Cloudflare, Vercel, Akamai, Imperva,
+ * PerimeterX, DataDome…) instead of the site's own page.
+ */
+export function isBotChallenge(response: Pick<FetchResult, "status" | "headers" | "body">): boolean {
+  if (!REFUSED_STATUSES.has(response.status)) return false;
+  if (response.headers["cf-mitigated"] === "challenge") return true;
+  return /cf-chl-|challenge-platform|<title>\s*(just a moment|attention required|access denied|vercel security checkpoint)|_incapsula_|px-captcha|captcha-delivery|datadome/i.test(response.body.slice(0, 50_000));
+}
+
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 /**
  * The full crawl uses the Googlebot request profile for every sitemap URL.
  * Raw-vs-Googlebot and browser comparisons remain a representative sample,
  * where they provide much more signal per request.
+ *
+ * Many firewalls reject requests that claim to be Googlebot but don't come
+ * from Google's network (real Googlebot is verified by reverse DNS). When a
+ * Googlebot request is refused, the page is re-fetched as a browser so the
+ * crawl still describes the page, and the refusal is recorded.
  */
 export async function fetchGooglebotPage(
   url: string,
   fetcher: Fetcher = defaultFetcher,
 ): Promise<CrawlPageResult> {
-  const response = await fetcher(url, { userAgent: GOOGLEBOT_UA });
-  return toCrawlResult(url, response, "googlebot");
+  let response = await fetcher(url, { userAgent: GOOGLEBOT_UA });
+  if (response.status === 429 && !isBotChallenge(response)) {
+    const retryAfter = Number(response.headers["retry-after"]);
+    await delay(Number.isFinite(retryAfter) && retryAfter > 0 ? Math.min(retryAfter * 1000, 10_000) : 3_000);
+    response = await fetcher(url, { userAgent: GOOGLEBOT_UA });
+  }
+  if (REFUSED_STATUSES.has(response.status)) {
+    const browser = await fetcher(url, { userAgent: BROWSER_UA }).catch(() => null);
+    if (browser && browser.status < 400 && !isBotChallenge(browser)) {
+      return { ...toCrawlResult(url, browser, "raw", true), googlebotBlockedStatus: response.status };
+    }
+  }
+  const page = toCrawlResult(url, response, "googlebot", true);
+  return isBotChallenge(response) ? { ...page, botChallenge: true, isEmptyShell: false, internalLinks: [] } : page;
 }
 
 export type GooglebotCrawlOutcome =
@@ -268,13 +380,14 @@ function toCrawlResult(
   url: string,
   fetchResult: FetchResult,
   mode: CrawlPageResult["fetchMode"],
+  withLinks = false,
 ): CrawlPageResult {
-  const signals = parseHtmlSignals(fetchResult.body);
-  const empty = isEmptyShell(fetchResult.body, signals);
+  const finalUrl = fetchResult.finalUrl || url;
+  const signals = parseHtmlSignals(fetchResult.body, finalUrl);
   return {
     url,
     status: fetchResult.status,
-    finalUrl: fetchResult.finalUrl,
+    finalUrl,
     title: signals.title,
     description: signals.description,
     canonical: signals.canonical,
@@ -282,13 +395,21 @@ function toCrawlResult(
     hreflang: signals.hreflang,
     jsonLdCount: signals.jsonLdCount,
     contentLength: fetchResult.body.length,
-    isEmptyShell: empty,
+    isEmptyShell: isEmptyShell(fetchResult.body, signals),
     headingOutline: signals.headingOutline,
     internalLinkCount: signals.internalLinkCount,
-    rawTextLength: mode === "raw" ? signals.textLength : signals.textLength,
+    rawTextLength: signals.textLength,
     renderedTextLength: 0,
     renderDelta: 0,
     fetchMode: mode,
+    h1Count: signals.h1Count,
+    noindex: signals.metaNoindex || headerNoindex(fetchResult.headers["x-robots-tag"]),
+    jsonLdTypes: signals.jsonLdTypes,
+    invalidJsonLd: signals.invalidJsonLd,
+    routeFamily: classifyUrlType(url),
+    canonicalMismatch: signals.canonical ? !sameDocument(signals.canonical, finalUrl) : false,
+    ...(signals.metaRefresh ? { metaRefresh: signals.metaRefresh } : {}),
+    ...(withLinks ? { internalLinks: signals.internalLinks.map((path) => ({ path, family: classifyUrlType(new URL(path || "/", finalUrl).toString()) })) } : {}),
   };
 }
 
@@ -296,7 +417,7 @@ export async function auditSitemap(
   baseUrl: string,
   fetcher: Fetcher = defaultFetcher,
   options?: { maxUrls?: number; maxSitemapFiles?: number },
-): Promise<{ audit: SitemapAudit; sampleUrls: string[]; urls: string[] }> {
+): Promise<{ audit: SitemapAudit; sampleUrls: string[]; urls: string[]; lastmod: Map<string, string> }> {
   const maxUrls = options?.maxUrls ?? 200;
   const origin = new URL(baseUrl).origin;
   const sitemapUrl = `${origin}/sitemap.xml`;
@@ -304,6 +425,7 @@ export async function auditSitemap(
 
   const errors: string[] = [];
   const indexFiles: string[] = [];
+  const lastmod = new Map<string, string>();
   let urls: string[] = [];
 
   try {
@@ -320,6 +442,7 @@ export async function auditSitemap(
     const state: SitemapCollectionState = {
       visited: new Set<string>(),
       maxFiles: options?.maxSitemapFiles ?? 500,
+      lastmod,
     };
     const collected: string[] = [];
     for (const entry of entries) {
@@ -333,12 +456,19 @@ export async function auditSitemap(
   const sampleUrls = selectRepresentativeSample(urls, maxUrls);
   const urlTypes: Record<string, number> = {};
   const languages: Record<string, number> = {};
+  const editions: Record<string, Record<string, number>> = {};
   for (const u of urls) {
     const type = classifyUrlType(u);
     urlTypes[type] = (urlTypes[type] ?? 0) + 1;
     const lang = classifyLanguage(u);
     languages[lang] = (languages[lang] ?? 0) + 1;
+    const byLanguage = editions[type] ??= {};
+    byLanguage[lang] = (byLanguage[lang] ?? 0) + 1;
   }
+  const sections = Object.fromEntries(Object.entries(editions).map(([type, byLanguage]) => [type, {
+    pages: Math.max(...Object.values(byLanguage)),
+    languages: Object.keys(byLanguage).length,
+  }]));
 
   return {
     audit: {
@@ -346,17 +476,44 @@ export async function auditSitemap(
       sampledUrls: sampleUrls.length,
       indexFiles,
       urlTypes,
+      sections,
       languages,
       errors,
     },
     sampleUrls,
     urls,
+    lastmod,
   };
 }
 
 interface SitemapCollectionState {
   visited: Set<string>;
   maxFiles: number;
+  /** `<lastmod>` per page URL, for URLs whose sitemap entry declares one. */
+  lastmod?: Map<string, string>;
+}
+
+/**
+ * `<url>` entries of a sitemap with their `<lastmod>`. Walks the document
+ * with indexOf so a malformed file (a `<url>` never closed) stays linear.
+ */
+export function sitemapEntries(body: string): Array<{ loc: string; lastmod?: string }> {
+  const lower = body.toLowerCase();
+  const entries: Array<{ loc: string; lastmod?: string }> = [];
+  let from = 0;
+  for (;;) {
+    const start = lower.indexOf("<url", from);
+    if (start < 0) break;
+    if (!/[\s>]/.test(lower[start + 4] ?? "")) { from = start + 4; continue; } // <urlset>
+    const end = lower.indexOf("</url>", start);
+    if (end < 0) break;
+    const block = body.slice(start, end);
+    const loc = /<loc>\s*(?:<!\[CDATA\[)?\s*([^<\]]+?)\s*(?:\]\]>)?\s*<\/loc>/i.exec(block)?.[1];
+    const lastmod = /<lastmod>\s*([^<]+?)\s*<\/lastmod>/i.exec(block)?.[1];
+    if (loc) entries.push(lastmod ? { loc, lastmod } : { loc });
+    from = end + 6;
+  }
+  return entries;
 }
 
 /** Recursively collects page URLs from a sitemap or sitemap index on one origin. */
@@ -407,8 +564,10 @@ export async function collectSitemapUrls(
     }
     return nested;
   }
-  return [...body.matchAll(/<loc>\s*([^<]+)\s*<\/loc>/gi)].map((m) => m[1].trim())
-    .filter((loc) => isSafePublicUrl(loc) && isSameSite(loc, allowedOrigin));
+  const entries = sitemapEntries(body);
+  const locs = entries.length ? entries.map((entry) => entry.loc) : [...body.matchAll(/<loc>\s*([^<]+)\s*<\/loc>/gi)].map((m) => m[1].trim());
+  if (collection.lastmod) for (const entry of entries) if (entry.lastmod) collection.lastmod.set(entry.loc, entry.lastmod);
+  return locs.filter((loc) => isSafePublicUrl(loc) && isSameSite(loc, allowedOrigin));
 }
 
 export function selectRepresentativeSample(
@@ -567,95 +726,10 @@ export function findingsFromCrawl(input: {
   return findings;
 }
 
-/** Findings based on every sitemap URL, rather than extrapolating from a sample. */
-export function findingsFromCrawlCoverage(input: {
-  siteId: string;
-  analysisId: string;
-  coverage: CrawlCoverage;
-  examples?: CrawlPageResult[];
-}): Finding[] {
-  const { coverage } = input;
-  const findings: Finding[] = [];
-  const crawled = Math.max(coverage.completedUrls, 1);
-  const shellRatio = coverage.emptyShellUrls / crawled;
-
-  if (coverage.emptyShellUrls > 0) {
-    const impact = organicImpactScore({
-      category: "rendering",
-      pagesAffected: coverage.emptyShellUrls,
-      isEmptyShellAtScale: shellRatio >= 0.1 || coverage.emptyShellUrls >= 25,
-      isBlockingCrawl: shellRatio >= 0.3,
-    });
-    findings.push({
-      id: createId("finding"),
-      siteId: input.siteId,
-      analysisId: input.analysisId,
-      category: "rendering",
-      severity: severityFromImpact(impact),
-      title: "Googlebot receives empty or thin HTML on sitemap URLs",
-      summary: `${coverage.emptyShellUrls.toLocaleString()} of ${coverage.completedUrls.toLocaleString()} crawled sitemap URLs returned an empty or thin HTML shell (${Math.round(shellRatio * 100)}%).`,
-      evidence: {
-        coverage,
-        examples: (input.examples ?? []).filter((page) => page.isEmptyShell).slice(0, 20).map((page) => ({
-          url: page.url,
-          status: page.status,
-          title: page.title,
-          textLength: page.rawTextLength,
-        })),
-      },
-      organicImpactScore: impact,
-      recommendation: "Ensure indexable routes return meaningful server or edge HTML before client hydration, then validate the affected template across its sitemap URLs.",
-      pagesAffected: (input.examples ?? []).filter((page) => page.isEmptyShell).slice(0, 20).map((page) => page.url),
-      createdAt: new Date().toISOString(),
-    });
-  }
-
-  if (coverage.httpErrorUrls > 0 || coverage.failedUrls > 0) {
-    const affected = coverage.httpErrorUrls + coverage.failedUrls;
-    const impact = organicImpactScore({
-      category: "indexing",
-      pagesAffected: affected,
-      isBlockingCrawl: affected / Math.max(coverage.totalUrls, 1) >= 0.05,
-    });
-    findings.push({
-      id: createId("finding"),
-      siteId: input.siteId,
-      analysisId: input.analysisId,
-      category: "indexing",
-      severity: severityFromImpact(impact),
-      title: "Sitemap URLs fail or return error responses",
-      summary: `${coverage.httpErrorUrls.toLocaleString()} URLs returned HTTP errors and ${coverage.failedUrls.toLocaleString()} could not be fetched during the crawl.`,
-      evidence: { coverage },
-      organicImpactScore: impact,
-      recommendation: "Review recurring response failures by route template and remove invalid URLs from the sitemap after correcting the underlying route or data issue.",
-      pagesAffected: [],
-      createdAt: new Date().toISOString(),
-    });
-  }
-
-  if (coverage.missingTitleUrls > 0) {
-    const impact = organicImpactScore({
-      category: "metadata",
-      pagesAffected: coverage.missingTitleUrls,
-    });
-    findings.push({
-      id: createId("finding"),
-      siteId: input.siteId,
-      analysisId: input.analysisId,
-      category: "metadata",
-      severity: severityFromImpact(Math.min(impact, 65)),
-      title: "Sitemap URLs are missing useful title tags",
-      summary: `${coverage.missingTitleUrls.toLocaleString()} crawled sitemap URLs had no title or a title shorter than 15 characters.`,
-      evidence: { coverage },
-      organicImpactScore: Math.min(impact, 65),
-      recommendation: "Trace the affected URLs to their page template and generate unique titles from page-specific entities and search intent.",
-      pagesAffected: [],
-      createdAt: new Date().toISOString(),
-    });
-  }
-
-  return findings;
-}
-
 export * from "./tech-seo.js";
+export * from "./coverage-findings.js";
+export * from "./rendering.js";
+export * from "./competitors.js";
 export * from "./urls.js";
+export * from "./html.js";
+export * from "./robots.js";

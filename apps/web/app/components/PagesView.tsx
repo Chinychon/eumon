@@ -65,21 +65,21 @@ export function PagesView({ site, onNavigate }: { site: SiteRecord; onNavigate: 
   return (
     <div>
       <ViewHeader
-        eyebrow="STEPS 4–5 · GENERATE & PUBLISH"
         title="Landing pages"
         description="Each template turns records into landing pages: what the searcher is looking for, the facts that answer it, and a clear call to action. Thin or duplicate pages are never published."
-        actions={<><Badge tone={verified ? "green" : "amber"}>{`${formatNumber(approved)} ${verified ? "live" : "approved"}`}</Badge><Button variant="secondary" onClick={() => onNavigate("setup")}>Serving setup</Button></>}
+        actions={<><Badge tone={verified && approved ? "green" : approved ? "amber" : "gray"}>{`${formatNumber(approved)} ${verified ? "live" : "approved"}`}</Badge><Button variant="secondary" onClick={() => onNavigate("setup")}>Serving setup</Button></>}
       />
-      {error && <div className="callout error" role="alert" style={{ marginBottom: 14 }}>{error}</div>}
-      {message && <div className="callout" style={{ marginBottom: 14 }}>{message}</div>}
+      <div className="results">
+      {error && <div className="callout error" role="alert">{error}</div>}
+      {message && <div className="callout">{message}</div>}
       {!verified && approved > 0 && (
-        <div className="callout warn" style={{ marginBottom: 14 }}>
+        <div className="callout warn">
           {formatNumber(approved)} approved pages are not on {host} yet: nobody, including Google, can see them until the proxy rule is added and verified.{" "}
-          <Button small variant="ghost" onClick={() => onNavigate("setup")}>Finish setup →</Button>
+          <Button small variant="ghost" onClick={() => onNavigate("setup")}>Finish setup</Button>
         </div>
       )}
       {loading ? <div className="empty">Loading…</div> : usable.length === 0 ? (
-        <div className="empty">No records yet. <Button small variant="ghost" onClick={() => onNavigate("data")}>Collect data first →</Button></div>
+        <div className="empty">No records yet. <Button small variant="ghost" onClick={() => onNavigate("data")}>Collect data first</Button></div>
       ) : usable.map((dataset) => {
         const datasetTemplates = templates.filter((template) => template.datasetId === dataset.id);
         return (
@@ -87,7 +87,7 @@ export function PagesView({ site, onNavigate }: { site: SiteRecord; onNavigate: 
             <div className="row" style={{ marginBottom: datasetTemplates.length ? 12 : 0 }}>
               {dataset.pageIdeas.map((idea, index) => (
                 <Button key={idea.name + index} small variant={datasetTemplates.length ? "secondary" : "primary"} busy={busy === `${dataset.id}:${index}`} disabled={Boolean(busy)} onClick={() => createTemplate(dataset, index)} title={idea.rationale}>
-                  + {idea.groupBy.length ? `Pages by ${idea.groupBy.join(" × ")}` : `One page per ${dataset.entityType}`}
+                  Create {idea.groupBy.length ? `pages by ${idea.groupBy.join(" × ")}` : `one page per ${dataset.entityType}`}
                 </Button>
               ))}
             </div>
@@ -97,6 +97,7 @@ export function PagesView({ site, onNavigate }: { site: SiteRecord; onNavigate: 
           </Card>
         );
       })}
+      </div>
     </div>
   );
 }
@@ -119,7 +120,7 @@ function TemplateCard({ template, dataset, site, settings, verified, onChanged, 
   }
 
   return (
-    <div style={{ border: "1px solid var(--line)", borderRadius: 10, padding: "14px 16px", marginTop: 10 }}>
+    <div className="template-row">
       <div className="row spread">
         <div className="grow">
           <h3 style={{ margin: 0, fontSize: 15, fontWeight: 650 }}>{template.name}</h3>
@@ -149,7 +150,7 @@ function TemplateCard({ template, dataset, site, settings, verified, onChanged, 
           ? <><Button small variant="danger" busy={busy === "delete"} onClick={() => act("delete", () => api(`/api/templates/${template.id}`, { method: "DELETE" }))}>Delete template and pages</Button><Button small variant="ghost" onClick={() => setConfirmDelete(false)}>Cancel</Button></>
           : <Button small variant="danger" onClick={() => setConfirmDelete(true)}>Delete</Button>}
       </div>
-      {error && <p className="small" style={{ color: "#9f3e31" }}>{error}</p>}
+      {error && <p className="small" style={{ color: "var(--red)" }}>{error}</p>}
       {editing && <TemplateEditor template={template} dataset={dataset} onSaved={async () => {
         const result = await api<{ generation: Generation }>(`/api/templates/${template.id}/generate`, { method: "POST" });
         onMessage(`Saved. ${summarize(result.generation)}`);
@@ -227,12 +228,12 @@ function TemplateEditor({ template, dataset, onSaved }: { template: PageTemplate
           <input className="input" placeholder="Question" value={entry.question} onChange={(event) => setFaq((items) => items.map((item, i) => (i === index ? { ...item, question: event.target.value } : item)))} />
           <div className="row" style={{ flexWrap: "nowrap" }}>
             <input className="input" placeholder="Answer" value={entry.answer} onChange={(event) => setFaq((items) => items.map((item, i) => (i === index ? { ...item, answer: event.target.value } : item)))} />
-            <Button small variant="danger" onClick={() => setFaq((items) => items.filter((_, i) => i !== index))}>✕</Button>
+            <Button small variant="danger" onClick={() => setFaq((items) => items.filter((_, i) => i !== index))}>Remove</Button>
           </div>
         </div>
       ))}
       <Button small variant="ghost" onClick={() => setFaq((items) => [...items, { question: "", answer: "" }])}>+ Add question</Button>
-      {error && <p className="small" style={{ color: "#9f3e31" }}>{error}</p>}
+      {error && <p className="small" style={{ color: "var(--red)" }}>{error}</p>}
       <div className="row" style={{ marginTop: 12 }}><Button busy={busy} onClick={save}>Save and regenerate</Button></div>
     </div>
   );
@@ -274,7 +275,7 @@ function PagesList({ template, site, settings, verified, onChanged }: { template
                     <strong style={{ fontSize: 13 }}>{page.title}</strong>
                     <div className="row small" style={{ marginTop: 3 }}>
                       <a className="mono" href={`/p/${site.id}${page.path}?preview=1`} target="_blank" rel="noreferrer">{page.path}</a>
-                      {page.status === "published" && verified && <a href={`${origin}${page.path}`} target="_blank" rel="noreferrer">live ↗</a>}
+                      {page.status === "published" && verified && <a href={`${origin}${page.path}`} target="_blank" rel="noreferrer">live</a>}
                     </div>
                   </td>
                   <td><Badge tone={page.status === "published" && !verified ? "amber" : toneFor(page.status)}>{statusLabel(page.status, verified)}</Badge></td>

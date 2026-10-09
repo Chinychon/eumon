@@ -1,3 +1,5 @@
+import { toBase64Url } from "@organic-growth/core";
+
 export interface GitHubRepository {
   id: number;
   name: string;
@@ -6,13 +8,6 @@ export interface GitHubRepository {
   default_branch: string;
   owner: { login: string };
   private: boolean;
-}
-
-function encodeBase64Url(value: string | Uint8Array): string {
-  const bytes = typeof value === "string" ? new TextEncoder().encode(value) : value;
-  let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary).replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
 }
 
 function derLength(length: number): Uint8Array {
@@ -41,8 +36,8 @@ function pemBytes(pem: string): Uint8Array {
 
 async function createAppJwt(appId: string, privateKeyPem: string): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
-  const header = encodeBase64Url(JSON.stringify({ alg: "RS256", typ: "JWT" }));
-  const claims = encodeBase64Url(JSON.stringify({ iat: now - 30, exp: now + 540, iss: appId }));
+  const header = toBase64Url(JSON.stringify({ alg: "RS256", typ: "JWT" }));
+  const claims = toBase64Url(JSON.stringify({ iat: now - 30, exp: now + 540, iss: appId }));
   const data = `${header}.${claims}`;
   const keyBytes = pemBytes(privateKeyPem);
   const pkcs8 = privateKeyPem.includes("BEGIN RSA PRIVATE KEY") ? pkcs1ToPkcs8(keyBytes) : keyBytes;
@@ -52,7 +47,7 @@ async function createAppJwt(appId: string, privateKeyPem: string): Promise<strin
     "pkcs8", keyData.buffer, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["sign"],
   );
   const signature = await crypto.subtle.sign("RSASSA-PKCS1-v1_5", key, new TextEncoder().encode(data));
-  return `${data}.${encodeBase64Url(new Uint8Array(signature))}`;
+  return `${data}.${toBase64Url(new Uint8Array(signature))}`;
 }
 
 async function github<T>(url: string, token: string, init?: RequestInit): Promise<T> {
@@ -95,27 +90,4 @@ export async function listInstallationRepositories(token: string): Promise<GitHu
     if (result.repositories.length < 100) break;
   }
   return repositories;
-}
-
-export async function createSignedInstallationCookie(
-  installationId: string,
-  secret: string,
-): Promise<string> {
-  if (secret.length < 32) throw new Error("SESSION_SECRET must contain at least 32 characters.");
-  const payload = encodeBase64Url(JSON.stringify({ id: installationId, exp: Date.now() + 7 * 86400_000 }));
-  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-  const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(payload));
-  return `${payload}.${encodeBase64Url(new Uint8Array(signature))}`;
-}
-
-export async function verifySignedInstallationCookie(value: string, secret: string): Promise<string | null> {
-  if (secret.length < 32) return null;
-  const [payload, signature] = value.split(".");
-  if (!payload || !signature) return null;
-  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["verify"]);
-  const padded = signature.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - signature.length % 4) % 4);
-  const bytes = Uint8Array.from(atob(padded), (char) => char.charCodeAt(0));
-  if (!(await crypto.subtle.verify("HMAC", key, bytes, new TextEncoder().encode(payload)))) return null;
-  const decoded = JSON.parse(atob(payload.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - payload.length % 4) % 4))) as { id?: unknown; exp?: unknown };
-  return typeof decoded.id === "string" && typeof decoded.exp === "number" && decoded.exp > Date.now() ? decoded.id : null;
 }

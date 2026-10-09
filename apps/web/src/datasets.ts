@@ -1,5 +1,4 @@
-import type { DataSourceKind, DatasetField, DatasetFieldType } from "@organic-growth/core";
-import { slugify } from "@organic-growth/pages";
+import { slugify, type DataSourceKind, type DatasetField, type DatasetFieldType } from "@organic-growth/core";
 
 const FIELD_TYPES: DatasetFieldType[] = ["text", "number", "list", "url", "boolean"];
 export const SOURCE_KINDS: DataSourceKind[] = ["own_site", "listing", "sitemap", "page"];

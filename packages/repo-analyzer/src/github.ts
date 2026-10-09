@@ -1,4 +1,4 @@
-import type { RepoSnapshot } from "./analyze.js";
+import { routeSourceCandidates, type RepoSnapshot } from "./analyze.js";
 
 export interface GitHubContentsClient {
   getTreePaths(owner: string, repo: string, ref?: string): Promise<string[]>;
@@ -11,45 +11,29 @@ export interface GitHubContentsClient {
 }
 
 /**
- * Builds a repo snapshot from GitHub API for analysis.
- * Fetches package.json, routes, wrangler, and key SEO files.
+ * Builds a repo snapshot from the GitHub API for analysis: configuration
+ * files plus the source of the routes, layouts, and sitemap code that decide
+ * what crawlers receive.
  */
 export async function buildRepoSnapshotFromGitHub(
   client: GitHubContentsClient,
   owner: string,
   repo: string,
   ref = "main",
+  maxFiles = 70,
 ): Promise<RepoSnapshot> {
   const treePaths = await client.getTreePaths(owner, repo, ref);
-  const interesting = treePaths.filter((p) =>
-    /^(package\.json|vite\.config\.|astro\.config\.|nuxt\.config\.|wrangler\.|next\.config\.|vercel\.json|netlify\.toml|src\/app\/routes\.|(src\/)?app\/.*page\.|public\/(robots\.txt|sitemap|_redirects)|scripts\/generate-sitemap|worker\/|src\/app\/seo\/)/.test(
-      p,
-    ),
+  const config = treePaths.filter((p) =>
+    /^(package\.json|(vite|astro|nuxt|next|svelte|remix|gatsby)\.config\.[cm]?[jt]s|wrangler\.(toml|jsonc?)|vercel\.json|netlify\.toml|public\/robots\.txt|middleware\.(t|j)s|src\/middleware\.(t|j)s)$/.test(p),
   );
-
-  const priority = [
-    "package.json",
-    "src/app/routes.tsx",
-    "src/app/routes.ts",
-    "wrangler.jsonc",
-    "wrangler.toml",
-    "vite.config.ts",
-    "public/robots.txt",
-    "worker/spa-fallback.js",
-    "scripts/generate-sitemap.mjs",
-  ];
-
-  const toFetch = [
-    ...new Set([
-      ...priority.filter((p) => treePaths.includes(p)),
-      ...interesting.slice(0, 40),
-    ]),
-  ].slice(0, 50);
+  const toFetch = [...new Set([...config, ...routeSourceCandidates(treePaths)])].slice(0, maxFiles);
 
   const files: RepoSnapshot["files"] = [];
-  for (const path of toFetch) {
-    const content = await client.getFileContent(owner, repo, path, ref);
-    files.push({ path, content: content ?? undefined });
+  // A few requests at a time keeps well inside GitHub's secondary rate limits.
+  for (let index = 0; index < toFetch.length; index += 6) {
+    const batch = toFetch.slice(index, index + 6);
+    const contents = await Promise.all(batch.map((path) => client.getFileContent(owner, repo, path, ref).catch(() => null)));
+    batch.forEach((path, offset) => files.push({ path, content: contents[offset] ?? undefined }));
   }
 
   let packageJson: Record<string, unknown> | undefined;
@@ -102,7 +86,9 @@ export function createGitHubApiClient(token: string): GitHubContentsClient {
       };
       if (!data.content) return null;
       if (data.encoding === "base64") {
-        return atob(data.content.replace(/\n/g, ""));
+        // atob yields one character per byte; decode the bytes as UTF-8.
+        const binary = atob(data.content.replace(/\n/g, ""));
+        return new TextDecoder().decode(Uint8Array.from(binary, (char) => char.charCodeAt(0)));
       }
       return data.content;
     },

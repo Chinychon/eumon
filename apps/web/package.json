@@ -15,6 +15,7 @@
     "@organic-growth/scraper": "*",
     "@organic-growth/sdk": "*",
     "@vinext/cloudflare": "^1.0.1",
+    "d3-force": "^3.0.0",
     "react": "latest",
     "react-dom": "latest",
     "react-server-dom-webpack": "^19.3.0",
@@ -23,6 +24,7 @@
   "devDependencies": {
     "@cloudflare/vite-plugin": "^2.0.0-beta.sha-52b0dc0e9",
     "@tailwindcss/postcss": "latest",
+    "@types/d3-force": "^3.0.10",
     "@types/node": "latest",
     "@types/react": "latest",
     "@types/react-dom": "latest",
@@ -42,6 +44,7 @@
     "db:migrate:local": "cf d1 migrations apply 591e4045-cbff-4ef4-a894-cbe4ece424ec --local --persist-to ./.cloudflare/state --dir ../../packages/db/migrations",
     "db:migrate:remote": "cf d1 migrations apply 591e4045-cbff-4ef4-a894-cbe4ece424ec --dir ../../packages/db/migrations",
     "deploy": "vinext-cloudflare deploy",
-    "typecheck": "tsc --noEmit -p ."
+    "typecheck": "cf workers types -q && tsc --noEmit -p .",
+    "test": "node --test \"app/**/*.test.ts\" \"src/**/*.test.ts\""
   }
 }

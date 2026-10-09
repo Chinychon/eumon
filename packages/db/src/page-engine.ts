@@ -71,6 +71,27 @@ export async function listDatasets(db: D1Like, siteId: string): Promise<Array<Da
   return results.map((row) => ({ ...mapDataset(row), recordCount: Number(row.record_count ?? 0) }));
 }
 
+/**
+ * Each active dataset with its record count and how many one-page-per-record
+ * pages are live: the data a site holds versus what it has turned into pages.
+ */
+export async function datasetCoverage(db: D1Like, siteId: string): Promise<Array<{ name: string; entityType: string; records: number; livePages: number }>> {
+  const { results } = await db.prepare(
+    `SELECT d.name, d.entity_type,
+       (SELECT COUNT(*) FROM data_records r WHERE r.dataset_id = d.id) AS records,
+       (SELECT COUNT(*) FROM generated_pages g JOIN page_templates t ON t.id = g.template_id
+         WHERE t.dataset_id = d.id AND g.status = 'published'
+           AND COALESCE(json_array_length(json_extract(t.config_json, '$.groupBy')), 0) = 0) AS live_pages
+     FROM datasets d WHERE d.site_id = ? AND d.status != 'archived' ORDER BY d.created_at`,
+  ).bind(siteId).all<Row>();
+  return results.map((row) => ({
+    name: String(row.name),
+    entityType: String(row.entity_type),
+    records: Number(row.records ?? 0),
+    livePages: Number(row.live_pages ?? 0),
+  }));
+}
+
 export async function deleteDataset(db: D1Like, id: string): Promise<void> {
   // D1 enforces foreign keys, so remove dependants explicitly in dependency order.
   await runStatements(db, [
@@ -264,18 +285,6 @@ export async function listAllRecords(db: D1Like, datasetId: string, max = 50_000
     if (results.length < 1000) break;
   }
   return output;
-}
-
-export async function getRecordsByIds(db: D1Like, ids: string[]): Promise<DataRecord[]> {
-  const output: DataRecord[] = [];
-  for (const group of chunks(ids, 90)) {
-    const { results } = await db.prepare(
-      `SELECT * FROM data_records WHERE id IN (${group.map(() => "?").join(",")})`,
-    ).bind(...group).all<Row>();
-    output.push(...results.map(mapRecord));
-  }
-  const order = new Map(ids.map((id, index) => [id, index]));
-  return output.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
 }
 
 /** Folds duplicate records into a canonical one in a single batch. */
@@ -739,6 +748,7 @@ export function defaultPageSettings(siteId: string, siteName: string, baseUrl: s
     siteId,
     publicOrigin: new URL(baseUrl).origin,
     mountPath: "/guides",
+    language: "en",
     siteName,
     brandColor: "#176b50",
     ctaLabel: "Get in touch",
@@ -755,6 +765,7 @@ export async function getPageSettings(db: D1Like, siteId: string): Promise<PageS
     siteId: String(row.site_id),
     publicOrigin: String(row.public_origin),
     mountPath: String(row.mount_path),
+    language: row.language ? String(row.language) : "en",
     siteName: String(row.site_name),
     brandColor: String(row.brand_color),
     ctaLabel: String(row.cta_label),
@@ -767,13 +778,14 @@ export async function getPageSettings(db: D1Like, siteId: string): Promise<PageS
 
 export async function upsertPageSettings(db: D1Like, settings: PageSettings): Promise<void> {
   await db.prepare(
-    `INSERT INTO page_settings (site_id, public_origin, mount_path, site_name, brand_color, cta_label, cta_url, cta_copy, verified_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(site_id) DO UPDATE SET public_origin = excluded.public_origin, mount_path = excluded.mount_path, verified_at = excluded.verified_at, site_name = excluded.site_name,
+    `INSERT INTO page_settings (site_id, public_origin, mount_path, language, site_name, brand_color, cta_label, cta_url, cta_copy, verified_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(site_id) DO UPDATE SET public_origin = excluded.public_origin, mount_path = excluded.mount_path, language = excluded.language,
+       verified_at = excluded.verified_at, site_name = excluded.site_name,
        brand_color = excluded.brand_color, cta_label = excluded.cta_label, cta_url = excluded.cta_url,
        cta_copy = excluded.cta_copy, updated_at = excluded.updated_at`,
   ).bind(
-    settings.siteId, settings.publicOrigin, settings.mountPath, settings.siteName, settings.brandColor,
+    settings.siteId, settings.publicOrigin, settings.mountPath, settings.language || "en", settings.siteName, settings.brandColor,
     settings.ctaLabel, settings.ctaUrl, settings.ctaCopy, settings.verifiedAt ?? null, settings.updatedAt,
   ).run();
 }
@@ -859,15 +871,6 @@ export async function upsertPageSearchDaily(
        search_impressions = excluded.search_impressions, search_position = excluded.search_position`,
   ).bind(siteId, row.pageId, row.day, row.clicks, row.impressions, row.position));
   for (const group of chunks(statements, 100)) await runStatements(db, group);
-}
-
-/** Sites with live generated pages and a Search Console property, for the daily sync. */
-export async function listSitesWithLivePages(db: D1Like): Promise<string[]> {
-  const { results } = await db.prepare(
-    `SELECT DISTINCT s.id FROM sites s JOIN generated_pages p ON p.site_id = s.id AND p.status = 'published'
-     WHERE s.gsc_property IS NOT NULL`,
-  ).all<{ id: string }>();
-  return results.map((row) => row.id);
 }
 
 /** Maps public page URLs back to page IDs for Search Console imports. */

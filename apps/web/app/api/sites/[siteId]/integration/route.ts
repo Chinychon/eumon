@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
-import { GOOGLEBOT_UA, defaultFetcher, isEmptyShell, parseHtmlSignals } from "@organic-growth/crawler";
-import { listPublishedPaths, upsertPageSettings } from "@organic-growth/db";
-import { fail, findSite, json, settingsFor } from "../../../../../src/server";
+import { GOOGLEBOT_UA, defaultFetcher, headerNoindex, isEmptyShell, parseHtmlSignals } from "@organic-growth/crawler";
+import { getSite, listPublishedPaths, upsertPageSettings } from "@organic-growth/db";
+import { fail, json, settingsFor } from "../../../../../src/server";
 
 type Snippet = { id: string; label: string; when: string; language: string; code: string };
 
@@ -34,8 +34,8 @@ export default {
     },
     {
       id: "vercel",
-      label: "Vercel (vercel.json)",
-      when: "The site is deployed on Vercel (Next.js, Astro, Nuxt, Vite).",
+      label: "Vercel",
+      when: "The site is deployed on Vercel (Next.js, Astro, Nuxt, Vite). Add this to vercel.json.",
       language: "json",
       code: JSON.stringify({
         rewrites: mount
@@ -48,8 +48,8 @@ export default {
     },
     {
       id: "nextjs",
-      label: "Next.js (next.config)",
-      when: "A self-hosted Next.js app.",
+      label: "Next.js",
+      when: "A self-hosted Next.js app. Add this to next.config.",
       language: "js",
       code: `// next.config.js
 module.exports = {
@@ -65,8 +65,8 @@ module.exports = {
     },
     {
       id: "netlify",
-      label: "Netlify (netlify.toml)",
-      when: "The site is deployed on Netlify.",
+      label: "Netlify",
+      when: "The site is deployed on Netlify. Add this to netlify.toml.",
       language: "toml",
       code: `[[redirects]]
   from = "${prefix}/*"
@@ -90,8 +90,8 @@ module.exports = {
     },
     {
       id: "apache",
-      label: "Apache (.htaccess / vhost)",
-      when: "Apache with mod_proxy and mod_headers enabled.",
+      label: "Apache",
+      when: "Apache with mod_proxy and mod_headers enabled. Add this to .htaccess or the virtual host.",
       language: "apache",
       code: `SSLProxyEngine on
 RequestHeader set X-Eumon-Proxy "1"
@@ -165,7 +165,7 @@ async function detectHosting(baseUrl: string): Promise<{ provider: string | null
 
 export async function GET(request: Request, context: { params: Promise<{ siteId: string }> }) {
   const { siteId } = await context.params;
-  const site = await findSite(siteId);
+  const site = await getSite(env.DB, siteId);
   if (!site) return fail("Site not found.", 404);
   const settings = await settingsFor(site);
   const target = `${new URL(request.url).origin}/p/${site.id}`;
@@ -191,7 +191,7 @@ export async function GET(request: Request, context: { params: Promise<{ siteId:
  */
 export async function POST(_request: Request, context: { params: Promise<{ siteId: string }> }) {
   const { siteId } = await context.params;
-  const site = await findSite(siteId);
+  const site = await getSite(env.DB, siteId);
   if (!site) return fail("Site not found.", 404);
   const settings = await settingsFor(site);
   const origin = settings.publicOrigin.replace(/\/$/, "");
@@ -228,9 +228,9 @@ export async function POST(_request: Request, context: { params: Promise<{ siteI
     const url = `${origin}${sample.path}`;
     try {
       const response = await defaultFetcher(url, { userAgent: GOOGLEBOT_UA });
-      const signals = parseHtmlSignals(response.body);
+      const signals = parseHtmlSignals(response.body, response.finalUrl);
       const fromEumon = /<meta name="generator" content="Eumon">/.test(response.body);
-      const robotsHeader = response.headers["x-robots-tag"] ?? "";
+      const noindex = signals.metaNoindex || headerNoindex(response.headers["x-robots-tag"]);
       checks.push({
         name: "A published page renders for Googlebot",
         ok: response.status === 200 && fromEumon && !isEmptyShell(response.body, signals),
@@ -242,8 +242,8 @@ export async function POST(_request: Request, context: { params: Promise<{ siteI
       if (!fromEumon) return json(await recordVerification(settings, checks));
       checks.push({
         name: "Indexable",
-        ok: !/noindex/i.test(robotsHeader) && !/noindex/i.test(signals.robots ?? ""),
-        detail: /noindex/i.test(robotsHeader) || /noindex/i.test(signals.robots ?? "")
+        ok: !noindex,
+        detail: noindex
           ? "The page is marked noindex — the proxy is probably not sending X-Eumon-Proxy: 1."
           : "No noindex directives.",
       });

@@ -1,0 +1,42 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <rect width="512" height="512" fill="#1e3d1f"/>
+  <g transform="translate(102 102) scale(0.6)">
+  <!-- Eumon brand pixel art (8x8 scaled to 512x512, each pixel = 64x64) -->
+  <!-- Row 1: ......ww. -->
+  <rect x="384" y="0" width="64" height="64" fill="#f4f5ee"/>
+  <rect x="448" y="0" width="64" height="64" fill="#f4f5ee"/>
+  <!-- Row 2: .....wwww -->
+  <rect x="320" y="64" width="64" height="64" fill="#f4f5ee"/>
+  <rect x="384" y="64" width="64" height="64" fill="#f4f5ee"/>
+  <rect x="448" y="64" width="64" height="64" fill="#f4f5ee"/>
+  <!-- Row 3: .ww.wwww. -->
+  <rect x="64" y="128" width="64" height="64" fill="#f4f5ee"/>
+  <rect x="128" y="128" width="64" height="64" fill="#f4f5ee"/>
+  <rect x="256" y="128" width="64" height="64" fill="#f4f5ee"/>
+  <rect x="320" y="128" width="64" height="64" fill="#f4f5ee"/>
+  <rect x="384" y="128" width="64" height="64" fill="#f4f5ee"/>
+  <rect x="448" y="128" width="64" height="64" fill="#f4f5ee"/>
+  <!-- Row 4: wwwwww... -->
+  <rect x="0" y="192" width="64" height="64" fill="#f4f5ee"/>
+  <rect x="64" y="192" width="64" height="64" fill="#f4f5ee"/>
+  <rect x="128" y="192" width="64" height="64" fill="#f4f5ee"/>
+  <rect x="192" y="192" width="64" height="64" fill="#f4f5ee"/>
+  <rect x="256" y="192" width="64" height="64" fill="#f4f5ee"/>
+  <rect x="320" y="192" width="64" height="64" fill="#f4f5ee"/>
+  <!-- Row 5: .wwww.... -->
+  <rect x="64" y="256" width="64" height="64" fill="#f4f5ee"/>
+  <rect x="128" y="256" width="64" height="64" fill="#f4f5ee"/>
+  <rect x="192" y="256" width="64" height="64" fill="#f4f5ee"/>
+  <rect x="256" y="256" width="64" height="64" fill="#f4f5ee"/>
+  <!-- Row 6: ....w.... -->
+  <rect x="256" y="320" width="64" height="64" fill="#f4f5ee"/>
+  <!-- Row 7: ....w.... -->
+  <rect x="256" y="384" width="64" height="64" fill="#f4f5ee"/>
+  <!-- Row 8: ..wwwww.. -->
+  <rect x="128" y="448" width="64" height="64" fill="#f4f5ee"/>
+  <rect x="192" y="448" width="64" height="64" fill="#f4f5ee"/>
+  <rect x="256" y="448" width="64" height="64" fill="#f4f5ee"/>
+  <rect x="320" y="448" width="64" height="64" fill="#f4f5ee"/>
+  <rect x="384" y="448" width="64" height="64" fill="#f4f5ee"/>
+  </g>
+</svg>

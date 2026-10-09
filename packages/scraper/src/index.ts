@@ -1,4 +1,3 @@
-export * from "./robots.js";
 export * from "./html.js";
 export * from "./url-pattern.js";
 export * from "./fetch.js";

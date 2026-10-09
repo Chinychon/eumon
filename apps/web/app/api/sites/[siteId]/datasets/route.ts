@@ -1,12 +1,12 @@
 import { env } from "cloudflare:workers";
 import { createId, type DatasetField } from "@organic-growth/core";
-import { getLatestJob, getSiteScope, listDatasets, listSources, upsertDataset } from "@organic-growth/db";
+import { getLatestJob, getSite, getSiteScope, listDatasets, listSources, upsertDataset } from "@organic-growth/db";
 import { validateFields } from "../../../../../src/datasets";
-import { fail, findSite, json, readJson } from "../../../../../src/server";
+import { fail, json, readJson } from "../../../../../src/server";
 
 export async function GET(_request: Request, context: { params: Promise<{ siteId: string }> }) {
   const { siteId } = await context.params;
-  if (!(await findSite(siteId))) return fail("Site not found.", 404);
+  if (!(await getSite(env.DB, siteId))) return fail("Site not found.", 404);
   const datasets = await listDatasets(env.DB, siteId);
   const detailed = await Promise.all(datasets.map(async (dataset) => ({
     ...dataset,
@@ -19,7 +19,7 @@ export async function GET(_request: Request, context: { params: Promise<{ siteId
 /** Creates a dataset by hand, e.g. for data the owner already has as a spreadsheet. */
 export async function POST(request: Request, context: { params: Promise<{ siteId: string }> }) {
   const { siteId } = await context.params;
-  if (!(await findSite(siteId))) return fail("Site not found.", 404);
+  if (!(await getSite(env.DB, siteId))) return fail("Site not found.", 404);
   const body = await readJson<{ name?: unknown; entityType?: unknown; description?: unknown; fields?: unknown; keyField?: unknown }>(request);
   if (!body || typeof body.name !== "string" || !body.name.trim()) return fail("Name the dataset, e.g. “Malls”.");
   const fields = validateFields(body.fields);

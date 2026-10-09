@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from "react";
 import type { PageSettings, SiteRecord } from "@organic-growth/core";
+import { PAGE_LANGUAGES } from "@organic-growth/pages/labels";
 import { api, errorMessage } from "./api";
-import { Button, Card, CopyBlock, Field, ViewHeader } from "./ui";
+import { Button, Card, CheckIcon, CopyBlock, CrossIcon, Field, PartHead } from "./ui";
 
 type Snippet = { id: string; label: string; when: string; language: string; code: string };
 type Integration = {
@@ -70,9 +71,9 @@ export function SetupView({ site }: { site: SiteRecord }) {
 
   return (
     <div>
-      <ViewHeader
-        eyebrow="SERVING & TRACKING"
-        title="Put the pages on your domain"
+      <PartHead
+        id="on-your-site"
+        title="On your site"
         description="Eumon renders every landing page as complete HTML. A small proxy rule on your domain forwards one path to Eumon, so Google sees real pages on your site — no JavaScript rendering, no CMS changes."
       />
       {error && <div className="callout error" role="alert" style={{ marginBottom: 14 }}>{error}</div>}
@@ -88,6 +89,12 @@ export function SetupView({ site }: { site: SiteRecord }) {
                 <input className="input mono" value={form.mountPath} placeholder="/guides" onChange={(event) => set("mountPath", event.target.value)} />
               </Field>
               <Field label="Business name"><input className="input" value={form.siteName} onChange={(event) => set("siteName", event.target.value)} /></Field>
+              <Field label="Page language" hint="New templates are written in this language; labels and the lang attribute follow it. Regenerate existing templates to switch their copy.">
+                <select className="select" value={form.language} onChange={(event) => set("language", event.target.value)}>
+                  {PAGE_LANGUAGES.map((language) => <option key={language.code} value={language.code}>{language.name}</option>)}
+                  {!PAGE_LANGUAGES.some((language) => language.code === form.language) && <option value={form.language}>{form.language}</option>}
+                </select>
+              </Field>
               <Field label="Brand colour"><div className="row" style={{ flexWrap: "nowrap" }}><input type="color" value={form.brandColor} onChange={(event) => set("brandColor", event.target.value)} style={{ width: 44, height: 36, border: 0, background: "none" }} /><input className="input mono" value={form.brandColor} onChange={(event) => set("brandColor", event.target.value)} /></div></Field>
               <Field label="Call-to-action label"><input className="input" value={form.ctaLabel} onChange={(event) => set("ctaLabel", event.target.value)} /></Field>
               <Field label="Call-to-action link" hint="WhatsApp (https://wa.me/60…), tel:, mailto:, or your contact page."><input className="input" value={form.ctaUrl} onChange={(event) => set("ctaUrl", event.target.value)} /></Field>
@@ -100,14 +107,14 @@ export function SetupView({ site }: { site: SiteRecord }) {
               const detected = [integration.hosting.provider ?? integration.deployment, integration.hosting.cms].filter(Boolean).join(" · ");
               return detected ? ` — detected: ${detected}` : "";
             })()}.</>}>
-            <div className="tabs">{integration.snippets.map((entry) => <button key={entry.id} className={tab === entry.id ? "active" : ""} onClick={() => setTab(entry.id)}>{entry.label}{entry.id === recommendedSnippet(integration) ? " ★" : ""}</button>)}</div>
-            {snippet && <><p className="small muted" style={{ marginTop: 0 }}>{snippet.when}</p><CopyBlock code={snippet.code} /></>}
+            <div className="tabs">{integration.snippets.map((entry) => <button key={entry.id} className={tab === entry.id ? "active" : ""} onClick={() => setTab(entry.id)}>{entry.label}</button>)}</div>
+            {snippet && <><p className="small muted" style={{ marginTop: 0 }}>{snippet.id === recommendedSnippet(integration) ? "Matches how your site is hosted. " : ""}{snippet.when}</p><CopyBlock code={snippet.code} /></>}
             <p className="small muted">Proxied requests must carry <span className="mono">X-Eumon-Proxy: 1</span> or <span className="mono">X-Forwarded-Host</span>; pages reached any other way are marked noindex so they never compete with your domain.</p>
           </Card>
 
           <Card title="2 · Verify what Google receives" subtitle="Fetches a published page through your domain as Googlebot." actions={<Button variant="secondary" busy={busy === "check"} onClick={check}>Run check</Button>}>
             {checks ? checks.map((entry) => (
-              <div key={entry.name} className={`check ${entry.ok ? "ok" : "bad"}`}><b>{entry.ok ? "✓" : "✕"}</b><div><strong>{entry.name}</strong><p>{entry.detail}</p></div></div>
+              <div key={entry.name} className={`check ${entry.ok ? "ok" : "bad"}`}><b role="img" aria-label={entry.ok ? "Passed" : "Failed"}>{entry.ok ? <CheckIcon /> : <CrossIcon />}</b><div><strong>{entry.name}</strong><p>{entry.detail}</p></div></div>
             )) : <p className="small muted" style={{ margin: 0 }}>Run the check after adding the proxy rule and publishing at least one template.</p>}
           </Card>
 

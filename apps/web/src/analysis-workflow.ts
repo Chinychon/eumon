@@ -3,13 +3,15 @@ import { WorkflowEntrypoint } from "cloudflare:workers";
 import { NonRetryableError } from "cloudflare:workflows";
 import type { WorkflowEvent, WorkflowStep } from "cloudflare:workers";
 import type { AppEnv } from "../cloudflare.config";
-import { createLlm } from "@organic-growth/ai";
+import { createLlm, type JsonLlm } from "@organic-growth/ai";
 import {
-  enqueueAnalysisCrawlUrls,
+  datasetCoverage,
   getCrawlCoverage,
   getSite,
   listCrawlPageResults,
   listPendingCrawlUrls,
+  listRecordKeys,
+  listSiteMarkets,
   listSiteCompetitorDomains,
   replaceCurrentSearchMetrics,
   saveAnalysisReport,
@@ -19,7 +21,9 @@ import {
   updateSiteFingerprint,
 } from "@organic-growth/db";
 import {
+  MAX_COMPETITORS,
   fetchSearchConsoleMetrics,
+  queueFullCrawl,
   runFullAnalysis,
   synthesizePlanNarrative,
 } from "@organic-growth/agents";
@@ -28,12 +32,19 @@ import {
   createGitHubApiClient,
   createInstallationToken,
 } from "@organic-growth/repo-analyzer";
-import { auditSitemap, crawlGooglebotBatch, isSafePublicUrl } from "@organic-growth/crawler";
+import {
+  crawlGooglebotBatch,
+  isSafePublicUrl,
+  researchSite,
+  type SiteResearch,
+} from "@organic-growth/crawler";
 import { googleAccessToken } from "./gsc-auth";
 
 interface AnalysisPayload {
   analysisId: string;
   siteId: string;
+  /** Fetch every sitemap URL again instead of reusing unchanged results from the last crawl. */
+  full?: boolean;
 }
 
 /** Upper bound on sitemap URLs crawled per analysis (≈250 Workflow steps). */
@@ -43,12 +54,17 @@ const CRAWL_CONCURRENCY = 6;
 
 export class SiteAnalysisWorkflow extends WorkflowEntrypoint<AppEnv, AnalysisPayload> {
   async run(event: WorkflowEvent<AnalysisPayload>, step: WorkflowStep) {
-    const { analysisId, siteId } = event.payload;
+    const { analysisId, siteId, full } = event.payload;
     const db = this.env.DB;
+    // Progress writes double as the cancel check: a cancelled run stops at its next update,
+    // even when ending its Workflow instance didn't work.
+    const progress = async (stage: string, message: string, detail?: Record<string, string | number>) => {
+      if (!(await updateAnalysisProgress(db, analysisId, stage, message, detail))) throw new NonRetryableError("The analysis was cancelled.");
+    };
     try {
       const site = await step.do("load-site", async () => {
         await updateAnalysisStatus(db, analysisId, "running", { startedAt: new Date().toISOString() });
-        await updateAnalysisProgress(db, analysisId, "sitemap", "Reading the sitemap");
+        await progress("sitemap", "Reading the sitemap");
         const record = await getSite(db, siteId);
         if (!record) throw new NonRetryableError("The site no longer exists.");
         // Only plain connection fields cross the step boundary.
@@ -65,11 +81,11 @@ export class SiteAnalysisWorkflow extends WorkflowEntrypoint<AppEnv, AnalysisPay
 
       // Crawl every sitemap URL (as Googlebot) in resumable batches before
       // analysis, so findings describe the whole site rather than a sample.
+      // Results from the last crawl that still stand are reused unless `full`.
       const queued = await step.do("enqueue-full-crawl", async () => {
-        const { urls } = await auditSitemap(site.baseUrl, undefined, { maxUrls: 1 });
-        const capped = urls.slice(0, MAX_FULL_CRAWL_URLS);
-        await enqueueAnalysisCrawlUrls(db, { analysisId, siteId, urls: capped });
-        return { queued: capped.length, declared: urls.length };
+        const result = await queueFullCrawl(db, { analysisId, siteId, baseUrl: site.baseUrl, maxUrls: MAX_FULL_CRAWL_URLS, full });
+        await progress("crawl", `Crawling ${result.queued.toLocaleString()} sitemap URLs as Googlebot`);
+        return result;
       });
 
       for (let batch = 0; batch * CRAWL_BATCH_SIZE < queued.queued + CRAWL_BATCH_SIZE; batch++) {
@@ -79,10 +95,26 @@ export class SiteAnalysisWorkflow extends WorkflowEntrypoint<AppEnv, AnalysisPay
           const outcomes = await crawlGooglebotBatch(urls, undefined, CRAWL_CONCURRENCY);
           await saveCrawlBatch(db, { analysisId, outcomes: outcomes.map((outcome) => ("page" in outcome ? outcome : { url: outcome.url, error: outcome.error })) });
           const done = Math.min((batch + 1) * CRAWL_BATCH_SIZE, queued.queued);
-          await updateAnalysisProgress(db, analysisId, "crawl", `Crawled ${done.toLocaleString()} of ${queued.queued.toLocaleString()} sitemap URLs as Googlebot`);
+          await progress("crawl", `Crawled ${done.toLocaleString()} of ${queued.queued.toLocaleString()} sitemap URLs as Googlebot`);
           return urls.length;
         });
         if (crawled === 0) break;
+      }
+
+      // Each competitor is researched in its own step (sitemaps and a few sample
+      // pages, fetched as EumonBot), so one slow site can retry on its own.
+      const competitorDomains = await step.do("list-competitors", async () => {
+        await progress("competitors", "Reading competitor sitemaps and sample pages");
+        return (await listSiteCompetitorDomains(db, siteId)).slice(0, MAX_COMPETITORS);
+      });
+      const competitorResearch: SiteResearch[] = [];
+      for (const [index, domain] of competitorDomains.entries()) {
+        competitorResearch.push(await step.do(`research-${domain}`, { retries: { limit: 1, delay: "10 seconds" } }, async () => {
+          await progress("competitors", `Reading ${domain}`, { competitor: domain, done: index, of: competitorDomains.length });
+          const research = await researchSite(domain, undefined, { maxFiles: 15, maxUrls: 50_000 });
+          // Keep the step output small: the largest families are what the comparison uses.
+          return { ...research, sitemap: { ...research.sitemap, families: research.sitemap.families.slice(0, 40) } };
+        }));
       }
 
       // The step persists the report itself and returns only a summary: the
@@ -91,7 +123,7 @@ export class SiteAnalysisWorkflow extends WorkflowEntrypoint<AppEnv, AnalysisPay
         "analyze-repository-and-site",
         { retries: { limit: 2, delay: "5 seconds", backoff: "exponential" } },
         async () => {
-          await updateAnalysisProgress(db, analysisId, "analysis", "Checking rendering, indexing, and search data");
+          await progress("analysis", "Checking rendering, indexing, and search data");
           const repoSnapshot = site.githubInstallationId && site.githubOwner && site.githubRepo
             ? await buildRepoSnapshotFromGitHub(
               createGitHubApiClient(await createInstallationToken(this.env.GITHUB_APP_ID, this.env.GITHUB_APP_PRIVATE_KEY, site.githubInstallationId)),
@@ -100,7 +132,12 @@ export class SiteAnalysisWorkflow extends WorkflowEntrypoint<AppEnv, AnalysisPay
               site.defaultBranch ?? "main",
             )
             : undefined;
-          const competitorDomains = await listSiteCompetitorDomains(db, siteId);
+          let llm: JsonLlm | undefined;
+          try {
+            llm = createLlm(this.env);
+          } catch {
+            // No model configured: content types are matched by name and the plan is deterministic.
+          }
           let searchMetrics;
           if (site.gscProperty) {
             const accessToken = await googleAccessToken(
@@ -110,9 +147,12 @@ export class SiteAnalysisWorkflow extends WorkflowEntrypoint<AppEnv, AnalysisPay
             searchMetrics = await fetchSearchConsoleMetrics(accessToken, site.gscProperty);
             await replaceCurrentSearchMetrics(db, siteId, searchMetrics);
           }
-          const [coverage, examples] = await Promise.all([
+          const [coverage, examples, datasets, targetMarkets, entityKeys] = await Promise.all([
             getCrawlCoverage(db, analysisId),
             listCrawlPageResults(db, analysisId, 50),
+            datasetCoverage(db, siteId),
+            listSiteMarkets(db, siteId),
+            listRecordKeys(db, siteId),
           ]);
           const raw = await runFullAnalysis({
             analysisId,
@@ -124,21 +164,23 @@ export class SiteAnalysisWorkflow extends WorkflowEntrypoint<AppEnv, AnalysisPay
             defaultBranch: site.defaultBranch,
             gscProperty: site.gscProperty,
             searchMetrics,
-            competitorDomains,
+            competitorResearch,
+            datasets,
+            targetMarkets,
+            entityKeys,
+            llm,
             repoSnapshot,
             maxPages: 25,
             crawlCoverage: { coverage, examples },
             renderPages: (urls) => this.renderPages(urls),
           });
-          let plan = raw.plan;
-          try {
-            plan = await synthesizePlanNarrative(createLlm(this.env), raw.plan, raw.findings);
-          } catch {
-            // No model configured: the deterministic plan stands on its own.
-          }
+          const plan = llm ? await synthesizePlanNarrative(llm, raw.plan, raw.findings) : raw.plan;
           if (raw.site.fingerprint) await updateSiteFingerprint(db, siteId, raw.site.fingerprint);
-          await updateAnalysisProgress(db, analysisId, "saving", "Saving findings and growth plan");
-          await saveAnalysisReport(db, analysisId, { ...raw, plan, sitemapUrlsDeclared: queued.declared }, plan.highestImpactOpportunity);
+          await progress("saving", "Saving findings and growth plan");
+          await saveAnalysisReport(db, analysisId, {
+            ...raw, plan, sitemapUrlsDeclared: queued.declared,
+            ...(queued.reused ? { crawlReuse: { urls: queued.reused, from: queued.reusedFrom } } : {}),
+          }, plan.highestImpactOpportunity);
           return plan.highestImpactOpportunity;
         },
       );
@@ -150,7 +192,7 @@ export class SiteAnalysisWorkflow extends WorkflowEntrypoint<AppEnv, AnalysisPay
     }
   }
 
-  /** Browser-renders a few pages so raw HTML can be compared with the rendered DOM. */
+  /** Browser-renders one page per template so raw HTML can be compared with the rendered DOM. */
   private async renderPages(urls: string[]): Promise<Record<string, string>> {
     const browser = await puppeteer.launch(this.env.BROWSER);
     try {
@@ -168,7 +210,10 @@ export class SiteAnalysisWorkflow extends WorkflowEntrypoint<AppEnv, AnalysisPay
               void outbound.abort().catch(() => undefined);
             }
           });
-          await page.goto(url, { waitUntil: "domcontentloaded", timeout: 15000 });
+          // Wait for client-side data requests to settle (as Google's renderer does);
+          // on a timeout, use whatever has rendered so far.
+          const loaded = await page.goto(url, { waitUntil: "networkidle2", timeout: 20000 }).catch(() => null);
+          if (!loaded) await page.waitForSelector("body", { timeout: 5000 });
           if (new URL(page.url()).origin === new URL(url).origin) output[url] = await page.content();
         } catch {
           // Keep other representative pages when one browser navigation fails.

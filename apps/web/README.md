@@ -14,7 +14,7 @@ The dashboard, API, public landing pages, and background Workflows, deployed as 
 3. Apply migrations: `npm run db:migrate:local -w @organic-growth/web`.
 4. Start: `npm run dev -w @organic-growth/web` (port 5174, fails rather than switching ports). Restart it after changing `cloudflare.config.ts` or `.dev.vars`.
 
-Deploy with `npm run deploy -w @organic-growth/web` after `npm run db:migrate:remote -w @organic-growth/web` and setting the secrets above on the deployed Worker. To deploy your own copy, set `CF_D1_DATABASE_ID` to your D1 database (and update the ID in the `db:migrate:*` scripts).
+To deploy, from the repository root: sign in with `npx cf auth login`, apply migrations with `npm run db:migrate:remote`, set the secrets above on the deployed Worker, then run `npm run deploy` (it builds the packages first). Re-run `npm run db:migrate:remote` after pulling changes that add files to `packages/db/migrations`; already-applied migrations are skipped. To deploy your own copy, set `CF_D1_DATABASE_ID` to your D1 database (and update the ID in the `db:migrate:*` scripts).
 
 ## The landing page engine
 
@@ -23,7 +23,7 @@ Deploy with `npm run deploy -w @organic-growth/web` after `npm run db:migrate:re
 | 1. Scope | `POST /api/sites/:id/scope` | Reads the homepage, linked pages, sitemap route families, and Search Console queries; proposes datasets (fields, page ideas, sources). |
 | 2. Sources | `/api/datasets/:id/sources`, `POST /api/sources/:id/preview` | Own-site sitemap sections, directory/listing pages, sitemaps, or single pages. Preview shows matches, robots.txt status, and a sample extraction. |
 | 3. Collect | `POST /api/datasets/:id/scrape` → `ScrapeWorkflow` | Durable, resumable batches. Identifies as EumonBot, obeys robots.txt and crawl-delay, paces requests per host. CSV import: `POST /api/datasets/:id/records/import`. |
-| 4. Generate | `POST /api/datasets/:id/templates`, `/api/templates/:id/generate` | One page per record (or per group of records). AI writes the copy *patterns* once per template; pages are filled from data, so cost doesn't grow with page count. Thin and duplicate pages are never published. |
+| 4. Generate | `GET /api/datasets/:id/potential`, `POST /api/datasets/:id/templates`, `/api/templates/:id/generate` | Before designing, the potential estimate shows how many pages each page idea (and each other grouping the data supports) would publish under the quality gate. One page per record (or per group of records). AI writes the copy *patterns* once per template; pages are filled from data, so cost doesn't grow with page count. Thin and duplicate pages are never published. |
 | 5. Serve | `GET /p/:siteId/<path>` | Complete server-rendered HTML with canonical, JSON-LD, sitemap, hub page, and related links. Published URLs never change on regeneration; removed pages return 410. |
 | 6. Measure | `GET /api/sites/:id/performance`, `SearchSyncWorkflow` (daily) | Views and CTA clicks (in-page beacon), Googlebot fetches (server-side), Search Console per page and query, and conversions attributed through a first-party session cookie. |
 | 7. Optimize | Suggestions, `POST /api/pages/:id/snippets`, CTA variants | Low-CTR snippets, near-miss queries, uncrawled or invisible pages, weak CTAs, winning templates. CTA variants are allocated by Thompson sampling. Every page edit is logged with before/after metrics. |
@@ -44,11 +44,12 @@ The app has no built-in user accounts: put the hostname behind **Cloudflare Acce
 
 - `/p/*` — landing pages, sitemap, and the analytics beacon
 - `/api/sites/*/events` — conversion events from customer sites
+- `/r/*` and `/api/r/*` — client Results links (each is a signed, revocable token)
 
 ## Current boundaries
 
 - One workspace; no multi-user membership or roles (see Access control).
-- Competitor entries are owner-supplied domains with one homepage fetch each; no SERP data.
+- Competitors are owner-supplied domains (up to five per analysis). Eumon reads their sitemaps within a fixed budget (large sitemap indexes are sampled and extrapolated), inspects one page per major section as EumonBot (robots.txt respected), and compares content types with yours and with your datasets. There is no SERP or backlink data, so counts show where competitors invest, not what ranks.
 - The scraper reads server-rendered HTML; sources that only render client-side, require logins, or block robots are skipped.
 - Collected facts are shown to the owner before anything is published, but extraction is model output — review records and page previews before publishing.
 - The analytics beacon is unauthenticated (as with any web analytics); counts can be inflated by deliberate abuse.

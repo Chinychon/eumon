@@ -31,13 +31,6 @@ export type CompetitorCategory =
   | "serp"
   | "authority";
 
-export type AnalysisStatus =
-  | "queued"
-  | "pending"
-  | "running"
-  | "completed"
-  | "failed";
-
 export type ChangeStatus =
   | "proposed"
   | "approved"
@@ -88,6 +81,10 @@ export interface SiteRecord {
   defaultBranch?: string;
   fingerprint?: FrameworkFingerprint;
   gscProperty?: string;
+  /** GA4 property (`properties/123456`) whose sessions feed Results. */
+  ga4Property?: string;
+  /** Bumped to revoke every client link to this site's Results. */
+  reportShareVersion?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -127,6 +124,32 @@ export type CrawlPageResult = {
   renderedTextLength: number;
   renderDelta: number;
   fetchMode: "raw" | "googlebot" | "browser";
+  /** Number of `<h1>` elements in the crawler-visible HTML. */
+  h1Count?: number;
+  /** Excluded from Google's index by a robots meta tag or an `X-Robots-Tag` header. */
+  noindex?: boolean;
+  /** schema.org `@type` values found in JSON-LD, `@graph` flattened. */
+  jsonLdTypes?: string[];
+  /** JSON-LD blocks that failed to parse (search engines ignore them). */
+  invalidJsonLd?: number;
+  /** Route family (`/en/doctors/jane` → `doctors`), used to report problems per page template. */
+  routeFamily?: string;
+  /** The canonical tag names a different URL than the one fetched. */
+  canonicalMismatch?: boolean;
+  /**
+   * Status a Googlebot-identified request got before the crawler retried as a
+   * browser — typically a firewall rejecting unverified Googlebot traffic.
+   */
+  googlebotBlockedStatus?: number;
+  /** The response was a bot-protection challenge page rather than the site's content. */
+  botChallenge?: boolean;
+  /** Target of a `<meta http-equiv="refresh">` redirect; such pages are redirects, not content. */
+  metaRefresh?: string;
+  /**
+   * Same-site links on the page (path with no trailing slash, and its page
+   * type), from full-crawl fetches only. Stored in `page_links`, not with the page.
+   */
+  internalLinks?: Array<{ path: string; family: string }>;
 }
 
 export type SitemapAudit = {
@@ -134,10 +157,40 @@ export type SitemapAudit = {
   sampledUrls: number;
   indexFiles: string[];
   urlTypes: Record<string, number>;
+  /** Distinct pages per family: translations of one page count once (its largest language edition). */
+  sections?: Record<string, { pages: number; languages: number }>;
   languages: Record<string, number>;
   errors: string[];
   freshness?: string;
 }
+
+/** Problems counted across every crawled sitemap URL. */
+export type CrawlIssue =
+  | "robotsBlocked"
+  | "noindex"
+  | "canonicalMismatch"
+  | "redirected"
+  | "missingH1"
+  | "multipleH1"
+  | "missingDescription"
+  | "missingStructuredData"
+  | "invalidStructuredData"
+  | "duplicateTitle"
+  | "botFallback"
+  | "botChallenge";
+
+export type CrawlIssueExample = { url: string; detail?: string };
+
+/** Crawl health of one route family (page template), e.g. every `/doctors/*` URL. */
+export type CrawlFamilyStats = {
+  family: string;
+  urls: number;
+  crawled: number;
+  emptyShells: number;
+  errors: number;
+  noindex: number;
+  missingStructuredData: number;
+};
 
 /** Aggregate coverage for a sitemap-driven crawl. Individual page records live in storage. */
 export type CrawlCoverage = {
@@ -148,6 +201,11 @@ export type CrawlCoverage = {
   emptyShellUrls: number;
   httpErrorUrls: number;
   missingTitleUrls: number;
+  /** URL counts per issue. Absent in reports created before these checks existed. */
+  issues?: Partial<Record<CrawlIssue, number>>;
+  issueExamples?: Partial<Record<CrawlIssue, CrawlIssueExample[]>>;
+  duplicateTitleGroups?: Array<{ title: string; count: number; examples: string[] }>;
+  families?: CrawlFamilyStats[];
 }
 
 export type SearchMetricRow = {
@@ -249,35 +307,6 @@ export interface ProposedChange {
   aiModel?: string;
   createdAt: string;
   result?: string;
-}
-
-export interface ConversionEvent {
-  id: string;
-  siteId: string;
-  event: ConversionEventName;
-  destination?: string;
-  pageUrl?: string;
-  sessionId?: string;
-  properties?: JsonObject;
-  occurredAt: string;
-}
-
-/** Prioritization model — not a traffic prediction. */
-export function computePriorityScore(input: {
-  searchDemand: number;
-  businessValue: number;
-  conversionPotential: number;
-  competitiveGap: number;
-  implementationEffort: number;
-}): number {
-  const effort = Math.max(input.implementationEffort, 0.1);
-  return (
-    (input.searchDemand *
-      input.businessValue *
-      input.conversionPotential *
-      input.competitiveGap) /
-    effort
-  );
 }
 
 export function rankSeverityByOrganicImpact(
@@ -452,6 +481,8 @@ export type PageSettings = {
   publicOrigin: string;
   /** Path prefix the proxy forwards to Eumon, e.g. `/guides`; `` for a whole subdomain. */
   mountPath: string;
+  /** Language the pages are written in (BCP 47, e.g. `en`, `id`, `ms`): page copy, interface labels, and `<html lang>`. */
+  language: string;
   siteName: string;
   brandColor: string;
   ctaLabel: string;

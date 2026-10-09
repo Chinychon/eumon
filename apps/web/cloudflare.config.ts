@@ -8,8 +8,9 @@ export const worker = defineWorker({
     exports: {
       SiteAnalysisWorkflow: exports.workflow({ name: "site-analysis" }),
       ScrapeWorkflow: exports.workflow({ name: "dataset-scrape" }),
-      // Daily Search Console import for generated pages (closes the measurement loop).
-      SearchSyncWorkflow: exports.workflow({ name: "search-sync", schedules: "15 4 * * *" }),
+      // Daily sync for every site. Scheduled Workflows need the paid Workers plan, so for now it runs only
+      // from "Sync now"; on the paid plan, add `schedules: "15 4 * * *"` back to run it daily at 04:15 UTC.
+      SearchSyncWorkflow: exports.workflow({ name: "search-sync" }),
     },
     assets: { notFoundHandling: "none" },
     env: {
@@ -43,11 +44,15 @@ export const worker = defineWorker({
       GOOGLE_CLIENT_ID: bindings.secret(),
       GOOGLE_CLIENT_SECRET: bindings.secret(),
       OAUTH_ENCRYPTION_KEY: bindings.secret(),
-      // Optional language model keys, used in this order: DeepSeek, Claude, then Workers AI.
+      // Optional: real-user speed and lab scores (Google API key with the CrUX and PageSpeed Insights APIs), and authority (Open PageRank).
+      GOOGLE_API_KEY: bindings.secret(),
+      OPEN_PAGERANK_KEY: bindings.secret(),
+      // Language model key: DeepSeek is used first, then Claude, then Workers AI.
+      // Every secret declared here must be set before a deploy (Cloudflare has no optional secrets),
+      // and local dev loads only declared keys from .dev.vars. ANTHROPIC_API_KEY and LLM_MODEL are
+      // left undeclared so they stay optional: set them with `wrangler secret put` in production,
+      // and declare them here again to use them in local dev.
       DEEPSEEK_API_KEY: bindings.secret(),
-      ANTHROPIC_API_KEY: bindings.secret(),
-      // Optional model override for the active provider, e.g. "deepseek-v4-pro".
-      LLM_MODEL: bindings.secret(),
     },
   });
 

@@ -1,4 +1,5 @@
-import { findSite } from "../../../../src/server";
+import { env } from "cloudflare:workers";
+import { getSite } from "@organic-growth/db";
 import { isBeaconPath, servePublicBeacon, servePublicGet } from "../../../../src/public-pages";
 
 type Context = { params: Promise<{ siteId: string; path?: string[] }> };
@@ -8,7 +9,7 @@ type Context = { params: Promise<{ siteId: string; path?: string[] }> };
  * (e.g. `example.com/guides/*`) to `/p/{siteId}/guides/*`, so search engines
  * receive complete HTML on the customer's own domain.
  */
-async function resolve(context: Context): Promise<{ site: Awaited<ReturnType<typeof findSite>>; path: string }> {
+async function resolve(context: Context): Promise<{ site: Awaited<ReturnType<typeof getSite>>; path: string }> {
   const { siteId, path } = await context.params;
   const segments = (path ?? []).map((segment) => {
     try {
@@ -17,7 +18,7 @@ async function resolve(context: Context): Promise<{ site: Awaited<ReturnType<typ
       return encodeURIComponent(segment); // malformed escapes simply won't match a page
     }
   });
-  return { site: await findSite(siteId), path: `/${segments.join("/")}` };
+  return { site: await getSite(env.DB, siteId), path: `/${segments.join("/")}` };
 }
 
 export async function GET(request: Request, context: Context) {

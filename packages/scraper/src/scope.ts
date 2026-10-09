@@ -1,7 +1,6 @@
 import { schema, type JsonLlm } from "@organic-growth/ai";
 import { isSafePublicUrl } from "@organic-growth/crawler";
-import type { DataSourceKind, DatasetField, DatasetFieldType, PageIdea } from "@organic-growth/core";
-import { slugify } from "./extract.js";
+import { slugify, type DataSourceKind, type DatasetField, type DatasetFieldType, type PageIdea } from "@organic-growth/core";
 
 export type SiteEvidence = {
   name: string;

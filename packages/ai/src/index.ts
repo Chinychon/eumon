@@ -198,6 +198,105 @@ export function describeModelError(error: unknown): string {
   return message || "The language model request failed.";
 }
 
+export type ChatToolCall = { id: string; name: string; arguments: string };
+
+export type ChatMessage =
+  | { role: "system" | "user"; content: string }
+  | { role: "assistant"; content: string; toolCalls?: ChatToolCall[] }
+  | { role: "tool"; toolCallId: string; content: string };
+
+export type ChatTool = { name: string; description: string; parameters: JsonSchema };
+
+export type ChatEvent =
+  | { type: "text"; text: string }
+  | { type: "tool_calls"; calls: ChatToolCall[] }
+  | { type: "finish"; reason: string; usage?: { promptTokens: number; completionTokens: number } };
+
+/** The data lines of a server-sent event stream, reassembled across network chunks. */
+async function* sseData(body: ReadableStream<Uint8Array>): AsyncGenerator<string> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) return;
+    buffer += decoder.decode(value, { stream: true });
+    for (let newline = buffer.indexOf("\n"); newline >= 0; newline = buffer.indexOf("\n")) {
+      const line = buffer.slice(0, newline).replace(/\r$/, "");
+      buffer = buffer.slice(newline + 1);
+      if (line.startsWith("data:")) yield line.slice(5).trimStart();
+    }
+  }
+}
+
+/**
+ * One streamed DeepSeek chat turn with tools: text as it arrives, then the
+ * tool calls once their arguments are complete. Thinking stays off, so tool
+ * rounds never have to send earlier reasoning back.
+ */
+export async function* streamChat(
+  env: LlmEnv,
+  input: { messages: ChatMessage[]; tools: ChatTool[]; signal?: AbortSignal; maxTokens?: number },
+  fetcher: typeof fetch = fetch,
+): AsyncGenerator<ChatEvent> {
+  if (!env.DEEPSEEK_API_KEY) throw new LlmError("Ask Eumon needs a DeepSeek key. Set DEEPSEEK_API_KEY in .dev.vars locally, or as a Worker secret.");
+  const response = await fetcher(`${DEEPSEEK_BASE_URL}/chat/completions`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${env.DEEPSEEK_API_KEY}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: env.LLM_MODEL?.trim() || DEFAULT_DEEPSEEK_MODEL,
+      messages: input.messages.map((message) => (
+        message.role === "tool" ? { role: "tool", tool_call_id: message.toolCallId, content: message.content }
+        : message.role === "assistant" && message.toolCalls?.length ? {
+          role: "assistant",
+          content: message.content || null,
+          tool_calls: message.toolCalls.map((call) => ({ id: call.id, type: "function", function: { name: call.name, arguments: call.arguments } })),
+        }
+        : { role: message.role, content: message.content })),
+      ...(input.tools.length ? { tools: input.tools.map((tool) => ({ type: "function", function: tool })) } : {}),
+      thinking: { type: "disabled" },
+      max_tokens: input.maxTokens ?? 4000,
+      temperature: 0.2,
+      stream: true,
+      stream_options: { include_usage: true },
+    }),
+    signal: input.signal,
+  });
+  if (!response.ok || !response.body) {
+    const text = (await response.text()).trim();
+    let detail = text.slice(0, 300);
+    try { detail = (JSON.parse(text) as { error?: { message?: string } }).error?.message ?? detail; } catch { /* keep raw text */ }
+    throw new LlmHttpError("DeepSeek", response.status, detail);
+  }
+  const calls = new Map<number, ChatToolCall>();
+  let reason = "";
+  let usage: { promptTokens: number; completionTokens: number } | undefined;
+  for await (const data of sseData(response.body)) {
+    if (data === "[DONE]") break;
+    const chunk = JSON.parse(data) as {
+      usage?: { prompt_tokens: number; completion_tokens: number };
+      choices?: Array<{
+        finish_reason?: string | null;
+        delta?: { content?: string | null; tool_calls?: Array<{ index: number; id?: string; function?: { name?: string; arguments?: string } }> };
+      }>;
+    };
+    if (chunk.usage) usage = { promptTokens: chunk.usage.prompt_tokens, completionTokens: chunk.usage.completion_tokens };
+    const choice = chunk.choices?.[0];
+    if (choice?.delta?.content) yield { type: "text", text: choice.delta.content };
+    for (const fragment of choice?.delta?.tool_calls ?? []) {
+      const call = calls.get(fragment.index) ?? { id: "", name: "", arguments: "" };
+      if (fragment.id) call.id = fragment.id;
+      if (fragment.function?.name) call.name = fragment.function.name;
+      call.arguments += fragment.function?.arguments ?? "";
+      calls.set(fragment.index, call);
+    }
+    if (choice?.finish_reason) reason = choice.finish_reason;
+  }
+  if (reason === "insufficient_system_resource") throw new LlmHttpError("DeepSeek", 503, "The model was interrupted by provider load; retry shortly.");
+  if (calls.size) yield { type: "tool_calls", calls: [...calls.values()] };
+  yield { type: "finish", reason, ...(usage ? { usage } : {}) };
+}
+
 /** Helpers for building strict schemas without repeating boilerplate. */
 export const schema = {
   object(properties: Record<string, JsonSchema>): JsonSchema {

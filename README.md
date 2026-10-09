@@ -8,7 +8,7 @@ A medical-tourism site becomes one page per doctor, procedure, and hospital. A m
 Scope → Find sources → Collect → Generate → Serve on your domain → Measure → Optimize
 ```
 
-Eumon also analyzes the existing site the way Google sees it — every sitemap URL fetched as Googlebot, rendering checks, ranked technical findings — and, when a GitHub repository is connected, proposes safe fixes as draft pull requests.
+Eumon also compares the site with the competitors you name — which kinds of pages they publish that you don't (and which of those you already have data for), plus how their pages convert — and analyzes the existing site the way Google sees it — every sitemap URL fetched as Googlebot and broken down by page template, the HTML compared with what a browser renders, repeated fetches to catch intermittent empty pages, and ranked technical findings — and, when a GitHub repository is connected, proposes safe fixes as draft pull requests.
 
 > **Status:** early MVP. Works with any website stack (Next.js, WordPress, Drupal, Webflow, custom); a GitHub repository is optional.
 
@@ -54,8 +54,8 @@ What each setting in `.dev.vars` unlocks (details in [apps/web/README.md](apps/w
 | `packages/crawler` | Sitemap discovery, Googlebot crawling, rendering and technical SEO findings. |
 | `packages/scraper` | Scoping analyst, robots.txt-aware collection, structured extraction, CSV import. |
 | `packages/pages` | Page generation with quality gates, HTML rendering, CTA testing, performance insights. |
-| `packages/repo-analyzer` | Framework, routing, and deployment detection from a GitHub repository. |
-| `packages/agents` | Growth plan synthesis, Search Console client, safe-change and pull request generation. |
+| `packages/repo-analyzer` | Stack detection (framework, router, CMS, database, deployment) and per-route code inspection: rendering mode, browser-side data fetching, where titles come from, request waterfalls, and unpaginated queries. |
+| `packages/agents` | Growth plan synthesis; search analysis (target-market share, intent mix, striking distance, skipped snippets, cannibalization); competitor comparison; code findings; Search Console client; safe-change and pull request generation. |
 | `packages/sdk` | Browser conversion tracker for JavaScript sites. |
 
 Built on Cloudflare Workers ([vinext](https://www.npmjs.com/package/vinext) + React), D1, Workflows, and Browser Rendering.
@@ -63,11 +63,15 @@ Built on Cloudflare Workers ([vinext](https://www.npmjs.com/package/vinext) + Re
 ## Development
 
 ```sh
-npm test            # unit tests (ai, crawler, scraper, pages)
+npm test            # unit tests (every package)
 npm run typecheck   # every workspace
 npm run build       # packages + production Worker bundle
+npm run audit -- https://example.com --max 300   # site analysis from the command line
 npm run eval        # end-to-end collection quality on a real site (calls the model; a few cents)
+npm run db:migrate:remote && npm run deploy   # deploy (after `npx cf auth login`)
 ```
+
+`npm run audit` runs the same steps as the analysis Workflow — sitemap, robots.txt, a Googlebot crawl of every sitemap URL (up to `--max`), per-template coverage, sampled checks, findings, and the growth plan — with an in-memory SQLite database in place of D1. Add `--competitor other.com` (repeatable) to include competitors, `--market idn` (repeatable, Search Console country codes) for target markets, and `--json` for the full report. With Playwright installed (`npm i -D playwright`), it also renders one page per template in Chromium for the source-vs-render comparison. Behind an HTTPS proxy, run it with `NODE_USE_ENV_PROXY=1`.
 
 `npm run eval` runs the real collection pipeline (pagination, extraction, merging, duplicate resolution) against a live website and grades it against an answer key parsed from the same pages without AI: how many collected records are real, how many published facts the site actually states, and how many of the site's facts were captured. Run it before and after changing prompts or merge logic.
 

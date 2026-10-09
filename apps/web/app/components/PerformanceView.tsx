@@ -23,7 +23,7 @@ function delta(before: number, after: number): string {
   return `${change >= 0 ? "+" : ""}${Math.round(change * 100)}%`;
 }
 
-export function PerformanceView({ site, onNavigate }: { site: SiteRecord; onNavigate: (view: "pages" | "overview") => void }) {
+export function PerformanceView({ site, onNavigate }: { site: SiteRecord; onNavigate: (view: "pages" | "connections") => void }) {
   const [days, setDays] = useState(28);
   const [data, setData] = useState<PerformanceData | null>(null);
   const [error, setError] = useState("");
@@ -54,7 +54,6 @@ export function PerformanceView({ site, onNavigate }: { site: SiteRecord; onNavi
   return (
     <div>
       <ViewHeader
-        eyebrow="STEPS 6–7 · MEASURE & OPTIMIZE"
         title="What's working"
         description="Search Console, on-page analytics, and conversions for every generated page — plus the next changes most likely to pay off."
         actions={<>
@@ -63,17 +62,17 @@ export function PerformanceView({ site, onNavigate }: { site: SiteRecord; onNavi
           </select>
           {data?.searchConnected
             ? <Button variant="secondary" busy={busy === "sync"} onClick={sync}>Sync Search Console</Button>
-            : <Button variant="secondary" onClick={() => onNavigate("overview")}>Connect Search Console</Button>}
+            : <Button variant="secondary" onClick={() => onNavigate("connections")}>Connect Search Console</Button>}
         </>}
       />
       {error && <div className="callout error" role="alert" style={{ marginBottom: 14 }}>{error}</div>}
       {message && <div className="callout" style={{ marginBottom: 14 }}>{message}</div>}
       {!report || !totals ? <div className="empty">Loading…</div> : totals.pages === 0 ? (
-        <div className="empty">No approved pages yet. <Button small variant="ghost" onClick={() => onNavigate("pages")}>Approve pages →</Button></div>
+        <div className="empty">No approved pages yet. <Button small variant="ghost" onClick={() => onNavigate("pages")}>Approve pages</Button></div>
       ) : (
-        <>
+        <div className="results">
           {!data?.live && (
-            <div className="callout warn" style={{ marginBottom: 14 }}>
+            <div className="callout warn">
               These pages are approved but not live on {data?.publicHost} yet, so there is no real traffic to measure. Numbers start once the proxy rule in Setup is verified.
             </div>
           )}
@@ -92,7 +91,7 @@ export function PerformanceView({ site, onNavigate }: { site: SiteRecord; onNavi
               : report.suggestions.map((suggestion, index) => <SuggestionRow key={index} suggestion={suggestion} siteId={site.id} onApplied={load} />)}
           </Card>
 
-          <div className="split" style={{ marginTop: 14 }}>
+          <div className="split">
             <Card title="By template" subtitle="Which kinds of page earn traffic and conversions.">
               <div className="table-wrap">
                 <table className="table">
@@ -151,7 +150,7 @@ export function PerformanceView({ site, onNavigate }: { site: SiteRecord; onNavi
               </div>
             )}
           </Card>
-        </>
+        </div>
       )}
     </div>
   );
@@ -181,13 +180,13 @@ function SuggestionRow({ suggestion, siteId, onApplied }: { suggestion: Suggesti
 
   return (
     <div className="list-row">
-      <Badge tone="blue">{KIND_LABEL[suggestion.kind]}</Badge>
+      <Badge tone="gray">{KIND_LABEL[suggestion.kind]}</Badge>
       <div className="grow">
         <h4>{suggestion.title}</h4>
         <p>{suggestion.detail}</p>
         {suggestion.queries && suggestion.queries.length > 0 && <div className="row" style={{ marginTop: 6 }}>{suggestion.queries.map((query) => <span key={query} className="chip">{query}</span>)}</div>}
         {suggestion.examples && suggestion.examples.length > 0 && <div className="small mono muted" style={{ marginTop: 6 }}>{suggestion.examples.join("  ·  ")}</div>}
-        {error && <p className="small" style={{ color: "#9f3e31" }}>{error}</p>}
+        {error && <p className="small" style={{ color: "var(--red)" }}>{error}</p>}
         {options && options.map((option) => (
           <div className="option" key={option.title}>
             <strong>{option.title}</strong>
@@ -233,7 +232,7 @@ function CtaTest({ siteId, variants, onChanged }: { siteId: string; variants: Ct
         <Field label="Link (optional)" hint="Defaults to the CTA link in Setup."><input className="input" value={url} placeholder="https://wa.me/60123456789" onChange={(event) => setUrl(event.target.value)} /></Field>
         <Field label="Supporting line (optional)" wide><input className="input" value={copy} maxLength={200} placeholder="Reply within one working day." onChange={(event) => setCopy(event.target.value)} /></Field>
       </div>
-      {error && <p className="small" style={{ color: "#9f3e31" }}>{error}</p>}
+      {error && <p className="small" style={{ color: "var(--red)" }}>{error}</p>}
       <div className="row" style={{ marginTop: 10 }}>
         <Button small busy={busy === "add"} disabled={!label.trim()} onClick={() => act("add", async () => {
           await api(`/api/sites/${siteId}/cta-variants`, { method: "POST", json: { label, copy, url } });

@@ -1,9 +1,12 @@
 import { env } from "cloudflare:workers";
-import { saveGoogleRefreshToken, verifyGscState } from "../../../../src/gsc-auth";
+import { verifyToken } from "@organic-growth/core";
+import { saveGoogleRefreshToken } from "../../../../src/gsc-auth";
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
-  const siteId = await verifyGscState(url.searchParams.get("state") ?? "", env.SESSION_SECRET);
+  // Only the state the connect route signed (it carries a nonce) counts; a client link also names a site.
+  const state = await verifyToken<{ siteId: string; nonce?: string }>(url.searchParams.get("state") ?? "", env.SESSION_SECRET);
+  const siteId = state?.nonce ? state.siteId : undefined;
   if (!siteId || url.searchParams.has("error")) return Response.redirect(new URL("/?gsc=error", url.origin), 303);
   const code = url.searchParams.get("code");
   if (!code) return Response.json({ error: "Google did not return an authorization code." }, { status: 400 });
@@ -15,12 +18,12 @@ export async function GET(request: Request) {
     }),
   });
   if (!response.ok) return Response.redirect(new URL("/?gsc=error", url.origin), 303);
-  const token = await response.json() as { refresh_token?: string };
+  const token = await response.json() as { refresh_token?: string; scope?: string };
   if (!token.refresh_token) return Response.redirect(new URL("/?gsc=reauthorize", url.origin), 303);
   try {
-    await saveGoogleRefreshToken(env.DB, siteId, token.refresh_token, env.OAUTH_ENCRYPTION_KEY);
+    await saveGoogleRefreshToken(env.DB, siteId, token.refresh_token, env.OAUTH_ENCRYPTION_KEY, token.scope ?? "webmasters.readonly");
   } catch {
     return Response.json({ error: "Could not securely store the Google connection." }, { status: 500 });
   }
-  return Response.redirect(new URL(`/?gsc=connected&site=${encodeURIComponent(siteId)}`, url.origin), 303);
+  return Response.redirect(new URL(`/?gsc=connected&view=connections&site=${encodeURIComponent(siteId)}`, url.origin), 303);
 }

@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { createSignedInstallationCookie } from "@organic-growth/repo-analyzer";
+import { signToken } from "@organic-growth/core";
 
 function cookie(request: Request, name: string): string | undefined {
   return request.headers.get("Cookie")?.split(";").map((part) => part.trim())
@@ -23,9 +23,10 @@ export async function GET(request: Request) {
   }
 
   try {
-    const signed = await createSignedInstallationCookie(installationId, env.SESSION_SECRET);
+    const signed = await signToken({ id: installationId }, 604_800_000, env.SESSION_SECRET);
     headers.set("Set-Cookie", `og_installation=${signed}; HttpOnly${secure}; SameSite=Lax; Path=/; Max-Age=604800`);
     destination.searchParams.set("github", "connected");
+    destination.searchParams.set("view", "connections");
     headers.set("Location", destination.toString());
     return new Response(null, { status: 303, headers });
   } catch {

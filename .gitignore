@@ -14,3 +14,8 @@ coverage
 tmp
 .turbo
 dist-test
+.codex
+.cursor
+
+# Impeccable review captures (regenerated on every review)
+**/.impeccable/review/

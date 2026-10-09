@@ -1,5 +1,6 @@
 import { schema, type JsonLlm } from "@organic-growth/ai";
 import type { GeneratedPage } from "@organic-growth/core";
+import { languageName } from "./labels.js";
 
 export type SnippetOption = { title: string; description: string; rationale: string };
 
@@ -17,9 +18,11 @@ export async function suggestSnippets(input: {
   page: Pick<GeneratedPage, "title" | "description" | "h1" | "intro" | "items" | "faq">;
   siteName: string;
   queries: Array<{ query: string; impressions: number; position: number; clicks: number }>;
+  /** Language the page is published in; options are written in it. */
+  language?: string;
 }): Promise<SnippetOption[]> {
   const result = await input.llm.json<{ options?: unknown[] }>({
-    system: SNIPPET_SYSTEM,
+    system: `${SNIPPET_SYSTEM}\n- Write the titles and descriptions in ${languageName(input.language)}, the page's language.`,
     user: JSON.stringify({
       site: input.siteName,
       current: { title: input.page.title, description: input.page.description },

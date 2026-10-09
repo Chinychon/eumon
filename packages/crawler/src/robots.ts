@@ -1,23 +1,23 @@
-/** Product token Eumon identifies itself with when collecting third-party data. */
-export const SCRAPER_USER_AGENT = "EumonBot/0.1 (+organic growth research; respects robots.txt)";
-export const SCRAPER_TOKEN = "eumonbot";
+/** Product token Google's main crawler matches in robots.txt. */
+export const GOOGLEBOT_TOKEN = "googlebot";
 
 type Rule = { allow: boolean; pattern: string };
 type Group = { agents: string[]; rules: Rule[]; crawlDelay?: number };
 
 export type RobotsPolicy = {
   isAllowed(pathAndQuery: string): boolean;
-  /** Seconds between requests requested by the site for our user agent, if any. */
+  /** Seconds between requests the site asks of this user agent, if any. */
   crawlDelay?: number;
   sitemaps: string[];
 };
 
 /**
- * Parses robots.txt per RFC 9309: the most specific matching user-agent
- * group applies, and within it the longest matching rule wins, with `allow`
- * winning ties. `*` and `$` wildcards are supported.
+ * Parses robots.txt per RFC 9309 for one crawler `token` (lower-case product
+ * name, e.g. `googlebot`): the most specific matching user-agent group
+ * applies, and within it the longest matching rule wins, with `allow` winning
+ * ties. `*` and `$` wildcards are supported.
  */
-export function parseRobots(body: string, token = SCRAPER_TOKEN): RobotsPolicy {
+export function parseRobots(body: string, token: string): RobotsPolicy {
   const groups: Group[] = [];
   const sitemaps: string[] = [];
   let current: Group | null = null;

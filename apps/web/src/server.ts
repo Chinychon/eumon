@@ -1,7 +1,8 @@
 import { env } from "cloudflare:workers";
 import { createLlm, describeModelError, LlmError, type JsonLlm, type LlmEnv } from "@organic-growth/ai";
 import type { PageSettings, SiteRecord } from "@organic-growth/core";
-import { defaultPageSettings, getPageSettings, getSite } from "@organic-growth/db";
+import { isSafePublicUrl } from "@organic-growth/crawler";
+import { defaultPageSettings, getPageSettings } from "@organic-growth/db";
 
 const NO_STORE = { "Cache-Control": "no-store" };
 
@@ -17,7 +18,8 @@ export function fail(message: string, status = 400): Response {
 export async function readText(request: Request, maxBytes: number): Promise<string | null> {
   const reader = request.body?.getReader();
   if (!reader) return null;
-  const chunks: Uint8Array[] = [];
+  const decoder = new TextDecoder();
+  let text = "";
   let total = 0;
   for (;;) {
     const part = await reader.read();
@@ -27,15 +29,9 @@ export async function readText(request: Request, maxBytes: number): Promise<stri
       await reader.cancel();
       return null;
     }
-    chunks.push(part.value);
+    text += decoder.decode(part.value, { stream: true });
   }
-  const bytes = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return new TextDecoder().decode(bytes);
+  return text + decoder.decode();
 }
 
 export async function readJson<T = Record<string, unknown>>(request: Request, maxBytes = 64 * 1024): Promise<T | null> {
@@ -47,10 +43,6 @@ export async function readJson<T = Record<string, unknown>>(request: Request, ma
   } catch {
     return null;
   }
-}
-
-export async function findSite(siteId: string): Promise<SiteRecord | null> {
-  return getSite(env.DB, siteId);
 }
 
 export async function settingsFor(site: SiteRecord): Promise<PageSettings> {
@@ -81,15 +73,5 @@ export function llmFailure(error: unknown): Response {
 }
 
 export function isPublicHttpUrl(value: unknown): value is string {
-  if (typeof value !== "string" || value.length > 2048) return false;
-  try {
-    const url = new URL(value);
-    const host = url.hostname.toLowerCase();
-    if (!/^https?:$/.test(url.protocol) || url.username || url.password) return false;
-    if (!host.includes(".") || host === "localhost" || /\.(local|localhost|internal)$/.test(host)) return false;
-    if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host.includes(":")) return false;
-    return !url.port || ["80", "443"].includes(url.port);
-  } catch {
-    return false;
-  }
+  return typeof value === "string" && value.length <= 2048 && isSafePublicUrl(value);
 }

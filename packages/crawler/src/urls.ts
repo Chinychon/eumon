@@ -1,7 +1,8 @@
 const LOCALE_SEGMENT = /^[a-z]{2}(?:[-_][a-z]{2,4})?$/i;
 const COMMON_LOCALES = new Set([
   "ar", "bn", "cs", "da", "de", "el", "en", "es", "fa", "fi", "fil", "fr", "he", "hi", "hu", "id", "it", "ja",
-  "ko", "ms", "nl", "no", "pl", "pt", "ro", "ru", "sv", "th", "tl", "tr", "uk", "ur", "vi", "zh",
+  "km", "ko", "lo", "ms", "nl", "no", "pl", "pt", "ro", "ru", "sv", "ta", "th", "tl", "tr", "uk", "ur", "vi", "zh",
+  // Not "my" (Burmese): `/my/` is far more often a "my account" route.
 ]);
 
 function pathSegments(url: string): string[] {
@@ -41,6 +42,17 @@ const siteHost = (hostname: string) => hostname.toLowerCase().replace(/^www\./, 
 export function isSameSite(url: string, reference: string): boolean {
   try {
     return siteHost(new URL(url).hostname) === siteHost(new URL(reference).hostname);
+  } catch {
+    return false;
+  }
+}
+
+/** True when `href` (resolved against `pageUrl`) names the same document, ignoring query and fragment. */
+export function sameDocument(href: string, pageUrl: string): boolean {
+  try {
+    const target = new URL(href, pageUrl);
+    const page = new URL(pageUrl);
+    return target.origin + target.pathname === page.origin + page.pathname;
   } catch {
     return false;
   }

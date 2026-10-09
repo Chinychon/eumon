@@ -23,7 +23,7 @@ function display(value: unknown): string {
   return String(value);
 }
 
-export function DataView({ site, onNavigate }: { site: SiteRecord; onNavigate: (view: "pages") => void }) {
+export function DataView({ site, onNavigate }: { site: SiteRecord; onNavigate: (view: "pages" | "performance") => void }) {
   const [datasets, setDatasets] = useState<DatasetWithDetails[]>([]);
   const [scope, setScope] = useState<Scope>(null);
   const [goal, setGoal] = useState("");
@@ -31,6 +31,7 @@ export function DataView({ site, onNavigate }: { site: SiteRecord; onNavigate: (
   const [scoping, setScoping] = useState(false);
   const [error, setError] = useState("");
   const [showNew, setShowNew] = useState(false);
+  const [conversions, setConversions] = useState<{ totalEvents: number; last28Days: number } | null>(null);
 
   const reload = useCallback(async () => {
     try {
@@ -42,6 +43,9 @@ export function DataView({ site, onNavigate }: { site: SiteRecord; onNavigate: (
   }, [site.id]);
 
   useEffect(() => { setLoading(true); setDatasets([]); setGoal(""); void reload(); }, [reload]);
+  useEffect(() => {
+    api<{ totalEvents: number; last28Days: number }>(`/api/sites/${site.id}/events/summary`).then(setConversions).catch(() => setConversions(null));
+  }, [site.id]);
 
   async function runScope() {
     setScoping(true); setError("");
@@ -56,12 +60,25 @@ export function DataView({ site, onNavigate }: { site: SiteRecord; onNavigate: (
   return (
     <div>
       <ViewHeader
-        eyebrow="STEPS 1–3 · SCOPE, SOURCE & COLLECT"
         title="Data for your landing pages"
         description="Break the business down into the specific things people search for — each becomes a dataset, and each record becomes its own landing page."
-        actions={withRecords > 0 && <Button variant="secondary" onClick={() => onNavigate("pages")}>Design pages →</Button>}
+        actions={withRecords > 0 && <Button variant="secondary" onClick={() => onNavigate("pages")}>Design pages</Button>}
       />
       {error && <div className="callout error" role="alert" style={{ marginBottom: 14 }}>{error}</div>}
+
+      <Card title="Landing page engine" subtitle="Turn what you sell into one high-intent landing page per thing people search for.">
+        <ol className="small steps-list">
+          <li>Scope the data that matters (doctors, procedures, malls, products…)</li>
+          <li>Find and collect it from your site or public sources</li>
+          <li>Generate a landing page per record, with a clear call to action</li>
+          <li>Serve real HTML on your domain, crawlable by Google</li>
+          <li>Track which pages bring visits, clicks, and conversions, then improve them</li>
+        </ol>
+        <div className="row">
+          <Button variant="secondary" onClick={() => onNavigate("performance")}>See performance</Button>
+          {conversions && <span className="small muted">Conversion events: {formatNumber(conversions.totalEvents)} total · {formatNumber(conversions.last28Days)} in the last 28 days</span>}
+        </div>
+      </Card>
 
       <Card
         title="Scope the opportunity"
@@ -116,7 +133,7 @@ function NewDatasetForm({ siteId, onCreated }: { siteId: string; onCreated: () =
           <input className="input" value={fields} onChange={(event) => setFields(event.target.value)} />
         </Field>
       </div>
-      {error && <p className="small" style={{ color: "#9f3e31" }}>{error}</p>}
+      {error && <p className="small" style={{ color: "var(--red)" }}>{error}</p>}
       <div className="row" style={{ marginTop: 10 }}><Button busy={busy} disabled={!name.trim()} onClick={create}>Create dataset</Button></div>
     </div>
   );
@@ -188,7 +205,8 @@ function DatasetCard({ dataset, siteBaseUrl, onChanged }: { dataset: DatasetWith
           ))}
         </div>
       )}
-      {error && <div className={`callout ${/^(Imported|Merged|No duplicates)/.test(error) ? "" : "error"}`} style={{ marginBottom: 10 }}>{error}</div>}
+      {error && <div className={`callout ${/^(Imported|Merged|No duplicates|Created a template)/.test(error) ? "" : "error"}`} style={{ marginBottom: 10 }}>{error}</div>}
+      {dataset.recordCount > 0 && <PagePotentialPanel datasetId={dataset.id} recordCount={dataset.recordCount} entityType={dataset.entityType} onMessage={setError} />}
 
       <div className="section-title">Fields</div>
       {editingFields
@@ -197,7 +215,7 @@ function DatasetCard({ dataset, siteBaseUrl, onChanged }: { dataset: DatasetWith
           <div className="row">
             {dataset.fields.map((field) => (
               <span className="chip" key={field.key} title={field.description}>
-                {field.key === dataset.keyField ? "★ " : ""}{field.label} <span className="muted">· {field.type}</span>
+                {field.label} <span className="muted">· {field.type}{field.key === dataset.keyField ? " · key" : ""}</span>
               </span>
             ))}
             <Button small variant="ghost" onClick={() => setEditingFields(true)}>Edit</Button>
@@ -273,7 +291,7 @@ function FieldsEditor({ dataset, onDone }: { dataset: Dataset; onDone: () => Pro
           </tbody>
         </table>
       </div>
-      {error && <p className="small" style={{ color: "#9f3e31" }}>{error}</p>}
+      {error && <p className="small" style={{ color: "var(--red)" }}>{error}</p>}
       <div className="row" style={{ marginTop: 10 }}>
         <Button small variant="secondary" onClick={() => setFields((items) => [...items, { key: `field_${items.length + 1}`, label: "", type: "text" }])}>Add field</Button>
         <Button small busy={busy} onClick={save}>Save fields</Button>
@@ -305,16 +323,16 @@ function SourceRow({ source, onChanged }: { source: DataSource; onChanged: () =>
         <p className="small">
           {source.recordCount > 0 && <>{formatNumber(source.recordCount)} records · </>}
           up to {formatNumber(source.maxPages)} pages
-          {source.robotsAllowed === false && <> · <span style={{ color: "#9f3e31" }}>blocked by robots.txt</span></>}
-          {source.error && <> · <span style={{ color: "#9a6a16" }}>{source.error}</span></>}
+          {source.robotsAllowed === false && <> · <span style={{ color: "var(--red)" }}>blocked by robots.txt</span></>}
+          {source.error && <> · <span style={{ color: "var(--amber)" }}>{source.error}</span></>}
         </p>
-        {error && <p className="small" style={{ color: "#9f3e31" }}>{error}</p>}
+        {error && <p className="small" style={{ color: "var(--red)" }}>{error}</p>}
         {preview && (
           <div className="callout" style={{ marginTop: 8 }}>
             <div><strong>{formatNumber(preview.matched)}</strong> matching pages{preview.blocked ? `, ${preview.blocked} blocked by robots.txt` : ""}{preview.total !== undefined && preview.total < preview.matched ? ` (${formatNumber(preview.total)} within this source's page budget)` : ""}.</div>
             {preview.notes.map((note) => <div key={note} className="small">{note}</div>)}
             {preview.urls.length > 0 && <details className="disclosure" style={{ marginTop: 6 }}><summary>Example pages</summary>{preview.urls.map((url) => <div key={url} className="small mono">{url}</div>)}</details>}
-            {preview.sampleError && <div className="small" style={{ marginTop: 6, color: "#9a6a16" }}>Sample extraction: {preview.sampleError}</div>}
+            {preview.sampleError && <div className="small" style={{ marginTop: 6, color: "var(--amber)" }}>Sample extraction: {preview.sampleError}</div>}
             {preview.sample && (
               <div style={{ marginTop: 8 }}>
                 <div className="small">From <span className="mono">{preview.sample.url}</span>: {preview.sample.summary} — {preview.sample.records.length} record{preview.sample.records.length === 1 ? "" : "s"} extracted.</div>
@@ -357,7 +375,7 @@ function AddSourceForm({ datasetId, siteBaseUrl, onAdded }: { datasetId: string;
     } catch (cause) { setError(errorMessage(cause)); } finally { setBusy(false); }
   }
   return (
-    <div className="callout" style={{ marginTop: 8, background: "#fbfdfc" }}>
+    <div className="callout" style={{ marginTop: 8, background: "var(--surface)" }}>
       <div className="form-grid">
         <Field label="Source type">
           <select className="select" value={kind} onChange={(event) => setKind(event.target.value as DataSource["kind"])}>
@@ -379,7 +397,7 @@ function AddSourceForm({ datasetId, siteBaseUrl, onAdded }: { datasetId: string;
           <input className="input" type="number" min={1} max={kind === "page" ? 50 : 5000} value={maxPages} onChange={(event) => setMaxPages(event.target.value)} />
         </Field>
       </div>
-      {error && <p className="small" style={{ color: "#9f3e31" }}>{error}</p>}
+      {error && <p className="small" style={{ color: "var(--red)" }}>{error}</p>}
       <div className="row" style={{ marginTop: 10 }}><Button small busy={busy} onClick={add}>Add source</Button><Button small variant="ghost" onClick={() => setOpen(false)}>Cancel</Button></div>
       <p className="small muted" style={{ marginBottom: 0 }}>Eumon identifies itself as EumonBot, follows robots.txt, and paces requests. Only collect facts you are allowed to republish.</p>
     </div>
@@ -423,6 +441,61 @@ function RecordsTable({ dataset, onChanged }: { dataset: Dataset; onChanged: () 
         <span className="small muted">{total ? `${offset + 1}–${Math.min(offset + 25, total)} of ${formatNumber(total)}` : ""}</span>
         <Button small variant="secondary" disabled={offset + 25 >= total} onClick={() => setOffset(offset + 25)}>Next</Button>
       </div>
+    </div>
+  );
+}
+
+type PagePotential = { name: string; groupBy: string[]; pages: number; candidates: number; thin: number; duplicates: number; examples: string[]; suggested: boolean };
+
+/** "How many landing pages can this data support?" — per page idea, plus groupings nobody proposed yet. */
+function PagePotentialPanel({ datasetId, recordCount, entityType, onMessage }: { datasetId: string; recordCount: number; entityType: string; onMessage: (message: string) => void }) {
+  const [estimates, setEstimates] = useState<PagePotential[] | null>(null);
+  const [creating, setCreating] = useState("");
+  const [created, setCreated] = useState<string[]>([]);
+  async function createTemplate(estimate: PagePotential) {
+    setCreating(estimate.name);
+    try {
+      await api(`/api/datasets/${datasetId}/templates`, { method: "POST", json: { groupBy: estimate.groupBy } });
+      setCreated((items) => [...items, estimate.name]);
+      onMessage(`Created a template for ${entityType} pages by ${estimate.groupBy.join(" × ")}. Review and publish it on the Landing pages step.`);
+    } catch (cause) { onMessage(errorMessage(cause)); } finally { setCreating(""); }
+  }
+  useEffect(() => {
+    let current = true;
+    api<{ estimates: PagePotential[] }>(`/api/datasets/${datasetId}/potential`)
+      .then((data) => { if (current) setEstimates(data.estimates); })
+      .catch(() => { if (current) setEstimates(null); });
+    return () => { current = false; };
+  }, [datasetId, recordCount]);
+  if (!estimates?.length) return null;
+  const planned = estimates.filter((estimate) => !estimate.suggested);
+  const suggested = estimates.filter((estimate) => estimate.suggested);
+  const total = planned.reduce((sum, estimate) => sum + estimate.pages, 0);
+  const row = (estimate: PagePotential) => (
+    <tr key={estimate.name}>
+      <td>{estimate.groupBy.length ? `By ${estimate.groupBy.join(" × ")}` : `One per ${entityType}`}{estimate.examples.length > 0 && <div className="small muted">e.g. {estimate.examples.join(", ")}</div>}</td>
+      <td className="num"><strong>{formatNumber(estimate.pages)}</strong></td>
+      <td className="num">{estimate.thin ? formatNumber(estimate.thin) : <span className="muted">0</span>}</td>
+      <td className="num">{estimate.duplicates ? formatNumber(estimate.duplicates) : <span className="muted">0</span>}</td>
+      <td>{estimate.suggested && (created.includes(estimate.name)
+        ? <span className="small muted">Template created</span>
+        : <Button small variant="secondary" busy={creating === estimate.name} disabled={Boolean(creating)} onClick={() => createTemplate(estimate)}>Create template</Button>)}</td>
+    </tr>
+  );
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <div className="section-title">Landing pages this data supports: ~{formatNumber(total)}</div>
+      <div className="table-wrap">
+        <table className="table">
+          <thead><tr><th>Page set</th><th className="num">Publishable</th><th className="num">Too thin</th><th className="num">Duplicate</th><th /></tr></thead>
+          <tbody>
+            {planned.map(row)}
+            {suggested.length > 0 && <tr><td colSpan={5} className="small muted">Other groupings your data supports:</td></tr>}
+            {suggested.map(row)}
+          </tbody>
+        </table>
+      </div>
+      <p className="small muted" style={{ margin: "6px 0 0" }}>Estimated with the same quality rules used at generation: entity pages need facts for most fields, grouped pages need at least 3 records, and pages listing identical records count once. Collecting more fields turns thin records into publishable pages.</p>
     </div>
   );
 }

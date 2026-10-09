@@ -37,7 +37,9 @@ export async function findDuplicateRecords(input: {
   const byName = new Map<string, DataRecord[]>();
   for (const record of input.records) {
     const name = nameOf(record, input.dataset.keyField);
-    byName.set(name, [...(byName.get(name) ?? []), record]);
+    const named = byName.get(name);
+    if (named) named.push(record);
+    else byName.set(name, [record]);
   }
   const names = [...byName.keys()].sort((a, b) => a.localeCompare(b, "en", { sensitivity: "base", numeric: true }));
   if (names.length < 2) return [];

@@ -1,6 +1,6 @@
 import {
-  createId, referringDomainGap, serpCrowding, serpLookup, severityFromImpact,
-  type CompetitorSuggestion, type CrawlLogView, type Finding, type FindingCategory, type JsonObject, type LinksInput, type Opportunity, type SerpResult,
+  createId, dropFromPeak, googlebotPace, latestAverage, peakAverage, referringDomainGap, serpCrowding, serpLookup, severityFromImpact,
+  type CompetitorSuggestion, type CrawlDayRow, type CrawlLogView, type DayPoint, type Finding, type FindingCategory, type JsonObject, type LinksInput, type Opportunity, type SerpResult,
 } from "@organic-growth/core";
 import type { SearchConsoleReconciliation } from "@organic-growth/db";
 
@@ -21,12 +21,24 @@ export type LogCoverage = {
 /** An imported Search Console Page-indexing export, reconciled with today (see `searchConsoleReconciliation`). */
 export type SearchConsoleSignal = Pick<SearchConsoleReconciliation, "importedAt" | "summary" | "counts" | "reasons" | "suggestions" | "remainingChecks">;
 
+/** The daily series the trend findings read (see `loadTrendSignals`). */
+export type TrendSignals = {
+  impressions: DayPoint[];
+  indexed: DayPoint[];
+  indexedSource: "search_console" | "inspection" | null;
+  /** With the inspection sample: how many of Eumon's pages Google left out, to tell a fall Google caused from pages the operator unpublished. */
+  notIndexed: DayPoint[];
+  crawlLog: CrawlDayRow[];
+  today: string;
+};
+
 export type ConnectorSignals = {
   serp?: SerpResult[];
   suggestions?: CompetitorSuggestion[];
   links?: LinksInput;
   logCoverage?: LogCoverage | null;
   searchConsole?: SearchConsoleSignal | null;
+  trends?: TrendSignals | null;
 };
 
 /** Fewer days of logs than this say nothing about what Googlebot skips. */
@@ -175,9 +187,82 @@ export function findingsFromSearchConsoleImport(input: { siteId: string; analysi
       pagesAffected: named,
     });
   }
+  return toFindings(drafts, input);
+}
+
+const toFindings = (drafts: Draft[], input: { siteId: string; analysisId: string }): Finding[] => {
   const createdAt = new Date().toISOString();
   return drafts.map((draft) => ({
     id: createId("finding"), siteId: input.siteId, analysisId: input.analysisId, category: draft.category, severity: severityFromImpact(draft.impact),
     title: draft.title, summary: draft.summary, evidence: draft.evidence, organicImpactScore: draft.impact, recommendation: draft.recommendation, pagesAffected: draft.pagesAffected, createdAt,
   }));
+};
+
+/** Thresholds for the trend findings, with their reasons. */
+const TREND = {
+  /** A week smooths weekday and weekend. */
+  window: 7,
+  /** Under 100 impressions a day, a week's swing is noise. */
+  peakLevel: 100,
+  /** A current week at 60% of the peak week or less is a fall worth a finding. */
+  fallTo: 0.6,
+  /** The indexed count must be 10% and 50 pages under its 90-day maximum. */
+  indexedShare: 0.1, indexedCount: 50,
+  /** Googlebot needing more than two months for one pass of a 200+ URL sitemap means pages wait. */
+  paceDays: 60, minSitemap: 200,
+};
+const DAY_MS = 86_400_000;
+const shortDay = (day: string) => new Date(`${day}T00:00:00Z`).toLocaleDateString("en", { day: "numeric", month: "short", timeZone: "UTC" });
+
+/**
+ * From the ledger and the crawl log: impressions that fell from a peak (and
+ * the indexed-count fall that happened with them), an indexed count that
+ * fell, and a Googlebot pace that can't get round the sitemap.
+ */
+export function findingsFromTrends(input: { siteId: string; analysisId: string; trends: TrendSignals | null; sitemapUrls: number | null; discovered: number | null }): Finding[] {
+  const { trends } = input;
+  if (!trends) return [];
+  const drafts: Draft[] = [];
+  let indexedFall = dropFromPeak(trends.indexed, TREND.indexedShare, TREND.indexedCount);
+  if (indexedFall && trends.indexedSource === "inspection") {
+    // The sample counts published Eumon pages: unpublishing lowers it with no change at Google. A fall Google caused shows up as pages it left out.
+    const leftOut = (day: string) => trends.notIndexed.filter((point) => point.day <= day).at(-1)?.value ?? 0;
+    if (leftOut(indexedFall.latestDay) - leftOut(indexedFall.peakDay) < (indexedFall.peak - indexedFall.latest) / 2) indexedFall = null;
+  }
+  const peak = peakAverage(trends.impressions, TREND.window, TREND.peakLevel);
+  const current = latestAverage(trends.impressions, TREND.window);
+  if (peak && current && current.average <= peak.average * TREND.fallTo) {
+    const share = Math.round((1 - current.average / peak.average) * 100);
+    const together = indexedFall && Math.abs(Date.parse(indexedFall.peakDay) - Date.parse(peak.to)) <= 7 * DAY_MS ? indexedFall : null;
+    drafts.push({
+      category: "search", impact: Math.min(90, 50 + Math.round(share * 0.4)),
+      title: `Search impressions fell ${share}% since ${shortDay(peak.to)}`,
+      summary: `Search Console impressions averaged ${n(Math.round(peak.average))} a day in the week to ${shortDay(peak.to)} and ${n(Math.round(current.average))} a day in the week to ${shortDay(current.to)}.${together ? ` That is when Google's indexed count fell from ${n(together.peak)} to ${n(together.latest)}.` : ""}`,
+      evidence: { peak, current, indexedFall },
+      recommendation: "Open Search Console's Page indexing report (or import it in Setup) and look at what changed on the site in the days before the fall: a sitemap, a redirect rule, a noindex. History records the day this number recovers.",
+    });
+  }
+  if (indexedFall) {
+    drafts.push({
+      category: "indexing", impact: Math.min(85, 45 + Math.round(indexedFall.share * 100)),
+      title: `Google's indexed count fell from ${indexedFall.peak} to ${indexedFall.latest} since ${shortDay(indexedFall.peakDay)}`,
+      summary: `${trends.indexedSource === "search_console" ? "Search Console's Page indexing chart" : "Eumon's URL inspection sample"} had ${n(indexedFall.peak)} pages indexed on ${shortDay(indexedFall.peakDay)} and ${n(indexedFall.latest)} on ${shortDay(indexedFall.latestDay)}: ${Math.round(indexedFall.share * 100)}% fewer.`,
+      evidence: { ...indexedFall, source: trends.indexedSource },
+      recommendation: "The Search Console import names the reasons Google gives for each page it dropped; the crawl's noindex, redirect and error counts say which of them the site caused.",
+    });
+  }
+  const pace = googlebotPace(trends.crawlLog, trends.today);
+  if (pace && input.sitemapUrls && input.sitemapUrls >= TREND.minSitemap) {
+    const days = Math.ceil(input.sitemapUrls / pace.perDay);
+    if (days > TREND.paceDays) {
+      drafts.push({
+        category: "indexing", impact: Math.min(80, 40 + Math.min(40, Math.round(days / 10))),
+        title: `At Googlebot's pace the sitemap takes ${days} days to crawl once`,
+        summary: `Googlebot made about ${n(Math.round(pace.perDay))} requests a day over the last ${pace.days} days of logs, and the sitemap lists ${n(input.sitemapUrls)} URLs.${input.discovered ? ` Search Console lists ${n(input.discovered)} of them as discovered but not yet crawled.` : ""}`,
+        evidence: { perDay: pace.perDay, logDays: pace.days, sitemapUrls: input.sitemapUrls, discovered: input.discovered },
+        recommendation: "Give Googlebot fewer URLs and better paths: keep only pages with real content in the sitemap, link the important ones from pages it already visits, and read the crawl-log card for where its requests go.",
+      });
+    }
+  }
+  return toFindings(drafts, input);
 }

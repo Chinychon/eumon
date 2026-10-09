@@ -38,6 +38,7 @@ Short definitions of the domain terms that name modules and seams. Architecture 
 - **Search Console import**: Google's Page indexing report has no API, so its exports are imported in Setup (a reason's URL list, the overview table, the chart). Imported URLs live in `search_console_urls` with the reason Google gave; the overview is the `search_console_summary` snapshot; the chart is the `gsc_indexed` / `gsc_not_indexed` metrics.
 - **Today status**: what an imported URL is now — `indexable`, `noindex`, `redirect`, `gone`, `error` or `unchecked` — from the latest crawl's row when it has one, otherwise a **live check** (fetched as Googlebot from the console, twenty per request). `todayStatus` is the rule; `searchConsoleReconciliation` applies it in SQL so a 20,000-URL list costs counts, not rows.
 - **Redirect suggestion**: for a gone URL, the live URL of the same page type whose slug contains every word of the dead slug (`suggestRedirect`); one word alone must be six characters or more.
+- **Trend finding**: a fall in a daily series the ledger holds, reported as a finding with a date and a size (`findingsFromTrends`): Search Console impressions against their peak week, Google's indexed count against its 90-day maximum, and Googlebot's pace (requests a day from the crawl log) against the sitemap's size. Thresholds live in `TREND` beside their reasons; the math is `packages/core/src/trends.ts`.
 
 ## Data
 

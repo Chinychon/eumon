@@ -3,7 +3,7 @@ import { addDays, findingKey, REF_ALPHABET, REF_LENGTH, slugify, suggestRedirect
 import { crawlGooglebotBatch, researchSite, type Fetcher, type SiteResearch } from "@organic-growth/crawler";
 import {
   chunks, createAnalysis, createLead, recordLeadClick, updateLead, defaultPageSettings, recordSyncRun, recountCrawl, upsertPageSettings, datasetCoverage, deleteSite, getAnalysisJob, getCrawlCoverage, getCrawlProgress, importSearchConsoleUrls, insertChange, insertConversionEvent, listAllRecords,
-  listCrawlPageResults, listPendingCrawlUrls, recordLandingSession, replaceCurrentSearchMetrics, replacePageSearchMetrics, runStatements, saveAnalysisReport, saveCrawlBatch,
+  listCrawlLogDays, listCrawlPageResults, listPendingCrawlUrls, recordLandingSession, replaceCurrentSearchMetrics, replacePageSearchMetrics, runStatements, saveAnalysisReport, saveCrawlBatch,
   saveIndexStatus, saveSearchConsoleChart, saveSearchConsoleChecks, saveSearchConsoleSummary, saveSiteScope, saveSnapshot, searchConsoleReconciliation, saveTopQueriesSnapshot, saveUrlIndexStatus, listSiteCompetitorDomains, setSiteCompetitorDomains, syncFirstPartyResults, updateSiteGa4Property, upsertMetricPoints, type MetricPoint, setSiteMarkets, setTemplatePublication, syncTemplatePages, updateAnalysisProgress,
   updateAnalysisStatus, upsertDataset, upsertRecords, upsertSite, upsertTemplate, type D1Like,
 } from "@organic-growth/db";
@@ -11,6 +11,7 @@ import { generatePages } from "@organic-growth/pages";
 import { demoLinks, demoSerpLists, demoSuggestions, seedDemoConnectors } from "./demo-connectors.js";
 import { crawlLogCoverage } from "./log-coverage.js";
 import { queueFullCrawl, runFullAnalysis } from "./pipeline.js";
+import { loadTrendSignals } from "./trend-signals.js";
 
 /*
  * A demo site for local development: a fictional dental clinic served from
@@ -430,6 +431,7 @@ async function analyzeDemo(db: D1Like, input: { analysisId: string; version: num
       links: demoLinks(demoConnectorInput(), new Date(input.now).toISOString().slice(0, 10)),
       logCoverage: await crawlLogCoverage(db, DEMO_SITE_ID, input.analysisId, new Date(input.now).toISOString().slice(0, 10)),
       searchConsole: await searchConsoleReconciliation(db, DEMO_SITE_ID, input.analysisId),
+      trends: await loadTrendSignals(db, DEMO_SITE_ID, await listCrawlLogDays(db, DEMO_SITE_ID, addDays(new Date(input.now).toISOString().slice(0, 10), -182)), new Date(input.now).toISOString().slice(0, 10)),
     },
     crawlCoverage: { coverage, examples },
     renderPages: (urls) => renderDemo(urls, input.version),

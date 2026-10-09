@@ -161,17 +161,17 @@ export async function seedDemoConnectors(db: D1Like, demo: Demo, now: number): P
   for (let back = 120; back >= 1; back--) {
     const day = addDays(today, -back);
     const dayMs = now - back * DAY_MS;
-    // Every clinic, dentist and treatment page about twice a month, with the odd 503.
-    for (let slot = 0; slot < 60; slot++) {
-      const page = pages[(back * 60 + slot) % pages.length]!;
+    // About twenty requests a day for a 1,700-URL sitemap: each clinic, dentist and treatment page roughly once a quarter, with the odd 503. Slow enough that the analysis says so.
+    for (let slot = 0; slot < 12; slot++) {
+      const page = pages[(back * 12 + slot) % pages.length]!;
       hits.push({ time: new Date(dayMs + slot * 600_000).toISOString(), path: page.path, status: slot === 7 && back % 9 === 0 ? 503 : 200, bot: "googlebot" });
     }
     // Only every fourth blog post is ever requested, the rest having no links pointing at them; drafts redirect.
-    for (let slot = 0; slot < 10; slot++) {
-      const post = blog[((back * 10 + slot) * 4) % blog.length];
+    for (let slot = 0; slot < 5; slot++) {
+      const post = blog[((back * 5 + slot) * 4) % blog.length];
       if (post) hits.push({ time: new Date(dayMs + slot * 900_000).toISOString(), path: post.path, status: post.path.startsWith("/blog/drafts/") ? 301 : 200, bot: "googlebot" });
     }
-    for (let slot = 0; slot < 9; slot++) hits.push({ time: new Date(dayMs + slot * 900_000).toISOString(), path: `/search?q=${["braces", "implant", "kids", "price"][slot % 4]}&page=${slot}`, status: 200, bot: "googlebot" });
+    for (let slot = 0; slot < 4; slot++) hits.push({ time: new Date(dayMs + slot * 900_000).toISOString(), path: `/search?q=${["braces", "implant", "kids", "price"][slot % 4]}&page=${slot}`, status: 200, bot: "googlebot" });
     hits.push({ time: `${day}T05:00:00.000Z`, path: "/old-promotions", status: 404, bot: "googlebot" });
     for (let slot = 0; slot < 12; slot++) hits.push({ time: new Date(dayMs + slot * 1_800_000).toISOString(), path: demo.paths[(back * 11 + slot * 29) % demo.paths.length]!.path, status: 200, bot: "bingbot" });
     for (const [agent, count] of [["GPTBot", 4], ["ClaudeBot", 2], ["PerplexityBot", 2], ["ChatGPT-User", back <= 80 ? 3 : 1], ["Bytespider", 1]] as const) {

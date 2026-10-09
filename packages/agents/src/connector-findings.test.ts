@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { crawlLogView, type LinksInput, type SerpResult } from "@organic-growth/core";
-import { findingsFromCrawlLog, findingsFromSearchConsoleImport, linkGapOpportunity, withSerpContext, type LogCoverage } from "./connector-findings.js";
+import { findingsFromCrawlLog, findingsFromSearchConsoleImport, findingsFromTrends, linkGapOpportunity, withSerpContext, type LogCoverage, type TrendSignals } from "./connector-findings.js";
 import { buildOpportunities, gapOpportunities, synthesizeGrowthPlan } from "./index.js";
 
 const view = (googlebot: { ok: number; redirect?: number; missing?: number; error?: number; query?: number }) => crawlLogView([
@@ -134,5 +134,58 @@ describe("Search Console import findings", () => {
     assert.deepEqual(withChart.map((finding) => finding.title), ["Google has indexed 1,561 of the 26,059 URLs it knows (6%)"]);
     const tableOnly = findingsFromSearchConsoleImport({ siteId: "s", analysisId: "a", view: { importedAt: null, summary: table, counts: null, reasons: [], suggestions: [], remainingChecks: 0 } });
     assert.deepEqual(tableOnly, [], "the table alone never says how many are indexed");
+  });
+});
+
+describe("trend findings", () => {
+  const day = (offset: number, from: string) => new Date(Date.parse(`${from}T00:00:00Z`) + offset * 86_400_000).toISOString().slice(0, 10);
+  const series = (values: number[], from = "2026-07-01") => values.map((value, index) => ({ day: day(index, from), value }));
+  const logs = (days: number, hits: number) => Array.from({ length: days }, (_, index) => ({ day: day(-1 - index, "2026-10-09"), bot: "googlebot", family: "doctors", statusClass: "2xx", query: false, hits }));
+  const signals = (over: Partial<TrendSignals>): TrendSignals => ({ impressions: [], indexed: [], notIndexed: [], indexedSource: null, crawlLog: [], today: "2026-10-09", ...over });
+
+  it("names an impressions fall, and the indexed fall that happened with it", () => {
+    // 1 Jul → 20 Sep rising to a peak of about 4,900 a day around 21 Sep, then 80% lower.
+    const impressions = series([...Array(82).fill(0).map((_, i) => 400 + i * 50), ...Array(18).fill(950)]);
+    const indexed = [{ day: "2026-09-15", value: 88 }, { day: "2026-09-19", value: 1774 }, { day: "2026-09-22", value: 1561 }, { day: "2026-10-04", value: 1561 }];
+    const findings = findingsFromTrends({ siteId: "s", analysisId: "a", trends: signals({ impressions, indexed, indexedSource: "search_console" }), sitemapUrls: 22913, discovered: 23100 });
+    const fall = findings.find((finding) => finding.title.startsWith("Search impressions fell"))!;
+    assert.match(fall.title, /^Search impressions fell 7\d% since Sep 20$/);
+    assert.equal(fall.category, "search");
+    assert.match(fall.summary, /indexed count fell from 1,774 to 1,561/);
+    const indexedFall = findings.find((finding) => finding.title.startsWith("Google's indexed count fell"))!;
+    assert.equal(indexedFall.title, "Google's indexed count fell from 1774 to 1561 since Sep 19");
+    assert.match(indexedFall.summary, /Search Console/);
+  });
+
+  it("does not tie an indexed fall to the impressions fall when the dates are weeks apart", () => {
+    const impressions = series([...Array(82).fill(0).map((_, i) => 400 + i * 50), ...Array(18).fill(950)]);
+    const indexed = [{ day: "2026-07-20", value: 1774 }, { day: "2026-07-25", value: 1561 }, { day: "2026-10-04", value: 1561 }];
+    const fall = findingsFromTrends({ siteId: "s", analysisId: "a", trends: signals({ impressions, indexed, indexedSource: "search_console" }), sitemapUrls: null, discovered: null }).find((finding) => finding.title.startsWith("Search impressions fell"))!;
+    assert.doesNotMatch(fall.summary, /indexed count fell/);
+  });
+
+  it("trusts the inspection sample's fall only when Google's not-indexed count rose with it, not when pages were unpublished", () => {
+    const indexed = [{ day: "2026-09-01", value: 500 }, { day: "2026-10-01", value: 420 }];
+    const unpublished = findingsFromTrends({ siteId: "s", analysisId: "a", trends: signals({ indexed, indexedSource: "inspection", notIndexed: [{ day: "2026-09-01", value: 20 }, { day: "2026-10-01", value: 20 }] }), sitemapUrls: null, discovered: null });
+    assert.deepEqual(unpublished, [], "80 fewer indexed pages but none more left out: the operator unpublished them");
+    const dropped = findingsFromTrends({ siteId: "s", analysisId: "a", trends: signals({ indexed, indexedSource: "inspection", notIndexed: [{ day: "2026-09-01", value: 20 }, { day: "2026-10-01", value: 90 }] }), sitemapUrls: null, discovered: null });
+    assert.equal(dropped[0]?.title, "Google's indexed count fell from 500 to 420 since Sep 1");
+    assert.match(dropped[0]!.summary, /inspection sample/);
+  });
+
+  it("says how long Googlebot takes to get round the sitemap at its current pace", () => {
+    const [pace] = findingsFromTrends({ siteId: "s", analysisId: "a", trends: signals({ crawlLog: logs(28, 25) }), sitemapUrls: 1785, discovered: 660 });
+    assert.equal(pace!.title, "At Googlebot's pace the sitemap takes 72 days to crawl once");
+    assert.match(pace!.summary, /25 requests a day/);
+    assert.match(pace!.summary, /660 .*discovered/i);
+    assert.equal(pace!.category, "indexing");
+  });
+
+  it("stays quiet on rising or small series, short logs, small sitemaps, and without signals", () => {
+    assert.deepEqual(findingsFromTrends({ siteId: "s", analysisId: "a", trends: null, sitemapUrls: 1785, discovered: null }), []);
+    const rising = signals({ impressions: series(Array.from({ length: 100 }, (_, i) => 100 + i * 20)), indexed: series([300, 320, 350]), indexedSource: "inspection", crawlLog: logs(28, 400) });
+    assert.deepEqual(findingsFromTrends({ siteId: "s", analysisId: "a", trends: rising, sitemapUrls: 1785, discovered: null }), []);
+    const tiny = signals({ impressions: series([...Array(50).fill(60), ...Array(30).fill(10)]), crawlLog: logs(10, 5) });
+    assert.deepEqual(findingsFromTrends({ siteId: "s", analysisId: "a", trends: tiny, sitemapUrls: 150, discovered: null }), [], "under 100 a day, ten days of logs, 150 URLs");
   });
 });

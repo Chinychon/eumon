@@ -13,6 +13,7 @@ import { crawlLogCoverage } from "./log-coverage.js";
 import { queueFullCrawl, runFullAnalysis } from "./pipeline.js";
 import { probeTitleForCoverage } from "./not-found-probe.js";
 import { loadTrendSignals } from "./trend-signals.js";
+import { loadInventories } from "./inventory-data.js";
 
 /*
  * A demo site for local development: a fictional dental clinic served from
@@ -444,6 +445,7 @@ async function analyzeDemo(db: D1Like, input: { analysisId: string; version: num
       logCoverage: await crawlLogCoverage(db, DEMO_SITE_ID, input.analysisId, new Date(input.now).toISOString().slice(0, 10)),
       searchConsole: await searchConsoleReconciliation(db, DEMO_SITE_ID, input.analysisId),
       trends: await loadTrendSignals(db, DEMO_SITE_ID, await listCrawlLogDays(db, DEMO_SITE_ID, addDays(new Date(input.now).toISOString().slice(0, 10), -182)), new Date(input.now).toISOString().slice(0, 10)),
+      inventory: await loadInventories(db, DEMO_SITE_ID),
     },
     crawlCoverage: { coverage, examples },
     renderPages: (urls) => renderDemo(urls, input.version),
@@ -485,6 +487,8 @@ const DENTIST_FIELDS: Dataset["fields"] = [
   { key: "clinic", label: "Clinic", type: "text" },
   { key: "years", label: "Years of experience", type: "number" },
   { key: "languages", label: "Languages", type: "list" },
+  { key: "bio_en", label: "Bio (EN)", type: "text" },
+  { key: "bio_ms", label: "Bio (MS)", type: "text" },
 ];
 const TREATMENT_FIELDS: Dataset["fields"] = [
   { key: "name", label: "Treatment", type: "text", required: true },
@@ -500,7 +504,12 @@ async function seedPageEngine(db: D1Like, now: number) {
   const datasets: Array<{ dataset: Dataset; records: Array<Record<string, string | number | string[]>> }> = [
     {
       dataset: { id: "dataset_demo_dentists", siteId: DEMO_SITE_ID, name: "Dentists", entityType: "dentist", description: "Every dentist at the clinic group, with specialty and clinic.", fields: DENTIST_FIELDS, keyField: "name", pageIdeas: [], status: "active", createdAt: at, updatedAt: at },
-      records: DENTISTS.slice(0, 128).map((dentist, i) => ({ name: dentist.name, specialty: dentist.specialty, clinic: title(dentist.clinic), years: dentist.years, languages: i % 3 ? ["English", "Malay"] : ["English", "Mandarin", "Malay"] })),
+      records: DENTISTS.slice(0, 128).map((dentist, i) => ({
+        name: dentist.name, specialty: dentist.specialty, clinic: title(dentist.clinic), years: dentist.years, languages: i % 3 ? ["English", "Malay"] : ["English", "Mandarin", "Malay"],
+        // Every dentist has an English bio; half have no Malay one yet, which the inventory finding reports.
+        bio_en: `${dentist.name} is a ${dentist.specialty.toLowerCase()} at the ${title(dentist.clinic)} clinic with ${dentist.years} years of experience.`,
+        ...(i % 2 ? { bio_ms: `${dentist.name} ialah ${dentist.specialty.toLowerCase()} di klinik ${title(dentist.clinic)} dengan ${dentist.years} tahun pengalaman.` } : {}),
+      })),
     },
     {
       dataset: { id: "dataset_demo_treatments", siteId: DEMO_SITE_ID, name: "Treatments", entityType: "treatment", description: "Treatments with starting prices, duration, and recovery.", fields: TREATMENT_FIELDS, keyField: "name", pageIdeas: [], status: "active", createdAt: at, updatedAt: at },

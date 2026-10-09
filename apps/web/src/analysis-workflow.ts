@@ -21,7 +21,7 @@ import {
   updateSiteFingerprint,
 } from "@organic-growth/db";
 import {
-  MAX_COMPETITORS, crawlLogCoverage, fetchSearchConsoleMetrics, loadTrendSignals, probeTitleForCoverage, queueFullCrawl, runFullAnalysis, synthesizePlanNarrative,
+  MAX_COMPETITORS, crawlLogCoverage, fetchSearchConsoleMetrics, loadInventories, loadTrendSignals, probeTitleForCoverage, queueFullCrawl, runFullAnalysis, synthesizePlanNarrative,
 } from "@organic-growth/agents";
 import {
   buildRepoSnapshotFromGitHub,
@@ -165,7 +165,9 @@ export class SiteAnalysisWorkflow extends WorkflowEntrypoint<AppEnv, AnalysisPay
             loadConnectorLists(db, { id: siteId, baseUrl: site.baseUrl }, { markets: targetMarkets, competitors }),
             crawlLogCoverage(db, siteId, analysisId),
             searchConsoleReconciliation(db, siteId, analysisId).catch(() => null),
-          ]).then(async ([lists, coverage, searchConsole]) => connectorSignals(lists, coverage, searchConsole, await loadTrendSignals(db, siteId, lists.crawlLog).catch(() => null))).catch(() => undefined);
+            // The client's own data, when the Data section holds any: fills by language, duplicates, thin record pages.
+            loadInventories(db, siteId).catch(() => []),
+          ]).then(async ([lists, coverage, searchConsole, inventory]) => connectorSignals(lists, coverage, searchConsole, await loadTrendSignals(db, siteId, lists.crawlLog).catch(() => null), inventory)).catch(() => undefined);
           const raw = await runFullAnalysis({
             analysisId,
             siteId,

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { crawlLogView, type LinksInput, type SerpResult } from "@organic-growth/core";
-import { findingsFromCrawlLog, findingsFromSearchConsoleImport, findingsFromTrends, linkGapOpportunity, withSerpContext, type LogCoverage, type TrendSignals } from "./connector-findings.js";
+import { findingsFromCrawlLog, findingsFromInventory, findingsFromSearchConsoleImport, findingsFromTrends, linkGapOpportunity, withSerpContext, type InventorySignal, type LogCoverage, type TrendSignals } from "./connector-findings.js";
 import { buildOpportunities, gapOpportunities, synthesizeGrowthPlan } from "./index.js";
 
 const view = (googlebot: { ok: number; redirect?: number; missing?: number; error?: number; query?: number }) => crawlLogView([
@@ -187,5 +187,41 @@ describe("trend findings", () => {
     assert.deepEqual(findingsFromTrends({ siteId: "s", analysisId: "a", trends: rising, sitemapUrls: 1785, discovered: null }), []);
     const tiny = signals({ impressions: series([...Array(50).fill(60), ...Array(30).fill(10)]), crawlLog: logs(10, 5) });
     assert.deepEqual(findingsFromTrends({ siteId: "s", analysisId: "a", trends: tiny, sitemapUrls: 150, discovered: null }), [], "under 100 a day, ten days of logs, 150 URLs");
+  });
+});
+
+describe("inventory findings", () => {
+  const fields = (over: Array<[string, string, number, number, string?]>) => over.map(([key, label, filled, share, language]) => ({ key, label, filled, share, ...(language ? { language } : {}) }));
+  const base = (records: number): InventorySignal => ({
+    dataset: { id: "d", name: "Doctors", entityType: "doctor", records },
+    inventory: { records, fields: [], languages: [], duplicates: { groups: 0, records: 0, examples: [] }, pages: null },
+  });
+
+  it("names the language a field is missing in, the records listed twice, and the thin pages", () => {
+    const signal: InventorySignal = { ...base(7704), inventory: {
+      records: 7704,
+      fields: fields([["name", "Name", 7704, 1], ["bio_en", "Bio (EN)", 7074, 0.918, "EN"], ["bio_id", "Bio (ID)", 7077, 0.919, "ID"], ["bio_zh", "Bio (ZH)", 7077, 0.919, "ZH"]]),
+      languages: [{ base: "Bio", variants: [{ language: "EN", filled: 7074, share: 0.918 }, { language: "ID", filled: 7077, share: 0.919 }, { language: "ZH", filled: 7077, share: 0.919 }] }],
+      duplicates: { groups: 20, records: 40, examples: [{ name: "Dr Lim Ai Wei", keys: ["a", "b"] }] },
+      pages: { linked: 7000, thin: 596, missing: 18, examples: { thin: ["https://x.com/doctors/a"], missing: [] } },
+    } };
+    const findings = findingsFromInventory({ siteId: "s", analysisId: "a", inventories: [signal] });
+    assert.deepEqual(findings.map((finding) => finding.title), [
+      "630 of 7,704 doctors have no Bio (EN)",
+      "40 doctors are listed more than once",
+      "596 doctor pages have almost no content",
+    ]);
+    assert.ok(findings.every((finding) => finding.category === "content"));
+    assert.match(findings[0]!.summary, /92%/);
+    assert.deepEqual(findings[1]!.evidence.examples, [{ name: "Dr Lim Ai Wei", keys: ["a", "b"] }]);
+  });
+
+  it("stays quiet on small datasets, well-filled fields, few duplicates and few thin pages", () => {
+    const small = { ...base(40), inventory: { ...base(40).inventory, fields: fields([["bio_en", "Bio (EN)", 10, 0.25, "EN"]]), duplicates: { groups: 5, records: 10, examples: [] } } };
+    assert.deepEqual(findingsFromInventory({ siteId: "s", analysisId: "a", inventories: [small] }), [], "under 50 records");
+    const fine = { ...base(500), inventory: { ...base(500).inventory, fields: fields([["bio", "Bio", 480, 0.96], ["phone", "Phone", 300, 0.6]]), duplicates: { groups: 1, records: 3, examples: [] }, pages: { linked: 500, thin: 9, missing: 0, examples: { thin: [], missing: [] } } } };
+    assert.deepEqual(findingsFromInventory({ siteId: "s", analysisId: "a", inventories: [fine] }), [], "96% filled, phone under 50% but only 200 missing is... fine? no: 200 missing of 500 at 60% is above the 50% line");
+    const plain = { ...base(500), inventory: { ...base(500).inventory, fields: fields([["overview", "Overview", 60, 0.12]]) } };
+    assert.deepEqual(findingsFromInventory({ siteId: "s", analysisId: "a", inventories: [plain] }).map((finding) => finding.title), ["440 of 500 doctors have no Overview"], "a plain field under half filled");
   });
 });

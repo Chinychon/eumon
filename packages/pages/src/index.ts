@@ -7,3 +7,4 @@ export * from "./insights.js";
 export * from "./snippets.js";
 export * from "./potential.js";
 export * from "./labels.js";
+export * from "./inventory.js";

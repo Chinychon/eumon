@@ -1012,3 +1012,63 @@ export async function getDailyTotals(db: D1Like, siteId: string, sinceDay: strin
     searchClicks: Number(row.search_clicks), searchImpressions: Number(row.search_impressions),
   }));
 }
+
+/** `$."key"` for json_extract, bound as a parameter. */
+const jsonPath = (key: string) => `$."${key.replace(/"/g, "")}"`;
+
+/**
+ * The counts behind a dataset's inventory, in four queries: how many records
+ * fill each field, every record's key and name (for duplicate groups), and the
+ * records' own pages in the site's latest finished crawl: thin (an empty shell
+ * or under 250 characters of text) or missing (404/410, or not crawled). Pages
+ * are null when no record points at the site or no crawl has finished.
+ */
+export async function datasetInventoryRows(db: D1Like, dataset: Pick<Dataset, "id" | "siteId" | "fields" | "keyField">): Promise<{
+  records: number;
+  fills: Record<string, number>;
+  names: Array<{ key: string; name: string }>;
+  pages: { linked: number; thin: number; missing: number; examples: { thin: string[]; missing: string[] } } | null;
+}> {
+  const keys = dataset.fields.map((field) => field.key);
+  const filled = (index: number) => `json_extract(data_json, ?${index + 2})`;
+  const fillRow = await db.prepare(
+    `SELECT COUNT(*) AS records${keys.map((_, index) => `, SUM(CASE WHEN ${filled(index)} IS NOT NULL AND ${filled(index)} NOT IN ('', '[]') THEN 1 ELSE 0 END) AS f${index}`).join("")}
+     FROM data_records WHERE dataset_id = ?1`,
+  ).bind(dataset.id, ...keys.map(jsonPath)).first<Record<string, number>>();
+  const records = Number(fillRow?.records ?? 0);
+  const fills = Object.fromEntries(keys.map((key, index) => [key, Number(fillRow?.[`f${index}`] ?? 0)]));
+  const nameKey = dataset.fields.some((field) => field.key === dataset.keyField) ? dataset.keyField : keys.find((key) => key === "name" || key === "title") ?? dataset.keyField;
+  const { results: nameRows } = await db.prepare(
+    "SELECT record_key, json_extract(data_json, ?) AS name FROM data_records WHERE dataset_id = ? LIMIT 50000",
+  ).bind(jsonPath(nameKey), dataset.id).all<{ record_key: string; name: string | null }>();
+  const names = nameRows.map((row) => ({ key: String(row.record_key), name: row.name == null ? "" : String(row.name) }));
+  const site = await db.prepare(
+    `SELECT base_url, (SELECT id FROM analyses WHERE site_id = sites.id AND status = 'completed' ORDER BY completed_at DESC LIMIT 1) AS analysis_id FROM sites WHERE id = ?`,
+  ).bind(dataset.siteId).first<{ base_url: string; analysis_id: string | null }>();
+  if (!site?.analysis_id) return { records, fills, names, pages: null };
+  const urlKey = dataset.fields.find((field) => field.type === "url" || field.key === "url")?.key;
+  const url = urlKey ? `COALESCE(json_extract(r.data_json, ?4), r.source_url)` : "r.source_url";
+  const THIN = "status IS NOT NULL AND status < 400 AND (is_empty_shell = 1 OR COALESCE(text, 0) < 250)";
+  const MISSING = "status IS NULL OR status >= 400";
+  const page = await db.prepare(
+    `WITH linked AS (SELECT ${url} AS url FROM data_records r WHERE r.dataset_id = ?1),
+     joined AS (
+       SELECT l.url, p.status, p.is_empty_shell, json_extract(p.result_json, '$.rawTextLength') AS text
+       FROM linked l LEFT JOIN pages p ON p.analysis_id = ?2 AND p.url = l.url AND p.crawl_state = 'complete'
+       WHERE l.url LIKE ?3
+     )
+     SELECT COUNT(*) AS linked,
+       SUM(CASE WHEN ${THIN} THEN 1 ELSE 0 END) AS thin,
+       SUM(CASE WHEN ${MISSING} THEN 1 ELSE 0 END) AS missing,
+       (SELECT GROUP_CONCAT(url, ' ') FROM (SELECT url FROM joined WHERE ${THIN} ORDER BY url LIMIT 5)) AS thin_examples,
+       (SELECT GROUP_CONCAT(url, ' ') FROM (SELECT url FROM joined WHERE ${MISSING} ORDER BY url LIMIT 5)) AS missing_examples
+     FROM joined`,
+  ).bind(dataset.id, site.analysis_id, `${new URL(site.base_url).origin}/%`, ...(urlKey ? [jsonPath(urlKey)] : [])).first<Record<string, number | string | null>>();
+  const linked = Number(page?.linked ?? 0);
+  if (!linked) return { records, fills, names, pages: null };
+  const split = (value: unknown) => (value ? String(value).split(" ") : []);
+  return {
+    records, fills, names,
+    pages: { linked, thin: Number(page?.thin ?? 0), missing: Number(page?.missing ?? 0), examples: { thin: split(page?.thin_examples), missing: split(page?.missing_examples) } },
+  };
+}

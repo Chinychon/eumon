@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { DataRecord, DataSource, Dataset, DatasetField, DatasetFieldType, Job, SiteRecord } from "@organic-growth/core";
+import type { Inventory } from "@organic-growth/pages";
 import { api, errorMessage, formatNumber } from "./api";
 import { Badge, Button, Card, Field, Progress, toneFor, usePolling, ViewHeader } from "./ui";
 
@@ -14,7 +15,7 @@ type Preview = {
 
 const FIELD_TYPES: DatasetFieldType[] = ["text", "number", "list", "url", "boolean"];
 const KIND_LABEL: Record<DataSource["kind"], string> = {
-  own_site: "Your site", listing: "Listing page", sitemap: "Sitemap", page: "Single page",
+  own_site: "Your site", listing: "Listing page", sitemap: "Sitemap", page: "Single page", supabase: "Supabase table",
 };
 
 function display(value: unknown): string {
@@ -222,8 +223,10 @@ function DatasetCard({ dataset, siteBaseUrl, onChanged }: { dataset: DatasetWith
           </div>
         )}
 
+      {dataset.recordCount > 0 && <InventoryPanel datasetId={dataset.id} recordCount={dataset.recordCount} entityType={dataset.entityType} />}
+
       <div className="section-title">Sources</div>
-      {dataset.sources.length === 0 && <p className="small muted">No sources yet. Add your own site's pages, a public directory, or import a CSV.</p>}
+      {dataset.sources.length === 0 && <p className="small muted">No sources yet. Add your own site's pages, a public directory, a Supabase table, or import a CSV.</p>}
       {dataset.sources.map((source) => <SourceRow key={source.id} source={source} onChanged={onChanged} />)}
       <AddSourceForm datasetId={dataset.id} siteBaseUrl={siteBaseUrl} onAdded={onChanged} />
 
@@ -305,10 +308,12 @@ function SourceRow({ source, onChanged }: { source: DataSource; onChanged: () =>
   const [preview, setPreview] = useState<Preview | null>(null);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
+  const [note, setNote] = useState("");
   async function act(key: string, action: () => Promise<unknown>, reload = true) {
-    setBusy(key); setError("");
+    setBusy(key); setError(""); setNote("");
     try { await action(); if (reload) await onChanged(); } catch (cause) { setError(errorMessage(cause)); } finally { setBusy(""); }
   }
+  const supabase = source.kind === "supabase";
   const sampleKeys = preview?.sample?.records[0] ? Object.keys(preview.sample.records[0]).slice(0, 6) : [];
   return (
     <div className="list-row">
@@ -317,16 +322,17 @@ function SourceRow({ source, onChanged }: { source: DataSource; onChanged: () =>
         <h4 className="row">
           <span className="chip">{KIND_LABEL[source.kind]}</span>
           <a href={source.url} target="_blank" rel="noreferrer" className="mono">{source.url.replace(/^https?:\/\//, "")}</a>
-          {source.urlPattern && <span className="mono muted">{source.urlPattern}</span>}
+          {source.urlPattern && !supabase && <span className="mono muted">{source.urlPattern}</span>}
         </h4>
         {source.rationale && <p>{source.rationale}</p>}
         <p className="small">
           {source.recordCount > 0 && <>{formatNumber(source.recordCount)} records · </>}
-          up to {formatNumber(source.maxPages)} pages
+          {supabase ? `table ${source.urlPattern ?? ""}, up to ${formatNumber(source.maxPages * 1000)} rows a pull` : `up to ${formatNumber(source.maxPages)} pages`}
           {source.robotsAllowed === false && <> · <span style={{ color: "var(--red)" }}>blocked by robots.txt</span></>}
           {source.error && <> · <span style={{ color: "var(--amber)" }}>{source.error}</span></>}
         </p>
         {error && <p className="small" style={{ color: "var(--red)" }}>{error}</p>}
+        {note && <p className="small">{note}</p>}
         {preview && (
           <div className="callout" style={{ marginTop: 8 }}>
             <div><strong>{formatNumber(preview.matched)}</strong> matching pages{preview.blocked ? `, ${preview.blocked} blocked by robots.txt` : ""}{preview.total !== undefined && preview.total < preview.matched ? ` (${formatNumber(preview.total)} within this source's page budget)` : ""}.</div>
@@ -348,7 +354,12 @@ function SourceRow({ source, onChanged }: { source: DataSource; onChanged: () =>
         )}
       </div>
       <div className="row" style={{ justifyContent: "flex-end" }}>
-        <Button small variant="secondary" busy={busy === "preview"} onClick={() => act("preview", async () => setPreview(await api<Preview>(`/api/sources/${source.id}/preview`, { method: "POST" })), false)}>Preview</Button>
+        {supabase
+          ? <Button small variant="secondary" busy={busy === "pull"} onClick={() => act("pull", async () => {
+            const result = await api<{ rows: number; records: number }>(`/api/sources/${source.id}/pull`, { method: "POST" });
+            setNote(`Pulled ${formatNumber(result.rows)} rows into ${formatNumber(result.records)} records.`);
+          })}>Pull now</Button>
+          : <Button small variant="secondary" busy={busy === "preview"} onClick={() => act("preview", async () => setPreview(await api<Preview>(`/api/sources/${source.id}/preview`, { method: "POST" })), false)}>Preview</Button>}
         {source.status !== "approved" && <Button small busy={busy === "approve"} onClick={() => act("approve", () => api(`/api/sources/${source.id}`, { method: "PATCH", json: { status: "approved" } }))}>Approve</Button>}
         {source.status === "approved" && <Button small variant="ghost" onClick={() => act("reject", () => api(`/api/sources/${source.id}`, { method: "PATCH", json: { status: "rejected" } }))}>Pause</Button>}
         <Button small variant="danger" onClick={() => act("delete", () => api(`/api/sources/${source.id}`, { method: "DELETE" }))}>Remove</Button>
@@ -363,16 +374,21 @@ function AddSourceForm({ datasetId, siteBaseUrl, onAdded }: { datasetId: string;
   const [url, setUrl] = useState("");
   const [pattern, setPattern] = useState("");
   const [maxPages, setMaxPages] = useState("300");
+  const [table, setTable] = useState("");
+  const [key, setKey] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   if (!open) return <Button small variant="ghost" onClick={() => setOpen(true)}>+ Add source</Button>;
   async function add() {
     setBusy(true); setError("");
     try {
-      await api(`/api/datasets/${datasetId}/sources`, { method: "POST", json: { kind, url, urlPattern: pattern, maxPages: Number(maxPages) } });
-      setOpen(false); setUrl(""); setPattern("");
+      const { source } = await api<{ source: DataSource }>(`/api/datasets/${datasetId}/sources`, { method: "POST", json: { kind, url, urlPattern: pattern, maxPages: Number(maxPages), table, key } });
+      setKey("");
+      // A table is read at once, so a wrong key or table name shows here, not days later.
+      if (kind === "supabase") await api(`/api/sources/${source.id}/pull`, { method: "POST" });
+      setOpen(false); setUrl(""); setPattern(""); setTable("");
       await onAdded();
-    } catch (cause) { setError(errorMessage(cause)); } finally { setBusy(false); }
+    } catch (cause) { setError(errorMessage(cause)); await onAdded(); } finally { setBusy(false); }
   }
   return (
     <div className="callout" style={{ marginTop: 8, background: "var(--surface)" }}>
@@ -383,24 +399,86 @@ function AddSourceForm({ datasetId, siteBaseUrl, onAdded }: { datasetId: string;
             <option value="listing">A directory or listing page</option>
             <option value="sitemap">A sitemap.xml</option>
             <option value="page">A page that lists records (table or list, follows pagination)</option>
+            <option value="supabase">A Supabase table (read-only key)</option>
           </select>
         </Field>
         {kind === "own_site"
           ? <Field label="Site"><input className="input" value={siteBaseUrl} disabled /></Field>
-          : <Field label="URL"><input className="input" value={url} placeholder="https://directory.example.com/malls" onChange={(event) => setUrl(event.target.value)} /></Field>}
-        {kind !== "page" && (
+          : kind === "supabase"
+            ? <Field label="Project URL"><input className="input" value={url} placeholder="https://abcdefgh.supabase.co" onChange={(event) => setUrl(event.target.value)} /></Field>
+            : <Field label="URL"><input className="input" value={url} placeholder="https://directory.example.com/malls" onChange={(event) => setUrl(event.target.value)} /></Field>}
+        {kind === "supabase" && (
+          <>
+            <Field label="Table or view" hint="Columns are matched to fields by key or label; unmatched columns are ignored.">
+              <input className="input mono" value={table} placeholder="doctors" onChange={(event) => setTable(event.target.value)} />
+            </Field>
+            <Field label="Read-only API key" hint="An anon key with row-level security that can only select this table, or a dedicated read-only role. Never the service-role key. Stored sealed; never shown again." wide>
+              <input className="input mono" type="password" autoComplete="off" value={key} onChange={(event) => setKey(event.target.value)} />
+            </Field>
+          </>
+        )}
+        {kind !== "page" && kind !== "supabase" && (
           <Field label="Detail page pattern" hint="Which links are individual records. * matches one path segment, ** any number.">
             <input className="input mono" value={pattern} placeholder="/malls/*" onChange={(event) => setPattern(event.target.value)} />
           </Field>
         )}
-        <Field label={kind === "page" ? "List pages to read" : "Max pages per run"} hint={kind === "page" ? "Follows the list's pager (up to 50 pages)." : undefined}>
-          <input className="input" type="number" min={1} max={kind === "page" ? 50 : 5000} value={maxPages} onChange={(event) => setMaxPages(event.target.value)} />
-        </Field>
+        {kind !== "supabase" && (
+          <Field label={kind === "page" ? "List pages to read" : "Max pages per run"} hint={kind === "page" ? "Follows the list's pager (up to 50 pages)." : undefined}>
+            <input className="input" type="number" min={1} max={kind === "page" ? 50 : 5000} value={maxPages} onChange={(event) => setMaxPages(event.target.value)} />
+          </Field>
+        )}
       </div>
       {error && <p className="small" style={{ color: "var(--red)" }}>{error}</p>}
       <div className="row" style={{ marginTop: 10 }}><Button small busy={busy} onClick={add}>Add source</Button><Button small variant="ghost" onClick={() => setOpen(false)}>Cancel</Button></div>
-      <p className="small muted" style={{ marginBottom: 0 }}>Eumon identifies itself as EumonBot, follows robots.txt, and paces requests. Only collect facts you are allowed to republish.</p>
+      <p className="small muted" style={{ marginBottom: 0 }}>{kind === "supabase" ? "Eumon reads the table through the project's REST API, 1,000 rows at a time, up to 40,000 rows a pull. It never writes." : "Eumon identifies itself as EumonBot, follows robots.txt, and paces requests. Only collect facts you are allowed to republish."}</p>
     </div>
+  );
+}
+
+/** What the records say about the content: fill per field (by language), records listed twice, and the records' pages in the latest crawl. */
+function InventoryPanel({ datasetId, recordCount, entityType }: { datasetId: string; recordCount: number; entityType: string }) {
+  const [inventory, setInventory] = useState<Inventory | null>(null);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    let live = true;
+    api<{ inventory: Inventory }>(`/api/datasets/${datasetId}/inventory`).then((data) => { if (live) setInventory(data.inventory); }, (cause) => { if (live) setError(errorMessage(cause)); });
+    return () => { live = false; };
+  }, [datasetId, recordCount]);
+  if (error) return <><div className="section-title">Inventory</div><p className="small" style={{ color: "var(--red)" }}>{error}</p></>;
+  if (!inventory) return <><div className="section-title">Inventory</div><p className="small muted">Counting…</p></>;
+  const percent = (share: number) => `${Math.round(share * 100)}%`;
+  const grouped = new Set(inventory.languages.flatMap((group) => group.variants.map((variant) => `${group.base}|${variant.language}`)));
+  const plain = inventory.fields.filter((field) => !(field.language && grouped.has(`${field.label.replace(/\s*\(\w{2,3}\)\s*$/, "")}|${field.language}`)));
+  const { duplicates, pages } = inventory;
+  return (
+    <>
+      <div className="section-title">Inventory</div>
+      <div className="form-grid" style={{ marginBottom: 8, gap: "6px 14px" }}>
+        {plain.map((field) => (
+          <div key={field.key} className="small">
+            <div className="row spread"><span>{field.label}</span><span className="muted">{formatNumber(field.filled)} of {formatNumber(inventory.records)} · {percent(field.share)}</span></div>
+            <Progress done={field.filled} total={inventory.records} />
+          </div>
+        ))}
+        {inventory.languages.map((group) => (
+          <div key={group.base} className="small">
+            <div className="row spread"><span>{group.base}</span><span className="muted">{group.variants.map((variant) => `${variant.language} ${percent(variant.share)}`).join(" · ")}</span></div>
+            <Progress done={Math.min(...group.variants.map((variant) => variant.filled))} total={inventory.records} />
+          </div>
+        ))}
+      </div>
+      <p className="small" style={{ marginBottom: 6 }}>
+        {duplicates.records > 0
+          ? <><strong>{formatNumber(duplicates.records)}</strong> {entityType} records share {formatNumber(duplicates.groups)} name{duplicates.groups === 1 ? "" : "s"}: {duplicates.examples.slice(0, 5).map((group) => `${group.name} ×${group.keys.length}`).join(", ")}. Merge duplicates (below) proposes the merges.</>
+          : <>No two records share a name.</>}
+      </p>
+      {pages && (
+        <p className="small" style={{ marginBottom: 6 }}>
+          <strong>{formatNumber(pages.linked)}</strong> {entityType} pages on the site in the latest crawl: {formatNumber(pages.thin)} thin (an empty shell or under 250 characters), {formatNumber(pages.missing)} missing (404, or not crawled).
+          {pages.examples.thin.length > 0 && <> Thin: {pages.examples.thin.map((url) => <span key={url} className="mono"> {url.replace(/^https?:\/\/[^/]+/, "")}</span>)}</>}
+        </p>
+      )}
+    </>
   );
 }
 

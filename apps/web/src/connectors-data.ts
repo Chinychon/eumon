@@ -1,4 +1,4 @@
-import { authorityDomain, type ConnectorSignals, type LogCoverage, type SearchConsoleSignal, type TrendSignals } from "@organic-growth/agents";
+import { authorityDomain, type ConnectorSignals, type InventorySignal, type LogCoverage, type SearchConsoleSignal, type TrendSignals } from "@organic-growth/agents";
 import { addDays, suggestCompetitors, type BacklinkSummary, type CrawlDayRow, type LinkGap, type LinksInput, type ResultsInput, type SerpCompetitor, type SerpResult, type SiteRecord } from "@organic-growth/core";
 import { firstMetricDay, listCrawlLogDays, listSnapshots, type D1Like } from "@organic-growth/db";
 
@@ -41,6 +41,6 @@ export async function loadConnectorLists(db: D1Like, site: Pick<SiteRecord, "id"
 }
 
 /** Everything the analysis takes from the connectors, in the shape the pipeline reads. */
-export function connectorSignals(lists: ConnectorLists, logCoverage: LogCoverage | null, searchConsole: SearchConsoleSignal | null = null, trends: TrendSignals | null = null): ConnectorSignals {
-  return { serp: lists.serp.lists.flatMap((list) => list.rows), suggestions: lists.serp.suggestions, links: lists.links, logCoverage, searchConsole, trends };
+export function connectorSignals(lists: ConnectorLists, logCoverage: LogCoverage | null, searchConsole: SearchConsoleSignal | null = null, trends: TrendSignals | null = null, inventory: InventorySignal[] = []): ConnectorSignals {
+  return { serp: lists.serp.lists.flatMap((list) => list.rows), suggestions: lists.serp.suggestions, links: lists.links, logCoverage, searchConsole, trends, inventory };
 }

@@ -1,7 +1,7 @@
 import { createId, fromBase64Url, toBase64Url } from "@organic-growth/core";
 import { getOAuthCredential, upsertOAuthCredential, type D1Like } from "@organic-growth/db";
 
-async function encryptSecret(value: string, secret: string): Promise<string> {
+export async function encryptSecret(value: string, secret: string): Promise<string> {
   const rawKey = fromBase64Url(secret);
   if (rawKey.length !== 32) throw new Error("OAUTH_ENCRYPTION_KEY must be a base64url-encoded 32-byte key.");
   const key = await crypto.subtle.importKey("raw", rawKey, "AES-GCM", false, ["encrypt"]);
@@ -10,7 +10,7 @@ async function encryptSecret(value: string, secret: string): Promise<string> {
   return `${toBase64Url(iv)}.${toBase64Url(cipher)}`;
 }
 
-async function decryptSecret(value: string, secret: string): Promise<string> {
+export async function decryptSecret(value: string, secret: string): Promise<string> {
   const [ivValue, cipherValue] = value.split(".");
   const key = await crypto.subtle.importKey("raw", fromBase64Url(secret), "AES-GCM", false, ["decrypt"]);
   const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv: fromBase64Url(ivValue) }, key, fromBase64Url(cipherValue));

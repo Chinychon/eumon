@@ -1,7 +1,7 @@
 import { slugify, type DataSourceKind, type DatasetField, type DatasetFieldType } from "@organic-growth/core";
 
 const FIELD_TYPES: DatasetFieldType[] = ["text", "number", "list", "url", "boolean"];
-export const SOURCE_KINDS: DataSourceKind[] = ["own_site", "listing", "sitemap", "page"];
+export const SOURCE_KINDS: DataSourceKind[] = ["own_site", "listing", "sitemap", "page", "supabase"];
 
 /** Validates owner-edited fields; returns an error message or the cleaned fields. */
 export function validateFields(value: unknown): DatasetField[] | string {

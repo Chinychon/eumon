@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import type { DataSource } from "@organic-growth/core";
-import { deleteSource, getSource, upsertSource } from "@organic-growth/db";
+import { deleteOAuthCredential, deleteSource, getSource, upsertSource } from "@organic-growth/db";
 import { validateUrlPattern } from "../../../../src/datasets";
 import { fail, json, readJson } from "../../../../src/server";
 
@@ -26,7 +26,9 @@ export async function PATCH(request: Request, context: { params: Promise<{ sourc
 
 export async function DELETE(_request: Request, context: { params: Promise<{ sourceId: string }> }) {
   const { sourceId } = await context.params;
-  if (!(await getSource(env.DB, sourceId))) return fail("Source not found.", 404);
+  const source = await getSource(env.DB, sourceId);
+  if (!source) return fail("Source not found.", 404);
   await deleteSource(env.DB, sourceId);
+  if (source.kind === "supabase") await deleteOAuthCredential(env.DB, source.siteId, `supabase:${sourceId}`);
   return json({ deleted: true });
 }

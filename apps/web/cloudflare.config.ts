@@ -16,9 +16,10 @@ export const worker = defineWorker({
     env: {
       ASSETS: bindings.assets(),
       IMAGES: bindings.images(),
+      // Bound by ID alone: the binding Cloudflare reports has no database name, and a deploy (Workers
+      // Builds runs it in strict mode) stops on any difference from the Worker's dashboard settings.
       DB: bindings.d1({
         id: process.env.CF_D1_DATABASE_ID ?? "591e4045-cbff-4ef4-a894-cbe4ece424ec",
-        name: "eumon-prod",
       }),
       AI: bindings.ai(),
       BROWSER: bindings.browser(),

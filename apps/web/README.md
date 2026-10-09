@@ -17,6 +17,8 @@ The dashboard, API, public landing pages, and background Workflows, deployed as 
 
 To deploy, from the repository root: sign in with `npm exec -w @organic-growth/web -- cf auth login` (the `cf` CLI is installed in the web workspace; or export `CLOUDFLARE_API_TOKEN`), apply migrations with `npm run db:migrate:remote`, set the secrets above on the deployed Worker, then run `npm run deploy` (it builds the packages first). Re-run `npm run db:migrate:remote` after pulling changes that add files to `packages/db/migrations`; already-applied migrations are skipped. To deploy your own copy, set `CF_D1_DATABASE_ID` to your D1 database (and update the ID in the `db:migrate:*` scripts).
 
+Keep the Worker's settings in `cloudflare.config.ts` and secrets as **Secrets**, not in the Cloudflare dashboard. A deploy from Workers Builds runs in strict mode: when the Worker was last changed in the dashboard and its settings differ from the config (a plain-text variable where the config declares a secret, for example), it stops with "Aborting the upload operation because of conflicts". Workers Builds doesn't apply migrations; run `npm run db:migrate:remote` before a deploy that adds a file to `packages/db/migrations`.
+
 ## The landing page engine
 
 | Step | Where | Notes |

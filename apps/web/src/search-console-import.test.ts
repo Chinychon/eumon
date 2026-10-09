@@ -4,6 +4,8 @@ import type { CrawlPageResult } from "@organic-growth/core";
 import { createAnalysis, enqueueAnalysisCrawlUrls, getSite, saveAnalysisReport, saveCrawlBatch, upsertSite, type D1Like } from "@organic-growth/db";
 import { openSqliteD1 } from "@organic-growth/db/sqlite";
 import type { GooglebotCrawlOutcome } from "@organic-growth/crawler";
+import { DEMO_SITE_ID, seedDemoSite } from "@organic-growth/agents";
+import { getAnalysisJob } from "@organic-growth/db";
 import { checkSearchConsoleUrls, importExport, searchConsoleView } from "./search-console-import.ts";
 
 const AT = "2026-10-01T00:00:00.000Z";
@@ -74,5 +76,20 @@ describe("Search Console import", () => {
     assert.deepEqual(noindex.today, { indexable: 2, noindex: 0, redirect: 1, gone: 1, error: 1, unchecked: 0 }, "a fetch failure counts as an error, not as waiting");
     assert.deepEqual(view.suggestions, [{ url: u("/doctors/catherine-lee"), suggestedUrl: u("/doctors/dr-catherine-lee-tong-how") }]);
     assert.equal(view.remainingChecks, 0);
+  });
+
+  it("gives the demo an import to show: reasons reconciled, redirect suggestions, and the three findings in its latest analysis", async () => {
+    const db = openSqliteD1();
+    await seedDemoSite(db, Date.now());
+    const view = await searchConsoleView(db, DEMO_SITE_ID);
+    const noindex = view.reasons.find((entry) => entry.reason === "noindex")!;
+    assert.ok(noindex.today.indexable > 0 && noindex.today.redirect > 0 && noindex.today.gone > 0, JSON.stringify(noindex.today));
+    assert.ok(view.suggestions.length >= 10, `suggestions ${view.suggestions.length}`);
+    assert.ok(view.history.length >= 10 && view.summary, "the chart and the overview");
+    assert.equal(view.remainingChecks, 0, "the demo's live checks are pre-recorded");
+    const titles = ((await getAnalysisJob(db, "analysis_demo_2"))!.report as { findings: Array<{ title: string }> }).findings.map((finding) => finding.title);
+    assert.ok(titles.some((title) => /^Google has indexed/.test(title)), titles.join(" | "));
+    assert.ok(titles.some((title) => /excluded as noindex are indexable now$/.test(title)));
+    assert.ok(titles.some((title) => /return 404; \d+ match a live page$/.test(title)));
   });
 });

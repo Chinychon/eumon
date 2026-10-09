@@ -2,6 +2,7 @@ import {
   createId, referringDomainGap, serpCrowding, serpLookup, severityFromImpact,
   type CompetitorSuggestion, type CrawlLogView, type Finding, type FindingCategory, type JsonObject, type LinksInput, type Opportunity, type SerpResult,
 } from "@organic-growth/core";
+import type { SearchConsoleReconciliation } from "@organic-growth/db";
 
 /*
  * What the connectors beyond Google add to an analysis: findings from the
@@ -17,11 +18,15 @@ export type LogCoverage = {
   view: CrawlLogView;
 };
 
+/** An imported Search Console Page-indexing export, reconciled with today (see `searchConsoleReconciliation`). */
+export type SearchConsoleSignal = Pick<SearchConsoleReconciliation, "importedAt" | "summary" | "reasons" | "suggestions" | "remainingChecks">;
+
 export type ConnectorSignals = {
   serp?: SerpResult[];
   suggestions?: CompetitorSuggestion[];
   links?: LinksInput;
   logCoverage?: LogCoverage | null;
+  searchConsole?: SearchConsoleSignal | null;
 };
 
 /** Fewer days of logs than this say nothing about what Googlebot skips. */
@@ -118,4 +123,59 @@ export function withSerpContext(opportunities: Opportunity[], rows: SerpResult[]
     ].filter(Boolean);
     return notes.length ? { ...opportunity, rationale: `${opportunity.rationale} ${notes.join("; ").replace(/^./, (first) => first.toUpperCase())} (checked ${result.checkedAt}).` } : opportunity;
   });
+}
+
+const n = (value: number) => value.toLocaleString("en");
+
+/**
+ * From an imported Search Console export: a low indexed share of what Google
+ * knows, noindex'd URLs that are indexable today (Google won't revisit unasked),
+ * and old URLs still crawled that are gone, with the live pages they match.
+ */
+export function findingsFromSearchConsoleImport(input: { siteId: string; analysisId: string; view: SearchConsoleSignal | null }): Finding[] {
+  const { view } = input;
+  if (!view) return [];
+  const drafts: Draft[] = [];
+  const known = view.summary ? view.summary.rows.reduce((total, row) => total + row.pages, 0) : 0;
+  const indexed = view.summary?.rows.find((row) => row.reason === "indexed")?.pages ?? null;
+  if (view.summary && indexed !== null && known >= 100 && indexed / known < 0.5) {
+    const rest = view.summary.rows.filter((row) => row.reason !== "indexed").sort((a, b) => b.pages - a.pages);
+    drafts.push({
+      category: "indexing", impact: Math.min(90, 55 + Math.round((0.5 - indexed / known) * 70)),
+      title: `Google has indexed ${n(indexed)} of the ${n(known)} URLs it knows (${Math.round((indexed / known) * 100)}%)`,
+      summary: `Search Console's Page indexing report counts ${n(known)} URLs on this site and ${n(indexed)} indexed. The rest sit under ${rest.slice(0, 3).map((row) => `${row.reasonText} (${n(row.pages)})`).join(", ")}${rest.length > 3 ? " and more" : ""}.`,
+      evidence: { known, indexed, reasons: rest.map((row) => ({ reason: row.reasonText, pages: row.pages })) },
+      recommendation: "Give Google fewer, better URLs: keep only pages with real content in the sitemap, noindex or drop thin ones, and watch the crawl log for which page types Googlebot actually requests. Index coverage follows crawl budget.",
+    });
+  }
+  const noindex = view.reasons.find((entry) => entry.reason === "noindex");
+  if (noindex && noindex.today.indexable >= 10) {
+    const also = [noindex.today.noindex && `${n(noindex.today.noindex)} are still noindex`, noindex.today.redirect && `${n(noindex.today.redirect)} redirect`, noindex.today.gone && `${n(noindex.today.gone)} are gone`].filter(Boolean);
+    drafts.push({
+      category: "indexing", impact: Math.min(80, 40 + Math.round(Math.log10(noindex.today.indexable + 1) * 12)),
+      title: `${n(noindex.today.indexable)} URLs Google excluded as noindex are indexable now`,
+      summary: `Google crawled ${n(noindex.urls)} URLs it found marked noindex; today ${n(noindex.today.indexable)} of them serve an indexable page${also.length ? `, ${also.join(", ")}` : ""}. Google only revisits when told.`,
+      evidence: { urls: noindex.urls, today: noindex.today, examples: noindex.examples.indexable ?? [] },
+      recommendation: "In Search Console's Page indexing report open \"Excluded by 'noindex' tag\" and click Validate fix, then resubmit the sitemap. Eumon sends changed pages to IndexNow for Bing.",
+      pagesAffected: noindex.examples.indexable,
+    });
+  }
+  const gone = view.reasons.reduce((total, entry) => total + entry.today.gone, 0);
+  if (gone >= 5) {
+    const matched = view.suggestions.length;
+    const named = [...new Set([...view.suggestions.map((entry) => entry.url), ...view.reasons.flatMap((entry) => entry.examples.gone ?? [])])];
+    drafts.push({
+      category: "indexing", impact: Math.min(70, 30 + Math.round(Math.log10(gone + 1) * 12)),
+      title: `${n(gone)} old URLs Google still crawls return 404; ${n(matched)} match a live page`,
+      summary: `Across the imported reasons, ${n(gone)} URLs Google remembers now return 404 or 410. ${matched ? `${n(matched)} of them share their words with a live page of the same type, so the redirect is obvious.` : "None matches a live page by name."}`,
+      evidence: { gone, matched, suggestions: view.suggestions.slice(0, 25), examples: named.slice(0, 10) },
+      recommendation: "Redirect each old URL (301) to the suggested page, and the rest to the closest list page: every redirect saves Googlebot a wasted fetch and keeps the old URL's links.",
+      pagesAffected: named,
+    });
+  }
+  const createdAt = new Date().toISOString();
+  return drafts.map((draft) => ({
+    id: createId("finding"), siteId: input.siteId, analysisId: input.analysisId, category: draft.category, severity: severityFromImpact(draft.impact),
+    title: draft.title, summary: draft.summary, evidence: draft.evidence, organicImpactScore: draft.impact, recommendation: draft.recommendation, pagesAffected: draft.pagesAffected, createdAt,
+  }));
 }

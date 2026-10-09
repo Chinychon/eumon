@@ -137,13 +137,13 @@ describe("results sync", () => {
   });
 
   const dataForSeo = { login: "me", password: "pw" };
-  const rankedAnswer = (rows: Array<[string, number, number, number]>) => JSON.stringify({ status_code: 20000, status_message: "Ok.", tasks: [{ status_code: 20000, status_message: "Ok.", result: [{ items_count: rows.length, items: rows.map(([keyword, volume, position, etv]) => ({
+  const rankedAnswer = (rows: Array<[string, number, number, number]>) => JSON.stringify({ status_code: 20000, status_message: "Ok.", tasks: [{ status_code: 20000, status_message: "Ok.", cost: 0.0132, result: [{ items_count: rows.length, items: rows.map(([keyword, volume, position, etv]) => ({
     keyword_data: { keyword, keyword_info: { search_volume: volume }, keyword_properties: { keyword_difficulty: 12 }, search_intent_info: { main_intent: "commercial" } },
     ranked_serp_element: { serp_item: { rank_group: position, relative_url: `/${keyword.replace(/ /g, "-")}`, etv } },
   })) }] }] });
-  const overviewAnswer = (rows: Array<[string, number]>) => JSON.stringify({ status_code: 20000, status_message: "Ok.", tasks: [{ status_code: 20000, status_message: "Ok.", result: [{ items_count: rows.length, items: rows.map(([keyword, volume]) => ({ keyword, keyword_info: { search_volume: volume }, keyword_properties: { keyword_difficulty: 7 }, search_intent_info: { main_intent: "informational" } })) }] }] });
+  const overviewAnswer = (rows: Array<[string, number]>) => JSON.stringify({ status_code: 20000, status_message: "Ok.", tasks: [{ status_code: 20000, status_message: "Ok.", cost: 0.01212, result: [{ items_count: rows.length, items: rows.map(([keyword, volume]) => ({ keyword, keyword_info: { search_volume: volume }, keyword_properties: { keyword_difficulty: 7 }, search_intent_info: { main_intent: "informational" } })) }] }] });
 
-  it("syncs competitor keywords and prices the site's queries once a month, per market", async () => {
+  it("refreshes each keyword list when it is missing or a month old, and only then", async () => {
     const { db, site: record } = await site();
     await setSiteMarkets(db, "s", ["idn", "mmr"]);
     await setSiteCompetitorDomains(db, "s", ["rival.example", "nobody.example"]);
@@ -164,9 +164,9 @@ describe("results sync", () => {
     const google = { connect: async () => ({ token: "t", scopes: [SEARCH_CONSOLE_SCOPE] }), fetchFn };
 
     const notes = await syncResults(db, record, now, google, { dataForSeo });
-    assert.ok(notes.includes("competitor keywords: 3 domains in 1 markets"), notes.join("; "));
+    assert.ok(notes.includes("competitor keywords: 3 lists fetched, 3 domains in 1 markets, $0.04"), notes.join("; "));
     assert.ok(notes.some((note) => note.startsWith("competitor keywords skipped mmr")), "a market DataForSEO doesn't cover is noted, not fatal");
-    assert.ok(notes.includes("keyword volumes: 2 queries listed, 1 priced"), notes.join("; "));
+    assert.ok(notes.includes("keyword volumes: 2 queries listed, 1 priced, $0.01"), notes.join("; "));
     // The site first, then competitors as the database lists them (alphabetically).
     assert.deepEqual(asked.filter((call) => call.url.includes("ranked_keywords")).map((call) => [call.body.target, call.body.location_code]), [["x.com", 2360], ["nobody.example", 2360], ["rival.example", 2360]]);
     assert.deepEqual(asked.find((call) => call.url.includes("keyword_overview"))!.body, { keywords: ["dr amy tan", "ivf penang"], location_code: 2360, language_code: "en" });
@@ -179,12 +179,55 @@ describe("results sync", () => {
     const series = await listMetricSeries(db, "s", ["kw_top10", "kw_traffic", "kw_top10:rival.example", "kw_traffic:rival.example", "kw_traffic:nobody.example"], "2026-10-07", "2026-10-07");
     assert.deepEqual([series.kw_top10![0]!.value, series.kw_traffic![0]!.value, series["kw_top10:rival.example"]![0]!.value, series["kw_traffic:rival.example"]![0]!.value, series["kw_traffic:nobody.example"]![0]!.value], [1, 50, 2, 902, 0]);
 
-    // Ten days later nothing is asked; 28 days later both run again.
+    // Ten days later nothing is asked: every list is fresh.
     asked.length = 0;
-    await syncResults(db, record, new Date("2026-10-17T04:15:00Z"), google, { dataForSeo });
-    assert.equal(asked.length, 0, "monthly sources rest between runs");
+    const rested = await syncResults(db, record, new Date("2026-10-17T04:15:00Z"), google, { dataForSeo });
+    assert.equal(asked.length, 0, "fresh lists are not paid for again");
+    assert.ok(rested.includes("competitor keywords: lists fresh") && rested.includes("keyword volumes: lists fresh"), rested.join("; "));
+    // A competitor added the next day is fetched on the next sync, alone.
+    await setSiteCompetitorDomains(db, "s", ["rival.example", "nobody.example", "newcomer.example"]);
+    const added = await syncResults(db, record, new Date("2026-10-18T04:15:00Z"), google, { dataForSeo });
+    assert.deepEqual(asked.map((call) => call.body.target), ["newcomer.example"], "only the missing list is fetched");
+    assert.ok(added.includes("competitor keywords: 1 lists fetched, 4 domains in 1 markets, $0.01"), added.join("; "));
+    assert.ok((await listMetricSeries(db, "s", ["kw_traffic:newcomer.example"], "2026-10-18", "2026-10-18"))["kw_traffic:newcomer.example"]!.length, "the trend points are recomputed from every current list");
+    // 28 days after the first fetch, the first lists are stale and fetched again; the newcomer's is still fresh.
+    asked.length = 0;
     await syncResults(db, record, new Date("2026-11-04T04:15:00Z"), google, { dataForSeo });
-    assert.equal(asked.length, 4, "three ranked lists and one price list again");
+    assert.deepEqual(asked.map((call) => call.body.target ?? "prices").sort(), ["nobody.example", "prices", "rival.example", "x.com"]);
+  });
+
+  it("prices each market on its own, and leaves a market without queries for the next sync instead of locking it out", async () => {
+    const { db, site: record } = await site();
+    await setSiteMarkets(db, "s", ["idn", "mys"]);
+    let mysQueries: Array<Record<string, unknown>> = [];
+    let mysPrices: "ok" | "down" = "ok";
+    const overviewCalls: number[] = [];
+    const fetchFn = (async (url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}"));
+      if (url.includes("keyword_overview")) {
+        const task = body[0];
+        overviewCalls.push(task.location_code);
+        if (task.location_code === 2458 && mysPrices === "down") return new Response("down", { status: 500 });
+        return new Response(overviewAnswer([[task.keywords[0], 100]]));
+      }
+      if (url.includes("dataforseo")) return new Response(rankedAnswer([]));
+      if (body.dimensions?.join() === "query") return new Response(JSON.stringify({ rows: body.dimensionFilterGroups?.[0]?.filters?.[0]?.expression === "mys" ? mysQueries : [{ keys: ["dentist jakarta"], clicks: 5, impressions: 100, ctr: 0.05, position: 6 }] }));
+      return new Response(JSON.stringify({ rows: [] }));
+    }) as typeof fetch;
+    const google = { connect: async () => ({ token: "t", scopes: [SEARCH_CONSOLE_SCOPE] }), fetchFn };
+
+    const first = await syncResults(db, record, now, google, { dataForSeo });
+    assert.ok(first.includes("keyword volumes: 1 queries listed, 1 priced, $0.01"), first.join("; "));
+    assert.ok(first.includes("keyword volumes skipped mys: no Search Console queries yet"), first.join("; "));
+    assert.deepEqual(overviewCalls, [2360], "no price list is bought for a market with nothing to price");
+
+    // The next day Malaysia has queries, but DataForSEO is down for it: Indonesia's fresh list is left alone, Malaysia is noted and tried again later.
+    mysQueries = [{ keys: ["dentist kl"], clicks: 3, impressions: 60, ctr: 0.05, position: 8 }];
+    mysPrices = "down";
+    const second = await syncResults(db, record, new Date("2026-10-08T04:15:00Z"), google, { dataForSeo });
+    assert.deepEqual(overviewCalls, [2360, 2458]);
+    assert.ok(second.some((note) => note.startsWith("keyword volumes skipped mys: DataForSEO keyword_overview request failed (500)")), second.join("; "));
+    assert.equal(await getSnapshot(db, "s", "keywords", "sc-domain:x.com|mys"), null);
   });
 
   it("asks for target markets before spending on keywords", async () => {
@@ -205,7 +248,7 @@ describe("results sync", () => {
       return new Response(rankedAnswer([["x clinic", 100, 1, 50]]));
     }) as typeof fetch;
     const notes = await syncResults(db, record, now, { connect: async () => ({ token: "t", scopes: [SEARCH_CONSOLE_SCOPE] }), fetchFn }, { dataForSeo });
-    assert.ok(notes.includes("competitor keywords: 1 domains in 1 markets"), notes.join("; "));
+    assert.ok(notes.includes("competitor keywords: 1 lists fetched, 2 domains in 1 markets, $0.01"), notes.join("; "));
     assert.ok(notes.some((note) => note.startsWith("competitor keywords skipped rival.example in idn: DataForSEO ranked_keywords: You can set only one task")), notes.join("; "));
     assert.ok(await getSnapshot(db, "s", "competitor_keywords", "x.com|idn"));
   });

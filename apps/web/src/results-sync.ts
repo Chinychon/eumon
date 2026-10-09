@@ -1,5 +1,5 @@
-import { addDays, type SiteRecord } from "@organic-growth/core";
-import { firstMetricDay, lastMetricDay, upsertMetricPoints, type D1Like, type MetricPoint } from "@organic-growth/db";
+import type { SiteRecord } from "@organic-growth/core";
+import { firstMetricDay, upsertMetricPoints, type D1Like, type MetricPoint } from "@organic-growth/db";
 import { SOURCES } from "./results-sources.ts";
 
 /** Connects to Google only when a Google step runs; the token and the scopes it was granted come together. */
@@ -28,8 +28,8 @@ export type SyncContext = {
 export type Source = {
   /** Prefix of its notes: "speed: 40 weeks", "speed failed: …". */
   name: string;
-  /** Daily sources run every sync. Weekly ones run on Mondays, or until their marker exists. Monthly ones run when their marker is absent or 28 or more days old. */
-  cadence: "daily" | "weekly" | "monthly";
+  /** Daily sources run every sync (a daily source that keeps lists decides inside which are stale). Weekly ones run on Mondays, or until their marker exists. */
+  cadence: "daily" | "weekly";
   /** Written after each run (value: points written). Its absence means a first run, which backfills. */
   marker?: string;
   /** Needs the site's Google token; when connecting fails, the runner notes it once and skips them all. */
@@ -75,9 +75,7 @@ export async function syncResults(db: D1Like, site: SiteRecord, now: Date, googl
       continue;
     }
     const first = source.marker ? !(await firstMetricDay(db, site.id, source.marker)) : false;
-    const due = first || source.cadence === "daily"
-      || (source.cadence === "weekly" ? now.getUTCDay() === 1 : ((await lastMetricDay(db, site.id, source.marker!)) ?? "") <= addDays(today, -28));
-    if (!due) continue;
+    if (source.cadence === "weekly" && !first && now.getUTCDay() !== 1) continue;
     try {
       const { points = [], notes: said = [] } = await source.run(ctx, first);
       if (source.marker) points.push({ metric: source.marker, day: today, value: points.length });

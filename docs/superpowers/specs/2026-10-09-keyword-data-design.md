@@ -42,7 +42,7 @@ The second "latest list" generalises the first (`CONTEXT.md`, *Snapshot*).
 
 ## 2. Sources
 
-Two sources join `results-sources.ts`. The runner gains a **monthly** cadence: run when the marker is absent or its latest day is 28 or more days old (`lastMetricDay` in `packages/db/src/metrics.ts`). "Sync now" runs them only when due; there is no forced refresh.
+Two daily sources join `results-sources.ts`. Each **list** (a domain in a market; the site's queries in a market) is refreshed when it is missing or 28 or more days old, so adding a competitor or a market fetches just the new list on the next sync, a failed list is tried again next sync, and nothing fresh is paid for twice. A sync whose lists are all fresh spends nothing. There is no forced refresh. Every note says what the sync cost. Budget: up to (competitors + 1) × markets DataForSEO calls in one sync, in sequence; the Workers Free plan allows 50 subrequests per invocation.
 
 ### Competitor keywords (`competitor keywords`, monthly, marker `sync.competitor_keywords`)
 

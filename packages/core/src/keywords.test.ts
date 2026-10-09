@@ -36,6 +36,10 @@ describe("keywordsView", () => {
     assert.equal(view.asOf, "2026-10-09");
     assert.equal(keywordsView({ ...input, priced: [], ranked: [], synced: false }).asOf, null);
   });
+  it("knows whether any competitor list has keywords, so an empty gap list isn't mistaken for a clean sweep", () => {
+    assert.equal(view.gapsKnown, true);
+    assert.equal(keywordsView({ ...input, ranked: [{ domain: "rival.example", periodEnd: "2026-10-09", rows: [] }] }).gapsKnown, false);
+  });
 });
 
 describe("demandFromSnapshots", () => {

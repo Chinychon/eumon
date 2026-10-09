@@ -121,11 +121,11 @@ export function buildOpportunities(bundle: AnalysisBundle): Opportunity[] {
 
 const COMMERCIAL_INTENT = new Set(["commercial", "transactional"]);
 
-/** The biggest searches competitors win and the site doesn't, as pages to build: volume ≥ 100, difficulty ≤ 40, commercial intent first. */
+/** The biggest searches competitors win and the site doesn't, as pages to build: volume ≥ 100, difficulty ≤ 40, commercial intent first. A competitor's own name (navigational) is not a page to build. */
 export function gapOpportunities(gaps: KeywordGap[], siteId: string, analysisId: string): Opportunity[] {
   const commercial = (gap: KeywordGap) => COMMERCIAL_INTENT.has(gap.intent ?? "");
   return gaps
-    .filter((gap) => (gap.volume ?? 0) >= 100 && gap.difficulty !== null && gap.difficulty <= 40)
+    .filter((gap) => (gap.volume ?? 0) >= 100 && gap.difficulty !== null && gap.difficulty <= 40 && gap.intent !== "navigational")
     .sort((a, b) => Number(commercial(b)) - Number(commercial(a)) || (b.volume ?? 0) - (a.volume ?? 0))
     .slice(0, 6)
     .map((gap) => {

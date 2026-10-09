@@ -22,11 +22,12 @@ describe("gap opportunities", () => {
       { keyword: "chf adalah", volume: 12100, difficulty: 0, intent: "informational", domain: "rival.example", position: 10, url: "/gagal-jantung/" },
       { keyword: "too hard", volume: 9000, difficulty: 70, intent: "commercial", domain: "rival.example", position: 2, url: "/hard" },
       { keyword: "too small", volume: 40, difficulty: 1, intent: "commercial", domain: "rival.example", position: 1, url: "/small" },
+      { keyword: "rival clinic", volume: 6000, difficulty: 0, intent: "navigational", domain: "rival.example", position: 1, url: "/" },
     ], "s", "a");
     assert.deepEqual(gaps.map((gap) => gap.title), [
       "Rank for “dj stent di penang”: 5,400 searches a month; rival.example ranks 15",
       "Rank for “chf adalah”: 12,100 searches a month; rival.example ranks 10",
-    ]);
+    ], "a competitor's own name (navigational) is not a page to build");
     assert.equal(gaps[0]!.intent, "keyword_gap");
     assert.equal(gaps[0]!.searchDemand, 5400);
     assert.equal(gaps[0]!.potentialPage, "https://rival.example/prosedur-pasang-dj-stent-di-penang/");

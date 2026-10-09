@@ -58,7 +58,9 @@ export function keywordGaps(input: KeywordsInput): KeywordGap[] {
 export function keywordsView(input: KeywordsInput) {
   const asOf = [...input.priced, ...input.ranked].map((list) => list.periodEnd).sort().at(-1) ?? null;
   const top = [...ownKeywords(input).values()].sort((a, b) => b.clicks - a.clicks || byVolume(a, b)).slice(0, 25);
-  return { asOf, synced: input.synced, top, gaps: keywordGaps(input).slice(0, 25) };
+  // No gaps means nothing only when some competitor list has keywords in it.
+  const gapsKnown = input.ranked.some((list) => list.domain !== input.site && list.rows.length > 0);
+  return { asOf, synced: input.synced, gapsKnown, top, gaps: keywordGaps(input).slice(0, 25) };
 }
 
 /** A lookup from the site's priced queries, for the growth plan. */

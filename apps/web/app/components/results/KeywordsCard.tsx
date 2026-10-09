@@ -63,7 +63,7 @@ export function KeywordsCard({ keywords, host, operator, hasCredentials, hasMark
                 ))}</tbody>
               </table>
             </div>
-          ) : <p className="empty-state">No gaps found: you appear for every keyword your competitors rank for.</p>}
+          ) : <p className="empty-state">{keywords.gapsKnown ? "No gaps found: you appear for every keyword your competitors rank for." : "DataForSEO has no keywords for your competitors in your target markets."}</p>}
 
           <div className="section-title">Share of visibility</div>
           <BarList format={(value) => `${formatNumber(value)} visits/mo`} rows={keywords.visibility.map((row, index) => ({

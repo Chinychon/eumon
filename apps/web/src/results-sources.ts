@@ -7,10 +7,10 @@ import {
   authorityDomain, dataForSeoLocation, fetchAuthority, fetchCruxHistory, fetchGa4Daily, fetchKeywordOverview, fetchLabScore, fetchQueryPositions, fetchRankedKeywords, fetchSearchDaily,
   mergePositions, rankingPoints, searchDayPoints, topQueries, type FormFactor, type QueryPosition,
 } from "@organic-growth/agents";
-import { addDays, countryNumeric, type PricedKeyword, type SiteRecord } from "@organic-growth/core";
+import { addDays, countryNumeric, type PricedKeyword, type RankedKeyword, type SiteRecord } from "@organic-growth/core";
 import {
-  defaultPageSettings, firstMetricDay, getPageSettings, indexStatusCounts, listSiteCompetitorDomains, listSiteMarkets, pagesToInspect, saveIndexStatus, saveSnapshot, saveTopQueriesSnapshot,
-  syncFirstPartyResults, topEumonPage, type D1Like, type MetricPoint,
+  defaultPageSettings, firstMetricDay, getPageSettings, indexStatusCounts, listSiteCompetitorDomains, listSiteMarkets, listSnapshotDates, listSnapshots, pagesToInspect, saveIndexStatus,
+  saveSnapshot, saveTopQueriesSnapshot, syncFirstPartyResults, topEumonPage, type D1Like, type MetricPoint,
 } from "@organic-growth/db";
 import { ANALYTICS_SCOPE } from "./gsc-auth.ts";
 import type { Source, SyncContext } from "./results-sync.ts";
@@ -212,59 +212,81 @@ const marketLocation = (market: string): number | null => {
 
 const noMarkets = (name: string) => async ({ db, site }: SyncContext) => ((await listSiteMarkets(db, site.id)).length ? null : `${name}: set target markets in Setup`);
 
+/** A keyword list is refreshed when it is missing or this many days old, so a new competitor or market is fetched on the next sync and nothing fresh is paid for twice. */
+const FRESH_DAYS = 28;
+const dollars = (cost: number) => `$${cost.toFixed(2)}`;
+const said = (error: unknown) => (error instanceof Error ? error.message : String(error));
+
 /**
- * Every domain's ranked keywords in each target market, the site's own first:
- * the lists behind keyword gaps and share of visibility. One DataForSEO call
- * per domain and market, so a domain or market that fails is noted and the
- * rest continue; the marker is written once anything was fetched.
+ * Every domain's organic keywords in each covered target market, the site's
+ * own first: the lists behind keyword gaps and share of visibility. One
+ * DataForSEO call per list that is missing or FRESH_DAYS old; a domain or
+ * market that fails is noted and tried again next sync. The trend points are
+ * recomputed from every current list whenever one was fetched.
+ *
+ * Budget: up to (competitors + 1) × markets calls in one sync, in sequence;
+ * the Workers Free plan allows 50 subrequests per invocation.
  */
 const competitorKeywords: Source = {
-  name: "competitor keywords", cadence: "monthly", marker: "sync.competitor_keywords",
+  name: "competitor keywords", cadence: "daily", marker: "sync.competitor_keywords",
   applies: ({ keys }) => Boolean(keys.dataForSeo),
   skip: noMarkets("competitor keywords"),
   run: async ({ db, site, today, keys, fetchFn }) => {
-    const markets = await listSiteMarkets(db, site.id);
+    const notes: string[] = [];
+    const markets = (await listSiteMarkets(db, site.id)).filter((market) => {
+      if (marketLocation(market) !== null) return true;
+      notes.push(`competitor keywords skipped ${market}: not covered by DataForSEO`);
+      return false;
+    });
     const own = authorityDomain(site.baseUrl);
-    const domains = [own, ...(await listSiteCompetitorDomains(db, site.id))];
-    const totals = new Map<string, { top10: number; traffic: number }>();
-    const skipped: string[] = [];
-    let marketsCovered = 0;
+    const domains = [...new Set([own, ...(await listSiteCompetitorDomains(db, site.id))])];
+    const dates = await listSnapshotDates(db, site.id, "competitor_keywords");
+    const staleBefore = addDays(today, -FRESH_DAYS);
+    let fetched = 0;
+    let cost = 0;
     for (const market of markets) {
-      const location = marketLocation(market);
-      if (location === null) {
-        skipped.push(`${market}: not covered by DataForSEO`);
-        continue;
-      }
-      marketsCovered++;
       for (const domain of domains) {
+        const scope = `${domain}|${market}`;
+        if ((dates[scope] ?? "") > staleBefore) continue;
         try {
-          const rows = await fetchRankedKeywords(keys.dataForSeo!, domain, location, fetchFn);
-          await saveSnapshot(db, site.id, { kind: "competitor_keywords", scope: `${domain}|${market}`, periodEnd: today, rows });
-          const sum = totals.get(domain) ?? { top10: 0, traffic: 0 };
-          sum.top10 += rows.filter((row) => row.position <= 10).length;
-          sum.traffic += rows.reduce((total, row) => total + row.traffic, 0);
-          totals.set(domain, sum);
+          const answer = await fetchRankedKeywords(keys.dataForSeo!, domain, marketLocation(market)!, fetchFn);
+          await saveSnapshot(db, site.id, { kind: "competitor_keywords", scope, periodEnd: today, rows: answer.rows });
+          fetched++;
+          cost += answer.cost;
         } catch (error) {
-          skipped.push(`${domain} in ${market}: ${error instanceof Error ? error.message : String(error)}`);
+          notes.push(`competitor keywords skipped ${domain} in ${market}: ${said(error)}`);
         }
       }
     }
-    if (!totals.size) throw new Error(skipped.join("; ") || "no markets covered");
+    if (!markets.length) return { notes: ["competitor keywords: no covered markets", ...notes] };
+    if (!fetched) return { notes: ["competitor keywords: lists fresh", ...notes] };
+    // Trend points from every current list, so a month with one failed list still sums what it has.
+    const totals = new Map<string, { top10: number; traffic: number }>();
+    for (const list of await listSnapshots<RankedKeyword>(db, site.id, "competitor_keywords")) {
+      const [domain, market] = list.scope.split("|") as [string, string];
+      if (!domains.includes(domain) || !markets.includes(market)) continue;
+      const sum = totals.get(domain) ?? { top10: 0, traffic: 0 };
+      sum.top10 += list.rows.filter((row) => row.position <= 10).length;
+      sum.traffic += list.rows.reduce((total, row) => total + row.traffic, 0);
+      totals.set(domain, sum);
+    }
     const points = [...totals].flatMap(([domain, sum]) => {
       const suffix = domain === own ? "" : `:${domain}`;
       return [{ metric: `kw_top10${suffix}`, day: today, value: sum.top10 }, { metric: `kw_traffic${suffix}`, day: today, value: Math.round(sum.traffic) }];
     });
-    return { points, notes: [`competitor keywords: ${totals.size} domains in ${marketsCovered} markets`, ...skipped.map((entry) => `competitor keywords skipped ${entry}`)] };
+    return { points, notes: [`competitor keywords: ${fetched} lists fetched, ${domains.length} domains in ${markets.length} markets, ${dollars(cost)}`, ...notes] };
   },
 };
 
 /**
  * The site's Search Console queries of the last 28 finalized days in each
- * market, up to 700 by impressions, priced by DataForSEO in the page language.
- * Every query is kept; one DataForSEO doesn't know has no volume.
+ * covered market, up to 700 by impressions, priced by DataForSEO in the page
+ * language. One list per market, refreshed when missing or FRESH_DAYS old; a
+ * market with no queries yet, or whose call fails, is noted and tried again
+ * next sync. Every query is kept; one DataForSEO doesn't know has no volume.
  */
 const keywordVolumes: Source = {
-  name: "keyword volumes", cadence: "monthly", marker: "sync.keyword_volumes", google: true,
+  name: "keyword volumes", cadence: "daily", marker: "sync.keyword_volumes", google: true,
   applies: ({ keys, site }) => Boolean(keys.dataForSeo && site.gscProperty),
   skip: noMarkets("keyword volumes"),
   run: async (ctx) => {
@@ -273,23 +295,39 @@ const keywordVolumes: Source = {
     const property = site.gscProperty!;
     const { language } = (await getPageSettings(db, site.id)) ?? defaultPageSettings(site.id, site.name, site.baseUrl);
     const range = { startDate: addDays(today, -30), endDate: addDays(today, -3) };
+    const dates = await listSnapshotDates(db, site.id, "keywords");
+    const staleBefore = addDays(today, -FRESH_DAYS);
+    const notes: string[] = [];
+    let due = 0;
     let listed = 0;
     let priced = 0;
+    let cost = 0;
     for (const market of await listSiteMarkets(db, site.id)) {
       const location = marketLocation(market);
       if (location === null) continue; // noted by competitor keywords
-      const queries = (await fetchQueryPositions(token, property, { ...range, country: market }, fetchFn)).sort((a, b) => b.impressions - a.impressions).slice(0, 700);
-      if (!queries.length) continue;
-      const prices = new Map((await fetchKeywordOverview(keys.dataForSeo!, queries.map((query) => query.query.toLowerCase()), location, language, fetchFn)).map((row) => [row.keyword, row]));
-      const rows: PricedKeyword[] = queries.map((query) => {
-        const price = prices.get(query.query.toLowerCase());
-        return { keyword: query.query, volume: price?.volume ?? null, difficulty: price?.difficulty ?? null, intent: price?.intent ?? null, position: query.position, clicks: query.clicks, impressions: query.impressions };
-      });
-      await saveSnapshot(db, site.id, { kind: "keywords", scope: `${property}|${market}`, periodEnd: range.endDate, rows });
-      listed += rows.length;
-      priced += prices.size;
+      if ((dates[`${property}|${market}`] ?? "") > staleBefore) continue;
+      due++;
+      try {
+        const queries = (await fetchQueryPositions(token, property, { ...range, country: market }, fetchFn)).sort((a, b) => b.impressions - a.impressions).slice(0, 700);
+        if (!queries.length) {
+          notes.push(`keyword volumes skipped ${market}: no Search Console queries yet`);
+          continue;
+        }
+        const answer = await fetchKeywordOverview(keys.dataForSeo!, queries.map((query) => query.query.toLowerCase()), location, language, fetchFn);
+        const prices = new Map(answer.rows.map((row) => [row.keyword, row]));
+        const rows: PricedKeyword[] = queries.map((query) => {
+          const price = prices.get(query.query.toLowerCase());
+          return { keyword: query.query, volume: price?.volume ?? null, difficulty: price?.difficulty ?? null, intent: price?.intent ?? null, position: query.position, clicks: query.clicks, impressions: query.impressions };
+        });
+        await saveSnapshot(db, site.id, { kind: "keywords", scope: `${property}|${market}`, periodEnd: range.endDate, rows });
+        listed += rows.length;
+        priced += prices.size;
+        cost += answer.cost;
+      } catch (error) {
+        notes.push(`keyword volumes skipped ${market}: ${said(error)}`);
+      }
     }
-    return { notes: [`keyword volumes: ${listed} queries listed, ${priced} priced`] };
+    return { notes: [due ? `keyword volumes: ${listed} queries listed, ${priced} priced, ${dollars(cost)}` : "keyword volumes: lists fresh", ...notes] };
   },
 };
 

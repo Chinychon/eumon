@@ -22,6 +22,13 @@ export async function getSnapshot<T>(db: D1Like, siteId: string, kind: string, s
   return row ? { periodEnd: row.period_end, rows: JSON.parse(row.rows_json) as T[] } : null;
 }
 
+/** Each list's period end by scope, without parsing the lists: for deciding what to refresh. */
+export async function listSnapshotDates(db: D1Like, siteId: string, kind: string): Promise<Record<string, string>> {
+  const { results } = await db.prepare("SELECT scope, period_end FROM site_snapshots WHERE site_id = ? AND kind = ?")
+    .bind(siteId, kind).all<{ scope: string; period_end: string }>();
+  return Object.fromEntries(results.map((row) => [row.scope, row.period_end]));
+}
+
 /** Every list of one kind, by scope. */
 export async function listSnapshots<T>(db: D1Like, siteId: string, kind: string): Promise<Array<Snapshot<T> & { scope: string }>> {
   const { results } = await db.prepare("SELECT scope, period_end, rows_json FROM site_snapshots WHERE site_id = ? AND kind = ? ORDER BY scope")

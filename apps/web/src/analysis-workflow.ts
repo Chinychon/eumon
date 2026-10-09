@@ -157,7 +157,8 @@ export class SiteAnalysisWorkflow extends WorkflowEntrypoint<AppEnv, AnalysisPay
             listSiteCompetitorDomains(db, siteId),
           ]);
           // Keyword lists from the Performance sync give opportunities real volume and difficulty, and the biggest gaps.
-          const keywords = await loadKeywords(db, { id: siteId, baseUrl: site.baseUrl, gscProperty: site.gscProperty }, { markets: targetMarkets, competitors });
+          // An enrichment only: an analysis never fails for want of them (for example before migration 0016 has run).
+          const keywords = await loadKeywords(db, { id: siteId, baseUrl: site.baseUrl, gscProperty: site.gscProperty }, { markets: targetMarkets, competitors }).catch(() => undefined);
           const raw = await runFullAnalysis({
             analysisId,
             siteId,

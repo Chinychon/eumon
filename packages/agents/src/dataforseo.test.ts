@@ -27,19 +27,22 @@ describe("DataForSEO client", () => {
   it("asks for a domain's ranked keywords in a country and reads each row", async () => {
     const asked: Array<{ url: string; init?: RequestInit }> = [];
     const fetchFn = (async (url: string, init?: RequestInit) => { asked.push({ url, init }); return new Response(envelope(rankedTask)); }) as typeof fetch;
-    const rows = await fetchRankedKeywords(auth, "medbaycare.com", 2360, fetchFn);
+    const answer = await fetchRankedKeywords(auth, "medbaycare.com", 2360, fetchFn);
     assert.equal(asked[0]!.url, "https://api.dataforseo.com/v3/dataforseo_labs/google/ranked_keywords/live");
     assert.equal((asked[0]!.init!.headers as Record<string, string>).Authorization, `Basic ${btoa("me@example.com:secret")}`);
-    assert.deepEqual(JSON.parse(String(asked[0]!.init!.body)), [{ target: "medbaycare.com", location_code: 2360, limit: 1000, order_by: ["keyword_data.keyword_info.search_volume,desc"] }]);
-    assert.deepEqual(rows, [
-      { keyword: "mahkota medical centre", volume: 2900, difficulty: 16, intent: "navigational", position: 21, url: "/id/hospitals/mahkota-medical-centre", traffic: 10.4 },
-      { keyword: "loh guan lye hospital", volume: 2400, difficulty: null, intent: null, position: 43, url: "/", traffic: 0 },
-    ]);
+    assert.deepEqual(JSON.parse(String(asked[0]!.init!.body)), [{ target: "medbaycare.com", location_code: 2360, limit: 1000, item_types: ["organic"], order_by: ["keyword_data.keyword_info.search_volume,desc"] }], "organic results only: ads are not rankings, and cost per row");
+    assert.deepEqual(answer, {
+      cost: 0.0132,
+      rows: [
+        { keyword: "mahkota medical centre", volume: 2900, difficulty: 16, intent: "navigational", position: 21, url: "/id/hospitals/mahkota-medical-centre", traffic: 10.4 },
+        { keyword: "loh guan lye hospital", volume: 2400, difficulty: null, intent: null, position: 43, url: "/", traffic: 0 },
+      ],
+    });
   });
 
-  it("returns no rows for a domain DataForSEO doesn't know", async () => {
+  it("returns no rows for a domain DataForSEO doesn't know, and what the call cost", async () => {
     const fetchFn = (async () => new Response(envelope({ status_code: 20000, status_message: "Ok.", cost: 0.012, result: [{ total_count: null, items_count: 0, items: null, metrics: { organic: {} } }] }))) as unknown as typeof fetch;
-    assert.deepEqual(await fetchRankedKeywords(auth, "nobody.example", 2360, fetchFn), []);
+    assert.deepEqual(await fetchRankedKeywords(auth, "nobody.example", 2360, fetchFn), { rows: [], cost: 0.012 });
   });
 
   it("prices keywords in a country and language, leaving out the ones DataForSEO doesn't know", async () => {
@@ -47,9 +50,9 @@ describe("DataForSEO client", () => {
       items: [{ se_type: "google", keyword: "chf adalah", keyword_info: { search_volume: 12100, monthly_searches: [{ year: 2026, month: 9, search_volume: 12100 }] }, keyword_properties: { keyword_difficulty: 0 }, search_intent_info: { main_intent: "informational" } }] }] };
     let body = "";
     const fetchFn = (async (_url: string, init?: RequestInit) => { body = String(init?.body); return new Response(envelope(task)); }) as typeof fetch;
-    const rows = await fetchKeywordOverview(auth, ["chf adalah", "dj stent di penang"], 2360, "id", fetchFn);
+    const answer = await fetchKeywordOverview(auth, ["chf adalah", "dj stent di penang"], 2360, "id", fetchFn);
     assert.deepEqual(JSON.parse(body), [{ keywords: ["chf adalah", "dj stent di penang"], location_code: 2360, language_code: "id" }]);
-    assert.deepEqual(rows, [{ keyword: "chf adalah", volume: 12100, difficulty: 0, intent: "informational" }]);
+    assert.deepEqual(answer, { rows: [{ keyword: "chf adalah", volume: 12100, difficulty: 0, intent: "informational" }], cost: 0.01212 });
   });
 
   it("turns an account or task error into a readable failure", async () => {

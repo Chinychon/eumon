@@ -33,4 +33,7 @@ export const errorMessage = (error: unknown) => (error instanceof Error ? error.
 
 export const formatNumber = (value: number) => value.toLocaleString("en", { maximumFractionDigits: 1 });
 
+/** "9 Oct" from "2026-10-09". */
+export const formatDay = (value: string) => new Date(`${value}T00:00:00Z`).toLocaleDateString("en", { day: "numeric", month: "short", timeZone: "UTC" });
+
 export const percent = (value: number) => `${(value * 100).toFixed(value > 0 && value < 0.01 ? 2 : 1)}%`;

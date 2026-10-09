@@ -2,11 +2,12 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { countryName, type Compare, type ResultsView as Results, type SpeedMetric, type SpeedRating, type TopQuery } from "@organic-growth/core";
-import { api, errorMessage, formatNumber } from "./api";
+import { api, errorMessage, formatDay, formatNumber } from "./api";
 import { BarList, Funnel, LineChart } from "./charts";
+import { KeywordsCard } from "./results/KeywordsCard";
 import { Badge, Button, Card, Kpi, ViewHeader } from "./ui";
 
-type Payload = { site: { name: string; baseUrl: string; searchConnected: boolean; analytics: "connected" | "reconnect" | "none"; signals: { speed: boolean; authority: boolean } }; results: Results };
+type Payload = { site: { name: string; baseUrl: string; searchConnected: boolean; analytics: "connected" | "reconnect" | "none"; signals: { speed: boolean; authority: boolean; keywords: boolean } }; results: Results };
 
 const SPEED_LABEL: Record<SpeedMetric, string> = { lcp: "Loading", inp: "Responding to taps", cls: "Staying still while loading" };
 const SPEED_HINT: Record<SpeedMetric, string> = { lcp: "Main content on screen", inp: "Reaction to a tap or click", cls: "Layout shift while loading" };
@@ -14,7 +15,7 @@ const RATING_LABEL: Record<SpeedRating, string> = { good: "Good", "needs-work": 
 const RATING_TONE: Record<SpeedRating, string> = { good: "green", "needs-work": "amber", poor: "red" };
 const formatSpeed = (metric: SpeedMetric, value: number) => (metric === "cls" ? value.toFixed(2) : value >= 1000 ? `${(value / 1000).toFixed(1)} s` : `${Math.round(value)} ms`);
 
-const day = (value: string) => new Date(`${value}T00:00:00Z`).toLocaleDateString("en", { day: "numeric", month: "short", timeZone: "UTC" });
+const day = formatDay;
 const pct = (value: number | null, digits = 1) => (value === null ? "—" : `${(value * 100).toFixed(digits)}%`);
 
 /** "was 120 before Eumon", or the previous 28 days without a go-live, or "collecting". */
@@ -123,6 +124,9 @@ export function ResultsView({ endpoint, operator, onNavigate }: { endpoint: stri
             </>
           )}
         </Card>
+
+        <KeywordsCard keywords={results.keywords} host={host} operator={operator} hasCredentials={site.signals.keywords} hasMarkets={results.markets.length > 0}
+          searchTop10={results.search?.buckets.find((bucket) => bucket.top === 10)?.queries ?? null} />
 
         <Card title="Enquiries" subtitle="Eumon's pages from a Google search to an enquiry, over the last 28 days of Search Console data.">
           {results.leads.funnel ? <Funnel steps={results.leads.funnel} /> : <p className="empty-state">The funnel appears once Eumon's pages have Google impressions.</p>}

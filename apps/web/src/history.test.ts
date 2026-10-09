@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import type { ChangeStatus, CrawlPageResult, Finding } from "@organic-growth/core";
 import { createAnalysis, enqueueAnalysisCrawlUrls, insertChange, insertCtaVariant, saveAnalysisReport, saveCrawlBatch, upsertSite, type D1Like } from "@organic-growth/db";
 import { openSqliteD1 } from "@organic-growth/db/sqlite";
+import { DEMO_SITE_ID, seedDemoSite } from "@organic-growth/agents";
 import { assembleHistory } from "./history.ts";
 
 const finding = (id: string, title: string, pagesAffected: string[] = []): Finding => ({
@@ -103,5 +104,17 @@ describe("history", () => {
     assert.equal(history.runs, 1);
     assert.equal(history.open, 1);
     assert.deepEqual(history.rows, []);
+  });
+
+  it("shows the demo site a fix, resolved findings and its publications", async () => {
+    const db = openSqliteD1();
+    await seedDemoSite(db, Date.now());
+    const history = await assembleHistory(db, DEMO_SITE_ID);
+    assert.equal(history.runs, 2);
+    assert.ok(history.numbers.fixedWithEumon >= 1, `fixed ${history.numbers.fixedWithEumon}`);
+    assert.ok(history.numbers.resolved > history.numbers.fixedWithEumon, `resolved ${history.numbers.resolved}`);
+    assert.ok(history.rows.some((row) => row.kind === "publish"), "published pages are actions");
+    const fixed = history.rows.find((row) => row.kind === "fixed")!;
+    assert.match(fixed.detail, /^Pull request #12: /);
   });
 });

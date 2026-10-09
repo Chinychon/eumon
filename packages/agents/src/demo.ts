@@ -11,6 +11,7 @@ import { generatePages } from "@organic-growth/pages";
 import { demoLinks, demoSerpLists, demoSuggestions, seedDemoConnectors } from "./demo-connectors.js";
 import { crawlLogCoverage } from "./log-coverage.js";
 import { queueFullCrawl, runFullAnalysis } from "./pipeline.js";
+import { probeTitleForCoverage } from "./not-found-probe.js";
 import { loadTrendSignals } from "./trend-signals.js";
 
 /*
@@ -63,7 +64,7 @@ function demoPages(): Page[] {
   TREATMENT_LIST.forEach((treatment, index) => pages.push({ path: `/treatments/${treatment.slug}`, family: "treatments", index }));
   // Two retired treatments still in the sitemap answer 200 with "not found" (soft 404s), and one dentist is listed twice under a coded slug.
   RETIRED_TREATMENTS.forEach((slug, index) => pages.push({ path: `/treatments/${slug}`, family: "treatments", index: TREATMENT_LIST.length + index }));
-  pages.push({ path: `/dentists/${DENTISTS[3]!.slug}-2b7f1a`, family: "dentists", index: DENTISTS.length });
+  pages.push({ path: `/dentists/${DENTISTS[3]!.slug}-2b7f1a`, family: "dentists", index: 3 });
   CITIES.forEach((city, index) => pages.push({ path: `/clinics/${city}`, family: "clinics", index }));
   BLOG.forEach((slug, index) => pages.push({ path: index < 12 ? `/blog/drafts/${slug}` : `/blog/${slug}`, family: "blog", index }));
   let index = 0;
@@ -415,7 +416,7 @@ async function analyzeDemo(db: D1Like, input: { analysisId: string; version: num
   for (const domain of COMPETITORS) research.push(await researchSite(domain, fetcher, { maxFiles: 5, maxUrls: 5_000 }));
   const notFoundProbe = await probeNotFound(ORIGIN, input.analysisId, fetcher);
   const [coverage, examples, datasets] = await Promise.all([
-    getCrawlCoverage(db, input.analysisId, { notFoundTitle: notFoundProbe.status < 400 ? notFoundProbe.title ?? null : null }),
+    getCrawlCoverage(db, input.analysisId, { notFoundTitle: probeTitleForCoverage(notFoundProbe) }),
     listCrawlPageResults(db, input.analysisId, 50),
     datasetCoverage(db, DEMO_SITE_ID),
   ]);

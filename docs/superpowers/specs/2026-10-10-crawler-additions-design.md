@@ -43,3 +43,10 @@ The demo's site serves a soft 404 (a 200 "Halaman tidak ditemukan" page for two 
 - db: `getCrawlCoverage` counts soft 404s (flag and probe title), near-duplicates with suffixed groups, and locales.
 - agents: the probe finding; the pipeline stores the probe and adds the finding.
 - demo: the latest demo analysis carries both findings.
+
+## After review (2026-10-10)
+
+- Fingerprints and the soft-404 text guard use the **main content** (`<main>`/`<article>`, else the body without nav, header, footer, aside and forms), so two people with the same name on a mega-menu site are not "the same page twice", and a not-found page under a big menu is still a not-found page. The simhash runs only in `toCrawlResult`, on integer arithmetic, capped at 1,000 words.
+- The **probe-title rule** counts real pages only (not the homepage, not empty shells), skips a title on more than a fifth of served pages (the site's template), and never uses the homepage's title when the probe was redirected there. The probe records `finalUrl`; the finding says "redirects to the homepage". The probe is stored on the report (`notFoundProbe`) and Ask Eumon reads it.
+- A trailing **code** has a digit in it (`-sunway` is a hospital, `-7f3a2b` is a code). "404" in a title counts only beside error, page or not found. Near-duplicate counts say "At least" when the query's caps truncated them.
+- Crawl results from before the crawler recorded a locale are **not reused**; those pages are fetched again once after deploy.

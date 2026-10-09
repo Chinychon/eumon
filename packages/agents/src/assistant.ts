@@ -5,6 +5,7 @@ import {
   getPagePerformance, getPreviousCompletedAnalysis, listDatasets, listPageRevisions, listRecords, listSiteCompetitorDomains,
   listSiteMarkets, listSites, listTemplates, listTopQueries, type D1Like,
 } from "@organic-growth/db";
+import { probeTitleForCoverage, type NotFoundProbe } from "./not-found-probe.js";
 
 /*
  * Ask Eumon: one agent loop over typed, read-only tools. Each tool returns
@@ -35,6 +36,7 @@ export type AssistantEvent = AssistantPart;
 
 type Report = {
   sitemap?: { totalUrls?: number };
+  notFoundProbe?: NotFoundProbe;
   findings?: Array<{ severity: string; category: string; title: string; summary: string; recommendation?: string; organicImpactScore: number }>;
   plan?: { situation: string; competitiveAdvantage: string; highestImpactOpportunity: string; priorities: Array<{ rank: number; title: string; whyThisMatters: string }> };
   competition?: {
@@ -61,11 +63,12 @@ const NO_ANALYSIS: Table = { summary: "No analysis has finished for this site ye
 const NO_SEARCH: Table = { summary: "Search Console is not connected for this site, so there is no search data. It can be connected on the Overview.", columns: [], rows: [] };
 const daysParameter = schema.object({ days: schema.nullable(schema.number("How many days back to look; default 28")) });
 
-const ISSUES: Record<string, string> = {
+const ISSUES: Record<CrawlIssue, string> = {
   robotsBlocked: "Blocked by robots.txt", noindex: "Noindex", canonicalMismatch: "Canonical points to another URL", redirected: "Redirects",
   missingH1: "No H1 heading", multipleH1: "Several H1 headings", missingDescription: "Missing or short meta description",
   missingStructuredData: "No structured data", invalidStructuredData: "Invalid structured data", botFallback: "Googlebot gets a different answer",
   botChallenge: "Bot challenge instead of the page", duplicateTitle: "Shares its title with other pages",
+  softNotFound: "Says not found but answers 200", nearDuplicate: "Nearly the same page as another",
 };
 
 const TOOLS: Tool[] = [
@@ -106,7 +109,7 @@ const TOOLS: Tool[] = [
     async run(context) {
       const last = await context.latest();
       if (!last) return NO_ANALYSIS;
-      const coverage = await getCrawlCoverage(context.db, last.id);
+      const coverage = await getCrawlCoverage(context.db, last.id, { notFoundTitle: probeTitleForCoverage(last.report.notFoundProbe) });
       return {
         summary: `Crawl finished ${last.completedAt.slice(0, 10)}: ${coverage.completedUrls} of ${coverage.totalUrls} sitemap URLs fetched; ${coverage.emptyShellUrls} empty HTML, ${coverage.httpErrorUrls} HTTP errors, ${coverage.failedUrls} failed.`,
         columns: ["page_type", "sitemap_urls", "crawled", "empty_html", "errors", "noindex", "no_structured_data"],
@@ -127,7 +130,7 @@ const TOOLS: Tool[] = [
     async run(context) {
       const last = await context.latest();
       if (!last) return NO_ANALYSIS;
-      const coverage = await getCrawlCoverage(context.db, last.id);
+      const coverage = await getCrawlCoverage(context.db, last.id, { notFoundTitle: probeTitleForCoverage(last.report.notFoundProbe) });
       const rows: Row[] = [
         { issue: "Empty HTML before JavaScript", urls: coverage.emptyShellUrls, examples: null },
         { issue: "HTTP errors", urls: coverage.httpErrorUrls, examples: null },

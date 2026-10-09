@@ -114,5 +114,7 @@ describe("demo site", () => {
     assert.ok(titles.includes("Pages that say not found but answer 200"), titles.join(" | "));
     assert.ok(titles.includes("Pages that are the same page twice"), titles.join(" | "));
     assert.ok(!titles.includes("The site answers 200 for pages that don't exist"), "the demo's unknown URLs are real 404s");
+    const report = (await getAnalysisJob(db, "analysis_demo_2"))!.report as { notFoundProbe?: { status: number } };
+    assert.equal(report.notFoundProbe?.status, 404, "the probe's answer is kept on the report");
   });
 });

@@ -21,7 +21,7 @@ import {
   updateSiteFingerprint,
 } from "@organic-growth/db";
 import {
-  MAX_COMPETITORS, crawlLogCoverage, fetchSearchConsoleMetrics, loadTrendSignals, queueFullCrawl, runFullAnalysis, synthesizePlanNarrative,
+  MAX_COMPETITORS, crawlLogCoverage, fetchSearchConsoleMetrics, loadTrendSignals, probeTitleForCoverage, queueFullCrawl, runFullAnalysis, synthesizePlanNarrative,
 } from "@organic-growth/agents";
 import {
   buildRepoSnapshotFromGitHub,
@@ -150,7 +150,7 @@ export class SiteAnalysisWorkflow extends WorkflowEntrypoint<AppEnv, AnalysisPay
           // One fetch of a URL that cannot exist: a site that answers 200 for it is a soft-404 site, and pages carrying that title are soft 404s.
           const notFoundProbe = await probeNotFound(site.baseUrl, analysisId).catch(() => undefined);
           const [coverage, examples, datasets, targetMarkets, entityKeys, competitors] = await Promise.all([
-            getCrawlCoverage(db, analysisId, { notFoundTitle: notFoundProbe && notFoundProbe.status < 400 ? notFoundProbe.title ?? null : null }),
+            getCrawlCoverage(db, analysisId, { notFoundTitle: probeTitleForCoverage(notFoundProbe) }),
             listCrawlPageResults(db, analysisId, 50),
             datasetCoverage(db, siteId),
             listSiteMarkets(db, siteId),

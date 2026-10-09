@@ -1,6 +1,6 @@
 import type { CrawlPageResult, Finding, SitemapAudit } from "@organic-growth/core";
 import { createId, organicImpactScore, severityFromImpact, simhash } from "@organic-growth/core";
-import { contentMarkup, elementSpans, findTags, hasToken, innerText, parseAttributes, visibleText } from "./html.js";
+import { contentMarkup, elementSpans, findTags, hasToken, innerText, parseAttributes, stripElements, visibleText } from "./html.js";
 import { GOOGLEBOT_TOKEN, parseRobots, type RobotsPolicy } from "./robots.js";
 import { classifyLanguage, classifyUrlType, isSameSite, sameDocument } from "./urls.js";
 
@@ -119,8 +119,8 @@ export type HtmlSignals = {
   /** Target of a `<meta http-equiv="refresh">` redirect (delay of 10 s or less). */
   metaRefresh?: string;
   bodyTextSample: string;
-  /** Simhash of the visible text when it has 200 characters or more. */
-  textHash?: string;
+  /** Visible text of the main content: `<main>` or `<article>` when the page has one, else the body without nav, header, footer, aside and forms. */
+  mainText: string;
 };
 
 /**
@@ -166,6 +166,8 @@ export function parseHtmlSignals(html: string, pageUrl?: string): HtmlSignals {
   }
 
   const text = visibleText(markup);
+  const main = elementSpans(markup, ["main", "article"])[0];
+  const mainText = visibleText(main ? markup.slice(main.contentStart, main.contentEnd) : stripElements(markup, ["nav", "header", "footer", "aside", "form"]));
   return {
     title: title ? innerText(title) : undefined,
     description: metaContent("description"),
@@ -184,7 +186,7 @@ export function parseHtmlSignals(html: string, pageUrl?: string): HtmlSignals {
     metaNoindex: [robots, googlebot].some((value) => /\b(noindex|none)\b/i.test(value ?? "")),
     metaRefresh: refresh && Number(refresh[1]) <= 10 ? refresh[2]!.trim() : undefined,
     bodyTextSample: text.slice(0, 280),
-    textHash: text.length >= 200 ? simhash(text) : undefined,
+    mainText,
   };
 }
 
@@ -318,6 +320,27 @@ export function isBotChallenge(response: Pick<FetchResult, "status" | "headers" 
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/** Words a page uses to say it is missing, in the languages the sites Eumon serves write in. "404" counts only beside error, page or not found: a guide numbered 404 is a guide. */
+const NOT_FOUND = /\b(page |halaman )?not found\b|\berror\s*-?\s*404\b|\b404\s*-?\s*(error|not found|page)\b|^\s*404\b|doesn[’']?t exist|does not exist|no longer available|tidak (di)?temukan|tidak dijumpai|halaman tidak ada|找不到|不存在/i;
+
+/** A page that answered under 400 but says it is missing, in its title or first heading, with little else in its main content: Google's soft 404. */
+function isSoftNotFound(status: number, signals: HtmlSignals): boolean {
+  if (status >= 400 || signals.mainText.length >= 2000) return false;
+  const h1 = signals.headingOutline.find((entry) => entry.startsWith("h1:"))?.slice(3) ?? "";
+  return NOT_FOUND.test(`${signals.title ?? ""} ${h1}`);
+}
+
+/** Fetches a URL that cannot exist, as Googlebot, and reports what the site answered: a status under 400 is a soft-404 site; `finalUrl` says where it was sent (the homepage, often). */
+export async function probeNotFound(baseUrl: string, runId: string, fetcher: Fetcher = defaultFetcher): Promise<{ url: string; finalUrl?: string; status: number; title?: string }> {
+  const url = `${new URL(baseUrl).origin}/eumon-404-probe-${runId.replace(/[^a-z0-9]/gi, "").slice(-8).toLowerCase() || "x"}`;
+  try {
+    const response = await fetcher(url, { userAgent: GOOGLEBOT_UA });
+    return { url, finalUrl: response.finalUrl || url, status: response.status, title: parseHtmlSignals(response.body, response.finalUrl || url).title };
+  } catch {
+    return { url, status: 599 };
+  }
+}
+
 /**
  * The full crawl uses the Googlebot request profile for every sitemap URL.
  * Raw-vs-Googlebot and browser comparisons remain a representative sample,
@@ -328,27 +351,6 @@ const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
  * Googlebot request is refused, the page is re-fetched as a browser so the
  * crawl still describes the page, and the refusal is recorded.
  */
-/** Words a page uses to say it is missing, in the languages the sites Eumon serves write in. */
-const NOT_FOUND = /\b(page )?not found\b|\b404\b|doesn'?t exist|does not exist|no longer available|tidak ditemukan|halaman tidak ada|找不到|不存在/i;
-
-/** A page that answered under 400 but says it is missing, in its title or first heading, with little else on it: Google's soft 404. */
-function isSoftNotFound(status: number, signals: HtmlSignals): boolean {
-  if (status >= 400 || signals.textLength >= 2000) return false;
-  const h1 = signals.headingOutline.find((entry) => entry.startsWith("h1:"))?.slice(3) ?? "";
-  return NOT_FOUND.test(`${signals.title ?? ""} ${h1}`);
-}
-
-/** Fetches a URL that cannot exist, as Googlebot, and reports what the site answered: a status under 400 is a soft-404 site. */
-export async function probeNotFound(baseUrl: string, runId: string, fetcher: Fetcher = defaultFetcher): Promise<{ url: string; status: number; title?: string }> {
-  const url = `${new URL(baseUrl).origin}/eumon-404-probe-${runId.replace(/[^a-z0-9]/gi, "").slice(-8).toLowerCase() || "x"}`;
-  try {
-    const response = await fetcher(url, { userAgent: GOOGLEBOT_UA });
-    return { url, status: response.status, title: parseHtmlSignals(response.body, url).title };
-  } catch {
-    return { url, status: 599 };
-  }
-}
-
 export async function fetchGooglebotPage(
   url: string,
   fetcher: Fetcher = defaultFetcher,
@@ -433,7 +435,7 @@ function toCrawlResult(
     routeFamily: classifyUrlType(url),
     canonicalMismatch: signals.canonical ? !sameDocument(signals.canonical, finalUrl) : false,
     locale: classifyLanguage(url),
-    ...(signals.textHash ? { textHash: signals.textHash } : {}),
+    ...(signals.mainText.length >= 200 ? { textHash: simhash(signals.mainText) } : {}),
     ...(isSoftNotFound(fetchResult.status, signals) ? { softNotFound: true } : {}),
     ...(signals.metaRefresh ? { metaRefresh: signals.metaRefresh } : {}),
     ...(withLinks ? { internalLinks: signals.internalLinks.map((path) => ({ path, family: classifyUrlType(new URL(path || "/", finalUrl).toString()) })) } : {}),

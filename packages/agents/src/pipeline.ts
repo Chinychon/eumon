@@ -160,7 +160,7 @@ export interface RunAnalysisInput {
   /** Search results pages, suggested competitors, links and crawl-log coverage from the sync, when synced. */
   connectors?: ConnectorSignals;
   /** What the site answered for a URL that cannot exist (`probeNotFound`), when the caller probed. */
-  notFoundProbe?: { url: string; status: number; title?: string };
+  notFoundProbe?: { url: string; finalUrl?: string; status: number; title?: string };
 }
 
 /** Competitors researched per analysis; each costs a sitemap profile and a handful of page fetches. */
@@ -387,6 +387,7 @@ export async function runFullAnalysis(input: RunAnalysisInput) {
   const searchNarrative = analyzeSearchTraffic(searchMetrics, brandTerms, search);
 
   return {
+    ...(input.notFoundProbe ? { notFoundProbe: input.notFoundProbe } : {}),
     site,
     analysisId,
     // Content-heavy repositories can declare thousands of routes; the inspected ones carry the detail.

@@ -11,7 +11,7 @@ function page(url: string, overrides: Partial<CrawlPageResult> = {}): CrawlPageR
     url, status: 200, finalUrl: url, title: `Unique title for ${url}`, description: "A description long enough to count as a real one.",
     hreflang: [], jsonLdCount: 1, contentLength: 5000, isEmptyShell: false, headingOutline: ["h1:Title"], internalLinkCount: 10,
     rawTextLength: 3000, renderedTextLength: 0, renderDelta: 0, fetchMode: "googlebot", h1Count: 1, noindex: false,
-    jsonLdTypes: ["WebPage"], invalidJsonLd: 0, canonicalMismatch: false,
+    jsonLdTypes: ["WebPage"], invalidJsonLd: 0, canonicalMismatch: false, locale: "default",
     routeFamily: new URL(url).pathname.split("/").filter(Boolean).length > 1 ? new URL(url).pathname.split("/")[1] : "page",
     ...overrides,
   };
@@ -121,7 +121,7 @@ describe("live crawl progress", async () => {
   await enqueueAnalysisCrawlUrls(db, {
     analysisId: "p1", siteId: "site",
     urls: [
-      ...["/doctors/a", "/doctors/b", "/doctors/c", "/doctors/d"].map((path) => ({ url: u(path), routeFamily: "doctors" })),
+      ...["/doctors/a", "/doctors/b", "/doctors/c", "/doctors/d", "/doctors/old"].map((path) => ({ url: u(path), routeFamily: "doctors" })),
       { url: u("/blog/x"), routeFamily: "blog" },
       { url: u("/private/x"), routeFamily: "private", blocked: true },
     ],
@@ -132,6 +132,7 @@ describe("live crawl progress", async () => {
       { url: u("/doctors/a"), page: page(u("/doctors/a")) },
       { url: u("/doctors/b"), page: page(u("/doctors/b"), { isEmptyShell: true }) },
       { url: u("/doctors/c"), page: page(u("/doctors/c"), { status: 404 }) },
+      { url: u("/doctors/old"), page: page(u("/doctors/old"), { locale: undefined }) },
       { url: u("/blog/x"), error: "timeout" },
     ],
   });
@@ -140,10 +141,10 @@ describe("live crawl progress", async () => {
     const progress = await getCrawlProgress(db, "p1");
     assert.deepEqual(
       { total: progress.total, pending: progress.pending, crawled: progress.crawled, failed: progress.failed, blocked: progress.blocked, ok: progress.ok, httpErrors: progress.httpErrors, emptyShells: progress.emptyShells },
-      { total: 6, pending: 1, crawled: 4, failed: 1, blocked: 1, ok: 2, httpErrors: 1, emptyShells: 1 },
+      { total: 7, pending: 1, crawled: 5, failed: 1, blocked: 1, ok: 3, httpErrors: 1, emptyShells: 1 },
     );
-    assert.deepEqual(progress.families.find((family) => family.family === "doctors"), { family: "doctors", total: 4, done: 3, fetched: 3, blocked: 0, emptyShells: 1, errors: 1 });
-    assert.equal(progress.recent.length, 4);
+    assert.deepEqual(progress.families.find((family) => family.family === "doctors"), { family: "doctors", total: 5, done: 4, fetched: 4, blocked: 0, emptyShells: 1, errors: 1 });
+    assert.equal(progress.recent.length, 5);
     assert.ok(progress.firstCrawledAt);
   });
 
@@ -184,9 +185,9 @@ describe("live crawl progress", async () => {
     assert.deepEqual(await getPreviousCompletedAnalysis(db, "site", "p2"), { id: "p1", completedAt: now });
     const states = await listCrawlStates(db, "p1");
     assert.equal(states.get(u("/blog/x"))?.state, "failed");
-    await reuseCrawlResults(db, { analysisId: "p2", previousAnalysisId: "p1", urls: [u("/doctors/a"), u("/doctors/b"), u("/blog/x")] });
+    await reuseCrawlResults(db, { analysisId: "p2", previousAnalysisId: "p1", urls: [u("/doctors/a"), u("/doctors/b"), u("/doctors/old"), u("/blog/x")] });
     const progress = await getCrawlProgress(db, "p2");
-    assert.equal(progress.reused, 2, "the failed URL is not copied");
+    assert.equal(progress.reused, 2, "the failed URL is not copied, nor a result from before the crawler recorded a locale: that page is fetched again");
     assert.deepEqual(progress.families.find((family) => family.family === "doctors"), { family: "doctors", total: 2, done: 2, fetched: 0, blocked: 0, emptyShells: 1, errors: 0 });
     assert.equal(progress.crawled, 0, "reused results do not count as fetched in this run");
     const coverage = await getCrawlCoverage(db, "p2");
@@ -297,22 +298,32 @@ describe("soft 404s, near-duplicates and locales in coverage", () => {
       page(u("/doctors/dr-lim-ai-wei"), { title: "Dr Lim Ai Wei", textHash: bioA, locale: "default" }),
       page(u("/doctors/dr-lim-ai-wei-7f3a2b"), { title: "Dr Lim Ai Wei", textHash: bioB, locale: "default" }),
       page(u("/doctors/dr-lim-ai-wei-derm"), { title: "Dr Lim Ai Wei", textHash: bioC, locale: "default" }),
+      page(u("/doctors/dr-chen-san-san"), { title: "Dr Chen San San", textHash: bioA, locale: "default" }),
+      page(u("/doctors/dr-chen-san-san-sunway"), { title: "Dr Chen San San", textHash: bioB, locale: "default" }),
+      page(u("/"), { title: "Oops", locale: "default", routeFamily: "home" }),
+      page(u("/shell"), { title: "Oops", locale: "default", isEmptyShell: true }),
       page(u("/treatments/old"), { title: "Page not found", softNotFound: true, locale: "default", noindex: false }),
       page(u("/treatments/older"), { title: "Oops", locale: "default" }),
       page(u("/id/doctors/dr-lim-ai-wei"), { title: "Dr Lim Ai Wei (ID)", locale: "id", noindex: true }),
       page(u("/id/doctors/dr-tan"), { title: "Dr Tan", locale: "id", noindex: true }),
     ];
-    await enqueueAnalysisCrawlUrls(db, { analysisId: "c1", siteId: "site", urls: pages.map((entry) => ({ url: entry.url, routeFamily: "doctors" })) });
+    await enqueueAnalysisCrawlUrls(db, { analysisId: "c1", siteId: "site", urls: pages.map((entry) => ({ url: entry.url, routeFamily: entry.url === u("/") ? "home" : "doctors" })) });
     await saveCrawlBatch(db, { analysisId: "c1", outcomes: pages.map((entry) => ({ url: entry.url, page: entry })) });
     const plain = await getCrawlCoverage(db, "c1");
     assert.equal(plain.issues?.softNotFound, 1, "the flagged page");
-    assert.equal(plain.issues?.nearDuplicate, 2, "two of the three namesakes are the same page");
-    assert.deepEqual(plain.nearDuplicateGroups, [{ title: "Dr Lim Ai Wei", urls: [u("/doctors/dr-lim-ai-wei"), u("/doctors/dr-lim-ai-wei-7f3a2b")], suffixed: true }]);
-    assert.deepEqual(plain.locales?.map((entry) => [entry.locale, entry.urls, entry.noindex]), [["default", 5, 0], ["id", 2, 2]]);
+    assert.equal(plain.issues?.nearDuplicate, 4, "two namesakes are the same page, and Dr Chen's two listings are too");
+    assert.deepEqual(plain.nearDuplicateGroups, [
+      { title: "Dr Chen San San", urls: [u("/doctors/dr-chen-san-san"), u("/doctors/dr-chen-san-san-sunway")], suffixed: false },
+      { title: "Dr Lim Ai Wei", urls: [u("/doctors/dr-lim-ai-wei"), u("/doctors/dr-lim-ai-wei-7f3a2b")], suffixed: true },
+    ], "a hospital name on the end is not a code; a hex code is");
+    assert.deepEqual(plain.locales?.map((entry) => [entry.locale, entry.urls, entry.noindex]), [["default", 9, 0], ["id", 2, 2]]);
     const probed = await getCrawlCoverage(db, "c1", { notFoundTitle: "Oops" });
-    assert.equal(probed.issues?.softNotFound, 2, "plus the page that shares the probe's title");
+    assert.equal(probed.issues?.softNotFound, 2, "plus the one real page that shares the probe's title: not the homepage, not the empty shell");
+    const everywhere = await getCrawlCoverage(db, "c1", { notFoundTitle: "Dr Lim Ai Wei" });
+    assert.equal(everywhere.issues?.softNotFound, 1, "a title on more than a fifth of the pages is the site's template, not a not-found page");
     assert.equal(probed.notFoundTitle, "Oops");
     assert.ok(probed.issueExamples?.softNotFound?.some((example) => example.url === u("/treatments/older")));
+    assert.ok(!probed.issueExamples?.softNotFound?.some((example) => example.url === u("/")), "the homepage is never a soft 404 by title");
   });
 
   it("reads 0 and no locales for crawls saved before these fields existed", async () => {

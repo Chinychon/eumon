@@ -22,7 +22,7 @@ import { analyzeSearch, searchOpportunities, type SearchInsights } from "./searc
 
 export interface AnalysisBundle {
   /** What the site answered for a URL that cannot exist; a status under 400 is a soft-404 site. */
-  notFoundProbe?: { url: string; status: number; title?: string };
+  notFoundProbe?: { url: string; finalUrl?: string; status: number; title?: string };
   siteId: string;
   analysisId: string;
   baseUrl: string;

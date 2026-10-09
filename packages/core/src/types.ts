@@ -231,6 +231,8 @@ export type CrawlCoverage = {
   duplicateTitleGroups?: Array<{ title: string; count: number; examples: string[] }>;
   /** Indexable pages with the same title whose text hashes are within a few bits; `suffixed` when their URLs differ only by a trailing code. */
   nearDuplicateGroups?: Array<{ title: string; urls: string[]; suffixed: boolean }>;
+  /** The near-duplicate count stopped at the query's cap, so it is a floor. */
+  nearDuplicateTruncated?: boolean;
   /** Per language version, only when the crawl has more than one. */
   locales?: CrawlLocaleStats[];
   /** The title the site gave a URL that cannot exist, when it answered under 400; pages with that title count as soft 404s. */

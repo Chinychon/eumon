@@ -11,7 +11,7 @@ import type {
   SiteRecord,
 } from "@organic-growth/core";
 import { chunks, nowIso, runStatements, type D1Like } from "./d1.js";
-import { nearDuplicate } from "@organic-growth/core";
+import { hammingBits, hashBits, NEAR_DUPLICATE_DISTANCE } from "@organic-growth/core";
 
 export * from "./d1.js";
 export * from "./page-engine.js";
@@ -297,7 +297,8 @@ export async function reuseCrawlResults(
       analysis_id, url, status, title, is_empty_shell, route_family, reused_from, result_json,
       crawl_state, crawled_at, created_at
     ) SELECT ?, url, status, title, is_empty_shell, route_family, ?, result_json, 'complete', crawled_at, ?
-    FROM pages WHERE analysis_id = ? AND crawl_state = 'complete' AND url IN (${group.map(() => "?").join(",")})`,
+    FROM pages WHERE analysis_id = ? AND crawl_state = 'complete' AND json_extract(result_json, '$.locale') IS NOT NULL
+      AND url IN (${group.map(() => "?").join(",")})`,
   ).bind(input.analysisId, input.previousAnalysisId, createdAt, input.previousAnalysisId, ...group));
   for (const group of chunks(statements, 50)) await runStatements(db, group);
   await recountCrawl(db, input.analysisId);
@@ -879,13 +880,22 @@ export async function getCrawlCoverage(
   ]);
   issues.duplicateTitle = Number(duplicates?.urls ?? 0);
 
-  // Pages carrying the title the site gives a URL that cannot exist are soft 404s whatever their words.
+  // Pages carrying the title the site gives a URL that cannot exist are soft 404s whatever their words: real pages only
+  // (not the homepage, not empty shells), and only when the title is not the site's template (on more than a fifth of pages).
+  const PROBE_TITLE = `${SERVED} AND is_empty_shell = 0 AND route_family != 'home' AND title = ? AND COALESCE(${crawlField("softNotFound")}, 0) = 0`;
+  let probeTitle: string | null = null;
   if (options.notFoundTitle) {
-    const { results } = await db.prepare(
-      `SELECT url FROM pages WHERE analysis_id = ? AND ${SERVED} AND title = ? AND COALESCE(${crawlField("softNotFound")}, 0) = 0 ORDER BY url`,
-    ).bind(analysisId, options.notFoundTitle).all<{ url: string }>();
-    issues.softNotFound = (issues.softNotFound ?? 0) + results.length;
-    if (results.length) issueExamples.softNotFound = [...(issueExamples.softNotFound ?? []), ...results.map((row) => ({ url: String(row.url), detail: options.notFoundTitle! }))].slice(0, 8);
+    const [matching, served] = await Promise.all([
+      db.prepare(`SELECT COUNT(*) AS n FROM pages WHERE analysis_id = ? AND ${PROBE_TITLE}`).bind(analysisId, options.notFoundTitle).first<{ n: number }>(),
+      db.prepare(`SELECT COUNT(*) AS n FROM pages WHERE analysis_id = ? AND ${SERVED}`).bind(analysisId).first<{ n: number }>(),
+    ]);
+    const count = Number(matching?.n ?? 0);
+    if (count > 0 && count <= Math.max(1, Number(served?.n ?? 0)) * 0.2) {
+      probeTitle = options.notFoundTitle;
+      issues.softNotFound = (issues.softNotFound ?? 0) + count;
+      const { results } = await db.prepare(`SELECT url FROM pages WHERE analysis_id = ? AND ${PROBE_TITLE} ORDER BY url LIMIT 8`).bind(analysisId, options.notFoundTitle).all<{ url: string }>();
+      issueExamples.softNotFound = [...(issueExamples.softNotFound ?? []), ...results.map((row) => ({ url: String(row.url), detail: options.notFoundTitle! }))].slice(0, 8);
+    }
   }
 
   // Near-duplicates: within the biggest duplicate-title groups, pages whose text hashes sit within a few bits of another's.
@@ -897,16 +907,22 @@ export async function getCrawlCoverage(
      ORDER BY title, url LIMIT 1000`,
   ).bind(analysisId, analysisId).all<{ title: string; url: string; hash: string }>();
   const nearDuplicateGroups: NonNullable<CrawlCoverage["nearDuplicateGroups"]> = [];
-  const byTitle = new Map<string, typeof members>();
-  for (const row of members) byTitle.set(String(row.title), [...(byTitle.get(String(row.title)) ?? []), row]);
+  const byTitle = new Map<string, Array<{ url: string; bits: [number, number] }>>();
+  for (const row of members) {
+    const bits = hashBits(String(row.hash));
+    if (bits) byTitle.set(String(row.title), [...(byTitle.get(String(row.title)) ?? []), { url: String(row.url), bits }]);
+  }
   for (const [title, group] of byTitle) {
-    const marked = group.filter((row) => group.some((other) => other.url !== row.url && nearDuplicate(String(row.hash), String(other.hash)))).map((row) => String(row.url));
+    const marked = group.filter((row) => group.some((other) => other.url !== row.url && hammingBits(row.bits, other.bits) <= NEAR_DUPLICATE_DISTANCE)).map((row) => row.url);
     if (marked.length < 2) continue;
-    const stem = (url: string) => url.replace(/-[a-z0-9]{4,}\/?$/i, "");
+    // A code on the end of the address has a digit in it; a hospital or town name on the end is a different page's name.
+    const stem = (url: string) => url.replace(/-(?=[a-z]*\d)[a-z0-9]{4,}\/?$/i, "");
     const suffixed = marked.every((url) => marked.some((other) => other !== url && (stem(url) === other || stem(other) === url || stem(url) === stem(other))));
     nearDuplicateGroups.push({ title, urls: marked, suffixed });
   }
+  nearDuplicateGroups.sort((a, b) => b.urls.length - a.urls.length || a.title.localeCompare(b.title));
   issues.nearDuplicate = nearDuplicateGroups.reduce((total, group) => total + group.urls.length, 0);
+  const nearDuplicateTruncated = members.length >= 1000 || Number(duplicates?.groups ?? 0) > 50;
 
   // Language versions, from the URL's locale prefix; one version is no split.
   const { results: localeRows } = await db.prepare(
@@ -918,10 +934,10 @@ export async function getCrawlCoverage(
        SUM(CASE WHEN ${CRAWL_ISSUES.redirected.where} THEN 1 ELSE 0 END) AS redirected,
        SUM(CASE WHEN ${CRAWL_ISSUES.missingDescription.where} THEN 1 ELSE 0 END) AS missing_description,
        SUM(CASE WHEN ${CRAWL_ISSUES.missingStructuredData.where} THEN 1 ELSE 0 END) AS missing_structured_data,
-       SUM(CASE WHEN ${CRAWL_ISSUES.softNotFound.where} THEN 1 ELSE 0 END) AS soft_not_found
+       SUM(CASE WHEN ${CRAWL_ISSUES.softNotFound.where}${probeTitle ? ` OR (${PROBE_TITLE})` : ""} THEN 1 ELSE 0 END) AS soft_not_found
      FROM pages WHERE analysis_id = ? AND ${crawlField("locale")} IS NOT NULL
      GROUP BY locale ORDER BY urls DESC, locale`,
-  ).bind(analysisId).all<Record<string, number | string>>();
+  ).bind(...(probeTitle ? [probeTitle] : []), analysisId).all<Record<string, number | string>>();
   const locales = localeRows.length > 1 ? localeRows.map((row) => ({
     locale: String(row.locale), urls: Number(row.urls), crawled: Number(row.crawled), emptyShells: Number(row.empty_shells), errors: Number(row.errors), noindex: Number(row.noindex),
     redirected: Number(row.redirected), missingDescription: Number(row.missing_description), missingStructuredData: Number(row.missing_structured_data), softNotFound: Number(row.soft_not_found),
@@ -943,6 +959,7 @@ export async function getCrawlCoverage(
       examples: String(group.urls ?? "").split(" ").filter(Boolean).slice(0, 4),
     })),
     nearDuplicateGroups: nearDuplicateGroups.slice(0, 8),
+    ...(nearDuplicateTruncated ? { nearDuplicateTruncated: true } : {}),
     ...(locales ? { locales } : {}),
     ...(options.notFoundTitle !== undefined ? { notFoundTitle: options.notFoundTitle } : {}),
     families: families.results.map((family): CrawlFamilyStats => ({

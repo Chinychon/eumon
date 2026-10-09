@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
 import type { CrawlCoverage } from "@organic-growth/core";
 import { aiReadiness, auditSitemap, defaultFetcher, robotsState, sitemapEntries, fetchGooglebotPage, findingsFromCrawlCoverage, headerNoindex, isBotChallenge, isEmptyShell, parseHtmlSignals, runTechnicalSeoAudit, type Fetcher, probeNotFound } from "./index.js";
+import { hamming, nearDuplicate } from "@organic-growth/core";
 import { classifyLanguage, classifyUrlType, isSameSite } from "./urls.js";
 
 describe("isSameSite", () => {
@@ -394,11 +395,38 @@ describe("soft 404s, hashes and locales on a crawled page", () => {
     assert.equal((await fetchGooglebotPage("https://x.com/gone", fetcher)).softNotFound, undefined, "a real 404 is not soft");
   });
 
+  it("fingerprints the main content, so the same name over a mega-menu is not the same page, and the same bio at two hospitals is", async () => {
+    const chrome = `<nav>${Array.from({ length: 120 }, (_, i) => `<a href="/s/${i}">Service ${i} for patients in Kuala Lumpur and Penang</a>`).join(" ")}</nav><header><h2>Demo Hospital Group</h2><p>${longText}</p></header>`;
+    const footer = `<footer>${Array.from({ length: 60 }, (_, i) => `<a href="/c/${i}">Clinic ${i}</a> Open daily 8am to 8pm, call 03-1234 ${i}`).join(" ")}</footer>`;
+    const bio = (hospital: string) => `Dr Lim Ai Wei is a consultant obstetrician and gynaecologist at ${hospital} with eighteen years of experience in high-risk pregnancy, minimally invasive surgery, fertility assessment and menopause care. She trained at the University of Malaya and in Singapore, sees patients for antenatal care, screening, contraception and the management of fibroids and endometriosis, speaks English, Malay and Mandarin, and consults on weekdays with Saturday sessions for returning patients. Appointments run through the patient line or WhatsApp; most insurers are accepted. Her clinical interests include recurrent miscarriage, polycystic ovary syndrome, adolescent gynaecology and the long-term follow-up of women after cancer treatment. She teaches undergraduate students, examines for the national college, has published on caesarean recovery and laparoscopic technique, and chairs the hospital's maternal safety committee. Outside the clinic she runs free antenatal classes twice a month and answers questions on the hospital's health talk series.`;
+    const derm = "Dr Lim Ai Wei is a dermatologist treating acne, eczema, psoriasis and skin cancer screening. She trained in dermatology in Glasgow and offers laser treatments, mole checks and paediatric skin care, with clinics Monday to Friday and same-day appointments for urgent rashes. Patients value her clear explanations, careful follow-up and practical advice on sun protection and skincare routines for Malaysian weather.";
+    const page = (body: string) => `<!doctype html><html><head><title>Dr Lim Ai Wei</title></head><body>${chrome}<main><h1>Dr Lim Ai Wei</h1><p>${body}</p></main>${footer}</body></html>`;
+    const fetcher = serve({ "https://x.com/doctors/a": { html: page(bio("Pantai Hospital")) }, "https://x.com/doctors/b": { html: page(bio("Gleneagles Hospital Penang")) }, "https://x.com/doctors/c": { html: page(derm) } });
+    const [a, b, other] = await Promise.all(["a", "b", "c"].map((slug) => fetchGooglebotPage(`https://x.com/doctors/${slug}`, fetcher)));
+    assert.ok(nearDuplicate(a!.textHash!, b!.textHash!), `same bio, two hospitals: ${hamming(a!.textHash!, b!.textHash!)} bits`);
+    assert.equal(nearDuplicate(a!.textHash!, other!.textHash!), false, `a different person: ${hamming(a!.textHash!, other!.textHash!)} bits`);
+    const soft = await fetchGooglebotPage("https://x.com/gone-but-200", serve({ "https://x.com/gone-but-200": { html: `<!doctype html><html><head><title>Page not found</title></head><body>${chrome}<main><h1>Page not found</h1><p>Sorry.</p></main>${footer}</body></html>` } }));
+    assert.equal(soft.softNotFound, true, "a not-found page under a big menu is still a not-found page");
+  });
+
+  it("reads 404 in a title only beside error, page or not found", async () => {
+    const fetcher = serve({
+      "https://x.com/blog/veneers-guide-404": { html: html("Veneers Guide 404", "Our 404th guide: veneers.") },
+      "https://x.com/old": { html: html("404 - Page not found", "Sorry.") },
+      "https://x.com/older": { html: html("Error 404", "Sorry.") },
+    });
+    assert.equal((await fetchGooglebotPage("https://x.com/blog/veneers-guide-404", fetcher)).softNotFound, undefined);
+    assert.equal((await fetchGooglebotPage("https://x.com/old", fetcher)).softNotFound, true);
+    assert.equal((await fetchGooglebotPage("https://x.com/older", fetcher)).softNotFound, true);
+  });
+
   it("probes a URL that cannot exist and reports what the site answered", async () => {
     const ok = await probeNotFound("https://x.com", "run_1", serve({}));
     assert.deepEqual([ok.status, ok.title, ok.url.startsWith("https://x.com/eumon-404-probe-")], [404, "Not found", true]);
     const soft = await probeNotFound("https://x.com", "run_1", async (url) => ({ url, status: 200, finalUrl: url, headers: {}, body: html("Oops", "Something went wrong.") }));
     assert.deepEqual([soft.status, soft.title], [200, "Oops"]);
+    const home = await probeNotFound("https://x.com", "run_1", async (url) => ({ url, status: 200, finalUrl: "https://x.com/", headers: {}, body: html("Demo Clinic", "Welcome.") }));
+    assert.deepEqual([home.status, home.finalUrl, home.title], [200, "https://x.com/", "Demo Clinic"], "a redirect to the homepage is recorded as such");
   });
 });
 

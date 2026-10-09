@@ -321,7 +321,7 @@ export function findingsFromCrawlCoverage(input: {
       category: "content",
       impact: Math.min(organicImpactScore({ category: "content", pagesAffected: nearDuplicates }), 55),
       title: "Pages that are the same page twice",
-      summary: `${pages(nearDuplicates)} are near-duplicates of another indexable page: the same title and nearly the same text${suffixed ? `; ${count(suffixed)} ${suffixed === 1 ? "pair differs" : "pairs differ"} only by a code at the end of the address — the same record listed twice` : ""}. Google picks one and ignores the rest, not always the one you'd choose.`,
+      summary: `${coverage.nearDuplicateTruncated ? "At least " : ""}${pages(nearDuplicates)} are near-duplicates of another indexable page: the same title and nearly the same text${suffixed ? `; ${count(suffixed)} ${suffixed === 1 ? "pair differs" : "pairs differ"} only by a code at the end of the address — the same record listed twice` : ""}. Google picks one and ignores the rest, not always the one you'd choose.`,
       evidence: { nearDuplicateUrls: nearDuplicates, suffixedGroups: suffixed, groups },
       recommendation: "Keep one page per record: merge the duplicates in the data, or give the copies a canonical pointing at the page to keep.",
       pagesAffected: groups.flatMap((group) => group.urls).slice(0, 20),

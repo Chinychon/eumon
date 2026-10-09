@@ -3,6 +3,8 @@
 import type { KeywordsView } from "@organic-growth/core";
 import { formatDay, formatNumber } from "../api";
 import { BarList } from "../charts";
+import { ExportMenu } from "../export/ExportMenu";
+import { keywordSheets } from "../export/report-sheets";
 import { Badge, Card } from "../ui";
 
 const num = (value: number | null) => (value === null ? "—" : formatNumber(value));
@@ -27,7 +29,7 @@ export function KeywordsCard({ keywords, host, operator, hasCredentials, hasMark
     : null;
   const you = keywords.visibility[0];
   return (
-    <Card title="Keywords" subtitle={`Searches per month and difficulty from DataForSEO, updated monthly${keywords.asOf ? ` (last on ${formatDay(keywords.asOf)})` : ""}. Positions from Search Console.`}>
+    <Card title="Keywords" actions={!empty && <ExportMenu title="Keywords" sheets={() => keywordSheets(keywords, host)} />} subtitle={`Searches per month and difficulty from DataForSEO, updated monthly${keywords.asOf ? ` (last on ${formatDay(keywords.asOf)})` : ""}. Positions from Search Console.`}>
       {empty ? <p className="empty-state">{empty}</p> : (
         <>
           <div className="section-title">Your top keywords</div>

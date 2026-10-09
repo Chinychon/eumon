@@ -29,6 +29,18 @@ async function publishPages(db: ReturnType<typeof openSqliteD1>, count: number) 
 }
 
 describe("results sync", () => {
+  it("never asks outside services about the demo site, whose data is seeded", async () => {
+    const db = openSqliteD1();
+    await upsertSite(db, { id: "site_demo_clinic", name: "Demo", baseUrl: "https://demo-clinic.example", gscProperty: "sc-domain:demo-clinic.example", createdAt: now.toISOString(), updatedAt: now.toISOString() });
+    const asked: string[] = [];
+    const fetchFn = (async (url: string) => { asked.push(url); return new Response("{}"); }) as unknown as typeof fetch;
+    const notes = await syncResults(db, (await getSite(db, "site_demo_clinic"))!, now, { connect: async () => ({ token: "t", scopes: [SEARCH_CONSOLE_SCOPE, ANALYTICS_SCOPE] }), fetchFn },
+      { googleApiKey: "g", openPageRankKey: "o", dataForSeo: { login: "l", password: "p" } });
+    assert.deepEqual(asked, [], "no Google, CrUX, Open PageRank or DataForSEO calls");
+    assert.ok(notes[0]!.startsWith("demo site"));
+    assert.equal((await listMetricSeries(db, "site_demo_clinic", ["published_pages"], "2026-10-07", "2026-10-07")).published_pages!.length, 1, "Eumon's own counts still refresh");
+  });
+
   it("keeps first-party points when Google access is revoked", async () => {
     const { db, site: record } = await site();
     const notes = await syncResults(db, record, now, { connect: async () => { throw new Error("Google access token refresh failed (400)."); } });
@@ -415,5 +427,29 @@ describe("results sync", () => {
     assert.equal(calls, 10, "stopped after the first batch");
     const saved = await db.prepare("SELECT COUNT(*) AS n FROM url_index_status").first<{ n: number }>();
     assert.equal(saved?.n, 0, "a refusal isn't recorded against the URLs");
+  });
+});
+
+describe("AI referral sessions from GA4", () => {
+  it("zeroes an assistant's day when GA4 no longer reports it, so the by-assistant bars match the total", async () => {
+    const { db, site: record } = await site();
+    let aiRows: Array<Record<string, unknown>> = [{ dimensionValues: [{ value: "20261001" }, { value: "chatgpt.com" }], metricValues: [{ value: "3" }, { value: "1" }] }];
+    const fetchFn = (async (url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}"));
+      if (url.includes("analyticsdata")) {
+        const dims = (body.dimensions as Array<{ name: string }> | undefined)?.map((entry) => entry.name).join() ?? "";
+        if (dims.includes("sessionSource")) return new Response(JSON.stringify({ rows: aiRows }));
+        return new Response(JSON.stringify({ rows: [{ dimensionValues: [{ value: "20261001" }, { value: "Organic Search" }], metricValues: [{ value: "9" }, { value: "4" }, { value: "1" }] }] }));
+      }
+      return new Response(JSON.stringify({ rows: [] }));
+    }) as typeof fetch;
+    const google = { connect: async () => ({ token: "t", scopes: [SEARCH_CONSOLE_SCOPE, ANALYTICS_SCOPE] }), fetchFn };
+    await syncResults(db, record, now, google);
+    const first = await listMetricSeries(db, "s", ["ga4_ai_sessions.chatgpt", "ga4_ai_sessions"], "2026-10-01", "2026-10-01");
+    assert.deepEqual([first["ga4_ai_sessions.chatgpt"]![0]!.value, first.ga4_ai_sessions![0]!.value], [3, 3]);
+    aiRows = [];
+    await syncResults(db, record, now, google);
+    const second = await listMetricSeries(db, "s", ["ga4_ai_sessions.chatgpt", "ga4_ai_sessions"], "2026-10-01", "2026-10-01");
+    assert.deepEqual([second["ga4_ai_sessions.chatgpt"]![0]!.value, second.ga4_ai_sessions![0]!.value], [0, 0], "a revised day is rewritten per assistant, not only in total");
   });
 });

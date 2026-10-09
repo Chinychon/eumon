@@ -61,3 +61,16 @@ describe("markets and record keys", () => {
     assert.deepEqual(await listRecordKeys(db, "site"), [{ key: "amy-tan", entityType: "doctor" }]);
   });
 });
+
+import * as engine from "./index.js";
+import * as sqlite from "./sqlite.js";
+
+describe("landing sessions", () => {
+  it("says whether a landing was the session's first, so a reload isn't a second visit", async () => {
+    const db = sqlite.openSqliteD1();
+    const at = "2026-10-09T00:00:00.000Z";
+    await engine.upsertSite(db, { id: "s", name: "x.com", baseUrl: "https://x.com", createdAt: at, updatedAt: at });
+    assert.equal(await engine.recordLandingSession(db, { siteId: "s", sessionId: "b".repeat(16), pageId: "p1", source: "ai:chatgpt" }), true);
+    assert.equal(await engine.recordLandingSession(db, { siteId: "s", sessionId: "b".repeat(16), pageId: "p1", source: "ai:chatgpt" }), false);
+  });
+});

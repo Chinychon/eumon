@@ -108,6 +108,9 @@ export function resolveLink(view: View, tab: string | null): Place {
 
 export const familyLabel = (family: string) => (family === "home" ? "Homepage" : family === "page" ? "Top-level pages" : `/${family}/`);
 
+/** A URL as its path and query, the homepage as `/`: how the console names a page in a row. */
+export const urlPath = (url: string) => url.replace(/^https?:\/\/[^/]+/, "") || "/";
+
 type Family = NonNullable<NonNullable<Report["coverage"]>["families"]>[number];
 
 /** The page-type × problem grid: each cell counts pages with that problem, and its share of the pages it applies to. */

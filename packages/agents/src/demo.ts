@@ -435,16 +435,15 @@ async function crawlAll(db: D1Like, analysisId: string, version: number, end: nu
     await saveCrawlBatch(db, { analysisId, outcomes: outcomes.map((outcome) => ("page" in outcome ? outcome : { url: outcome.url, error: outcome.error })) });
   }
   // One fetch every few hundred milliseconds, so pace and estimates read like a real crawl.
-  const { results } = await db.prepare("SELECT id FROM pages WHERE analysis_id = ? AND crawled_at IS NOT NULL ORDER BY url").bind(analysisId).all<{ id: string }>();
+  const { results } = await db.prepare("SELECT url FROM pages WHERE analysis_id = ? AND crawled_at IS NOT NULL ORDER BY url").bind(analysisId).all<{ url: string }>();
   const step = (minutes * 60_000) / Math.max(results.length, 1);
   const start = end - minutes * 60_000;
-  const statements = results.map((row, index) => db.prepare("UPDATE pages SET crawled_at = ? WHERE id = ?").bind(new Date(start + index * step).toISOString(), row.id));
+  const statements = results.map((row, index) => db.prepare("UPDATE pages SET crawled_at = ? WHERE analysis_id = ? AND url = ?").bind(new Date(start + index * step).toISOString(), analysisId, row.url));
   for (const group of chunks(statements, 100)) await runStatements(db, group);
 }
 
 async function completedAnalysis(db: D1Like, id: string, version: number, at: number) {
   await createAnalysis(db, { id, siteId: DEMO_SITE_ID, status: "running", createdAt: new Date(at - 8 * 60_000).toISOString() });
-  await updateAnalysisStatus(db, id, "running", { startedAt: new Date(at - 7 * 60_000).toISOString() });
   const queued = await queueFullCrawl(db, { analysisId: id, siteId: DEMO_SITE_ID, baseUrl: ORIGIN, maxUrls: 25_000, full: true, fetcher: demoFetcher(version, at), now: at });
   await crawlAll(db, id, version, at - 60_000, 6);
   await analyzeDemo(db, { analysisId: id, version, declared: queued.declared, now: at });
@@ -515,9 +514,9 @@ async function seedPageEngine(db: D1Like, now: number) {
       const views = Math.round(clicks * 1.3 + (d % 7 === 0 ? 2 : 0));
       if (d >= 2 && d < 30) { clicks28 += clicks; impressions28 += impressions; }
       statements.push(db.prepare(
-        `INSERT INTO page_metrics_daily (site_id, page_id, day, googlebot_hits, other_bot_hits, views, cta_clicks, search_clicks, search_impressions, search_position)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(page_id, day) DO NOTHING`,
-      ).bind(DEMO_SITE_ID, page.id, day, 1 + ((d + p) % 4), (d + p) % 3, views, Math.round(views * 0.08), clicks, impressions, Math.max(2.5, 24 - growth * 16 + (p % 5))));
+        `INSERT INTO page_metrics_daily (site_id, page_id, day, googlebot_hits, views, cta_clicks, search_clicks, search_impressions)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(page_id, day) DO NOTHING`,
+      ).bind(DEMO_SITE_ID, page.id, day, 1 + ((d + p) % 4), views, Math.round(views * 0.08), clicks, impressions));
     }
     // The last 28 days of Search Console rows per page, split across two queries, as a sync stores them.
     const name = page.path.split("/").pop()!.replace(/-/g, " ");
@@ -619,7 +618,7 @@ const DEMO_RATE = 8;
 export async function startDemoRun(db: D1Like, input: { analysisId: string; full: boolean; now?: number }): Promise<void> {
   const now = input.now ?? Date.now();
   await createAnalysis(db, { id: input.analysisId, siteId: DEMO_SITE_ID, status: "running", createdAt: new Date(now).toISOString() });
-  await updateAnalysisStatus(db, input.analysisId, "running", { startedAt: new Date(now).toISOString() });
+  await updateAnalysisStatus(db, input.analysisId, "running");
   await updateAnalysisProgress(db, input.analysisId, "sitemap", "Reading the sitemap");
   const queued = await queueFullCrawl(db, { analysisId: input.analysisId, siteId: DEMO_SITE_ID, baseUrl: ORIGIN, maxUrls: 25_000, full: input.full, fetcher: demoFetcher(3, now), now });
   await updateAnalysisProgress(db, input.analysisId, "sitemap", "Reading the sitemap", { declared: queued.declared, reused: queued.reused, ...(queued.reusedFrom ? { reusedFrom: queued.reusedFrom } : {}) });
@@ -794,8 +793,7 @@ async function seedDemoResults(db: D1Like, now: number) {
   // Fictional URL Inspection results for a sample of the latest crawl's pages.
   const { results: sample } = await db.prepare(
     `SELECT url, family FROM (
-       SELECT url, COALESCE(json_extract(result_json, '$.routeFamily'), 'other') AS family,
-         ROW_NUMBER() OVER (PARTITION BY COALESCE(json_extract(result_json, '$.routeFamily'), 'other') ORDER BY url) AS turn
+       SELECT url, route_family AS family, ROW_NUMBER() OVER (PARTITION BY route_family ORDER BY url) AS turn
        FROM pages WHERE analysis_id = 'analysis_demo_2' AND crawl_state = 'complete' AND status < 400)
      ORDER BY turn, family LIMIT 600`,
   ).all<{ url: string; family: string }>();

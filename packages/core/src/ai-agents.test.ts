@@ -43,3 +43,24 @@ describe("AI agents", () => {
     assert.equal(landingSource("facebook.com"), "other");
   });
 });
+
+import * as agents from "./ai-agents.js";
+
+describe("AI agents, roles and referrers", () => {
+  it("knows which blocked tokens matter for AI answers: live fetchers and search crawlers, not training or control tokens", () => {
+    const check = (agent: string) => agents.AI_ROBOTS_CHECKS.find((entry) => entry.agent === agent)!;
+    assert.equal(check("PerplexityBot").search, true);
+    assert.equal(check("OAI-SearchBot").search, true);
+    assert.equal(check("ChatGPT-User").search, true);
+    assert.equal(check("GPTBot").search, false);
+    assert.equal(check("Google-Extended").search, false);
+  });
+
+  it("counts only Google's search hosts as search engines, not Docs, Gmail or Ads", () => {
+    assert.equal(agents.landingSource("www.google.com.my"), "search");
+    assert.equal(agents.landingSource("google.com"), "search");
+    assert.equal(agents.landingSource("docs.google.com"), "other");
+    assert.equal(agents.landingSource("mail.google.com"), "other");
+    assert.equal(agents.landingSource("gemini.google.com"), "ai:gemini");
+  });
+});

@@ -32,6 +32,8 @@ export type AiAgent = {
   kind: AiFetchKind;
   /** What the operator should know about blocking it. */
   purpose: string;
+  /** A crawler that feeds AI answers (an AI search index), so blocking it hides the site from those answers. Live fetchers always do. */
+  search?: boolean;
 };
 
 /**
@@ -42,16 +44,16 @@ export type AiAgent = {
  */
 export const AI_AGENTS: AiAgent[] = [
   { agent: "ChatGPT-User", engine: "openai", kind: "live", purpose: "ChatGPT opening a page to answer someone" },
-  { agent: "OAI-SearchBot", engine: "openai", kind: "crawler", purpose: "ChatGPT search results" },
+  { agent: "OAI-SearchBot", engine: "openai", kind: "crawler", purpose: "ChatGPT search results", search: true },
   { agent: "GPTBot", engine: "openai", kind: "crawler", purpose: "OpenAI model training" },
   { agent: "Claude-User", engine: "anthropic", kind: "live", purpose: "Claude opening a page to answer someone" },
-  { agent: "Claude-SearchBot", engine: "anthropic", kind: "crawler", purpose: "Claude search results" },
+  { agent: "Claude-SearchBot", engine: "anthropic", kind: "crawler", purpose: "Claude search results", search: true },
   { agent: "ClaudeBot", engine: "anthropic", kind: "crawler", purpose: "Anthropic model training" },
   { agent: "anthropic-ai", engine: "anthropic", kind: "crawler", purpose: "Anthropic (older token)" },
   { agent: "Perplexity-User", engine: "perplexity", kind: "live", purpose: "Perplexity opening a page to answer someone" },
-  { agent: "PerplexityBot", engine: "perplexity", kind: "crawler", purpose: "Perplexity search results" },
+  { agent: "PerplexityBot", engine: "perplexity", kind: "crawler", purpose: "Perplexity search results", search: true },
   { agent: "Meta-ExternalFetcher", engine: "meta", kind: "live", purpose: "Meta AI opening a page to answer someone" },
-  { agent: "Meta-ExternalAgent", engine: "meta", kind: "crawler", purpose: "Meta AI training and search" },
+  { agent: "Meta-ExternalAgent", engine: "meta", kind: "crawler", purpose: "Meta AI training and search", search: true },
   { agent: "CCBot", engine: "commoncrawl", kind: "crawler", purpose: "Common Crawl, an open archive many AI models train on" },
   { agent: "MistralAI-User", engine: "other", kind: "live", purpose: "Mistral's Le Chat opening a page to answer someone" },
   { agent: "DuckAssistBot", engine: "other", kind: "live", purpose: "DuckDuckGo's AI answers" },
@@ -65,10 +67,10 @@ export const AI_ROBOTS_TOKENS = [
   { agent: "Applebot-Extended", purpose: "Apple Intelligence training" },
 ];
 
-/** Tokens checked in robots.txt for AI readiness: every counted agent, then the control-only tokens. */
-export const AI_ROBOTS_CHECKS: Array<{ agent: string; purpose: string; kind: AiFetchKind | "control" }> = [
-  ...AI_AGENTS.map((entry) => ({ agent: entry.agent, purpose: entry.purpose, kind: entry.kind })),
-  ...AI_ROBOTS_TOKENS.map((entry) => ({ ...entry, kind: "control" as const })),
+/** Tokens checked in robots.txt for AI readiness: every counted agent, then the control-only tokens. `search` says whether blocking it hides the site from AI answers. */
+export const AI_ROBOTS_CHECKS: Array<{ agent: string; purpose: string; kind: AiFetchKind | "control"; search: boolean }> = [
+  ...AI_AGENTS.map((entry) => ({ agent: entry.agent, purpose: entry.purpose, kind: entry.kind, search: entry.kind === "live" || Boolean(entry.search) })),
+  ...AI_ROBOTS_TOKENS.map((entry) => ({ ...entry, kind: "control" as const, search: false })),
 ];
 
 /** Longest tokens first, so `Claude-SearchBot` is never read as `ClaudeBot` and `ChatGPT-User` wins over a generic match. */
@@ -107,7 +109,8 @@ export const AI_ASSISTANTS = [
 
 export type AiAssistant = (typeof AI_ASSISTANTS)[number]["assistant"];
 
-const SEARCH_HOSTS = [/(^|\.)google\.[a-z.]+$/, /(^|\.)bing\.com$/, /(^|\.)duckduckgo\.com$/, /(^|\.)search\.yahoo\.com$/, /(^|\.)yandex\.[a-z.]+$/, /(^|\.)ecosia\.org$/, /(^|\.)baidu\.com$/];
+// Google's search host only: Docs, Gmail, Ads and Maps live on other google.* hosts and are not search engines.
+const SEARCH_HOSTS = [/^(www\.)?google\.[a-z.]+$/, /(^|\.)bing\.com$/, /(^|\.)duckduckgo\.com$/, /(^|\.)search\.yahoo\.com$/, /(^|\.)yandex\.[a-z.]+$/, /(^|\.)ecosia\.org$/, /(^|\.)baidu\.com$/];
 
 const hostMatches = (host: string, domain: string) => host === domain || host.endsWith(`.${domain}`);
 

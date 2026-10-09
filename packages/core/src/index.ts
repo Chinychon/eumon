@@ -8,3 +8,5 @@ export * from "./results.js";
 export * from "./keywords.js";
 export * from "./signals.js";
 export * from "./ai-agents.js";
+export * from "./sheet-titles.js";
+export * from "./sync-notes.js";

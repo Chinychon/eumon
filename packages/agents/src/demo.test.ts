@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { addDays, RESULT_METRICS, resultsView } from "@organic-growth/core";
 import { listSnapshots } from "@organic-growth/db";
-import { getAnalysisJob, getCrawlProgress, getLinkGraph, getSite, getTopQueriesSnapshot, indexStatusCounts, listMetricSeries, publishedPages } from "@organic-growth/db";
+import { deleteSite, getAnalysisJob, getCrawlProgress, getLinkGraph, getSite, getTopQueriesSnapshot, indexStatusCounts, listMetricSeries, publishedPages } from "@organic-growth/db";
 import { openSqliteD1 } from "@organic-growth/db/sqlite";
 import { advanceDemoRun, DEMO_SITE_ID, isLocalHost, seedDemoSite, startDemoRun } from "./demo.js";
 
@@ -83,5 +83,18 @@ describe("demo site", () => {
     assert.ok(kw["sync.competitor_keywords"]!.length && kw["sync.keyword_volumes"]!.length && kw.kw_traffic!.length && kw["kw_traffic:brightcare-dental.example"]!.length, "keyword markers and visibility points");
     const coverage = await db.prepare("SELECT COUNT(*) AS n FROM url_index_status WHERE site_id = ?").bind(DEMO_SITE_ID).first<{ n: number }>();
     assert.ok(Number(coverage?.n) > 300, "a sample of sitemap URLs checked with Google");
+  });
+
+  it("leaves nothing behind when the site is deleted: every table cascades from sites", async () => {
+    const db = openSqliteD1();
+    await seedDemoSite(db, Date.now());
+    await deleteSite(db, DEMO_SITE_ID);
+    const { results: tables } = await db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").all<{ name: string }>();
+    const left: string[] = [];
+    for (const { name } of tables) {
+      const row = await db.prepare(`SELECT COUNT(*) AS n FROM ${name}`).first<{ n: number }>();
+      if (Number(row?.n)) left.push(`${name}: ${row?.n}`);
+    }
+    assert.deepEqual(left, []);
   });
 });

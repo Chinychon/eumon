@@ -19,14 +19,19 @@ export type AiReadiness = {
 
 type Fetched = { status: number; body: string; headers?: Record<string, string> } | null;
 
-const looksLikeHtml = (body: string, headers?: Record<string, string>) =>
-  /text\/html/i.test(headers?.["content-type"] ?? "") || /^\s*<(!doctype|html|head|body)/i.test(body);
+/** The body decides, not the Content-Type: servers mislabel robots.txt as text/html, and a robots.txt body is never HTML. */
+const looksLikeHtml = (body: string) => /^\s*<(!doctype|html|head|body)/i.test(body);
 
-/** How a robots.txt response reads: the body to parse, or why there is none. */
+/**
+ * How a robots.txt response reads: the body to parse, or why there is none.
+ * 404 and 410 mean no robots.txt (everything allowed); any other 4xx, such as
+ * a bot challenge or a login wall, can't be judged and is never read as
+ * "everything allowed".
+ */
 export function robotsState(response: Fetched): { robots: AiReadiness["robots"]; body?: string } {
   if (!response) return { robots: "unreadable" };
-  if (response.status >= 400 && response.status < 500) return { robots: "missing" };
-  if (response.status >= 300 || looksLikeHtml(response.body, response.headers)) return { robots: "unreadable" };
+  if (response.status === 404 || response.status === 410) return { robots: "missing" };
+  if (response.status >= 300 || looksLikeHtml(response.body)) return { robots: "unreadable" };
   return { robots: "read", body: response.body };
 }
 
@@ -41,7 +46,7 @@ export function aiReadiness(input: { robots: Fetched; llms: Fetched; pages: Arra
   return {
     robots,
     crawlers,
-    llmsTxt: Boolean(llms && llms.status === 200 && llms.body.trim() && !looksLikeHtml(llms.body, llms.headers)),
+    llmsTxt: Boolean(llms && llms.status === 200 && llms.body.trim() && !looksLikeHtml(llms.body)),
     faqPages: {
       pages: input.pages.filter((page) => (page.jsonLdTypes ?? []).some((type) => /^(FAQPage|QAPage)$/i.test(type))).length,
       of: input.pages.length,

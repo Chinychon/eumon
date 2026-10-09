@@ -64,7 +64,7 @@ export class SiteAnalysisWorkflow extends WorkflowEntrypoint<AppEnv, AnalysisPay
     };
     try {
       const site = await step.do("load-site", async () => {
-        await updateAnalysisStatus(db, analysisId, "running", { startedAt: new Date().toISOString() });
+        await updateAnalysisStatus(db, analysisId, "running");
         await progress("sitemap", "Reading the sitemap");
         const record = await getSite(db, siteId);
         if (!record) throw new NonRetryableError("The site no longer exists.");

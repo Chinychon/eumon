@@ -86,8 +86,10 @@ export async function publishedPages(db: D1Like, siteId: string): Promise<{ publ
 export async function syncFirstPartyResults(db: D1Like, siteId: string, now = new Date()): Promise<void> {
   const today = now.toISOString().slice(0, 10);
   const since = (await firstMetricDay(db, siteId, "published_pages")) ? addDays(today, -7) : "2000-01-01";
+  // The by-source split arrived after the first deploys: a site without it backfills its leads once more.
+  const leadsSince = (await firstMetricDay(db, siteId, "leads_eumon.other")) ? since : "2000-01-01";
   const [leads, activity, pages, firsts] = await Promise.all([
-    dailyLeads(db, siteId, since),
+    dailyLeads(db, siteId, leadsSince),
     db.prepare(
       `SELECT day, SUM(googlebot_hits) AS googlebot, SUM(views) AS views, SUM(cta_clicks) AS cta
        FROM page_metrics_daily WHERE site_id = ? AND day >= ? GROUP BY day`,
@@ -100,15 +102,15 @@ export async function syncFirstPartyResults(db: D1Like, siteId: string, now = ne
   ]);
   // Once tracking has started, a day with nothing is a real 0, not missing data.
   const yesterday = addDays(today, -1);
-  const daysFrom = (first: string | null | undefined) => {
+  const daysFrom = (first: string | null | undefined, from: string) => {
     const days: string[] = [];
-    if (first) for (let day = first > since ? first : since; day <= yesterday; day = addDays(day, 1)) days.push(day);
+    if (first) for (let day = first > from ? first : from; day <= yesterday; day = addDays(day, 1)) days.push(day);
     return days;
   };
   const leadsByDay = new Map(leads.map((row) => [row.day, row]));
   const activityByDay = new Map(activity.results.map((row) => [row.day, row]));
-  const leadDays = [...new Set([...daysFrom(firsts?.events), ...leadsByDay.keys()])];
-  const activityDays = [...new Set([...daysFrom(firsts?.activity), ...activityByDay.keys()])];
+  const leadDays = [...new Set([...daysFrom(firsts?.events, leadsSince), ...leadsByDay.keys()])];
+  const activityDays = [...new Set([...daysFrom(firsts?.activity, since), ...activityByDay.keys()])];
   await upsertMetricPoints(db, siteId, [
     ...leadDays.flatMap((day) => {
       const row = leadsByDay.get(day);

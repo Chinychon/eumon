@@ -90,7 +90,7 @@ describe("queueFullCrawl", async () => {
 
     await createAnalysis(db, { id: "later", siteId: "s", status: "running", createdAt: new Date(Date.now() + 1980).toISOString() });
     await queueFullCrawl(db, { analysisId: "later", siteId: "s", baseUrl: origin, maxUrls: 100, fetcher, now: Date.now() + 2 * DAY });
-    const row = await db.prepare("SELECT json_extract(result_json, '$.reusedFrom') AS source FROM pages WHERE analysis_id = 'later' AND url = ?").bind(`${origin}/blog/a`).first<{ source: string }>();
+    const row = await db.prepare("SELECT reused_from AS source FROM pages WHERE analysis_id = 'later' AND url = ?").bind(`${origin}/blog/a`).first<{ source: string }>();
     assert.equal(row?.source, "refetch");
   });
 

@@ -3,6 +3,8 @@
 import { countryName, type Compare, type SpeedMetric, type SpeedRating, type TopQuery } from "@organic-growth/core";
 import { formatDay, formatNumber } from "../api";
 import { BarList, Funnel, LineChart, Radar } from "../charts";
+import { ExportMenu } from "../export/ExportMenu";
+import { aiSheets, enquirySheets, googleSearchSheets, pick, proofSheets } from "../export/report-sheets";
 import type { Navigate } from "../report-model";
 import type { Payload } from "../site-data";
 import { Badge, Button, Card, Kpi } from "../ui";
@@ -39,7 +41,8 @@ function versus(compare: Compare, format: (value: number) => string = formatNumb
 export function ProofHeadline({ data, operator, onNavigate }: Section) {
   const { site, results } = data;
   return (
-    <Card title="Google clicks per week" subtitle={results.goLive ? "The whole site, and Eumon's pages since they went live." : "The whole site. Eumon's pages appear once the first one is published."}>
+    <Card title="Google clicks per week" subtitle={results.goLive ? "The whole site, and Eumon's pages since they went live." : "The whole site. Eumon's pages appear once the first one is published."}
+      actions={<ExportMenu title="Google clicks per week" sheets={() => proofSheets(results)} />}>
       {site.searchConnected && results.headline.some((week) => week.site !== null)
         ? <LineChart series={results.goLive ? ["whole site", "eumon pages"] : ["whole site"]} marker={goLiveMarker(results)} partialFrom={partialWeek(results)}
             points={results.headline.map((week) => ({ x: week.week, values: results.goLive ? [week.site, week.eumon] : [week.site] }))} />
@@ -69,7 +72,7 @@ export function GoogleSearchCard({ data, operator, onNavigate }: Section) {
   const partialFrom = partialWeek(results);
   const pages = results.numbers.pages;
   return (
-    <Card title="Google search" subtitle={results.search?.scoped ? `Scoped to your target markets: ${results.markets.map(countryName).join(", ")}.` : results.markets.length ? "Every country, until your target markets' history is synced." : operator ? "Every country. Set target markets in Setup to focus this section." : "Every country."}>
+    <Card title="Google search" actions={<ExportMenu title="Google search" sheets={() => googleSearchSheets(results)} />} subtitle={results.search?.scoped ? `Scoped to your target markets: ${results.markets.map(countryName).join(", ")}.` : results.markets.length ? "Every country, until your target markets' history is synced." : operator ? "Every country. Set target markets in Setup to focus this section." : "Every country."}>
       {results.search ? (
         <>
           <div className="ruled-grid c11 results-pair">
@@ -118,7 +121,7 @@ export function OrganicSessions({ data }: Section) {
 export function EnquiriesCard({ data, operator }: Section) {
   const { results } = data;
   return (
-    <Card title="Enquiries" subtitle="Eumon's pages from a Google search to an enquiry, over the last 28 days of Search Console data.">
+    <Card title="Enquiries" subtitle="Eumon's pages from a Google search to an enquiry, over the last 28 days of Search Console data." actions={<ExportMenu title="Enquiries" sheets={() => enquirySheets(results)} />}>
       {results.leads.funnel ? <Funnel steps={results.leads.funnel} /> : <p className="empty-state">The funnel appears once Eumon's pages have Google impressions.</p>}
       <div className="section-title">Enquiries per week</div>
       {results.leads.weeks.some((week) => week.other !== null || week.eumon !== null)
@@ -251,7 +254,7 @@ export function AiReadersCard({ data, operator }: Section) {
   const live = ai.engines.reduce((total, entry) => total + (entry.live.current ?? 0), 0);
   const liveBefore = ai.engines.some((entry) => entry.live.previous !== null) ? ai.engines.reduce((total, entry) => total + (entry.live.previous ?? 0), 0) : null;
   return (
-    <Card title="AI assistants reading your pages" subtitle={subtitle}>
+    <Card title="AI assistants reading your pages" subtitle={subtitle} actions={<ExportMenu title="AI fetches" sheets={() => pick(aiSheets(data.results), "AI fetches by company", "AI fetches per week")} />}>
       <div className="ruled-grid c21 ai-readers">
         <Radar caption="AI fetches of Eumon pages by company, last 28 days" axes={ai.engines.map((entry) => entry.label)}
           series={[{ name: "crawls", values: ai.engines.map((entry) => entry.crawler.current) }, { name: "live fetches", values: ai.engines.map((entry) => entry.live.current) }]} />
@@ -279,7 +282,7 @@ export function AiReferralsCard({ data, operator }: Section) {
   const leads = ai.leadsBySource;
   const leadTotal = leads ? leads.search + leads.ai + leads.other : 0;
   return (
-    <Card title="Visits from AI answers" subtitle="People who clicked through from ChatGPT, Perplexity, Gemini, Copilot, Claude or Meta AI. Eumon's pages and the whole site are measured separately and never added together.">
+    <Card title="Visits from AI answers" actions={<ExportMenu title="Visits from AI answers" sheets={() => pick(aiSheets(data.results), "Visits from AI answers", "Enquiries by source")} />} subtitle="People who clicked through from ChatGPT, Perplexity, Gemini, Copilot, Claude or Meta AI. Eumon's pages and the whole site are measured separately and never added together.">
       <div className="metrics-grid">
         <Kpi label="To Eumon pages · 28 days" value={eumon.current === null ? "—" : formatNumber(eumon.current)} caption={eumon.current === null ? (numbers.pages.live ? "None yet" : "Publish pages first") : versus(eumon)} />
         <Kpi label="To the whole site · 28 days" value={ga4?.sessions.current == null ? "—" : formatNumber(ga4.sessions.current)} caption={ga4 ? versus(ga4.sessions) : analyticsState(data.site.analytics, operator)} />
@@ -295,7 +298,7 @@ export function AiReferralsCard({ data, operator }: Section) {
         <div>
           <div className="section-title">Whole site, by assistant</div>
           {ga4?.sessions.current ? <BarList rows={ga4.byAssistant.filter((entry) => entry.sessions).map((entry) => ({ label: entry.label, value: entry.sessions }))} />
-            : <p className="empty-state">{ga4 ? "No AI-referred sessions in these 28 days." : operator ? "Connect Google Analytics in Setup to count AI visits to the whole site." : "Analytics not connected yet."}</p>}
+            : <p className="empty-state">{ga4 ? "No AI-referred sessions in these 28 days." : analyticsState(data.site.analytics, operator)}</p>}
         </div>
       </div>
       {leads && leadTotal > 0 && (
@@ -315,7 +318,7 @@ export function AiReferralsCard({ data, operator }: Section) {
 export function QuestionSearchesCard({ data, operator, onNavigate }: Section) {
   const questions = data.results.ai.questions;
   return (
-    <Card title="Question searches" subtitle="Searches phrased as a question (how, what, berapa, bagaimana…), the kind AI answers and Google's answer boxes respond to directly. From the latest 28 days of Search Console queries.">
+    <Card title="Question searches" actions={<ExportMenu title="Question searches" sheets={() => pick(aiSheets(data.results), "Question searches")} />} subtitle="Searches phrased as a question (how, what, berapa, bagaimana…), the kind AI answers and Google's answer boxes respond to directly. From the latest 28 days of Search Console queries.">
       {questions ? (
         <div className="metrics-grid c3">
           <Kpi label="Question searches" value={formatNumber(questions.queries)} caption={`28 days to ${day(questions.day)}`} />

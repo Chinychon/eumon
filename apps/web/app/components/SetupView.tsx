@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { PageSettings, SiteRecord } from "@organic-growth/core";
+import { isProblemNote, type PageSettings, type SiteRecord } from "@organic-growth/core";
 import { PAGE_LANGUAGES } from "@organic-growth/pages/labels";
 import { api, errorMessage } from "./api";
+import { urlPath } from "./report-model";
 import { WhyRow } from "./ReportTabs";
 import { Badge, Button, Card, CheckIcon, CopyBlock, CrossIcon, Field, PartHead } from "./ui";
 
@@ -141,7 +142,7 @@ export function SetupView({ site }: { site: SiteRecord }) {
 }
 
 const when = (iso: string) => new Date(iso).toLocaleString("en", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
-const isProblem = (note: string) => /\b(failed|stopped|refused)\b/i.test(note);
+const isProblem = isProblemNote;
 
 type SyncRun = { id: string; trigger: "manual" | "daily"; startedAt: string; finishedAt: string; notes: string[] };
 
@@ -181,7 +182,7 @@ function RecentEvents({ siteId }: { siteId: string }) {
   const [events, setEvents] = useState<RecentEvent[] | null>(null);
   const load = () => api<{ events: RecentEvent[] }>(`/api/sites/${siteId}/events/recent?limit=10`).then((data) => setEvents(data.events)).catch(() => setEvents([]));
   useEffect(() => { setEvents(null); void load(); }, [siteId]); // eslint-disable-line react-hooks/exhaustive-deps
-  const path = (url: string | null) => (url ? url.replace(/^https?:\/\/[^/]+/, "") || "/" : "—");
+  const path = (url: string | null) => (url ? urlPath(url) : "—");
   return (
     <>
       <div className="row spread recent-events-head">

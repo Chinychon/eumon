@@ -8,7 +8,9 @@ import { BarList, Funnel, Heatmap, PairedBars, Scatter } from "./charts";
 import { CrawlGarden } from "./pixel";
 import { SPEED_SUBTITLE, SpeedSection } from "./results/sections";
 import { SiteGraph } from "./SiteGraph";
-import { familyLabel, findingArea, gapsFirst, HEALTH_COLUMNS, opportunityArea, pageTypeHealth, servedShare, type Finding, type Navigate, type Report } from "./report-model";
+import { familyLabel, findingArea, gapsFirst, HEALTH_COLUMNS, opportunityArea, pageTypeHealth, servedShare, urlPath, type Finding, type Navigate, type Report } from "./report-model";
+import { ExportMenu } from "./export/ExportMenu";
+import { aiReadinessSheets, competitorSheets, conversionSheets, coverageSheets, fixSheets, pageTypeSheets, pick, pushSheets, renderingSheets, routeSheets, searchAnalysisSheets, speedSheets } from "./export/report-sheets";
 import type { Leads, Payload } from "./site-data";
 import { Badge, Button, Card, Kpi } from "./ui";
 
@@ -24,7 +26,7 @@ import { Badge, Button, Card, Kpi } from "./ui";
 export type Change = { id: string; findingId?: string; title: string; reason: string; patch: string; prUrl?: string };
 
 const SEVERITY_CLASS: Record<string, string> = { CRITICAL: "critical", HIGH: "high", MEDIUM: "medium", LOW: "low", INFORMATIONAL: "info" };
-const path = (url: string) => url.replace(/^https?:\/\/[^/]+/, "") || "/";
+const path = urlPath;
 const share = (value: number) => `${Math.round(value * 100)}%`;
 
 /** One line that opens in place to say why it matters and what to do. */
@@ -58,7 +60,7 @@ export function TechnicalTab({ siteId, report, results, running, changes, busy, 
   onOpenPullRequest: (change: Change) => void;
   onRecrawl: () => void;
 }) {
-  const speed = results && <Card title="Speed" subtitle={SPEED_SUBTITLE}><SpeedSection data={results} operator /></Card>;
+  const speed = results && <Card title="Speed" subtitle={SPEED_SUBTITLE} actions={<ExportMenu title="Speed" sheets={() => speedSheets(results.results)} />}><SpeedSection data={results} operator /></Card>;
   if (!report) {
     return (
       <div className="results">
@@ -76,15 +78,18 @@ export function TechnicalTab({ siteId, report, results, running, changes, busy, 
     <div className="results">
       <TechnicalNumbers report={report} results={results} running={running} />
       <div className="ruled-grid c11">
-        <Card title="Every sitemap URL" subtitle={`${formatNumber(report.coverage?.totalUrls ?? report.sitemap.totalUrls)} URLs, one square each, as Googlebot received them.`}>
+        <Card title="Every sitemap URL" subtitle={`${formatNumber(report.coverage?.totalUrls ?? report.sitemap.totalUrls)} URLs, one square each, as Googlebot received them.`}
+          actions={families.length > 0 && <ExportMenu title="Sitemap URLs by page type" sheets={() => pageTypeSheets(report)} />}>
           {families.length ? (
             <CrawlGarden
+              fill
               label="Every sitemap URL by page type"
               families={families.map((family) => ({ family: family.family, total: family.urls, done: family.urls, blocked: Math.max(0, family.urls - family.crawled - family.errors), emptyShells: family.emptyShells, errors: family.errors }))}
             />
           ) : <p className="empty-state">Run a full analysis to see every URL.</p>}
         </Card>
-        <Card title="Text Google gets, before and after JavaScript" subtitle="One page per template. A short first bar means Google sees little until scripts run.">
+        <Card title="Text Google gets, before and after JavaScript" subtitle="One page per template. A short first bar means Google sees little until scripts run."
+          actions={comparisons.length > 0 && <ExportMenu title="Text before and after JavaScript" sheets={() => renderingSheets(report)} />}>
           {comparisons.length
             ? <PairedBars series={["In the HTML", "After JavaScript"]} groups={comparisons.map((entry) => ({ label: familyLabel(entry.family), values: [entry.rawTextLength, entry.renderedTextLength] }))} />
             : <p className="empty-state">No pages were rendered in a browser in this analysis.</p>}
@@ -92,13 +97,13 @@ export function TechnicalTab({ siteId, report, results, running, changes, busy, 
         </Card>
       </div>
       {families.length > 0 && (
-        <Card title="Where pages break, by page type" subtitle="Darker means a larger share of that page type has the problem.">
+        <Card title="Where pages break, by page type" subtitle="Darker means a larger share of that page type has the problem." actions={<ExportMenu title="Where pages break" sheets={() => pageTypeSheets(report)} />}>
           <Heatmap caption="Problems per page type" columns={HEALTH_COLUMNS.map((column) => column.label)} rows={pageTypeHealth(families).map((row) => ({ ...row, note: `${formatNumber(row.urls)} ${row.urls === 1 ? "URL" : "URLs"}` }))} />
         </Card>
       )}
       {speed}
       <SiteGraph siteId={siteId} />
-      <Card title="Fixes" actions={<span className="count-pill">{findings.length} findings</span>}>
+      <Card title="Fixes" actions={<><span className="count-pill">{findings.length} findings</span>{findings.length > 0 && <ExportMenu title="Technical fixes" sheets={() => fixSheets(report, (category) => findingArea(category) === "technical")} />}</>}>
         {findings.length ? findings.map((finding) => (
           <FindingRow key={finding.id} finding={finding} change={changes.find((item) => item.findingId === finding.id)} busy={busy}
             fixable={hasRepo && ["sitemap", "indexing"].includes(finding.category)} onGenerateChange={onGenerateChange} onOpenPullRequest={onOpenPullRequest} />
@@ -191,7 +196,7 @@ export function IndexCoverageCard({ siteId, onNavigate }: { siteId: string; onNa
   const days = Math.ceil((coverage.total - coverage.checked) / 1800);
   const share = (n: number) => `${Math.round((n / coverage.checked) * 100)}%`;
   return (
-    <Card title={title} subtitle={`Checked ${formatNumber(coverage.checked)} of ${formatNumber(coverage.total)} sitemap URLs with Google.${days > 0 ? ` About ${days} more day${days === 1 ? "" : "s"} until every URL is checked once.` : " Every URL has been checked; each is checked again after 30 days."}`}>
+    <Card title={title} actions={<ExportMenu title="Google crawl coverage" sheets={() => coverageSheets(coverage)} />} subtitle={`Checked ${formatNumber(coverage.checked)} of ${formatNumber(coverage.total)} sitemap URLs with Google.${days > 0 ? ` About ${days} more day${days === 1 ? "" : "s"} until every URL is checked once.` : " Every URL has been checked; each is checked again after 30 days."}`}>
       <CoverageBar byClass={coverage.byClass} checked={coverage.checked} />
       <div className="chart-legend coverage-legend">
         {COVERAGE_CLASSES.map((name) => <span key={name} className={`cov-${name}`}>{COVERAGE_LABEL[name]} {formatNumber(coverage.byClass[name])} · {share(coverage.byClass[name])}</span>)}
@@ -230,14 +235,15 @@ export function SearchAnalysis({ report }: { report: Report }) {
         <Kpi label={entity ? `Looking up a ${entity.entityType}` : "Branded searches"} value={share(entity ? search.entityQueries!.share : search.brandedShare)} caption={entity ? "of clicks name one record" : "of clicks include your brand"} />
       </div>
       <div className="ruled-grid c21">
-        <Card title="Position vs impressions" subtitle="Green: queries at positions 4–15, the closest to page-one clicks. Grey: pages on page one that searchers skip.">
+        <Card title="Position vs impressions" subtitle="Green: queries at positions 4–15, the closest to page-one clicks. Grey: pages on page one that searchers skip."
+          actions={<ExportMenu title="Position vs impressions" sheets={() => pick(searchAnalysisSheets(report), "Near page one", "Skipped on page one")} />}>
           <Scatter points={searchPoints(search)} band={[4, 15]} xLabel="Position" yLabel="impressions" />
         </Card>
-        <Card title="Where searchers are" subtitle="Share of impressions by country.">
+        <Card title="Where searchers are" subtitle="Share of impressions by country." actions={<ExportMenu title="Where searchers are" sheets={() => pick(searchAnalysisSheets(report), "Where searchers are")} />}>
           <BarList rows={search.countries.slice(0, 6).map((country) => ({ label: country.name, value: Math.round(country.impressionShare * 100) }))} />
         </Card>
       </div>
-      <Card title="Queries to push" actions={<span className="count-pill">{opportunities.length}</span>}>
+      <Card title="Queries to push" actions={<><span className="count-pill">{opportunities.length}</span>{opportunities.length > 0 && <ExportMenu title="Queries to push" sheets={() => pushSheets(opportunities)} />}</>}>
         {opportunities.length ? opportunities.slice(0, 5).map((entry) => (
           <WhyRow key={entry.title} title={entry.title} aside={<span className="score">{Math.round(entry.priorityScore)}<small>priority</small></span>}>
             <p>{entry.rationale}</p>
@@ -245,7 +251,7 @@ export function SearchAnalysis({ report }: { report: Report }) {
           </WhyRow>
         )) : <p className="empty-state">No queries are close enough to page one to push yet.</p>}
       </Card>
-      <Card title="Pages to fix">
+      <Card title="Pages to fix" actions={<ExportMenu title="Pages to fix" sheets={() => [...pick(searchAnalysisSheets(report), "Skipped on page one", "Competing pages"), ...fixSheets(report, (category) => category === "search")]} />}>
         {findings.map((finding) => (
           <WhyRow key={finding.id} lead={<Severity value={finding.severity} />} title={finding.title}>
             <p>{finding.summary}</p>
@@ -301,7 +307,7 @@ export function CompetitorsSection({ report, site, competitors, onNavigate }: { 
       <Card
         title="Pages per section: you vs each competitor"
         subtitle="Sections where a competitor is furthest ahead come first. Counts show where they invest, not search demand."
-        actions={competition.rows.some((row) => row.status === "gap") && <Button small variant="secondary" onClick={() => onNavigate("data")}>Close a gap in Data</Button>}
+        actions={<>{competition.rows.some((row) => row.status === "gap") && <Button small variant="secondary" onClick={() => onNavigate("data")}>Close a gap in Data</Button>}<ExportMenu title="Pages per section" sheets={() => pick(competitorSheets(report, null, you), "Pages per section")} /></>}
       >
         <PairedBars series={[you, ...domains.map((competitor) => competitor.domain)]} groups={rows.slice(0, 10).map((row) => ({
           label: row.label,
@@ -310,7 +316,7 @@ export function CompetitorsSection({ report, site, competitors, onNavigate }: { 
       </Card>
       <div className="ruled-grid c11">
         <Card title="Your advantage"><p className="advantage-line">{report.plan.competitiveAdvantage}</p></Card>
-        <Card title="Competitors">
+        <Card title="Competitors" actions={<ExportMenu title="Competitors" sheets={() => pick(competitorSheets(report, null, you), "Competitors")} />}>
           {report.competitors.slice(0, 5).map((competitor) => (
             <WhyRow key={competitor.domain} lead={<span className="domain-icon">{competitor.domain[0]?.toUpperCase()}</span>} title={competitor.domain}
               aside={<span className="relevance">{competitor.relevanceScore !== undefined ? `${Math.round(competitor.relevanceScore * 100)}% overlap` : "Owner selected"}</span>}>
@@ -321,7 +327,7 @@ export function CompetitorsSection({ report, site, competitors, onNavigate }: { 
           ))}
         </Card>
       </div>
-      <Card title="What stands out">
+      <Card title="What stands out" actions={<ExportMenu title="What stands out" sheets={() => pick(competitorSheets(report, null, you), "What stands out", "Pages per section")} />}>
         {competition.insights.slice(0, 6).map((insight) => <p key={insight} className="line-item">{insight}</p>)}
         <details className="why-row table-toggle" open>
           <summary><span className="why-title">Every section as a table</span><span className="why-open" aria-hidden="true" /></summary>
@@ -369,11 +375,11 @@ export function ConversionSections({ report, leads, onNavigate }: { report: Repo
   const conversion = report?.conversion;
   return (
     <>
-      <Card title="Conversion events" subtitle="Everything tracked on the site in the last 28 days." actions={<Button small variant="secondary" onClick={() => onNavigate("setup")}>Tracking setup</Button>}>
+      <Card title="Conversion events" subtitle="Everything tracked on the site in the last 28 days." actions={<><Button small variant="secondary" onClick={() => onNavigate("setup")}>Tracking setup</Button><ExportMenu title="Conversion events" sheets={() => pick(conversionSheets(report, leads), "Conversion events")} /></>}>
         <div className="big-number">{leads ? formatNumber(leads.events28) : "—"}</div>
       </Card>
       {conversion && conversion.templates.length > 0 && (
-        <Card title="How each template asks for the enquiry">
+        <Card title="How each template asks for the enquiry" actions={<ExportMenu title="How each template asks" sheets={() => pick(conversionSheets(report, leads), "How each template asks", "Events worth tracking")} />}>
           <div className="table-wrap">
             <table className="table">
               <thead><tr><th>Template</th><th>Ways to convert</th><th>Prices shown</th><th>Tracking</th></tr></thead>
@@ -425,7 +431,7 @@ export function AiReadinessCard({ report }: { report: Report | null }) {
   const blocked = readiness.crawlers.filter((crawler) => !crawler.allowed);
   const findings = report!.findings.filter((finding) => finding.category === "ai_visibility");
   return (
-    <Card title="Can AI assistants read the site?" subtitle="From the latest analysis: robots.txt as it applies to each AI agent, an llms.txt guide for AI tools, and FAQ markup on the sampled pages.">
+    <Card title="Can AI assistants read the site?" actions={<ExportMenu title="AI agents in robots.txt" sheets={() => aiReadinessSheets(report)} />} subtitle="From the latest analysis: robots.txt as it applies to each AI agent, an llms.txt guide for AI tools, and FAQ markup on the sampled pages.">
       <div className="metrics-grid c3">
         <Kpi label="AI agents allowed" value={readiness.robots === "unreadable" ? "—" : `${readiness.crawlers.length - blocked.length} of ${readiness.crawlers.length}`}
           caption={readiness.robots === "missing" ? "No robots.txt: everything is allowed" : readiness.robots === "unreadable" ? "robots.txt couldn't be read" : blocked.length ? `${blocked.length} blocked in robots.txt` : "None blocked"} />
@@ -483,7 +489,7 @@ function CodeIntelligence({ repo }: { repo: NonNullable<Report["repo"]> }) {
   ];
   const routes = [...(repo.routeInspections ?? [])].sort((a, b) => Number(b.dynamic) - Number(a.dynamic)).slice(0, 15);
   return (
-    <Card title="Stack and routes, from the repository">
+    <Card title="Stack and routes, from the repository" actions={routes.length > 0 && <ExportMenu title="Routes" sheets={() => routeSheets(repo)} />}>
       <div className="fact-grid">{facts.filter(([, value]) => value).map(([name, value]) => <div key={name}><span>{name}</span><strong>{value}</strong></div>)}</div>
       {routes.length > 0 && (
         <details className="why-row table-toggle">

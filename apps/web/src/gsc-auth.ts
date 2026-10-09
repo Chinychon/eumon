@@ -19,24 +19,26 @@ async function decryptSecret(value: string, secret: string): Promise<string> {
 
 export const SEARCH_CONSOLE_SCOPE = "https://www.googleapis.com/auth/webmasters.readonly";
 export const ANALYTICS_SCOPE = "https://www.googleapis.com/auth/analytics.readonly";
+/** Creating Google Sheets for exports: reaches only files Eumon itself creates. */
+export const DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file";
 
 /** `scopes` is Google's space-separated grant, so later code can tell which APIs this connection may call. */
 export async function saveGoogleRefreshToken(db: D1Like, siteId: string, refreshToken: string, encryptionKey: string, scopes: string) {
   await upsertOAuthCredential(db, {
-    id: createId("oauth"), siteId, provider: "google_search_console",
+    id: createId("oauth"), siteId, provider: "google",
     encryptedBlob: await encryptSecret(refreshToken, encryptionKey), scopes,
   });
 }
 
 /** Scopes the site's Google connection was granted; connections made before scopes were stored read as Search Console only. */
 export async function googleScopes(db: D1Like, siteId: string): Promise<string[]> {
-  const credential = await getOAuthCredential(db, siteId, "google_search_console");
+  const credential = await getOAuthCredential(db, siteId, "google");
   if (!credential) return [];
   return (credential.scopes ?? "").split(/\s+/).filter(Boolean).map((scope) => (scope === "webmasters.readonly" ? SEARCH_CONSOLE_SCOPE : scope));
 }
 
 export async function googleAccessToken(db: D1Like, siteId: string, clientId: string, clientSecret: string, encryptionKey: string) {
-  const credential = await getOAuthCredential(db, siteId, "google_search_console");
+  const credential = await getOAuthCredential(db, siteId, "google");
   if (!credential) throw new Error("Connect Google Search Console first.");
   const refreshToken = await decryptSecret(credential.encryptedBlob, encryptionKey);
   const response = await fetch("https://oauth2.googleapis.com/token", {

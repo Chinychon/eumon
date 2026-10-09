@@ -130,14 +130,14 @@ function relatedHtml(related: PageLink[], heading: string): string {
   return `<section class="related"><h2>${escapeHtml(heading)}</h2><ul>${related.map((link) => `<li><a href="${escapeHtml(link.path)}">${escapeHtml(link.title)}</a></li>`).join("")}</ul></section>`;
 }
 
-function trackingScript(beaconPath: string, pageId: string, variantId: string | undefined, cookieDomain: string | undefined): string {
+export function trackingScript(beaconPath: string, pageId: string, variantId: string | undefined, cookieDomain: string | undefined): string {
   // Beacon is same-origin (served through the customer's proxy), first-party,
   // and fails silently so analytics can never break the page. A view sends the
   // referrer's host only (never the full URL) and utm_source, so the server
   // can tell visits from AI assistants and search engines.
   const domain = cookieDomain && /^[a-z0-9.-]+$/i.test(cookieDomain) ? `; domain=${cookieDomain}` : "";
   const config = scriptJson({ e: beaconPath, p: pageId, v: variantId ?? null, d: domain });
-  return `<script>(function(c){try{var m=document.cookie.match(/(?:^|; )eumon_sid=([^;]+)/),s=m?m[1]:(crypto.randomUUID?crypto.randomUUID().replace(/-/g,""):String(Math.random()).slice(2)+Date.now());document.cookie="eumon_sid="+s+"; path=/; max-age=2592000; SameSite=Lax"+c.d;var R="",U=null;try{R=document.referrer?new URL(document.referrer).host:"";if(R===location.host)R="";U=new URLSearchParams(location.search).get("utm_source")}catch(_){}var send=function(t,x){var b=JSON.stringify(t==="view"?{t:t,p:c.p,v:c.v,s:s,r:R,u:U}:{t:t,p:c.p,v:c.v,s:s,x:x||null});if(navigator.sendBeacon){navigator.sendBeacon(c.e,new Blob([b],{type:"application/json"}))}else{fetch(c.e,{method:"POST",body:b,keepalive:true,headers:{"Content-Type":"application/json"}})}};send("view");document.addEventListener("click",function(ev){var a=ev.target&&ev.target.closest&&ev.target.closest("[data-eumon-cta]");if(a)send("cta",a.getAttribute("data-eumon-cta"))},true)}catch(_){}})(${config})</script>`;
+  return `<script>(function(c){try{var m=document.cookie.match(/(?:^|; )eumon_sid=([^;]+)/),s=m?m[1]:(crypto.randomUUID?crypto.randomUUID().replace(/-/g,""):String(Math.random()).slice(2)+Date.now());document.cookie="eumon_sid="+s+"; path=/; max-age=2592000; SameSite=Lax"+c.d;var R="",U=null;try{R=document.referrer?new URL(document.referrer).host:"";if(R===location.host)R="";U=(new URLSearchParams(location.search).get("utm_source")||"").slice(0,80)||null}catch(_){}var send=function(t,x){var b=JSON.stringify(t==="view"?{t:t,p:c.p,v:c.v,s:s,r:R,u:U}:{t:t,p:c.p,v:c.v,s:s,x:x||null});if(navigator.sendBeacon){navigator.sendBeacon(c.e,new Blob([b],{type:"application/json"}))}else{fetch(c.e,{method:"POST",body:b,keepalive:true,headers:{"Content-Type":"application/json"}})}};send("view");document.addEventListener("click",function(ev){var a=ev.target&&ev.target.closest&&ev.target.closest("[data-eumon-cta]");if(a)send("cta",a.getAttribute("data-eumon-cta"))},true)}catch(_){}})(${config})</script>`;
 }
 
 function styles(brand: string): string {

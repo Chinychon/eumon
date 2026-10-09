@@ -8,7 +8,7 @@ async function latestCrawl(db: D1Like, siteId: string): Promise<string | null> {
 }
 
 /** Served pages of a crawl, with their page type. */
-const CURRENT = `SELECT url, COALESCE(json_extract(result_json, '$.routeFamily'), 'other') AS family FROM pages
+const CURRENT = `SELECT url, route_family AS family FROM pages
   WHERE analysis_id = ? AND crawl_state = 'complete' AND status < 400`;
 
 /**

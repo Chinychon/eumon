@@ -21,13 +21,8 @@ import {
   updateSiteFingerprint,
 } from "@organic-growth/db";
 import {
-  MAX_COMPETITORS,
-  crawlLogCoverage,
-  fetchSearchConsoleMetrics,
-  queueFullCrawl,
-  runFullAnalysis,
-  synthesizePlanNarrative,
-loadTrendSignals } from "@organic-growth/agents";
+  MAX_COMPETITORS, crawlLogCoverage, fetchSearchConsoleMetrics, loadTrendSignals, queueFullCrawl, runFullAnalysis, synthesizePlanNarrative,
+} from "@organic-growth/agents";
 import {
   buildRepoSnapshotFromGitHub,
   createGitHubApiClient,

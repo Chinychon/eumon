@@ -26,6 +26,8 @@ export type TrendSignals = {
   impressions: DayPoint[];
   indexed: DayPoint[];
   indexedSource: "search_console" | "inspection" | null;
+  /** With the inspection sample: how many of Eumon's pages Google left out, to tell a fall Google caused from pages the operator unpublished. */
+  notIndexed: DayPoint[];
   crawlLog: CrawlDayRow[];
   today: string;
 };
@@ -221,16 +223,21 @@ export function findingsFromTrends(input: { siteId: string; analysisId: string; 
   const { trends } = input;
   if (!trends) return [];
   const drafts: Draft[] = [];
-  const indexedFall = dropFromPeak(trends.indexed, TREND.indexedShare, TREND.indexedCount);
+  let indexedFall = dropFromPeak(trends.indexed, TREND.indexedShare, TREND.indexedCount);
+  if (indexedFall && trends.indexedSource === "inspection") {
+    // The sample counts published Eumon pages: unpublishing lowers it with no change at Google. A fall Google caused shows up as pages it left out.
+    const leftOut = (day: string) => trends.notIndexed.filter((point) => point.day <= day).at(-1)?.value ?? 0;
+    if (leftOut(indexedFall.latestDay) - leftOut(indexedFall.peakDay) < (indexedFall.peak - indexedFall.latest) / 2) indexedFall = null;
+  }
   const peak = peakAverage(trends.impressions, TREND.window, TREND.peakLevel);
   const current = latestAverage(trends.impressions, TREND.window);
   if (peak && current && current.average <= peak.average * TREND.fallTo) {
     const share = Math.round((1 - current.average / peak.average) * 100);
-    const together = indexedFall && Math.abs(Date.parse(indexedFall.peakDay) - Date.parse(peak.to)) <= 7 * DAY_MS;
+    const together = indexedFall && Math.abs(Date.parse(indexedFall.peakDay) - Date.parse(peak.to)) <= 7 * DAY_MS ? indexedFall : null;
     drafts.push({
       category: "search", impact: Math.min(90, 50 + Math.round(share * 0.4)),
       title: `Search impressions fell ${share}% since ${shortDay(peak.to)}`,
-      summary: `Search Console impressions averaged ${n(Math.round(peak.average))} a day in the week to ${shortDay(peak.to)} and ${n(Math.round(current.average))} a day in the week to ${shortDay(current.to)}.${together ? ` That is when Google's indexed count fell from ${n(indexedFall.peak)} to ${n(indexedFall.latest)}.` : ""}`,
+      summary: `Search Console impressions averaged ${n(Math.round(peak.average))} a day in the week to ${shortDay(peak.to)} and ${n(Math.round(current.average))} a day in the week to ${shortDay(current.to)}.${together ? ` That is when Google's indexed count fell from ${n(together.peak)} to ${n(together.latest)}.` : ""}`,
       evidence: { peak, current, indexedFall },
       recommendation: "Open Search Console's Page indexing report (or import it in Setup) and look at what changed on the site in the days before the fall: a sitemap, a redirect rule, a noindex. History records the day this number recovers.",
     });

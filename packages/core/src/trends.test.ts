@@ -24,6 +24,8 @@ describe("peakAverage", () => {
     assert.deepEqual(peak, { from: "2026-09-24", to: "2026-09-30", average: 1000 }, "the last full week at 1,000");
     assert.equal(peakAverage(series(values.map((value) => value / 20)), 7, 100), null, "never reached 100 a day");
     assert.equal(peakAverage(series([1, 1, 1, 1, 1, 1, 1, 500]), 7, 100), null, "a peak inside the last week is not a peak to fall from");
+    const late = peakAverage(series([...Array(20).fill(100), ...Array(7).fill(1000)]), 7, 100);
+    assert.equal(late?.average, 100, "the week at 1,000 is the latest week, so it can't be the peak fallen from");
   });
 });
 
@@ -31,6 +33,7 @@ describe("dropFromPeak", () => {
   it("names the fall from the maximum to the latest value when it is big enough", () => {
     const points = series([1700, 1774, 1561, 1561, 1200]);
     assert.deepEqual(dropFromPeak(points, 0.1, 50), { peakDay: "2026-09-02", peak: 1774, latestDay: "2026-09-05", latest: 1200, share: 0.32 });
+    assert.equal(dropFromPeak(series([...Array(10).fill(1774), 1500]), 0.1, 50)?.peakDay, "2026-09-10", "a plateau's last day is when the fall began");
     assert.equal(dropFromPeak(series([1774, 1700]), 0.1, 50), null, "4% is not a fall");
     assert.equal(dropFromPeak(series([100, 60]), 0.1, 50), null, "40 pages is under the count");
     assert.equal(dropFromPeak(series([1000, 1200]), 0.1, 50), null, "a rise");

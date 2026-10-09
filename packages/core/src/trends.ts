@@ -7,7 +7,7 @@ import type { CrawlDayRow } from "./server-logs.js";
  */
 
 export type DayPoint = { day: string; value: number };
-export type Window = { from: string; to: string; average: number };
+export type AverageWindow = { from: string; to: string; average: number };
 
 const DAY_MS = 86_400_000;
 const shift = (day: string, n: number) => new Date(Date.parse(`${day}T00:00:00Z`) + n * DAY_MS).toISOString().slice(0, 10);
@@ -15,7 +15,7 @@ const sorted = (series: DayPoint[]) => [...series].sort((a, b) => a.day.localeCo
 const mean = (points: DayPoint[]) => points.reduce((total, point) => total + point.value, 0) / points.length;
 
 /** The last `window` points present, averaged. */
-export function latestAverage(series: DayPoint[], window = 7): Window | null {
+export function latestAverage(series: DayPoint[], window = 7): AverageWindow | null {
   const points = sorted(series).slice(-window);
   if (!points.length) return null;
   return { from: points[0]!.day, to: points.at(-1)!.day, average: mean(points) };
@@ -23,16 +23,16 @@ export function latestAverage(series: DayPoint[], window = 7): Window | null {
 
 /**
  * The highest trailing average of `window` points whose last day is at least
- * `window` days before `endBefore` (the series' last day), the latest such
- * window when several tie; null when none reaches `minLevel`. A peak inside
- * the last week is not yet something to have fallen from.
+ * `window` days before the series' last day, the latest such window when
+ * several tie; null when none reaches `minLevel`. A peak inside the last
+ * week is not yet something to have fallen from.
  */
-export function peakAverage(series: DayPoint[], window = 7, minLevel = 0, endBefore?: string): Window | null {
+export function peakAverage(series: DayPoint[], window = 7, minLevel = 0): AverageWindow | null {
   const points = sorted(series);
-  const last = endBefore ?? points.at(-1)?.day;
+  const last = points.at(-1)?.day;
   if (!last) return null;
   const cutoff = shift(last, -window);
-  let best: Window | null = null;
+  let best: AverageWindow | null = null;
   for (let end = window; end <= points.length; end++) {
     const slice = points.slice(end - window, end);
     if (slice.at(-1)!.day > cutoff) break;
@@ -42,13 +42,13 @@ export function peakAverage(series: DayPoint[], window = 7, minLevel = 0, endBef
   return best;
 }
 
-/** The fall from the series' highest value in its last 90 days to its latest, when it is at least `minShare` of the peak and `minCount` in absolute terms. */
+/** The fall from the series' highest value in its last 90 days (the last day of a plateau) to its latest, when it is at least `minShare` of the peak and `minCount` in absolute terms. */
 export function dropFromPeak(series: DayPoint[], minShare: number, minCount: number): { peakDay: string; peak: number; latestDay: string; latest: number; share: number } | null {
   const points = sorted(series);
   const latest = points.at(-1);
   if (!latest) return null;
   const since = shift(latest.day, -90);
-  const peak = points.filter((point) => point.day >= since).reduce((best, point) => (point.value > best.value ? point : best), latest);
+  const peak = points.filter((point) => point.day >= since).reduce((best, point) => (point.value >= best.value ? point : best), points.find((point) => point.day >= since)!);
   const fall = peak.value - latest.value;
   if (peak.value <= 0 || fall < minCount || fall / peak.value < minShare) return null;
   return { peakDay: peak.day, peak: peak.value, latestDay: latest.day, latest: latest.value, share: Math.round((fall / peak.value) * 100) / 100 };

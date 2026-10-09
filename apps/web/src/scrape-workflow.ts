@@ -19,6 +19,7 @@ import {
 } from "@organic-growth/db";
 import { expandSource, extractRecordsFromHtml, PoliteFetcher, RobotsBlockedError, sleep } from "@organic-growth/scraper";
 import { mergeDuplicateRecords } from "./dedupe";
+import { runSupabasePull, type PullStep } from "./supabase-source";
 
 export interface ScrapePayload {
   jobId: string;
@@ -52,7 +53,17 @@ export class ScrapeWorkflow extends WorkflowEntrypoint<AppEnv, ScrapePayload> {
         return { dataset, sources };
       });
 
-      for (const source of setup.sources) {
+      // A Supabase table is read a page a step, not crawled; its error, if any, is on the source row.
+      const tables = setup.sources.filter((source) => source.kind === "supabase");
+      const pull: PullStep = { do: (name, fn) => step.do(name, { retries: { limit: 2, delay: "15 seconds", backoff: "exponential" } }, fn as never) as never };
+      for (const source of tables) {
+        try {
+          await runSupabasePull({ db, encryptionKey: this.env.OAUTH_ENCRYPTION_KEY }, pull, source, setup.dataset, jobId);
+        } catch {
+          // Recorded on the source by the pull; the other sources still run.
+        }
+      }
+      for (const source of setup.sources.filter((source) => source.kind !== "supabase")) {
         await step.do(`expand-${source.id}`, { retries: { limit: 2, delay: "10 seconds", backoff: "exponential" } }, async () => {
           try {
             const expanded = await expandSource(source, new PoliteFetcher());
@@ -73,14 +84,15 @@ export class ScrapeWorkflow extends WorkflowEntrypoint<AppEnv, ScrapePayload> {
         });
       }
 
-      await step.do("queued", async () => {
+      const queued = await step.do("queued", async () => {
         const counts = await scrapeQueueCounts(db, jobId);
-        if (!counts.total) throw new NonRetryableError("None of the approved sources produced pages to collect. Preview each source to check its URL pattern and robots.txt.");
-        await updateJob(db, jobId, { progress: { message: `Collecting from ${counts.total.toLocaleString()} pages`, done: 0, total: counts.total } });
+        if (!counts.total && !tables.length) throw new NonRetryableError("None of the approved sources produced pages to collect. Preview each source to check its URL pattern and robots.txt.");
+        if (counts.total) await updateJob(db, jobId, { progress: { message: `Collecting from ${counts.total.toLocaleString()} pages`, done: 0, total: counts.total } });
+        return counts.total;
       });
 
       const ownSite = new Set(setup.sources.filter((source) => source.kind === "own_site").map((source) => source.id));
-      for (let batch = 0; batch < MAX_STEPS; batch++) {
+      for (let batch = 0; queued && batch < MAX_STEPS; batch++) {
         const processed = await step.do(`scrape-batch-${batch}`, { retries: { limit: 2, delay: "15 seconds", backoff: "exponential" } }, async () => {
           const items = await nextScrapeBatch(db, jobId, BATCH_SIZE);
           if (!items.length) return 0;
@@ -147,7 +159,9 @@ export class ScrapeWorkflow extends WorkflowEntrypoint<AppEnv, ScrapePayload> {
         if (processed === 0) break;
       }
 
-      const mergedCount = await step.do("merge-duplicates", async () => {
+      // Pages list the same entity many times, so scraped records are merged by name. A table is the authority for its
+      // rows: its namesakes stay apart for the inventory to show, and the operator merges by hand.
+      const mergedCount = tables.length === setup.sources.length ? 0 : await step.do("merge-duplicates", async () => {
         await updateJob(db, jobId, { progress: { message: "Merging records that name the same thing", done: 1, total: 1 } });
         try {
           const merges = await mergeDuplicateRecords(db, createLlm(this.env), setup.dataset);
@@ -158,7 +172,7 @@ export class ScrapeWorkflow extends WorkflowEntrypoint<AppEnv, ScrapePayload> {
       });
 
       await step.do("finish", async () => {
-        for (const source of setup.sources) await refreshSourceRecordCount(db, source.id);
+        for (const source of setup.sources) if (source.kind !== "supabase") await refreshSourceRecordCount(db, source.id);
         const counts = await scrapeQueueCounts(db, jobId);
         const { total: uniqueRecords } = await listRecords(db, datasetId, { limit: 1 });
         const failedNote = (mergedCount ? ` Merged ${mergedCount.toLocaleString()} duplicate names.` : "")
@@ -167,7 +181,9 @@ export class ScrapeWorkflow extends WorkflowEntrypoint<AppEnv, ScrapePayload> {
           status: "completed",
           progress: {
             // Entries repeat across pages (e.g. one mall in many projects); records are merged by name.
-            message: `Read ${counts.total.toLocaleString()} pages and found ${counts.records.toLocaleString()} entries; the dataset now has ${uniqueRecords.toLocaleString()} records.${failedNote}`,
+            message: counts.total
+              ? `Read ${counts.total.toLocaleString()} pages and found ${counts.records.toLocaleString()} entries; the dataset now has ${uniqueRecords.toLocaleString()} records.${failedNote}`
+              : `Read ${tables.length === 1 ? "the table" : `${tables.length} tables`}; the dataset now has ${uniqueRecords.toLocaleString()} records.`,
             done: counts.total,
             total: counts.total,
           },

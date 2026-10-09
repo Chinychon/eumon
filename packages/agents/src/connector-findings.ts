@@ -3,6 +3,7 @@ import {
   type CompetitorSuggestion, type CrawlDayRow, type CrawlLogView, type DayPoint, type Finding, type FindingCategory, type JsonObject, type LinksInput, type Opportunity, type SerpResult,
 } from "@organic-growth/core";
 import type { SearchConsoleReconciliation } from "@organic-growth/db";
+import type { Inventory } from "@organic-growth/pages";
 
 /*
  * What the connectors beyond Google add to an analysis: findings from the
@@ -39,6 +40,7 @@ export type ConnectorSignals = {
   logCoverage?: LogCoverage | null;
   searchConsole?: SearchConsoleSignal | null;
   trends?: TrendSignals | null;
+  inventory?: InventorySignal[];
 };
 
 /** Fewer days of logs than this say nothing about what Googlebot skips. */
@@ -265,4 +267,71 @@ export function findingsFromTrends(input: { siteId: string; analysisId: string; 
     }
   }
   return toFindings(drafts, input);
+}
+
+/** A dataset's inventory (`loadInventories`), as the findings read it. */
+export type InventorySignal = { dataset: { id: string; name: string; entityType: string; records: number }; inventory: Inventory };
+
+/** Datasets with fewer records say little; a field, a duplicate group or a thin-page count below these is noise. */
+const INVENTORY = { minRecords: 50, minMissing: 50, plainFillBelow: 0.5, minDuplicateRecords: 4, minThin: 10, minThinShare: 0.05, thinChars: 250 };
+
+/** "Doctors" as the dataset is named; failing a plural name, the entity type with an s (or ies). */
+const plural = (name: string, entity: string) => (/s$/i.test(name.trim()) ? name.trim().toLowerCase() : /y$/i.test(entity) ? `${entity.slice(0, -1)}ies` : `${entity}s`);
+/** Rounded, but a field with records missing is never "100%": 99.9% filled and 50 short reads 99%. */
+const filledShare = (filled: number, whole: number) => `${Math.min(Math.round((filled / whole) * 100), filled < whole ? 99 : 100)}%`;
+
+/**
+ * What the client's own data says about the site's content: a field most
+ * records lack (by language where fields come in language variants), records
+ * listed more than once, and record pages with almost nothing on them.
+ */
+export function findingsFromInventory(input: { siteId: string; analysisId: string; inventories: InventorySignal[] }): Finding[] {
+  const drafts: Draft[] = [];
+  for (const { dataset, inventory } of input.inventories) {
+    if (inventory.records < INVENTORY.minRecords) continue;
+    const entities = plural(dataset.name, dataset.entityType);
+    const records = inventory.records;
+    // One field finding per dataset: the language variant most records lack, else the emptiest plain field under half filled.
+    const variants = inventory.languages.flatMap((group) => group.variants.map((variant) => ({ ...variant, base: group.base, missing: records - variant.filled })))
+      .filter((variant) => variant.missing >= INVENTORY.minMissing).sort((a, b) => a.share - b.share);
+    const plain = inventory.fields.filter((field) => !field.language && field.share < INVENTORY.plainFillBelow && records - field.filled >= INVENTORY.minMissing).sort((a, b) => a.share - b.share);
+    const gap = variants[0] ? { label: `${variants[0].base} (${variants[0].language})`, filled: variants[0].filled, language: variants[0].language } : plain[0] ? { label: plain[0].label, filled: plain[0].filled } : null;
+    if (gap) {
+      const missing = records - gap.filled;
+      drafts.push({
+        category: "content", impact: Math.min(75, 40 + Math.round((missing / records) * 60)),
+        title: `${n(missing)} of ${n(records)} ${entities} have no ${gap.label}`,
+        summary: `${filledShare(gap.filled, records)} of the ${n(records)} ${entities} in ${dataset.name} have ${gap.label} filled; ${n(missing)} don't. A page built from one of those records has nothing to say${gap.language ? ` in ${gap.language}` : ""}, so it is thin${gap.language ? ` in ${gap.language} search results` : ""} or left out.`,
+        evidence: { dataset: dataset.id, field: gap.label, records, filled: gap.filled, missing },
+        recommendation: `Fill the ${gap.label} in the source data; the pages follow the records. Until then leave those pages out of the sitemap${gap.language ? ` for ${gap.language}` : ""}, or give them a noindex, so Google spends its visits on pages with content.`,
+      });
+    }
+    const duplicates = inventory.duplicates;
+    if (duplicates.records >= INVENTORY.minDuplicateRecords) {
+      drafts.push({
+        category: "content", impact: Math.min(70, 35 + Math.round(Math.log10(duplicates.records + 1) * 10)),
+        title: `${n(duplicates.records)} ${entities} are listed more than once`,
+        summary: `${n(duplicates.groups)} name${duplicates.groups === 1 ? "" : "s"} in ${dataset.name} appear${duplicates.groups === 1 ? "s" : ""} on more than one record${duplicates.examples[0] ? ` (${duplicates.examples.slice(0, 3).map((group) => `${group.name} ×${group.keys.length}`).join(", ")})` : ""}. Those records may be the same ${dataset.entityType} listed twice, each with its own page saying the same thing: Google keeps one and the clicks split.`,
+        evidence: { dataset: dataset.id, groups: duplicates.groups, records: duplicates.records, examples: duplicates.examples },
+        recommendation: "Review the groups in the Data section: two people can share a name. Merge duplicates there applies the merges it finds (it deletes the extra records), so check before running it, then redirect each dropped page to the one kept.",
+      });
+    }
+    const pages = inventory.pages;
+    if (pages && pages.thin >= INVENTORY.minThin && pages.thin >= pages.linked * INVENTORY.minThinShare) {
+      drafts.push({
+        category: "content", impact: Math.min(80, 40 + Math.round((pages.thin / pages.linked) * 60)),
+        title: `${n(pages.thin)} ${dataset.entityType} pages have almost no content`,
+        summary: `Of the ${n(pages.linked)} ${dataset.entityType} pages the records point to, ${n(pages.thin)} answered with an empty shell or under ${INVENTORY.thinChars} characters of text in the crawl${pages.gone ? `, ${n(pages.gone)} answer 404 or 410` : ""}${pages.unreached ? `, and ${n(pages.unreached)} were not reached` : ""}. Google indexes few thin pages and ranks fewer.`,
+        evidence: { dataset: dataset.id, linked: pages.linked, thin: pages.thin, gone: pages.gone, unreached: pages.unreached, examples: pages.examples },
+        recommendation: "Fill the record so the page has something to say, or leave the page out of the sitemap until it does.",
+        pagesAffected: pages.examples.thin,
+      });
+    }
+  }
+  const createdAt = new Date().toISOString();
+  return drafts.map((draft) => ({
+    id: createId("finding"), siteId: input.siteId, analysisId: input.analysisId, category: draft.category, severity: severityFromImpact(draft.impact),
+    title: draft.title, summary: draft.summary, evidence: draft.evidence, organicImpactScore: draft.impact, recommendation: draft.recommendation,
+    pagesAffected: draft.pagesAffected ?? [], createdAt,
+  }));
 }

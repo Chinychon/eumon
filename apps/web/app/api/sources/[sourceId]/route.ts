@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import type { DataSource } from "@organic-growth/core";
-import { deleteSource, getSource, upsertSource } from "@organic-growth/db";
+import { deleteOAuthCredential, deleteSource, getSource, upsertSource } from "@organic-growth/db";
 import { validateUrlPattern } from "../../../../src/datasets";
 import { fail, json, readJson } from "../../../../src/server";
 
@@ -12,7 +12,10 @@ export async function PATCH(request: Request, context: { params: Promise<{ sourc
   if (!body) return fail("Send the changes as JSON.");
   const next: DataSource = { ...source };
   if (body.status === "approved" || body.status === "rejected" || body.status === "proposed") next.status = body.status;
-  if (body.urlPattern !== undefined) {
+  if (body.urlPattern !== undefined && source.kind === "supabase") {
+    if (typeof body.urlPattern !== "string" || !/^[A-Za-z_][A-Za-z0-9_]{0,62}$/.test(body.urlPattern.trim())) return fail("Enter the table or view name (letters, digits and underscores).");
+    next.urlPattern = body.urlPattern.trim();
+  } else if (body.urlPattern !== undefined) {
     const pattern = validateUrlPattern(body.urlPattern);
     if (typeof pattern === "object") return fail(pattern.error);
     next.urlPattern = pattern;
@@ -26,7 +29,9 @@ export async function PATCH(request: Request, context: { params: Promise<{ sourc
 
 export async function DELETE(_request: Request, context: { params: Promise<{ sourceId: string }> }) {
   const { sourceId } = await context.params;
-  if (!(await getSource(env.DB, sourceId))) return fail("Source not found.", 404);
+  const source = await getSource(env.DB, sourceId);
+  if (!source) return fail("Source not found.", 404);
   await deleteSource(env.DB, sourceId);
+  if (source.kind === "supabase") await deleteOAuthCredential(env.DB, source.siteId, `supabase:${sourceId}`);
   return json({ deleted: true });
 }

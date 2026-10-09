@@ -29,6 +29,7 @@ describe("demo site", () => {
     assert.ok(before.coverage.emptyShellUrls > after.coverage.emptyShellUrls && after.coverage.emptyShellUrls > 0, "fewer empty pages a month later");
     assert.ok(after.coverage.httpErrorUrls > 0);
     assert.ok(after.findings.length > 3);
+    assert.ok((after.findings as Array<{ title: string }>).some((finding) => finding.title === "64 of 128 dentists have no Bio (MS)"), "the inventory finding from the Dentists dataset");
     assert.ok(after.competition?.rows.length, "competitor content compared");
     assert.ok(after.search, "search insights");
     const links = await getLinkGraph(db, DEMO_SITE_ID);

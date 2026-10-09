@@ -98,6 +98,8 @@ export async function deleteDataset(db: D1Like, id: string): Promise<void> {
     db.prepare("DELETE FROM generated_pages WHERE template_id IN (SELECT id FROM page_templates WHERE dataset_id = ?)").bind(id),
     db.prepare("DELETE FROM page_templates WHERE dataset_id = ?").bind(id),
     db.prepare("DELETE FROM data_records WHERE dataset_id = ?").bind(id),
+    // A Supabase source's sealed key goes with it.
+    db.prepare("DELETE FROM oauth_credentials WHERE provider IN (SELECT 'supabase:' || id FROM data_sources WHERE dataset_id = ?)").bind(id),
     db.prepare("DELETE FROM data_sources WHERE dataset_id = ?").bind(id),
     db.prepare("DELETE FROM datasets WHERE id = ?").bind(id),
   ]);
@@ -1011,4 +1013,123 @@ export async function getDailyTotals(db: D1Like, siteId: string, sinceDay: strin
     day: String(row.day), views: Number(row.views), ctaClicks: Number(row.cta_clicks), googlebotHits: Number(row.googlebot_hits),
     searchClicks: Number(row.search_clicks), searchImpressions: Number(row.search_impressions),
   }));
+}
+
+/** `$."key"` for json_extract, bound as a parameter. */
+const jsonPath = (key: string) => `$."${key.replace(/"/g, "")}"`;
+
+/** A URL as the same page: scheme and `www.` dropped, fragment and trailing slash gone, lower-cased. Relative URLs come out unusable, which keeps them out of the join. */
+const samePage = (expr: string) => {
+  const noScheme = `substr(${expr}, instr(${expr}, '://') + 3)`;
+  const noWww = `CASE WHEN substr(${noScheme}, 1, 4) = 'www.' THEN substr(${noScheme}, 5) ELSE ${noScheme} END`;
+  const noFragment = `CASE WHEN instr(${noWww}, '#') > 0 THEN substr(${noWww}, 1, instr(${noWww}, '#') - 1) ELSE ${noWww} END`;
+  return `lower(rtrim(${noFragment}, '/'))`;
+};
+
+/** The field that holds a record's page: a `url`/`page` key first, else a url-type field that is not a picture or an outside website. */
+function pageUrlField(fields: Dataset["fields"]): string | undefined {
+  return (fields.find((field) => /^(url|page_url|page|link|permalink)$/i.test(field.key))
+    ?? fields.find((field) => field.type === "url" && !/photo|image|avatar|logo|picture|thumbnail|website|video|map/i.test(`${field.key} ${field.label}`)))?.key;
+}
+
+/**
+ * The counts behind a dataset's inventory, in four queries: how many records
+ * fill each field, every record's key and name (for duplicate groups), and the
+ * records' own pages in a crawl (the latest finished analysis, or the one
+ * named): thin (an empty shell or under 250 characters of text), gone (404 or
+ * 410), or unreached (not crawled, or another error). Pages are null when no
+ * record points at the site or the analysis has no crawl rows.
+ */
+export async function datasetInventoryRows(db: D1Like, dataset: Pick<Dataset, "id" | "siteId" | "fields" | "keyField">, analysisId?: string): Promise<{
+  records: number;
+  fills: Record<string, number>;
+  names: Array<{ key: string; name: string }>;
+  pages: { linked: number; thin: number; gone: number; unreached: number; examples: { thin: string[]; gone: string[] } } | null;
+}> {
+  const keys = dataset.fields.map((field) => field.key);
+  const filled = (index: number) => `json_extract(data_json, ?${index + 2})`;
+  const fillRow = await db.prepare(
+    `SELECT COUNT(*) AS records${keys.map((_, index) => `, SUM(CASE WHEN ${filled(index)} IS NOT NULL AND ${filled(index)} NOT IN ('', '[]') THEN 1 ELSE 0 END) AS f${index}`).join("")}
+     FROM data_records WHERE dataset_id = ?1`,
+  ).bind(dataset.id, ...keys.map(jsonPath)).first<Record<string, number>>();
+  const records = Number(fillRow?.records ?? 0);
+  const fills = Object.fromEntries(keys.map((key, index) => [key, Number(fillRow?.[`f${index}`] ?? 0)]));
+  const nameKey = dataset.fields.some((field) => field.key === dataset.keyField) ? dataset.keyField : keys.find((key) => key === "name" || key === "title") ?? dataset.keyField;
+  // ponytail: one pass over the dataset's names; past 50,000 records the duplicate groups are a sample.
+  const { results: nameRows } = await db.prepare(
+    "SELECT record_key, json_extract(data_json, ?) AS name FROM data_records WHERE dataset_id = ? ORDER BY record_key LIMIT 50000",
+  ).bind(jsonPath(nameKey), dataset.id).all<{ record_key: string; name: string | null }>();
+  const names = nameRows.map((row) => ({ key: String(row.record_key), name: row.name == null ? "" : String(row.name) }));
+  const site = await (analysisId
+    ? db.prepare(
+      `SELECT base_url, ?2 AS analysis_id, EXISTS(SELECT 1 FROM pages WHERE analysis_id = ?2 AND crawl_state = 'complete') AS has_pages FROM sites WHERE id = ?1`,
+    ).bind(dataset.siteId, analysisId)
+    : db.prepare(
+      `WITH latest AS (SELECT id FROM analyses WHERE site_id = ?1 AND status = 'completed' ORDER BY completed_at DESC LIMIT 1)
+       SELECT base_url, (SELECT id FROM latest) AS analysis_id,
+         EXISTS(SELECT 1 FROM pages WHERE analysis_id = (SELECT id FROM latest) AND crawl_state = 'complete') AS has_pages
+       FROM sites WHERE id = ?1`,
+    ).bind(dataset.siteId)
+  ).first<{ base_url: string; analysis_id: string | null; has_pages: number }>();
+  if (!site?.analysis_id || !Number(site.has_pages)) return { records, fills, names, pages: null };
+  const urlKey = pageUrlField(dataset.fields as Dataset["fields"]);
+  const recordUrl = urlKey ? `COALESCE(NULLIF(json_extract(r.data_json, ?4), ''), r.source_url)` : "r.source_url";
+  const host = new URL(site.base_url).hostname.toLowerCase().replace(/^www\./, "");
+  const THIN = "status IS NOT NULL AND status < 400 AND (is_empty_shell = 1 OR COALESCE(text, 0) < 250)";
+  const GONE = "status IN (404, 410)";
+  const UNREACHED = "status IS NULL OR (status >= 400 AND status NOT IN (404, 410))";
+  const page = await db.prepare(
+    `WITH linked AS MATERIALIZED (SELECT DISTINCT ${samePage(recordUrl)} AS url FROM data_records r WHERE r.dataset_id = ?1 AND ${samePage(recordUrl)} LIKE ?3),
+     crawled AS MATERIALIZED (
+       SELECT ${samePage("url")} AS url, url AS raw, status, is_empty_shell, json_extract(result_json, '$.rawTextLength') AS text
+       FROM pages WHERE analysis_id = ?2 AND crawl_state = 'complete'
+     ),
+     joined AS MATERIALIZED (SELECT l.url, c.raw, c.status, c.is_empty_shell, c.text FROM linked l LEFT JOIN crawled c ON c.url = l.url)
+     SELECT COUNT(*) AS linked,
+       SUM(CASE WHEN ${THIN} THEN 1 ELSE 0 END) AS thin,
+       SUM(CASE WHEN ${GONE} THEN 1 ELSE 0 END) AS gone,
+       SUM(CASE WHEN ${UNREACHED} THEN 1 ELSE 0 END) AS unreached,
+       (SELECT GROUP_CONCAT(raw, ' ') FROM (SELECT raw FROM joined WHERE ${THIN} ORDER BY raw LIMIT 5)) AS thin_examples,
+       (SELECT GROUP_CONCAT(raw, ' ') FROM (SELECT raw FROM joined WHERE ${GONE} ORDER BY raw LIMIT 5)) AS gone_examples
+     FROM joined`,
+  ).bind(dataset.id, site.analysis_id, `${host}/%`, ...(urlKey ? [jsonPath(urlKey)] : [])).first<Record<string, number | string | null>>();
+  const linked = Number(page?.linked ?? 0);
+  if (!linked) return { records, fills, names, pages: null };
+  const split = (value: unknown) => (value ? String(value).split(" ") : []);
+  return {
+    records, fills, names,
+    pages: { linked, thin: Number(page?.thin ?? 0), gone: Number(page?.gone ?? 0), unreached: Number(page?.unreached ?? 0), examples: { thin: split(page?.thin_examples), gone: split(page?.gone_examples) } },
+  };
+}
+
+/**
+ * A source's rows written in bulk, 200 a statement through json_each: a record
+ * the source gave before is replaced (the table is the authority, so a blank
+ * erases), one another source gave is taken over. Returns the rows written.
+ */
+export async function replaceRecords(
+  db: D1Like,
+  scope: { siteId: string; datasetId: string; sourceId: string; sourceUrl: string },
+  records: Array<{ key: string; data: JsonObject }>,
+): Promise<number> {
+  const now = nowIso();
+  for (const group of chunks(records, 200)) {
+    const rows = group.map((record) => ({ key: record.key, data: Object.fromEntries(Object.entries(record.data).filter(([, value]) => value != null && value !== "")) }));
+    await db.prepare(
+      `INSERT INTO data_records (id, site_id, dataset_id, record_key, data_json, source_id, source_url, created_at, updated_at)
+       SELECT 'rec_' || lower(hex(randomblob(16))), ?1, ?2, json_extract(value, '$.key'), json_extract(value, '$.data'), ?3, ?4, ?5, ?5
+       FROM json_each(?6) WHERE true
+       ON CONFLICT(dataset_id, record_key) DO UPDATE SET data_json = excluded.data_json, source_id = excluded.source_id,
+         source_url = excluded.source_url, updated_at = excluded.updated_at`,
+    ).bind(scope.siteId, scope.datasetId, scope.sourceId, scope.sourceUrl, now, JSON.stringify(rows)).run();
+  }
+  return records.length;
+}
+
+/** Records this source gave that a complete pull did not touch: gone from the table, so gone here. Returns how many. */
+export async function deleteStaleRecords(db: D1Like, sourceId: string, before: string): Promise<number> {
+  const stale = await db.prepare("SELECT COUNT(*) AS n FROM data_records WHERE source_id = ? AND updated_at < ?").bind(sourceId, before).first<{ n: number }>();
+  if (!Number(stale?.n ?? 0)) return 0;
+  await db.prepare("DELETE FROM data_records WHERE source_id = ? AND updated_at < ?").bind(sourceId, before).run();
+  return Number(stale!.n);
 }

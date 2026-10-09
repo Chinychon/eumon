@@ -21,7 +21,7 @@ import {
   updateSiteFingerprint,
 } from "@organic-growth/db";
 import {
-  MAX_COMPETITORS, crawlLogCoverage, fetchSearchConsoleMetrics, loadTrendSignals, probeTitleForCoverage, queueFullCrawl, runFullAnalysis, synthesizePlanNarrative,
+  MAX_COMPETITORS, crawlLogCoverage, fetchSearchConsoleMetrics, loadInventories, loadTrendSignals, probeTitleForCoverage, queueFullCrawl, runFullAnalysis, synthesizePlanNarrative,
 } from "@organic-growth/agents";
 import {
   buildRepoSnapshotFromGitHub,
@@ -117,6 +117,10 @@ export class SiteAnalysisWorkflow extends WorkflowEntrypoint<AppEnv, AnalysisPay
         }));
       }
 
+      // The client's own data, when the Data section holds any: fills by language, duplicates, thin record pages.
+      // Its own step, so its queries have their own budget and a failure costs only the inventory.
+      const inventory = await step.do("inventory", () => loadInventories(db, siteId, { analysisId }).catch(() => []));
+
       // The step persists the report itself and returns only a summary: the
       // full report can exceed the Workflow step-output size limit.
       await step.do(
@@ -165,7 +169,7 @@ export class SiteAnalysisWorkflow extends WorkflowEntrypoint<AppEnv, AnalysisPay
             loadConnectorLists(db, { id: siteId, baseUrl: site.baseUrl }, { markets: targetMarkets, competitors }),
             crawlLogCoverage(db, siteId, analysisId),
             searchConsoleReconciliation(db, siteId, analysisId).catch(() => null),
-          ]).then(async ([lists, coverage, searchConsole]) => connectorSignals(lists, coverage, searchConsole, await loadTrendSignals(db, siteId, lists.crawlLog).catch(() => null))).catch(() => undefined);
+          ]).then(async ([lists, coverage, searchConsole]) => connectorSignals(lists, coverage, searchConsole, await loadTrendSignals(db, siteId, lists.crawlLog).catch(() => null), inventory)).catch(() => connectorSignals({ serp: { lists: [], suggestions: [] }, links: undefined } as never, null, null, null, inventory));
           const raw = await runFullAnalysis({
             analysisId,
             siteId,

@@ -401,7 +401,7 @@ export type Dataset = {
   updatedAt: string;
 };
 
-export type DataSourceKind = "sitemap" | "listing" | "page" | "own_site";
+export type DataSourceKind = "sitemap" | "listing" | "page" | "own_site" | "supabase";
 export type DataSourceOrigin = "ai" | "user" | "own_site";
 export type DataSourceStatus = "proposed" | "approved" | "rejected" | "blocked";
 

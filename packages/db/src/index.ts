@@ -427,6 +427,10 @@ export async function getOAuthCredential(
   return row ? { encryptedBlob: row.encrypted_blob, scopes: row.scopes } : null;
 }
 
+export async function deleteOAuthCredential(db: D1Like, siteId: string, provider: string): Promise<void> {
+  await db.prepare("DELETE FROM oauth_credentials WHERE site_id = ? AND provider = ?").bind(siteId, provider).run();
+}
+
 export async function setSiteCompetitorDomains(
   db: D1Like,
   siteId: string,

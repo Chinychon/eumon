@@ -19,7 +19,7 @@ export type LogCoverage = {
 };
 
 /** An imported Search Console Page-indexing export, reconciled with today (see `searchConsoleReconciliation`). */
-export type SearchConsoleSignal = Pick<SearchConsoleReconciliation, "importedAt" | "summary" | "reasons" | "suggestions" | "remainingChecks">;
+export type SearchConsoleSignal = Pick<SearchConsoleReconciliation, "importedAt" | "summary" | "counts" | "reasons" | "suggestions" | "remainingChecks">;
 
 export type ConnectorSignals = {
   serp?: SerpResult[];
@@ -136,14 +136,16 @@ export function findingsFromSearchConsoleImport(input: { siteId: string; analysi
   const { view } = input;
   if (!view) return [];
   const drafts: Draft[] = [];
-  const known = view.summary ? view.summary.rows.reduce((total, row) => total + row.pages, 0) : 0;
-  const indexed = view.summary?.rows.find((row) => row.reason === "indexed")?.pages ?? null;
-  if (view.summary && indexed !== null && known >= 100 && indexed / known < 0.5) {
-    const rest = view.summary.rows.filter((row) => row.reason !== "indexed").sort((a, b) => b.pages - a.pages);
+  // The chart carries Google's indexed count; the overview table lists only the not-indexed reasons unless an Indexed row was included.
+  const tableIndexed = view.summary?.rows.find((row) => row.reason === "indexed")?.pages ?? null;
+  const indexed = view.counts?.indexed ?? tableIndexed;
+  const known = view.counts ? view.counts.indexed + view.counts.notIndexed : tableIndexed !== null && view.summary ? view.summary.rows.reduce((total, row) => total + row.pages, 0) : 0;
+  if (indexed !== null && known >= 100 && indexed / known < 0.5) {
+    const rest = (view.summary?.rows ?? []).filter((row) => row.reason !== "indexed").sort((a, b) => b.pages - a.pages);
     drafts.push({
       category: "indexing", impact: Math.min(90, 55 + Math.round((0.5 - indexed / known) * 70)),
       title: `Google has indexed ${n(indexed)} of the ${n(known)} URLs it knows (${Math.round((indexed / known) * 100)}%)`,
-      summary: `Search Console's Page indexing report counts ${n(known)} URLs on this site and ${n(indexed)} indexed. The rest sit under ${rest.slice(0, 3).map((row) => `${row.reasonText} (${n(row.pages)})`).join(", ")}${rest.length > 3 ? " and more" : ""}.`,
+      summary: `Search Console's Page indexing report counts ${n(known)} URLs on this site and ${n(indexed)} indexed.${rest.length ? ` The rest sit under ${rest.slice(0, 3).map((row) => `${row.reasonText} (${n(row.pages)})`).join(", ")}${rest.length > 3 ? " and more" : ""}.` : ""}`,
       evidence: { known, indexed, reasons: rest.map((row) => ({ reason: row.reasonText, pages: row.pages })) },
       recommendation: "Give Google fewer, better URLs: keep only pages with real content in the sitemap, noindex or drop thin ones, and watch the crawl log for which page types Googlebot actually requests. Index coverage follows crawl budget.",
     });

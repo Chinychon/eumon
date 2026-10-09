@@ -15,6 +15,7 @@ describe("findingKey", () => {
     assert.equal(findingKey(finding("f1", " Thin Meta Descriptions ")), "metadata|thin meta descriptions");
     assert.notEqual(findingKey(finding("f1", "Thin meta descriptions")), findingKey(finding("f1", "Thin meta descriptions", { category: "content" })), "another category is another problem");
     assert.equal(findingKey(finding("f1", "Rewrite the search snippet of /prices/kl-2")), findingKey(finding("f2", "Rewrite the search snippet of /prices/kl-7")), "two pages' snippet findings are one key");
+    assert.equal(findingKey(finding("f1", "Google has indexed 1,561 of the 26,059 URLs it knows (6%)")), findingKey(finding("f2", "Google has indexed 800 of the 900 URLs it knows (89%)")), "a count crossing 1,000 is the same problem");
   });
 });
 

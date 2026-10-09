@@ -6,7 +6,7 @@ import { openSqliteD1 } from "@organic-growth/db/sqlite";
 import type { GooglebotCrawlOutcome } from "@organic-growth/crawler";
 import { DEMO_SITE_ID, seedDemoSite } from "@organic-growth/agents";
 import { getAnalysisJob } from "@organic-growth/db";
-import { checkSearchConsoleUrls, importExport, searchConsoleView } from "./search-console-import.ts";
+import { CHECKS_PER_REQUEST, checkSearchConsoleUrls, importExport, MAX_URLS_PER_IMPORT, searchConsoleView } from "./search-console-import.ts";
 
 const AT = "2026-10-01T00:00:00.000Z";
 const u = (path: string) => `https://x.com${path}`;
@@ -44,6 +44,25 @@ describe("Search Console import", () => {
     assert.ok("error" in elsewhere && /other\.example|another/i.test(elsewhere.error), elsewhere && "error" in elsewhere ? elsewhere.error : "");
     const junk = await importExport(db, record, csv(["a,b", "1,2"]), { reason: "noindex" });
     assert.ok("error" in junk && /URL/.test(junk.error));
+  });
+
+  it("caps one import at a few thousand URLs, and checks ten URLs a request", async () => {
+    const { db, site: record } = await site();
+    assert.equal(CHECKS_PER_REQUEST, 10);
+    const many = csv(["URL,Last crawled", ...Array.from({ length: MAX_URLS_PER_IMPORT + 1 }, (_, i) => `${u(`/doctors/d${i}`)},2026-09-30`)]);
+    const outcome = await importExport(db, record, many, { reason: "discovered" });
+    assert.ok("error" in outcome && new RegExp(MAX_URLS_PER_IMPORT.toLocaleString("en")).test(outcome.error), "error" in outcome ? outcome.error : "imported");
+  });
+
+  it("pairs a gone URL the crawl already knows with a live page during the check pass", async () => {
+    const { db, site: record } = await site();
+    await createAnalysis(db, { id: "a2", siteId: "s", status: "running", createdAt: "2026-10-05T00:00:00.000Z" });
+    await enqueueAnalysisCrawlUrls(db, { analysisId: "a2", siteId: "s", urls: [{ url: u("/doctors/catherine-lee"), routeFamily: "doctors" }, { url: u("/doctors/dr-catherine-lee-tong-how"), routeFamily: "doctors" }] });
+    await saveCrawlBatch(db, { analysisId: "a2", outcomes: [{ url: u("/doctors/catherine-lee"), page: page(u("/doctors/catherine-lee"), 404) }, { url: u("/doctors/dr-catherine-lee-tong-how"), page: page(u("/doctors/dr-catherine-lee-tong-how"), 200) }] });
+    await saveAnalysisReport(db, "a2", { findings: [] }, "done");
+    await importExport(db, record, csv(["URL,Last crawled", `${u("/doctors/catherine-lee")},2026-09-30`]), { reason: "not_found" });
+    assert.deepEqual(await checkSearchConsoleUrls(db, record, { crawl: async () => [] }), { checked: 0, remaining: 0 }, "nothing to fetch: the crawl knows it");
+    assert.deepEqual((await searchConsoleView(db, "s")).suggestions, [{ url: u("/doctors/catherine-lee"), suggestedUrl: u("/doctors/dr-catherine-lee-tong-how") }]);
   });
 
   it("records the overview table and the chart, and the view carries both", async () => {

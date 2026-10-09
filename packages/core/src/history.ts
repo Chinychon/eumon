@@ -27,8 +27,8 @@ export type Resolution = {
   vanished: boolean;
 };
 
-/** The same problem across runs: category and title with numbers blanked, so "waits for 3 requests" and "waits for 4" are one key. */
-export const findingKey = (finding: Pick<Finding, "category" | "title">) => `${finding.category}|${finding.title.replace(/\d+/g, "#").trim().toLowerCase()}`;
+/** The same problem across runs: category and title with numbers blanked (thousands separators included, so 1,200 and 800 match), so "waits for 3 requests" and "waits for 4" are one key. */
+export const findingKey = (finding: Pick<Finding, "category" | "title">) => `${finding.category}|${finding.title.replace(/\d[\d,.]*/g, "#").trim().toLowerCase()}`;
 
 /**
  * A finished run's key list: its findings, plus `vanished` rows for the

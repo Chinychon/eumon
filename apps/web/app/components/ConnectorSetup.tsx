@@ -123,20 +123,29 @@ export function ConnectorSetup({ siteId }: { siteId: string }) {
     if (!file) return;
     setExporting(true); setExportStatus("Reading the export…");
     try {
+      // The ZIP's name carries the reason; its members are Table.csv, Chart.csv and the like. Finder's resource forks are not data.
       const files: Array<{ name: string; text: string }> = file.name.toLowerCase().endsWith(".zip")
-        ? Object.entries(unzipSync(new Uint8Array(await file.arrayBuffer()))).filter(([name]) => name.toLowerCase().endsWith(".csv")).map(([, data]) => ({ name: file.name, text: strFromU8(data) }))
+        ? Object.entries(unzipSync(new Uint8Array(await file.arrayBuffer()))).filter(([name]) => name.toLowerCase().endsWith(".csv") && !name.startsWith("__MACOSX/")).map(([, data]) => ({ name: file.name, text: strFromU8(data) }))
         : [{ name: file.name, text: await file.text() }];
       if (!files.length) throw new Error("The ZIP holds no CSV files.");
       const notes: string[] = [];
+      const skipped: string[] = [];
       let remaining = 0;
       for (const entry of files) {
         const query = new URLSearchParams({ name: entry.name, ...(exportReason ? { reason: exportReason } : {}) });
-        const outcome = await api<{ kind: string; imported: number; reason?: string; remainingChecks?: number }>(`/api/sites/${siteId}/search-console/import?${query}`, { method: "POST", body: entry.text, headers: { "Content-Type": "text/csv" } });
-        const label = outcome.reason ? GSC_REASONS.find((reason) => reason.reason === outcome.reason)?.label ?? outcome.reason : "";
-        notes.push(outcome.kind === "urls" ? `${formatNumber(outcome.imported)} URLs as ${label}` : outcome.kind === "table" ? `the overview (${outcome.imported} reasons)` : `the chart (${outcome.imported} days)`);
-        remaining = Math.max(remaining, outcome.remainingChecks ?? 0);
+        try {
+          const outcome = await api<{ kind: string; imported: number; reason?: string; otherHost?: number; remainingChecks?: number }>(`/api/sites/${siteId}/search-console/import?${query}`, { method: "POST", body: entry.text, headers: { "Content-Type": "text/csv" } });
+          const label = outcome.reason ? GSC_REASONS.find((reason) => reason.reason === outcome.reason)?.label ?? outcome.reason : "";
+          notes.push(outcome.kind === "urls" ? `${formatNumber(outcome.imported)} URLs as ${label}${outcome.otherHost ? ` (${formatNumber(outcome.otherHost)} on another host left out)` : ""}` : outcome.kind === "table" ? `the overview (${outcome.imported} reasons)` : `the chart (${outcome.imported} days)`);
+          remaining = Math.max(remaining, outcome.remainingChecks ?? 0);
+        } catch (cause) {
+          // One member the importer doesn't know (a drill-down's own chart, say) doesn't stop the others.
+          if (files.length === 1) throw cause;
+          skipped.push(errorMessage(cause));
+        }
       }
-      const imported = `Imported ${notes.join(", ")}.`;
+      if (!notes.length) throw new Error(skipped[0] ?? "Nothing in the ZIP could be read.");
+      const imported = `Imported ${notes.join(", ")}.${skipped.length ? ` Skipped ${skipped.length} file${skipped.length === 1 ? "" : "s"} in the ZIP: ${skipped[0]}` : ""}`;
       let done = 0;
       while (remaining > 0) {
         setExportStatus(`${imported} Checking ${formatNumber(remaining + done)} URLs that are no longer in the sitemap… ${formatNumber(done)} done.`);
@@ -146,6 +155,7 @@ export function ConnectorSetup({ siteId }: { siteId: string }) {
         if (!step.checked) break;
       }
       setExportStatus(`${imported}${done ? ` Checked ${formatNumber(done)} URLs outside the sitemap.` : ""} The Search tab shows the result.`);
+      setExportReason("");
     } catch (cause) { setExportStatus(errorMessage(cause)); } finally { setExporting(false); }
   }
 
@@ -197,7 +207,7 @@ export function ConnectorSetup({ siteId }: { siteId: string }) {
             </select>
             <label className="btn btn-secondary btn-small">
               {exporting ? "Importing…" : "Import an export"}
-              <input type="file" accept=".csv,.zip" hidden disabled={exporting} onChange={(event) => void sendExport(event.target.files?.[0])} />
+              <input type="file" accept=".csv,.zip" hidden disabled={exporting} onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; void sendExport(file); }} />
             </label>
           </div>
           {exportStatus && <p className="small">{exportStatus}</p>}

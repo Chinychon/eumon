@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { GSC_REASONS, gscReason, parseSearchConsoleExport, reasonFromFileName, suggestRedirect, todayStatus } from "./search-console.js";
+import { asDay, GSC_REASONS, gscReason, parseSearchConsoleExport, reasonFromFileName, suggestRedirect, todayStatus } from "./search-console.js";
 
 const csv = (lines: string[]) => `${lines.join("\r\n")}\r\n`;
 
@@ -43,6 +43,20 @@ describe("parseSearchConsoleExport", () => {
     assert.deepEqual(parsed.points, [{ day: "2026-09-19", indexed: 1774, notIndexed: 3309 }, { day: "2026-09-22", indexed: 1561, notIndexed: 24498 }]);
   });
 
+  it("reads day-first dates when any date in the file says so, and never takes a count for a date", () => {
+    const chart = parseSearchConsoleExport(csv(["Date,Indexed,Not indexed", "19/9/2026,1774,3309", "3/10/2026,1561,24498"]), "medbay.example");
+    assert.equal(chart.kind, "chart");
+    if (chart.kind === "chart") assert.deepEqual(chart.points.map((point) => point.day), ["2026-09-19", "2026-10-03"], "19/9 can only be day-first, so 3/10 is 3 October");
+    const list = parseSearchConsoleExport(csv(["URL,Pages,Last crawled", "https://medbay.example/a,3,2026-10-01"]), "medbay.example");
+    assert.equal(list.kind, "urls");
+    if (list.kind === "urls") assert.deepEqual(list.urls, [{ url: "https://medbay.example/a", lastCrawled: "2026-10-01" }]);
+  });
+
+  it("refuses a file whose quote never closes rather than reading the rest as one URL", () => {
+    const parsed = parseSearchConsoleExport('URL,Last crawled\n"https://medbay.example/a,2026-10-01\nhttps://medbay.example/b,2026-10-01\n', "medbay.example");
+    assert.equal(parsed.kind, "unknown");
+  });
+
   it("says what it could not recognise, and lists nothing from another property", () => {
     const unknown = parseSearchConsoleExport(csv(["a,b", "1,2"]), "medbay.example");
     assert.equal(unknown.kind, "unknown");
@@ -66,9 +80,23 @@ describe("gscReason", () => {
   });
 });
 
+describe("asDay", () => {
+  it("validates what it reads and knows the two slash orders", () => {
+    assert.equal(asDay("2026-13-45"), null);
+    assert.equal(asDay("3"), null, "a count is not a date");
+    assert.equal(asDay("19/9/2026"), null, "month 19 is impossible month-first");
+    assert.equal(asDay("19/9/2026", "dmy"), "2026-09-19");
+    assert.equal(asDay("9/19/2026"), "2026-09-19");
+    assert.equal(asDay("Oct 6, 2026"), "2026-10-06");
+  });
+});
+
 describe("reasonFromFileName", () => {
-  it("takes the reason from an export's file name when it names one", () => {
+  it("takes the reason from an export's file name when it names one, ignoring the property's own words", () => {
     assert.equal(reasonFromFileName("medbay.example-Coverage-Drilldown-2026-10-09 Excluded by 'noindex' tag.zip"), "noindex");
+    assert.equal(reasonFromFileName("medbay.example-Coverage-Drilldown-2026-10-09 Crawled - currently not indexed.zip"), "crawled");
+    assert.equal(reasonFromFileName("noindex-clinic.example-Coverage-Drilldown-2026-10-09 Crawled – currently not indexed.zip"), "crawled");
+    assert.equal(reasonFromFileName("redirects.example-Coverage-Drilldown-2026-10-09 Not found (404).zip"), "not_found");
     assert.equal(reasonFromFileName("Discovered - currently not indexed.csv"), "discovered");
     assert.equal(reasonFromFileName("Table.csv"), null);
   });
@@ -96,9 +124,11 @@ describe("suggestRedirect", () => {
     assert.equal(suggestRedirect("https://x.com/hospitals/pantai-melaka", live), "https://x.com/hospitals/pantai-hospital-melaka");
     assert.equal(suggestRedirect("https://x.com/doctors/dr-badaruddin", live), "https://x.com/doctors/dato-dr-badrul-shah-badaruddin", "one long word is enough; dr is ignored");
   });
-  it("never pairs on a short common word alone, or across page types", () => {
+  it("never pairs on a short common word alone, across languages, or when two pages fit equally", () => {
     assert.equal(suggestRedirect("https://x.com/doctors/lee", live), null);
     assert.equal(suggestRedirect("https://x.com/doctors/dr-lee", live), null);
-    assert.equal(suggestRedirect("https://x.com/clinics/pantai-melaka", live), null, "another page type");
+    assert.equal(suggestRedirect("https://x.com/doctors/catherine-lee", ["https://x.com/ms/doctors/dr-catherine-lee", "https://x.com/doctors/dr-catherine-lee-tong"]), "https://x.com/doctors/dr-catherine-lee-tong", "the other language's page is never the answer");
+    assert.equal(suggestRedirect("https://x.com/ms/doctors/catherine-lee", ["https://x.com/ms/doctors/dr-catherine-lee", "https://x.com/doctors/dr-catherine-lee"]), "https://x.com/ms/doctors/dr-catherine-lee");
+    assert.equal(suggestRedirect("https://x.com/doctors/catherine-lee", ["https://x.com/doctors/dr-catherine-lee-a", "https://x.com/doctors/dr-catherine-lee-b"]), null, "a tie is no answer");
   });
 });

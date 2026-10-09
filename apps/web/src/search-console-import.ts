@@ -1,8 +1,8 @@
-import { addDays, GSC_REASONS, parseSearchConsoleExport, reasonFromFileName, suggestRedirect, urlFamily, type GscReason, type SiteRecord } from "@organic-growth/core";
-import { crawlGooglebotBatch, type GooglebotCrawlOutcome } from "@organic-growth/crawler";
+import { addDays, GSC_REASONS, parseSearchConsoleExport, reasonFromFileName, suggestRedirect, type GscReason, type SiteRecord } from "@organic-growth/core";
+import { classifyUrlType, crawlGooglebotBatch, type GooglebotCrawlOutcome } from "@organic-growth/crawler";
 import {
-  importSearchConsoleUrls, listMetricSeries, liveUrlsOfFamily, saveSearchConsoleChart, saveSearchConsoleChecks, saveSearchConsoleSummary, searchConsoleChecksRemaining,
-  searchConsoleReconciliation, searchConsoleUrlsToCheck, type D1Like, type SearchConsoleReconciliation,
+  importSearchConsoleUrls, listMetricSeries, liveUrlsOfFamily, saveSearchConsoleChart, saveSearchConsoleChecks, saveSearchConsoleSuggestions, saveSearchConsoleSummary,
+  searchConsoleChecksRemaining, searchConsoleGoneUnsuggested, searchConsoleReconciliation, searchConsoleUrlsToCheck, type D1Like, type SearchConsoleReconciliation,
 } from "@organic-growth/db";
 
 /*
@@ -11,9 +11,13 @@ import {
  * know are fetched a few at a time from the console until none remain.
  */
 
-/** Live fetches per request: the Free plan allows 50 subrequests, and a redirect chain costs several. */
-export const CHECKS_PER_REQUEST = 20;
-/** A fetch the crawler could not complete is recorded as this status: an error, not a URL still waiting. */
+/** Live fetches per request: the Free plan allows 50 subrequests, and a redirect, a firewall re-fetch or a retry each cost one more. */
+export const CHECKS_PER_REQUEST = 10;
+/** Crawl-known gone URLs paired with a live page per request (no fetch, one query per page type). */
+const SUGGESTIONS_PER_REQUEST = 50;
+/** URLs one import may hold: Search Console exports at most 1,000 rows per list, and two statements write the lot. */
+export const MAX_URLS_PER_IMPORT = 5_000;
+/** A fetch the crawler could not complete is recorded as this status: it reads as erroring, and the next import of its reason re-checks it. */
 export const FETCH_FAILED = 599;
 
 export type ImportOutcome =
@@ -41,6 +45,7 @@ export async function importExport(db: D1Like, site: Pick<SiteRecord, "id" | "ba
   if (!parsed.urls.length) {
     return { error: parsed.otherHost ? `The ${parsed.otherHost.toLocaleString("en")} URLs in this file are on another host, not ${host}. Export from the Search Console property for ${host}.` : "The file lists no URLs." };
   }
+  if (parsed.urls.length > MAX_URLS_PER_IMPORT) return { error: `This list has ${parsed.urls.length.toLocaleString("en")} URLs; one import takes at most ${MAX_URLS_PER_IMPORT.toLocaleString("en")}. Split it, or export one reason at a time.` };
   const reason = isReason(options.reason) ? options.reason : options.fileName ? reasonFromFileName(options.fileName) : null;
   if (!reason) return { error: "Say which reason this URL list is for: Search Console puts it in the export's file name, or pick it here." };
   await importSearchConsoleUrls(db, site.id, { reason, reasonText: GSC_REASONS.find((entry) => entry.reason === reason)!.label, urls: parsed.urls, importedAt: now });
@@ -49,30 +54,36 @@ export async function importExport(db: D1Like, site: Pick<SiteRecord, "id" | "ba
 
 export type Crawl = (urls: string[]) => Promise<GooglebotCrawlOutcome[]>;
 
-/** Fetches the next unchecked URLs as Googlebot, records what they are today, and pairs gone ones with a live page of the same type. */
+/**
+ * One step of the check pass: fetches the next unchecked URLs the crawl
+ * doesn't know as Googlebot and records what they are today, then pairs gone
+ * URLs — fetched or crawl-known — with a live page of the same type. The
+ * console repeats it until nothing remains.
+ */
 export async function checkSearchConsoleUrls(db: D1Like, site: Pick<SiteRecord, "id" | "baseUrl">, options: { limit?: number; crawl?: Crawl } = {}): Promise<{ checked: number; remaining: number }> {
   const crawl = options.crawl ?? ((urls: string[]) => crawlGooglebotBatch(urls, undefined, 4));
-  const urls = await searchConsoleUrlsToCheck(db, site.id, options.limit ?? CHECKS_PER_REQUEST);
-  if (!urls.length) return { checked: 0, remaining: 0 };
-  const outcomes = await crawl(urls);
   const liveByFamily = new Map<string, string[]>();
+  const suggest = async (url: string) => {
+    const family = classifyUrlType(url);
+    if (!liveByFamily.has(family)) liveByFamily.set(family, await liveUrlsOfFamily(db, site.id, family));
+    return suggestRedirect(url, liveByFamily.get(family)!);
+  };
+  const urls = await searchConsoleUrlsToCheck(db, site.id, options.limit ?? CHECKS_PER_REQUEST);
   const rows = [];
-  for (const outcome of outcomes) {
+  for (const outcome of urls.length ? await crawl(urls) : []) {
     if ("error" in outcome) {
       rows.push({ url: outcome.url, status: FETCH_FAILED, finalUrl: null, noindex: null, suggestedUrl: null });
       continue;
     }
     const { page } = outcome;
-    let suggestedUrl: string | null = null;
-    if (page.status === 404 || page.status === 410) {
-      const family = urlFamily(outcome.url);
-      if (!liveByFamily.has(family)) liveByFamily.set(family, await liveUrlsOfFamily(db, site.id, family));
-      suggestedUrl = suggestRedirect(outcome.url, liveByFamily.get(family)!);
-    }
-    rows.push({ url: outcome.url, status: page.status, finalUrl: page.finalUrl ?? null, noindex: page.noindex ?? null, suggestedUrl });
+    const gone = page.status === 404 || page.status === 410;
+    rows.push({ url: outcome.url, status: page.status, finalUrl: page.finalUrl ?? null, noindex: page.noindex ?? null, suggestedUrl: gone ? await suggest(outcome.url) : null });
   }
-  await saveSearchConsoleChecks(db, site.id, rows);
-  return { checked: rows.length, remaining: await searchConsoleChecksRemaining(db, site.id) };
+  if (rows.length) await saveSearchConsoleChecks(db, site.id, rows);
+  const known = await searchConsoleGoneUnsuggested(db, site.id, undefined, SUGGESTIONS_PER_REQUEST);
+  if (known.length) await saveSearchConsoleSuggestions(db, site.id, await Promise.all(known.map(async (url) => ({ url, suggestedUrl: await suggest(url) }))));
+  const [fetches, pairings] = await Promise.all([searchConsoleChecksRemaining(db, site.id), searchConsoleGoneUnsuggested(db, site.id, undefined, 1)]);
+  return { checked: rows.length, remaining: fetches + pairings.length };
 }
 
 export type SearchConsoleView = SearchConsoleReconciliation & { history: Array<{ day: string; indexed: number; notIndexed: number }> };

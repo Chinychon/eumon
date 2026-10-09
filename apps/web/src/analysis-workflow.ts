@@ -166,7 +166,7 @@ export class SiteAnalysisWorkflow extends WorkflowEntrypoint<AppEnv, AnalysisPay
           const connectors = await Promise.all([
             loadConnectorLists(db, { id: siteId, baseUrl: site.baseUrl }, { markets: targetMarkets, competitors }),
             crawlLogCoverage(db, siteId, analysisId),
-            searchConsoleReconciliation(db, siteId).catch(() => null),
+            searchConsoleReconciliation(db, siteId, analysisId).catch(() => null),
           ]).then(([lists, coverage, searchConsole]) => connectorSignals(lists, coverage, searchConsole)).catch(() => undefined);
           const raw = await runFullAnalysis({
             analysisId,

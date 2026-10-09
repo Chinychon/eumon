@@ -56,16 +56,15 @@ export function SearchConsoleCard({ siteId, onNavigate }: { siteId: string; onNa
       </Card>
     );
   }
-  const indexed = view.summary?.rows.find((row) => row.reason === "indexed")?.pages ?? null;
-  const known = view.summary ? view.summary.rows.reduce((total, row) => total + row.pages, 0) : null;
-  const latest = view.history.at(-1);
+  const listed = view.summary ? view.summary.rows.reduce((total, row) => total + row.pages, 0) : null;
+  const latest = view.counts;
   return (
     <Card title={title} actions={<ExportMenu title="Search Console import" sheets={() => searchConsoleSheets(view)} />}
       subtitle={`From exports of the Page indexing report${view.importedAt ? `, last imported ${formatDay(view.importedAt.slice(0, 10))}` : ""}. Each listed URL is checked against today's crawl; URLs no longer in the sitemap are fetched.`}>
-      {(known !== null || latest) && (
+      {(listed !== null || latest) && (
         <p>
           {latest ? <>On {formatDay(latest.day)} Google had indexed <strong>{formatNumber(latest.indexed)}</strong> of the {formatNumber(latest.indexed + latest.notIndexed)} URLs it knows ({Math.round((latest.indexed / Math.max(1, latest.indexed + latest.notIndexed)) * 100)}%).</>
-            : <>Google knows <strong>{formatNumber(known!)}</strong> URLs{indexed !== null ? <>, {formatNumber(indexed)} of them indexed ({Math.round((indexed / Math.max(1, known!)) * 100)}%)</> : null}.</>}
+            : <>Google lists <strong>{formatNumber(listed!)}</strong> URLs under the reasons below. Import the chart too for how many it has indexed.</>}
         </p>
       )}
       {view.history.length >= 2 && (

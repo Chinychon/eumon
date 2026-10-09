@@ -240,11 +240,11 @@ export function OverviewView({ site, tab, onTab, onNavigate }: {
               <Briefing report={report} running={Boolean(pendingId)} leads={leads} hasSearch={Boolean(site.gscProperty)} competitorCount={competitorCount} onOpen={go} onNavigate={onNavigate} />
               </>
             )}
-            {current === "technical" && <TechnicalTab siteId={site.id} report={report} results={results.data} running={Boolean(pendingId)} changes={changes} busy={busy} hasRepo={hasRepo} onGenerateChange={generateChange} onOpenPullRequest={openPullRequest} onRecrawl={() => runAnalysis(true)} />}
+            {current === "technical" && <TechnicalTab siteId={site.id} report={report} results={results.data} running={Boolean(pendingId)} changes={changes} busy={busy} hasRepo={hasRepo} onGenerateChange={generateChange} onOpenPullRequest={openPullRequest} onRecrawl={() => runAnalysis(true)} onSetup={() => onNavigate("setup")} />}
             {results.data && current === "search" && <SearchPanel site={site} data={results.data} report={report} onNavigate={onNavigate} />}
             {results.data && current === "enquiries" && <EnquiriesPanel data={results.data} report={report} leads={leads} onNavigate={onNavigate} />}
             {results.data && current === "keywords" && <KeywordsPanel site={site} data={results.data} />}
-            {results.data && current === "competitors" && <CompetitorsPanel site={site} data={results.data} report={report} onNavigate={onNavigate} />}
+            {results.data && current === "competitors" && <CompetitorsPanel site={site} data={results.data} report={report} onNavigate={onNavigate} onCompetitorsChanged={() => setCompetitorCount((count) => (count ?? 0) + 1)} />}
             {results.data && current === "ai" && <AiPanel data={results.data} report={report} onNavigate={onNavigate} />}
           </>
         )}

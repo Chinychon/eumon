@@ -47,9 +47,11 @@ export const worker = defineWorker({
       // Optional: real-user speed and lab scores (Google API key with the CrUX and PageSpeed Insights APIs), and authority (Open PageRank).
       GOOGLE_API_KEY: bindings.secret(),
       OPEN_PAGERANK_KEY: bindings.secret(),
-      // Optional: DataForSEO (keyword volume, difficulty, competitor keywords). Basic auth: the API login and API password.
+      // Optional: DataForSEO (keyword volume, difficulty, competitor keywords, search results pages, backlinks). Basic auth: the API login and API password.
       DATAFORSEO_LOGIN: bindings.secret(),
       DATAFORSEO_PASSWORD: bindings.secret(),
+      // Optional: Bing Webmaster Tools API key (Settings → API access), for Bing clicks, impressions and crawl counts.
+      BING_WEBMASTER_API_KEY: bindings.secret(),
       // Language model key: DeepSeek is used first, then Claude, then Workers AI.
       // Every secret declared here must be set before a deploy (Cloudflare has no optional secrets),
       // and local dev loads only declared keys from .dev.vars. ANTHROPIC_API_KEY and LLM_MODEL are

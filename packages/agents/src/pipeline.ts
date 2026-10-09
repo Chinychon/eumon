@@ -45,6 +45,7 @@ import {
   type AnalysisBundle,
 } from "./index.js";
 import { findingsFromCode } from "./code-findings.js";
+import { findingsFromCrawlLog, type ConnectorSignals } from "./connector-findings.js";
 import { auditConversion, findingsFromConversion } from "./conversion.js";
 import {
   compareCompetition,
@@ -155,6 +156,8 @@ export interface RunAnalysisInput {
   entityKeys?: Array<{ key: string; entityType: string }>;
   /** Keyword lists from the Performance sync (DataForSEO), when synced. */
   keywords?: KeywordsInput;
+  /** Search results pages, suggested competitors, links and crawl-log coverage from the sync, when synced. */
+  connectors?: ConnectorSignals;
 }
 
 /** Competitors researched per analysis; each costs a sitemap profile and a handful of page fetches. */
@@ -349,6 +352,7 @@ export async function runFullAnalysis(input: RunAnalysisInput) {
   }
   const competitors = competition ? competitorProfiles(competition, input.siteId) : [];
 
+  if (input.connectors?.logCoverage) findings.push(...findingsFromCrawlLog({ siteId: input.siteId, analysisId, coverage: input.connectors.logCoverage }));
   const rankedFindings = rankSeverityByOrganicImpact(findings);
 
   const bundle: AnalysisBundle = {
@@ -367,6 +371,7 @@ export async function runFullAnalysis(input: RunAnalysisInput) {
     datasets: input.datasets,
     search,
     keywords: input.keywords,
+    connectors: input.connectors,
   };
 
   const opportunities = buildOpportunities(bundle);

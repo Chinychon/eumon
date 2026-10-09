@@ -3,12 +3,13 @@
 import { useEffect, useState } from "react";
 import { COUNTRIES, countryName, type SiteRecord } from "@organic-growth/core";
 import { api, errorMessage } from "./api";
+import { ConnectorSetup } from "./ConnectorSetup";
 import type { Repository } from "./OverviewView";
 import { Badge, Button, Card, CrossIcon, PartHead, ViewHeader } from "./ui";
 
 const domainsOf = (text: string) => text.split(/[\n,]/).map((value) => value.trim()).filter(Boolean);
 
-/** Everything Eumon reads from: the website, the code, Search Console, the markets you sell to, and your competitors. */
+/** Everything Eumon reads from: the website, the code, Search Console, the markets you sell to, your competitors, and the optional sources beyond them. */
 export function ConnectionsView({ site, repositories, githubInstalled, onSiteChanged }: {
   site: SiteRecord;
   repositories: Repository[];
@@ -168,6 +169,7 @@ export function ConnectionsView({ site, repositories, githubInstalled, onSiteCha
           </div>
         </div>
       </Card>
+      <ConnectorSetup siteId={site.id} />
     </div>
   );
 }

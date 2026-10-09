@@ -22,6 +22,7 @@ import {
 } from "@organic-growth/db";
 import {
   MAX_COMPETITORS,
+  crawlLogCoverage,
   fetchSearchConsoleMetrics,
   queueFullCrawl,
   runFullAnalysis,
@@ -39,6 +40,7 @@ import {
   type SiteResearch,
 } from "@organic-growth/crawler";
 import { googleAccessToken } from "./gsc-auth";
+import { connectorSignals, loadConnectorLists } from "./connectors-data";
 import { loadKeywords } from "./keywords-data";
 
 interface AnalysisPayload {
@@ -159,6 +161,11 @@ export class SiteAnalysisWorkflow extends WorkflowEntrypoint<AppEnv, AnalysisPay
           // Keyword lists from the Performance sync give opportunities real volume and difficulty, and the biggest gaps.
           // An enrichment only: an analysis never fails for want of them (for example before migration 0016 has run).
           const keywords = await loadKeywords(db, { id: siteId, baseUrl: site.baseUrl, gscProperty: site.gscProperty }, { markets: targetMarkets, competitors }).catch(() => undefined);
+          // Search results, links and the crawl log, likewise an enrichment only.
+          const connectors = await Promise.all([
+            loadConnectorLists(db, { id: siteId, baseUrl: site.baseUrl }, { markets: targetMarkets, competitors }),
+            crawlLogCoverage(db, siteId, analysisId),
+          ]).then(([lists, coverage]) => connectorSignals(lists, coverage)).catch(() => undefined);
           const raw = await runFullAnalysis({
             analysisId,
             siteId,
@@ -174,6 +181,7 @@ export class SiteAnalysisWorkflow extends WorkflowEntrypoint<AppEnv, AnalysisPay
             targetMarkets,
             entityKeys,
             keywords,
+            connectors,
             llm,
             repoSnapshot,
             maxPages: 25,

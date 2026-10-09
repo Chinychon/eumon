@@ -8,6 +8,8 @@ import {
   updateAnalysisStatus, upsertDataset, upsertRecords, upsertSite, upsertTemplate, type D1Like,
 } from "@organic-growth/db";
 import { generatePages } from "@organic-growth/pages";
+import { demoLinks, demoSerpLists, demoSuggestions, seedDemoConnectors } from "./demo-connectors.js";
+import { crawlLogCoverage } from "./log-coverage.js";
 import { queueFullCrawl, runFullAnalysis } from "./pipeline.js";
 
 /*
@@ -342,6 +344,9 @@ const DEMO_RANKED: Record<string, Record<string, Ranked[]>> = {
 /** Estimated monthly visits for a ranking, the way DataForSEO's etv falls off past the top 3. */
 const estimatedTraffic = (volume: number, position: number) => Math.round(volume * (position <= 1 ? 0.3 : position <= 3 ? 0.15 : position <= 10 ? 0.04 : position <= 20 ? 0.008 : 0.002) * 10) / 10;
 
+/** What the demo's connector data is built from. */
+const demoConnectorInput = () => ({ siteId: DEMO_SITE_ID, origin: ORIGIN, own, competitors: COMPETITORS, ranked: DEMO_RANKED, paths: demoPages() });
+
 /** The demo's keyword lists, as the analysis and the view read them. */
 export function demoKeywords(today: string): KeywordsInput {
   return {
@@ -418,6 +423,13 @@ async function analyzeDemo(db: D1Like, input: { analysisId: string; version: num
     targetMarkets: ["mys", "sgp"],
     // The keyword lists the growth plan prices queries and finds gaps with, as a synced site has them.
     keywords: demoKeywords(new Date(input.now).toISOString().slice(0, 10)),
+    // Likewise results pages, links, suggested competitors and the crawl log.
+    connectors: {
+      serp: demoSerpLists(demoConnectorInput(), new Date(input.now).toISOString().slice(0, 10)).flatMap((list) => list.rows),
+      suggestions: demoSuggestions(),
+      links: demoLinks(demoConnectorInput(), new Date(input.now).toISOString().slice(0, 10)),
+      logCoverage: await crawlLogCoverage(db, DEMO_SITE_ID, input.analysisId, new Date(input.now).toISOString().slice(0, 10)),
+    },
     crawlCoverage: { coverage, examples },
     renderPages: (urls) => renderDemo(urls, input.version),
   });
@@ -606,6 +618,8 @@ export async function seedDemoSite(db: D1Like, now = Date.now()): Promise<{ site
   await setSiteCompetitorDomains(db, DEMO_SITE_ID, COMPETITORS);
   await replaceCurrentSearchMetrics(db, DEMO_SITE_ID, demoSearchRows(now));
   await seedPageEngine(db, now);
+  // Before the analyses, which read the crawl log.
+  await seedDemoConnectors(db, demoConnectorInput(), now);
   await completedAnalysis(db, "analysis_demo_1", 1, now - 30 * DAY);
   await completedAnalysis(db, "analysis_demo_2", 2, now - 2 * DAY);
   await seedDemoResults(db, now);
@@ -810,7 +824,8 @@ async function seedDemoResults(db: D1Like, now: number) {
   await seedDemoKeywords(db, now);
   // Three syncs for the history in Setup: two clean daily runs, and a Sync now where Analytics refused the token.
   const ran = (daysBack: number, hour: number) => new Date(now - daysBack * DAY + hour * 3600_000).toISOString();
-  const clean = ["speed: 2 weeks", "lab: 2 scores", "authority: 3 domains", "search: 7 days", "search@markets: 7 days", "rankings: skipped (Mondays)", "inspected 52 pages", "coverage: inspected 50", "analytics: 7 days", "keywords: lists fresh"];
+  const clean = ["speed: 2 weeks", "lab: 2 scores", "authority: 3 domains", "search: 7 days", "search@markets: 7 days", "rankings: skipped (Mondays)", "inspected 52 pages", "coverage: inspected 50", "analytics: 7 days", "keywords: lists fresh",
+    "search competitors: lists fresh", "search results: 10 pages checked, $0.04", "backlinks: lists fresh", "bing: 14 days", "indexnow: nothing changed", "crawl log: 64 Googlebot and 12 Bingbot requests yesterday"];
   await recordSyncRun(db, { id: "sync_demo_1", siteId: DEMO_SITE_ID, trigger: "daily", startedAt: ran(2, 4.25), finishedAt: ran(2, 4.27), notes: clean });
   await recordSyncRun(db, { id: "sync_demo_2", siteId: DEMO_SITE_ID, trigger: "manual", startedAt: ran(1, 9.1), finishedAt: ran(1, 9.12),
     notes: [...clean.filter((note) => !note.startsWith("analytics")), "analytics failed: Google Analytics report request failed (403): The caller does not have permission. Reconnect Google in Setup."] });

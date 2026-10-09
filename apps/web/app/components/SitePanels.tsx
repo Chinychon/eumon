@@ -3,6 +3,7 @@
 import type { SiteRecord } from "@organic-growth/core";
 import { AiReadinessCard, CompetitorsSection, ConversionSections, IndexCoverageCard, SearchAnalysis } from "./ReportTabs";
 import type { Navigate, Report } from "./report-model";
+import { BacklinksCard, BingCard, CompetitorSuggestionsCard, SearchResultsCard } from "./results/ConnectorCards";
 import { KeywordsCard } from "./results/KeywordsCard";
 import { AiReadersCard, AiReferralsCard, AUTHORITY_NOTE, AuthoritySection, ConnectPrompt, EnquiriesCard, GoogleSearchCard, OrganicSessions, QuestionSearchesCard } from "./results/sections";
 import type { Leads, Payload } from "./site-data";
@@ -24,6 +25,7 @@ export function SearchPanel({ site, data, report, onNavigate }: { site: SiteReco
           <ConnectPrompt operator what="Search Console" onNavigate={onNavigate} />
         </Card>
         {data.results.organic && <Card title="Organic sessions"><OrganicSessions data={data} operator /></Card>}
+        <BingCard data={data} operator />
       </div>
     );
   }
@@ -36,6 +38,7 @@ export function SearchPanel({ site, data, report, onNavigate }: { site: SiteReco
         </Card>
       )}
       <IndexCoverageCard siteId={site.id} onNavigate={onNavigate} />
+      <BingCard data={data} operator />
     </div>
   );
 }
@@ -50,22 +53,25 @@ export function EnquiriesPanel({ data, report, leads, onNavigate }: { data: Payl
   );
 }
 
-/** What the site's searches are worth, which searches competitors win, and each domain's share of visibility. */
+/** What the site's searches are worth, which searches competitors win, each domain's share of visibility, and what the results pages hold. */
 export function KeywordsPanel({ site, data }: { site: SiteRecord; data: Payload }) {
   const { results } = data;
   return (
     <div className="results">
       <KeywordsCard keywords={results.keywords} host={new URL(site.baseUrl).hostname} operator hasCredentials={data.site.signals.keywords} hasMarkets={results.markets.length > 0}
         searchTop10={results.search?.buckets.find((bucket) => bucket.top === 10)?.queries ?? null} />
+      <SearchResultsCard data={data} operator />
     </div>
   );
 }
 
-/** The kinds of pages competitors publish that the site doesn't, where it leads, and authority beside theirs. */
-export function CompetitorsPanel({ site, data, report, onNavigate }: { site: SiteRecord; data: Payload; report: Report | null; onNavigate: Navigate }) {
+/** Who wins the site's searches, the kinds of pages competitors publish that the site doesn't, and links and authority beside theirs. */
+export function CompetitorsPanel({ site, data, report, onNavigate, onCompetitorsChanged }: { site: SiteRecord; data: Payload; report: Report | null; onNavigate: Navigate; onCompetitorsChanged?: () => void }) {
   return (
     <div className="results">
+      <CompetitorSuggestionsCard siteId={site.id} data={data} onAdded={onCompetitorsChanged} />
       <CompetitorsSection report={report} site={site} competitors={data.results.authority.competitors.length} onNavigate={onNavigate} />
+      <BacklinksCard data={data} operator />
       <Card title="Authority" subtitle="An authority estimate for you and each competitor.">
         <AuthoritySection data={data} operator />
         <p className="small muted">{AUTHORITY_NOTE}</p>

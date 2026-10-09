@@ -3,7 +3,8 @@ import type { WorkflowEvent, WorkflowStep } from "cloudflare:workers";
 import type { AppEnv } from "../cloudflare.config";
 import { getSite, listSitesForResults, publishedPages } from "@organic-growth/db";
 import { googleAccess } from "./results-access";
-import { COVERAGE_STEP, coverageRound, syncResults } from "./results-sync";
+import { syncResults } from "./results-sync";
+import { COVERAGE_STEP, coverageRound } from "./url-inspection";
 import { syncGeneratedPageSearch } from "./search-sync";
 
 /** The daily sync for every site. Unscheduled for now (scheduled Workflows need the paid Workers plan; see cloudflare.config.ts). */

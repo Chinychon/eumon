@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { analysisHealthPoints, clearMetricPoints, topEumonPage, getTopQueriesSnapshot, saveTopQueriesSnapshot, SEARCH_METRIC_PATTERNS, indexStatusCounts, listSitesForResults, pagesToInspect, saveIndexStatus, bumpReportShareVersion, createAnalysis, dailyLeads, firstMetricDay, getSite, insertConversionEvent, listMetricSeries, publishedPages, recordLandingSession, saveAnalysisReport, syncFirstPartyResults, updateSiteGa4Property, upsertMetricPoints, upsertSite } from "./index.js";
+import { METRICS, RESULT_METRICS } from "@organic-growth/core";
+import { analysisHealthPoints, clearMetricPoints, topEumonPage, getTopQueriesSnapshot, saveTopQueriesSnapshot, indexStatusCounts, listSitesForResults, pagesToInspect, saveIndexStatus, bumpReportShareVersion, createAnalysis, dailyLeads, firstMetricDay, getSite, insertConversionEvent, listMetricSeries, publishedPages, recordLandingSession, saveAnalysisReport, syncFirstPartyResults, updateSiteGa4Property, upsertMetricPoints, upsertSite } from "./index.js";
 import { openSqliteD1 } from "./sqlite.js";
 
 const now = "2026-10-07T00:00:00.000Z";
@@ -123,11 +124,11 @@ describe("review fixes", async () => {
   it("clears one source's history, so a new property backfills its own", async () => {
     const db = openSqliteD1();
     await upsertSite(db, { id: "s", name: "x.com", baseUrl: "https://x.com", createdAt: now, updatedAt: now });
-    await upsertMetricPoints(db, "s", ["search_clicks", "search_clicks@markets", "eumon_search_clicks", "queries_top10", "ga4_sessions", "leads"].map((metric) => ({ metric, day: "2026-10-01", value: 1 })));
-    await clearMetricPoints(db, "s", ["%@markets"]);
+    await upsertMetricPoints(db, "s", ["search_clicks", "search_clicks@markets", "eumon_search_clicks", "queries_top10", "sync.search", "pages_indexed", "ga4_sessions", "leads"].map((metric) => ({ metric, day: "2026-10-01", value: 1 })));
+    await clearMetricPoints(db, "s", RESULT_METRICS.filter((metric) => metric.endsWith("@markets")));
     assert.equal(await firstMetricDay(db, "s", "search_clicks@markets"), null);
-    await clearMetricPoints(db, "s", SEARCH_METRIC_PATTERNS);
-    const left = await listMetricSeries(db, "s", ["search_clicks", "eumon_search_clicks", "queries_top10", "ga4_sessions", "leads"], "2026-01-01", "2026-12-31");
+    await clearMetricPoints(db, "s", METRICS.search);
+    const left = await listMetricSeries(db, "s", ["search_clicks", "eumon_search_clicks", "queries_top10", "sync.search", "pages_indexed", "ga4_sessions", "leads"], "2026-01-01", "2026-12-31");
     assert.deepEqual(Object.entries(left).filter(([, points]) => points.length).map(([metric]) => metric), ["ga4_sessions", "leads"]);
   });
 });

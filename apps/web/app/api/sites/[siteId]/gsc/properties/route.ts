@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
-import { clearMetricPoints, getSite, listRecordKeys, listSiteMarkets, replaceCurrentSearchMetrics, SEARCH_METRIC_PATTERNS, setLatestReportSearch, updateSiteGscProperty } from "@organic-growth/db";
+import { METRICS } from "@organic-growth/core";
+import { clearMetricPoints, getSite, listRecordKeys, listSiteMarkets, replaceCurrentSearchMetrics, setLatestReportSearch, updateSiteGscProperty } from "@organic-growth/db";
 import { analyzeSearch, fetchSearchConsoleMetrics, listSearchConsoleProperties, siteBrandTerms } from "@organic-growth/agents";
 import { googleAccessToken } from "../../../../../../src/gsc-auth";
 
@@ -28,7 +29,7 @@ export async function POST(request: Request, context: { params: Promise<{ siteId
     const properties = await listSearchConsoleProperties(token);
     if (!properties.some((entry) => entry.siteUrl === property)) return Response.json({ error: "That property is not accessible to this Google account." }, { status: 403 });
     // Another property's history is not this site's "before Eumon": clear it so the next sync backfills.
-    if (site.gscProperty && site.gscProperty !== property) await clearMetricPoints(env.DB, siteId, SEARCH_METRIC_PATTERNS);
+    if (site.gscProperty && site.gscProperty !== property) await clearMetricPoints(env.DB, siteId, METRICS.search);
     await updateSiteGscProperty(env.DB, siteId, property);
     // Fill the last report's Search section now instead of on the next analysis.
     const [rows, targetMarkets, entityKeys] = await Promise.all([

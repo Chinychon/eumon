@@ -76,16 +76,30 @@ export const RANK_BUCKETS = [3, 10, 20, 100] as const;
 const SEARCH = ["search_clicks", "search_impressions", "search_position_weight"];
 const BUCKET_METRICS = RANK_BUCKETS.flatMap((n) => [`queries_top${n}`, `queries_top${n}.new`, `queries_top${n}.lost`]);
 
+/**
+ * Every ledger metric, grouped by the source that writes it. A group is what
+ * that source's sync may write, what the view reads, and what a changed
+ * property clears. `sync.*` markers record that a source has run.
+ */
+export const METRICS = {
+  firstParty: ["leads", "leads_eumon", "googlebot_fetches", "eumon_page_views", "eumon_cta_clicks", "published_pages"],
+  analysis: ["site_health", "crawl_urls", "crawl_empty_shells", "crawl_http_errors", "crawl_noindex"],
+  /** Search Console: daily series (whole site, Eumon pages, target markets), Monday ranking buckets, index status. */
+  search: [
+    "sync.search", "sync.search@markets", "sync.rankings",
+    ...SEARCH, ...SEARCH.map((metric) => `${metric}@markets`), ...SEARCH.map((metric) => `eumon_${metric}`),
+    ...BUCKET_METRICS, ...BUCKET_METRICS.map((metric) => `${metric}@markets`),
+    "pages_indexed", "pages_not_indexed",
+  ],
+  ga4: ["sync.ga4", "ga4_sessions", "ga4_organic_sessions", "ga4_organic_engaged_sessions", "ga4_organic_key_events"],
+  crux: ["sync.crux", ...["lcp", "inp", "cls"].flatMap((metric) => [`crux_${metric}_p75.phone`, `crux_${metric}_p75.desktop`])],
+  lab: ["sync.lab", "lab_score_home.phone", "lab_score_home.desktop", "lab_score_eumon.phone", "lab_score_eumon.desktop"],
+  /** Plus `authority:<domain>` for each current competitor. */
+  authority: ["sync.authority", "authority"],
+};
+
 /** Every metric the Results view reads. */
-export const RESULT_METRICS = [
-  ...SEARCH, ...SEARCH.map((metric) => `${metric}@markets`), ...SEARCH.map((metric) => `eumon_${metric}`),
-  ...BUCKET_METRICS, ...BUCKET_METRICS.map((metric) => `${metric}@markets`),
-  "leads", "leads_eumon", "googlebot_fetches", "eumon_page_views", "eumon_cta_clicks", "published_pages",
-  "ga4_sessions", "ga4_organic_sessions", "ga4_organic_engaged_sessions", "ga4_organic_key_events",
-  "site_health", "crawl_urls", "crawl_empty_shells", "crawl_http_errors", "crawl_noindex",
-  "sync.crux", ...["lcp", "inp", "cls"].flatMap((metric) => [`crux_${metric}_p75.phone`, `crux_${metric}_p75.desktop`]),
-  "lab_score_home.phone", "lab_score_home.desktop", "lab_score_eumon.phone", "lab_score_eumon.desktop", "authority",
-];
+export const RESULT_METRICS = Object.values(METRICS).flat();
 
 /** A query's last 28 days of Search Console data, beside the 28 before (null when it had no impressions then). */
 export type TopQuery = {

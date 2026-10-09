@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { createAnalysis, enqueueAnalysisCrawlUrls, getTopQueriesSnapshot, indexCoverage, urlsToInspect, listMetricSeries, saveCrawlBatch, updateAnalysisStatus, setSiteCompetitorDomains, setSiteMarkets, updateSiteGa4Property, updateSiteGscProperty, upsertSite, getSite } from "@organic-growth/db";
 import { openSqliteD1 } from "@organic-growth/db/sqlite";
+import { RESULT_METRICS } from "@organic-growth/core";
 import { ANALYTICS_SCOPE, SEARCH_CONSOLE_SCOPE } from "./gsc-auth.ts";
-import { coverageRound, inspectSitemapUrls, syncResults } from "./results-sync.ts";
+import { syncResults } from "./results-sync.ts";
+import { coverageRound, inspectSitemapUrls } from "./url-inspection.ts";
 
 const now = new Date("2026-10-07T04:15:00Z");
 
@@ -77,6 +79,60 @@ describe("results sync", () => {
     const notes = await syncResults(db, record, now, { connect: async () => ({ token: "t", scopes: [SEARCH_CONSOLE_SCOPE] }), fetchFn });
     assert.ok(notes.includes("inspected 12 pages"), notes.join("; "));
     assert.ok(most > 1 && most <= 10, `at most ${most} inspections in flight`);
+  });
+
+  it("leaves a page Google won't inspect for tomorrow and carries on with the rest", async () => {
+    const { db, site: record } = await site();
+    await publishPages(db, 12);
+    const fetchFn = (async (_url: string, init?: RequestInit) => {
+      const asked = (JSON.parse(String(init?.body ?? "{}")) as { inspectionUrl?: string }).inspectionUrl;
+      if (!asked) return new Response(JSON.stringify({ rows: [] }));
+      if (asked.endsWith("/guides/3")) return new Response(JSON.stringify({ error: { message: "URL is not part of this property" } }), { status: 403 });
+      return new Response(JSON.stringify({ inspectionResult: { indexStatusResult: { verdict: "PASS" } } }));
+    }) as typeof fetch;
+    const notes = await syncResults(db, record, now, { connect: async () => ({ token: "t", scopes: [SEARCH_CONSOLE_SCOPE] }), fetchFn });
+    assert.ok(notes.includes("inspected 11 pages"), notes.join("; "));
+    assert.ok(!notes.some((note) => note.startsWith("inspection stopped")), notes.join("; "));
+  });
+
+  it("writes only metrics the Performance view reads", async () => {
+    const { db, site: record } = await site();
+    await setSiteMarkets(db, "s", ["mys"]);
+    await setSiteCompetitorDomains(db, "s", ["rival.example"]);
+    await publishPages(db, 2);
+    const fetchFn = (async (url: string) => {
+      if (url.includes("urlInspection")) return new Response(JSON.stringify({ inspectionResult: { indexStatusResult: { verdict: "PASS" } } }));
+      if (url.includes("chromeuxreport")) return new Response(JSON.stringify({ record: { metrics: { largest_contentful_paint: { percentilesTimeseries: { p75s: [3000] } } }, collectionPeriods: [{ lastDate: { year: 2026, month: 10, day: 3 } }] } }));
+      if (url.includes("pagespeedonline")) return new Response(JSON.stringify({ lighthouseResult: { categories: { performance: { score: 0.5 } } } }));
+      if (url.includes("openpagerank")) return new Response(JSON.stringify({ response: [{ status_code: 200, domain: "x.com", page_rank_decimal: 2.5 }, { status_code: 200, domain: "rival.example", page_rank_decimal: 3.1 }] }));
+      if (url.includes("analyticsdata")) return new Response(JSON.stringify({ rows: [{ dimensionValues: [{ value: "20261001" }, { value: "Organic Search" }], metricValues: [{ value: "9" }, { value: "4" }, { value: "1" }] }] }));
+      return new Response(JSON.stringify({ rows: [{ keys: ["2026-10-01"], clicks: 1, impressions: 10, ctr: 0.1, position: 5 }] }));
+    }) as typeof fetch;
+    const google = { connect: async () => ({ token: "t", scopes: [SEARCH_CONSOLE_SCOPE, ANALYTICS_SCOPE] }), fetchFn };
+    const notes = await syncResults(db, record, now, google, { googleApiKey: "g", openPageRankKey: "o" });
+    assert.ok(!notes.some((note) => note.includes("failed")), notes.join("; "));
+    const written = (await db.prepare("SELECT DISTINCT metric FROM metric_points WHERE site_id = 's'").all<{ metric: string }>()).results.map((row) => row.metric);
+    const declared = new Set([...RESULT_METRICS, "authority:rival.example"]);
+    assert.deepEqual(written.filter((metric) => !declared.has(metric)), [], "every point a sync writes is declared, so the view can read it and a property change can clear it");
+    assert.ok(written.length > 20, `a full sync wrote ${written.length} metrics`);
+  });
+
+  it("retries lab scores the next day when PageSpeed answered none", async () => {
+    const db = openSqliteD1();
+    await upsertSite(db, { id: "s", name: "x.com", baseUrl: "https://x.com", createdAt: now.toISOString(), updatedAt: now.toISOString() });
+    let pagespeed = 0;
+    const fetchFn = (async (url: string) => {
+      if (url.includes("pagespeedonline")) { pagespeed++; return new Response("busy", { status: 500 }); }
+      if (url.includes("chromeuxreport")) return new Response("{}", { status: 404 });
+      return new Response("{}");
+    }) as typeof fetch;
+    const google = { connect: async () => { throw new Error("not connected"); }, fetchFn };
+    const record = (await getSite(db, "s"))!;
+    const first = await syncResults(db, record, now, google, { googleApiKey: "g" });
+    assert.ok(first.some((note) => note.startsWith("lab failed")), first.join("; "));
+    const before = pagespeed;
+    await syncResults(db, record, new Date("2026-10-08T04:15:00Z"), google, { googleApiKey: "g" });
+    assert.ok(pagespeed > before, "a run that scored nothing is not a run: PageSpeed is asked again the next day");
   });
 
   it("stops inspecting when Google refuses (quota or permission)", async () => {

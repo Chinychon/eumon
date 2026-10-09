@@ -189,14 +189,9 @@ export async function topEumonPage(db: D1Like, siteId: string, today: string): P
   return row?.path ?? null;
 }
 
-/** Every Search Console metric, as `LIKE` patterns (a property change starts their history over). */
-export const SEARCH_METRIC_PATTERNS = ["search\\_%", "eumon\\_search\\_%", "queries\\_%", "pages\\_indexed", "pages\\_not\\_indexed", "sync.search%"];
-/** Every GA4 metric. */
-export const GA4_METRIC_PATTERNS = ["ga4\\_%", "sync.ga4"];
-
-/** Deletes a source's points (by `LIKE` pattern), so the next sync backfills them from the new source. */
-export async function clearMetricPoints(db: D1Like, siteId: string, patterns: string[]): Promise<void> {
-  await runStatements(db, patterns.map((pattern) => db.prepare("DELETE FROM metric_points WHERE site_id = ? AND metric LIKE ? ESCAPE '\\'").bind(siteId, pattern)));
+/** Deletes a source's points (a group from `METRICS`), so the next sync backfills them from the new source. */
+export async function clearMetricPoints(db: D1Like, siteId: string, metrics: string[]): Promise<void> {
+  await db.prepare("DELETE FROM metric_points WHERE site_id = ? AND metric IN (SELECT value FROM json_each(?))").bind(siteId, JSON.stringify(metrics)).run();
 }
 
 /** Which fetch a top-queries list belongs to: a different property or set of markets makes it stale. */

@@ -122,6 +122,8 @@ const PENDING = 0, HEALTHY = 1, EMPTY = 2, ERROR = 3, BLOCKED = 4, BLOOM = 5;
 const STATE_NAMES = ["Waiting", "Served", "Empty HTML", "Error", "Blocked", "Blooming"];
 const MAX_HEIGHT = 168;
 const GROW_MS = 520;
+/** How long the wave takes to reach the last square of a big garden. */
+const SWEEP_MS = 1800;
 
 /** The largest square the garden draws, so a site with a handful of URLs gets big squares, not a strip. */
 const MAX_PITCH = 36;
@@ -182,6 +184,10 @@ export function CrawlGarden({ families, bloom = false, label, fill = false }: { 
   // Bring each bed's squares up to date: new squares take the states that appeared since the last poll.
   if (plot) {
     const now = performance.now();
+    const owed = (count: number) => (count > 0 ? Math.max(1, Math.round(count / plot.k)) : 0);
+    // First every bed's new squares, then their start times: one wave over all of them, in garden order,
+    // so a big garden sweeps from first square to last instead of stopping partway and popping the rest in.
+    const grown: Array<{ entry: { states: Uint8Array; born: Float64Array }; have: number; fresh: number; problems: number[] }> = [];
     for (const bed of families) {
       const size = Math.ceil(bed.total / plot.k);
       let entry = beds.current.get(bed.family);
@@ -189,7 +195,6 @@ export function CrawlGarden({ families, bloom = false, label, fill = false }: { 
         entry = { states: new Uint8Array(size), born: new Float64Array(size) };
         beds.current.set(bed.family, entry);
       }
-      const owed = (count: number) => (count > 0 ? Math.max(1, Math.round(count / plot.k)) : 0);
       const done = Math.min(size, Math.ceil(bed.done / plot.k));
       const want = { [EMPTY]: owed(bed.emptyShells), [ERROR]: owed(bed.errors), [BLOCKED]: owed(bed.blocked) } as Record<number, number>;
       let have = 0;
@@ -200,27 +205,34 @@ export function CrawlGarden({ families, bloom = false, label, fill = false }: { 
         if (state in tally) tally[state]!++;
       }
       if (done < have) { entry.states.fill(PENDING); have = 0; tally[EMPTY] = tally[ERROR] = tally[BLOCKED] = 0; }
-      const fresh = done - have;
       const problems = [EMPTY, ERROR, BLOCKED].flatMap((state) => Array.from({ length: Math.max(0, want[state]! - tally[state]!) }, () => state));
-      for (let i = 0; i < fresh; i++) {
+      grown.push({ entry, have, fresh: Math.max(0, done - have), problems });
+    }
+    const total = grown.reduce((sum, bed) => sum + bed.fresh, 0);
+    // About 25ms a square for a few, never longer than SWEEP_MS for many; each square then grows for GROW_MS.
+    const sweep = Math.min(SWEEP_MS, total * 25);
+    let rank = 0;
+    for (const { entry, have, fresh, problems } of grown) {
+      for (let i = 0; i < fresh; i++, rank++) {
         const slot = have + i;
         // Spread the newly found problems evenly through the newly grown squares.
         const pick = problems.length && Math.floor((i * problems.length) / fresh) !== Math.floor(((i + 1) * problems.length) / fresh)
           ? problems[Math.floor((i * problems.length) / fresh)]!
           : HEALTHY;
         entry.states[slot] = pick;
-        // A wave across the bed; on first sight the whole garden sprouts in about a second and a half.
-        entry.born[slot] = reduced ? 0 : now + Math.min(i, 400) * 4;
+        entry.born[slot] = reduced || total <= 1 ? now : now + (rank / (total - 1)) * sweep;
       }
     }
     if (bloom && !bloomed.current) {
       bloomed.current = true;
+      const squares = [...beds.current.values()].reduce((sum, entry) => sum + entry.states.length, 0);
       let index = 0;
       for (const entry of beds.current.values()) {
         for (let i = 0; i < entry.states.length; i++, index++) {
           if (entry.states[i] === HEALTHY && ((i * 2654435761) >>> 0) % 19 === 0) {
             entry.states[i] = BLOOM;
-            entry.born[i] = now + 120 + (index % 900) * 1.4;
+            // Blooms follow the same sweep, after the last square has grown.
+            entry.born[i] = now + 120 + (squares > 1 ? (index / (squares - 1)) * SWEEP_MS : 0);
           }
         }
       }

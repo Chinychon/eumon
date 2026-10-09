@@ -9,6 +9,7 @@ import { LeadFunnel, TechnicalTab, searchPoints, type Change } from "./ReportTab
 import { AREA_PLACE, doFirst, gapsFirst, HEALTH_COLUMNS, pageTypeHealth, type Navigate, type Place, type Report } from "./report-model";
 import { KeyNumbers, ProofHeadline } from "./results/sections";
 import { AiPanel, CompetitorsPanel, EnquiriesPanel, KeywordsPanel, SearchPanel } from "./SitePanels";
+import { HistoryPanel } from "./HistoryPanel";
 import { ExportContext, ExportMenu } from "./export/ExportMenu";
 import { backlogSheets, pageTypeSheets } from "./export/report-sheets";
 import { useLeads, useResults, type Leads } from "./site-data";
@@ -16,7 +17,7 @@ import { Button, Card, ViewHeader } from "./ui";
 
 export type Repository = { id: number; name: string; fullName: string; owner: string; defaultBranch: string; isPrivate: boolean };
 
-type Tab = "overview" | "technical" | "search" | "enquiries" | "keywords" | "competitors" | "ai";
+type Tab = "overview" | "technical" | "search" | "enquiries" | "keywords" | "competitors" | "ai" | "history";
 /** The first tab has no `?tab=`; the others' keys are what links carry. */
 export const OVERVIEW_TABS: Array<{ tab: Tab; label: string }> = [
   { tab: "overview", label: "Overview" },
@@ -26,6 +27,7 @@ export const OVERVIEW_TABS: Array<{ tab: Tab; label: string }> = [
   { tab: "keywords", label: "Keywords" },
   { tab: "competitors", label: "Competitors" },
   { tab: "ai", label: "AI visibility" },
+  { tab: "history", label: "History" },
 ];
 const TABS = OVERVIEW_TABS;
 
@@ -222,7 +224,7 @@ export function OverviewView({ site, tab, onTab, onNavigate }: {
         </div>
       </div>
       <div key={current} className="view-enter" role="tabpanel">
-        {!loaded || (current !== "overview" && current !== "technical" && !results.data) ? <div className={results.error && loaded ? "callout error" : "empty"}>{loaded && results.error ? results.error : "Loading…"}</div> : (
+        {!loaded || (current !== "overview" && current !== "technical" && current !== "history" && !results.data) ? <div className={results.error && loaded ? "callout error" : "empty"}>{loaded && results.error ? results.error : "Loading…"}</div> : (
           <>
             {current === "overview" && (
               <>
@@ -252,6 +254,7 @@ export function OverviewView({ site, tab, onTab, onNavigate }: {
             {results.data && current === "keywords" && <KeywordsPanel site={site} data={results.data} />}
             {results.data && current === "competitors" && <CompetitorsPanel site={site} data={results.data} report={report} onNavigate={onNavigate} onCompetitorsChanged={() => setCompetitorCount((count) => (count ?? 0) + 1)} />}
             {results.data && current === "ai" && <AiPanel data={results.data} report={report} onNavigate={onNavigate} />}
+            {current === "history" && <HistoryPanel siteId={site.id} onNavigate={onNavigate} />}
           </>
         )}
       </div>

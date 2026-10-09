@@ -128,6 +128,8 @@ export const METRICS = {
   bing: ["sync.bing", "bing_clicks", "bing_impressions", "bing_crawled_pages", "bing_crawl_errors", "bing_in_index"],
   /** URLs sent to IndexNow per day. */
   indexnow: ["sync.indexnow", "indexnow_submitted"],
+  /** Search Console's own indexed and not-indexed counts, from an imported Page-indexing chart. No sync writes these. */
+  searchConsole: ["gsc_indexed", "gsc_not_indexed"],
 };
 
 /** Every metric the Results view reads. */

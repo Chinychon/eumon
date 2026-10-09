@@ -29,6 +29,18 @@ async function publishPages(db: ReturnType<typeof openSqliteD1>, count: number) 
 }
 
 describe("results sync", () => {
+  it("never asks outside services about the demo site, whose data is seeded", async () => {
+    const db = openSqliteD1();
+    await upsertSite(db, { id: "site_demo_clinic", name: "Demo", baseUrl: "https://demo-clinic.example", gscProperty: "sc-domain:demo-clinic.example", createdAt: now.toISOString(), updatedAt: now.toISOString() });
+    const asked: string[] = [];
+    const fetchFn = (async (url: string) => { asked.push(url); return new Response("{}"); }) as unknown as typeof fetch;
+    const notes = await syncResults(db, (await getSite(db, "site_demo_clinic"))!, now, { connect: async () => ({ token: "t", scopes: [SEARCH_CONSOLE_SCOPE, ANALYTICS_SCOPE] }), fetchFn },
+      { googleApiKey: "g", openPageRankKey: "o", dataForSeo: { login: "l", password: "p" } });
+    assert.deepEqual(asked, [], "no Google, CrUX, Open PageRank or DataForSEO calls");
+    assert.ok(notes[0]!.startsWith("demo site"));
+    assert.equal((await listMetricSeries(db, "site_demo_clinic", ["published_pages"], "2026-10-07", "2026-10-07")).published_pages!.length, 1, "Eumon's own counts still refresh");
+  });
+
   it("keeps first-party points when Google access is revoked", async () => {
     const { db, site: record } = await site();
     const notes = await syncResults(db, record, now, { connect: async () => { throw new Error("Google access token refresh failed (400)."); } });

@@ -1,4 +1,5 @@
 import type { SiteRecord } from "@organic-growth/core";
+import { DEMO_SITE_ID } from "@organic-growth/agents";
 import { firstMetricDay, upsertMetricPoints, type D1Like, type MetricPoint } from "@organic-growth/db";
 import { SOURCES } from "./results-sources.ts";
 
@@ -57,7 +58,11 @@ export async function syncResults(db: D1Like, site: SiteRecord, now: Date, googl
   const ctx: SyncContext = { db, site, today, now, keys, coverageLimit, fetchFn: google.fetchFn, google: () => (access ??= google.connect()) };
   const notes: string[] = [];
   let googleFailed = false;
-  for (const source of SOURCES) {
+  // The demo's domains are fictional and its data is seeded: asking Google, CrUX, Open PageRank or DataForSEO
+  // about them spends quota and credits, and replaces the sample data with empty answers.
+  const demo = site.id === DEMO_SITE_ID;
+  if (demo) notes.push("demo site: sample data is seeded, so only Eumon's own counts were refreshed");
+  for (const source of demo ? SOURCES.filter((entry) => entry.name === "first-party") : SOURCES) {
     if (source.applies && !source.applies(ctx)) continue;
     if (source.google) {
       if (googleFailed) continue;

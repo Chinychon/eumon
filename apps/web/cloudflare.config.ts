@@ -8,8 +8,9 @@ export const worker = defineWorker({
     exports: {
       SiteAnalysisWorkflow: exports.workflow({ name: "site-analysis" }),
       ScrapeWorkflow: exports.workflow({ name: "dataset-scrape" }),
-      // Daily Search Console import for generated pages (closes the measurement loop).
-      SearchSyncWorkflow: exports.workflow({ name: "search-sync", schedules: "15 4 * * *" }),
+      // Daily sync for every site. Scheduled Workflows need the paid Workers plan, so for now it runs only
+      // from "Sync now"; on the paid plan, add `schedules: "15 4 * * *"` back to run it daily at 04:15 UTC.
+      SearchSyncWorkflow: exports.workflow({ name: "search-sync" }),
     },
     assets: { notFoundHandling: "none" },
     env: {

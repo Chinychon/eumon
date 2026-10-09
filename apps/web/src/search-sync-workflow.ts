@@ -6,7 +6,7 @@ import { googleAccess } from "./results-access";
 import { COVERAGE_STEP, coverageRound, syncResults } from "./results-sync";
 import { syncGeneratedPageSearch } from "./search-sync";
 
-/** Runs daily (see cloudflare.config.ts) so page performance stays current without anyone clicking "sync". */
+/** The daily sync for every site. Unscheduled for now (scheduled Workflows need the paid Workers plan; see cloudflare.config.ts). */
 export class SearchSyncWorkflow extends WorkflowEntrypoint<AppEnv, Record<string, never>> {
   async run(_event: WorkflowEvent<Record<string, never>>, step: WorkflowStep) {
     const siteIds = await step.do("list-sites", () => listSitesForResults(this.env.DB));

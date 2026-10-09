@@ -8,7 +8,7 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "npm run build:packages && npm run dev -w @organic-growth/web",
+    "dev": "npm run dev -w @organic-growth/web",
     "build": "npm run build:packages && npm run build -w @organic-growth/web",
     "deploy": "npm run build:packages && npm run deploy -w @organic-growth/web",
     "typecheck": "npm run build:packages && npm run typecheck --workspaces --if-present",

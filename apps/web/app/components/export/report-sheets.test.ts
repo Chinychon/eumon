@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { addDays, resultsView, type ResultsInput } from "@organic-growth/core";
-import { aiSheets, fixSheets, keywordSheets, pick, proofSheets, tabSheets } from "./report-sheets.ts";
+import { aiSheets, fixSheets, keywordSheets, pick, proofSheets } from "./report-sheets.ts";
 
 const today = "2026-10-07";
 const input = (series: ResultsInput["series"] = {}): ResultsInput => ({
@@ -17,13 +17,10 @@ describe("report sheets", () => {
     assert.deepEqual(numbers!.rows[0], ["Google clicks", 280, 280, 280]);
   });
 
-  it("keeps numbers as numbers and leaves out empty tables in a tab export", () => {
+  it("keeps numbers as numbers", () => {
     const results = resultsView(input({ ai_fetches: days(10, 3), ai_crawler_fetches: days(10, 2), "ai_crawler_fetches.openai": days(10, 2) }));
     const fetches = pick(aiSheets(results), "AI fetches by company")[0]!;
     assert.deepEqual(fetches.rows[0], ["OpenAI", 20, null, null, null]);
-    const tab = tabSheets("ai", { results, report: null, leads: null, host: "x.com" });
-    assert.ok(tab.every((sheet) => sheet.rows.length > 0));
-    assert.ok(!tab.some((sheet) => sheet.name === "Question searches"), "no question data yet, so no empty sheet");
   });
 
   it("filters findings by area, and names the site in its own visibility row", () => {

@@ -10,7 +10,7 @@ import { AREA_PLACE, doFirst, gapsFirst, HEALTH_COLUMNS, pageTypeHealth, type Na
 import { KeyNumbers, ProofHeadline } from "./results/sections";
 import { AiPanel, CompetitorsPanel, EnquiriesPanel, KeywordsPanel, SearchPanel } from "./SitePanels";
 import { ExportContext, ExportMenu } from "./export/ExportMenu";
-import { backlogSheets, pageTypeSheets, tabSheets } from "./export/report-sheets";
+import { backlogSheets, pageTypeSheets } from "./export/report-sheets";
 import { useLeads, useResults, type Leads } from "./site-data";
 import { Button, Card, ViewHeader } from "./ui";
 
@@ -220,8 +220,6 @@ export function OverviewView({ site, tab, onTab, onNavigate }: {
             <button key={entry.tab} role="tab" aria-selected={current === entry.tab} className={current === entry.tab ? "active" : undefined} onClick={() => openTab(entry.tab)}>{entry.label}</button>
           ))}
         </div>
-        {/* Every table on the open tab: one sheet each in Excel or Google Sheets. */}
-        <ExportMenu label="Export tab" title={TABS.find((entry) => entry.tab === current)!.label} sheets={() => tabSheets(current, { results: results.data?.results ?? null, report, leads, host: new URL(site.baseUrl).hostname })} />
       </div>
       <div key={current} className="view-enter" role="tabpanel">
         {!loaded || (current !== "overview" && current !== "technical" && !results.data) ? <div className={results.error && loaded ? "callout error" : "empty"}>{loaded && results.error ? results.error : "Loading…"}</div> : (

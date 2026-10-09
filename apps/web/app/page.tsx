@@ -199,16 +199,17 @@ function AddSite({ hasSites, repositories, githubInstalled, onAdded, onCancel }:
   const [repositoryId, setRepositoryId] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  // The demo site (fictional data, served from memory) is offered only on this machine.
-  const [local, setLocal] = useState(false);
-  useEffect(() => setLocal(["localhost", "127.0.0.1", "[::1]"].includes(window.location.hostname)), []);
+  // The demo site (fictional data) is offered by the development server, and by a built app only on this machine.
+  const [demo, setDemo] = useState(false);
+  useEffect(() => setDemo(process.env.NODE_ENV !== "production" || ["localhost", "127.0.0.1", "[::1]"].includes(window.location.hostname)), []);
 
+  const [demoBusy, setDemoBusy] = useState(false);
   async function loadDemo() {
-    setBusy(true); setError("");
+    setDemoBusy(true); setError("");
     try {
       const data = await api<{ siteId: string }>("/api/dev/demo-site", { method: "POST" });
       await onAdded(data.siteId);
-    } catch (cause) { setError(errorMessage(cause)); } finally { setBusy(false); }
+    } catch (cause) { setError(errorMessage(cause)); } finally { setDemoBusy(false); }
   }
 
   async function add(event: React.FormEvent) {
@@ -229,6 +230,12 @@ function AddSite({ hasSites, repositories, githubInstalled, onAdded, onCancel }:
         <div className="welcome-row">
           <h1>Turn what you sell into<br className="desktop-break" /> pages people search for.</h1>
           <p className="intro">Eumon scopes the specific things your customers look for, collects the facts, publishes a crawlable landing page for each one on your domain, and shows you which pages bring customers.</p>
+          {demo && (
+            <div className="welcome-demo">
+              <Button variant="secondary" busy={demoBusy} disabled={busy} onClick={loadDemo}>Explore the demo</Button>
+              <span>A dental clinic with fictional data: a crawl, Google numbers, keywords, AI visibility and landing pages.</span>
+            </div>
+          )}
         </div>
       )}
       <form className="card" onSubmit={add}>
@@ -249,7 +256,7 @@ function AddSite({ hasSites, repositories, githubInstalled, onAdded, onCancel }:
         <div className="row" style={{ marginTop: 14 }}>
           <Button busy={busy} disabled={!websiteUrl.trim()} onClick={undefined} type="submit">Add website</Button>
           {onCancel && <Button variant="ghost" onClick={onCancel}>Cancel</Button>}
-          {local && <Button variant="ghost" disabled={busy} onClick={loadDemo}>Load demo site</Button>}
+          {demo && hasSites && <Button variant="ghost" busy={demoBusy} disabled={busy} onClick={loadDemo}>Load demo site</Button>}
         </div>
       </form>
       {!hasSites && (

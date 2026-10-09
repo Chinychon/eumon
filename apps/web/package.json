@@ -39,6 +39,7 @@
   },
   "type": "module",
   "scripts": {
+    "predev": "node scripts/predev.mjs",
     "dev": "vite dev --port 5174 --strictPort",
     "build": "vite build",
     "start": "vite preview",

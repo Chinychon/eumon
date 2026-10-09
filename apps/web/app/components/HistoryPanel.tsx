@@ -73,7 +73,7 @@ function Row({ row, onNavigate }: { row: HistoryRow; onNavigate: Navigate }) {
         <h4>{title}</h4>
         <p>{row.detail}{row.since && <> · since {day(row.since)}</>}{row.reopenedAt && <> · reopened {day(row.reopenedAt)}</>}</p>
       </div>
-      <span className="small muted">{day(row.at)}</span>
+      <span className="small muted" style={{ flex: "none" }}>{day(row.at)}</span>
     </div>
   );
 }

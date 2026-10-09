@@ -1,7 +1,7 @@
 import { bindings, defineConfig, defineWorker, exports, type InferEnv } from "cf/config";
 
 export const worker = defineWorker({
-    name: "organic-growth",
+    name: "eumon",
     entrypoint: "./worker.ts",
     compatibilityDate: "2026-10-05",
     compatibilityFlags: ["nodejs_compat"],
@@ -25,17 +25,17 @@ export const worker = defineWorker({
       BROWSER: bindings.browser(),
       ANALYSIS_WORKFLOW: bindings.workflow({
         name: "site-analysis",
-        worker: "organic-growth",
+        worker: "eumon",
         exportName: "SiteAnalysisWorkflow",
       }),
       SCRAPE_WORKFLOW: bindings.workflow({
         name: "dataset-scrape",
-        worker: "organic-growth",
+        worker: "eumon",
         exportName: "ScrapeWorkflow",
       }),
       SEARCH_SYNC_WORKFLOW: bindings.workflow({
         name: "search-sync",
-        worker: "organic-growth",
+        worker: "eumon",
         exportName: "SearchSyncWorkflow",
       }),
       GITHUB_APP_ID: bindings.secret(),

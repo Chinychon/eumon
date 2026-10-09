@@ -32,12 +32,12 @@ function isProxied(request: Request, settings: PageSettings): boolean {
   return Boolean(forwarded && forwarded === new URL(settings.publicOrigin).host.toLowerCase());
 }
 
-/** Counts a crawler's request for a published page: Googlebot and other bots on the page's daily row, AI agents by name. */
+/** Counts a crawler's request for a published page: Googlebot on the page's daily row, AI agents by name. Other bots aren't counted. */
 function countCrawl(siteId: string, pageId: string, userAgent: string): Promise<void> | null {
   const visitor = classifyUserAgent(userAgent);
   if (!visitor) return null;
   if (visitor.kind === "ai") return recordAiSignal(env.DB, { siteId, pageId, signal: "fetch", name: visitor.agent.agent });
-  return incrementPageMetric(env.DB, { siteId, pageId, kind: visitor.kind === "googlebot" ? "googlebot_hits" : "other_bot_hits" });
+  return visitor.kind === "googlebot" ? incrementPageMetric(env.DB, { siteId, pageId, kind: "googlebot_hits" }) : null;
 }
 
 function html(body: string, status: number, headers: Record<string, string>): Response {

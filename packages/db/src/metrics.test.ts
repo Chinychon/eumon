@@ -6,6 +6,16 @@ import { openSqliteD1 } from "./sqlite.js";
 
 const now = "2026-10-07T00:00:00.000Z";
 
+/** Landing pages for daily counters to belong to. */
+async function addPages(db: ReturnType<typeof openSqliteD1>, siteId: string, ids: string[]) {
+  await db.prepare(`INSERT OR IGNORE INTO datasets (id, site_id, name, entity_type, description, fields_json, key_field, page_ideas_json, status, created_at, updated_at) VALUES (?, ?, 'T', 't', '', '[]', 'name', '[]', 'active', ?, ?)`).bind(`d_${siteId}`, siteId, now, now).run();
+  await db.prepare(`INSERT OR IGNORE INTO page_templates (id, site_id, dataset_id, name, config_json, status, created_at, updated_at) VALUES (?, ?, ?, 'T', '{}', 'active', ?, ?)`).bind(`t_${siteId}`, siteId, `d_${siteId}`, now, now).run();
+  for (const id of ids) {
+    await db.prepare(`INSERT INTO generated_pages (id, site_id, template_id, path, group_key, title, description, content_json, quality_score, quality_issues_json, status, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, 'x', '', '{}', 1, '[]', 'draft', ?, ?)`).bind(id, siteId, `t_${siteId}`, `/${id}`, id, now, now).run();
+  }
+}
+
 describe("metric ledger", async () => {
   const db = openSqliteD1();
   await upsertSite(db, { id: "s", name: "x.com", baseUrl: "https://x.com", createdAt: now, updatedAt: now });
@@ -71,6 +81,7 @@ describe("first-party results", async () => {
 describe("AI visibility points", async () => {
   const db = openSqliteD1();
   await upsertSite(db, { id: "s", name: "x.com", baseUrl: "https://x.com", createdAt: now, updatedAt: now });
+  await addPages(db, "s", ["p1", "p2"]);
   await recordAiSignal(db, { siteId: "s", pageId: "p1", signal: "fetch", name: "GPTBot", day: "2026-10-04" });
   await recordAiSignal(db, { siteId: "s", pageId: "p1", signal: "fetch", name: "GPTBot", day: "2026-10-04" });
   await recordAiSignal(db, { siteId: "s", pageId: "p2", signal: "fetch", name: "ChatGPT-User", day: "2026-10-04" });
@@ -153,6 +164,7 @@ describe("review fixes", async () => {
     await upsertSite(db, { id: "s", name: "x.com", baseUrl: "https://x.com", createdAt: now, updatedAt: now });
     await insertConversionEvent(db, { id: "e1", siteId: "s", event: "whatsapp_click", occurredAt: "2026-10-01T02:00:00Z", sessionId: "x" });
     await insertConversionEvent(db, { id: "e2", siteId: "s", event: "whatsapp_click", occurredAt: "2026-10-03T02:00:00Z", sessionId: "y" });
+    await addPages(db, "s", ["p"]);
     await db.prepare("INSERT INTO page_metrics_daily (site_id, page_id, day, views) VALUES ('s', 'p', '2026-10-02', 5)").run();
     await syncFirstPartyResults(db, "s", new Date("2026-10-05T04:00:00Z"));
     const series = await listMetricSeries(db, "s", ["leads", "eumon_page_views"], "2026-09-01", "2026-10-31");
@@ -197,7 +209,7 @@ describe("signals helpers", () => {
         VALUES (?, 's', 't', ?, ?, 'x', '', '{}', 1, '[]', 'published', ?, ?, ?)`).bind(id, `/guides/${id}`, id, published, now, now).run();
     }
     assert.equal(await topEumonPage(db, "s", "2026-10-07"), "/guides/a", "no clicks yet: the earliest published");
-    await db.prepare("INSERT INTO page_metrics_daily (site_id, page_id, day, search_clicks, search_impressions, search_position) VALUES ('s', 'b', '2026-10-01', 9, 90, 4)").run();
+    await db.prepare("INSERT INTO page_metrics_daily (site_id, page_id, day, search_clicks, search_impressions) VALUES ('s', 'b', '2026-10-01', 9, 90)").run();
     assert.equal(await topEumonPage(db, "s", "2026-10-07"), "/guides/b");
   });
 });

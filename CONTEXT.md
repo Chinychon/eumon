@@ -32,3 +32,10 @@ Short definitions of the domain terms that name modules and seams. Architecture 
 ## Growth plan
 
 - **Opportunity**: a prioritised thing to do, from search data, competitor content, collected datasets or a technical finding. Its `searchDemand` and `estimatedDifficulty` come from one **demand estimate** (`packages/agents/src/demand.ts`); until keyword data is synced they are heuristics, and the rationales say so.
+
+## Data
+
+- **Ownership**: every table with a `site_id` cascades from `sites`, so deleting a site is `DELETE FROM sites` (`deleteSite` clears the two largest tables first). Crawl results (`pages`) and changes cascade from their analysis; daily page counters (`page_metrics_daily`, `ai_page_daily`) from their generated page. A new table that belongs to a site takes `REFERENCES sites(id) ON DELETE CASCADE`; the demo test checks nothing survives a delete.
+- **Crawl result** (`pages`): one row per analysis and URL (`PRIMARY KEY (analysis_id, url)`). The page type (`route_family`) and reuse (`reused_from`, the earlier analysis a result was copied from) are columns; the rest of what the crawler saw is `result_json`.
+- **Google connection**: one `oauth_credentials` row per site with provider `google`, covering Search Console, Analytics and Sheets (its `scopes` say which were granted).
+- **Table rebuild**: SQLite can't add a foreign key to an existing table, so a migration that changes one creates the new table, copies the rows, drops the old one and renames. A parent is replaced only after its old children are dropped: dropping a table deletes its rows, and that delete cascades into any table already pointing at it (`0019_ownership_and_indexes.sql`).

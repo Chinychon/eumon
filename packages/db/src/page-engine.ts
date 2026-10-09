@@ -817,7 +817,7 @@ export async function setCtaVariantActive(db: D1Like, siteId: string, id: string
 // Page analytics
 // ---------------------------------------------------------------------------
 
-export type PageHitKind = "googlebot_hits" | "other_bot_hits" | "views" | "cta_clicks";
+export type PageHitKind = "googlebot_hits" | "views" | "cta_clicks";
 
 export async function incrementPageMetric(
   db: D1Like,
@@ -842,8 +842,8 @@ export async function incrementPageMetric(
 /** Keeps the first Eumon page a session landed on, and where it came from (`search`, `ai:<assistant>`, `other`). */
 export async function recordLandingSession(db: D1Like, input: { siteId: string; sessionId: string; pageId: string; source?: string; at?: string }): Promise<void> {
   await db.prepare(
-    "INSERT OR IGNORE INTO page_sessions (session_id, site_id, page_id, first_seen_at, source) VALUES (?, ?, ?, ?, ?)",
-  ).bind(input.sessionId, input.siteId, input.pageId, input.at ?? nowIso(), input.source ?? null).run();
+    "INSERT OR IGNORE INTO page_sessions (site_id, session_id, page_id, first_seen_at, source) VALUES (?, ?, ?, ?, ?)",
+  ).bind(input.siteId, input.sessionId, input.pageId, input.at ?? nowIso(), input.source ?? null).run();
 }
 
 /** One AI agent's request for a landing page (`fetch`, name = agent), or one visit an AI assistant sent (`referral`, name = assistant). */
@@ -872,14 +872,13 @@ export async function replacePageSearchMetrics(
 export async function upsertPageSearchDaily(
   db: D1Like,
   siteId: string,
-  rows: Array<{ pageId: string; day: string; clicks: number; impressions: number; position: number }>,
+  rows: Array<{ pageId: string; day: string; clicks: number; impressions: number }>,
 ): Promise<void> {
   const statements = rows.map((row) => db.prepare(
-    `INSERT INTO page_metrics_daily (site_id, page_id, day, search_clicks, search_impressions, search_position)
-     VALUES (?, ?, ?, ?, ?, ?)
-     ON CONFLICT(page_id, day) DO UPDATE SET search_clicks = excluded.search_clicks,
-       search_impressions = excluded.search_impressions, search_position = excluded.search_position`,
-  ).bind(siteId, row.pageId, row.day, row.clicks, row.impressions, row.position));
+    `INSERT INTO page_metrics_daily (site_id, page_id, day, search_clicks, search_impressions)
+     VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(page_id, day) DO UPDATE SET search_clicks = excluded.search_clicks, search_impressions = excluded.search_impressions`,
+  ).bind(siteId, row.pageId, row.day, row.clicks, row.impressions));
   for (const group of chunks(statements, 100)) await runStatements(db, group);
 }
 
@@ -927,7 +926,7 @@ export async function getPagePerformance(
      ) m ON m.page_id = p.id
      LEFT JOIN (
        SELECT ps.page_id, COUNT(*) AS attributed FROM conversion_events ce
-       JOIN page_sessions ps ON ps.session_id = ce.session_id
+       JOIN page_sessions ps ON ps.site_id = ce.site_id AND ps.session_id = ce.session_id
        WHERE ce.site_id = ? AND ce.occurred_at >= ? AND ce.event IN (${conversionList})
        GROUP BY ps.page_id
      ) a ON a.page_id = p.id

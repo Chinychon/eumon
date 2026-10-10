@@ -592,6 +592,7 @@ export async function saveCrawlBatch(
       metaRefresh: page.metaRefresh,
       redirectHops: page.redirectHops,
       hsts: page.hsts,
+      titleWidth: page.titleWidth,
       lang: page.lang,
       viewport: page.viewport,
       images: page.images,
@@ -796,7 +797,7 @@ export type LinkFamily = {
 /** One served page per template (not the homepage, not an empty shell, error or challenge), the largest templates first: the pages the AI crawler probe fetches. */
 export async function probePages(db: D1Like, analysisId: string, limit: number): Promise<string[]> {
   const { results } = await db.prepare(
-    `SELECT route_family AS family, MIN(url) AS url, COUNT(*) AS n FROM pages
+    `SELECT route_family AS family, MIN(COALESCE(${crawlField("finalUrl")}, url)) AS url, COUNT(*) AS n FROM pages
      WHERE analysis_id = ? AND ${SERVED} AND is_empty_shell = 0 AND NOT (${CHALLENGE}) AND route_family != 'home'
      GROUP BY route_family ORDER BY n DESC, family LIMIT ?`,
   ).bind(analysisId, limit).all<{ url: string }>();
@@ -815,9 +816,10 @@ export async function linkGraphIssues(db: D1Like, siteId: string, analysisId: st
   const links = Number((await db.prepare("SELECT COUNT(*) AS n FROM page_links WHERE site_id = ?").bind(siteId).first<{ n: number }>())?.n ?? 0);
   const served = `p.analysis_id = ? AND p.crawl_state = 'complete' AND p.status < 400 AND ${PAGE_FAMILY} != 'home'`;
   const listed = (where: string) => `SELECT COUNT(*) AS n, substr(group_concat(url, ' '), 1, 1200) AS urls FROM (SELECT p.url FROM pages p WHERE ${served} AND ${where} ORDER BY p.url)`;
-  // Failing pages first (few), then their links in through idx_page_links_target.
+  // Failing pages first (few), then their links in through idx_page_links_target. Pages Eumon could not read
+  // (fetch failed, rate-limited, unavailable, or a bot challenge) are not counted as broken.
   const failing = `FROM pages p JOIN page_links l ON l.site_id = ? AND l.target_path = ${URL_PATH("p.url")} AND l.source_url != p.url
-     WHERE p.analysis_id = ? AND (p.crawl_state = 'failed' OR (p.crawl_state = 'complete' AND p.status >= 400))`;
+     WHERE p.analysis_id = ? AND p.crawl_state = 'complete' AND p.status >= 400 AND p.status NOT IN (429, 503) AND NOT (${CHALLENGE})`;
   const max = options.maxLinkRows ?? 200_000;
   const [orphans, single, broken, brokenTotals, deep] = await Promise.all([
     db.prepare(listed(`NOT EXISTS (${LINKS_IN})`)).bind(analysisId, siteId).first<{ n: number; urls: string | null }>(),
@@ -887,6 +889,10 @@ const DETAIL_PAGE = "route_family NOT IN ('home', 'page')";
 
 /** SQL conditions for each crawl issue, plus the stored value worth showing beside an example URL. */
 const F = crawlField;
+/** A title's display width: CJK characters count twice (`titleWidth`, written when the title has any). */
+const TITLE_WIDTH = `COALESCE(${crawlField("titleWidth")}, LENGTH(TRIM(title)))`;
+/** No title, or one too short to say what the page is. */
+const WEAK_TITLE = `(title IS NULL OR ${TITLE_WIDTH} < 15)`;
 /*
  * Conditions on fields the content signals always write (viewport, words, articleLike, author, landmarks,
  * listsOrTables) guard the checks that would otherwise fire on rows from crawls before those fields existed.
@@ -905,7 +911,7 @@ const CRAWL_ISSUES: Record<Exclude<CrawlIssue, "duplicateTitle" | "nearDuplicate
   metaRefresh: { where: `${SERVED} AND ${F("metaRefresh")} IS NOT NULL`, detail: F("metaRefresh") },
   mixedContent: { where: `${SERVED} AND ${F("mixedContent")} > 0`, detail: F("mixedContent") },
   httpLinks: { where: `${SERVED} AND ${F("httpLinks")} > 0`, detail: F("httpLinks") },
-  titleLength: { where: `${SERVED} AND is_empty_shell = 0 AND ${F("words")} IS NOT NULL AND title IS NOT NULL AND (LENGTH(TRIM(title)) < ${TITLE_LENGTH.min} OR LENGTH(TRIM(title)) > ${TITLE_LENGTH.max})`, detail: "title" },
+  titleLength: { where: `${SERVED} AND is_empty_shell = 0 AND ${F("words")} IS NOT NULL AND title IS NOT NULL AND (${TITLE_WIDTH} < ${TITLE_LENGTH.min} OR ${TITLE_WIDTH} > ${TITLE_LENGTH.max})`, detail: "title" },
   descriptionLength: { where: `${SERVED} AND LENGTH(COALESCE(${F("description")}, '')) > ${DESCRIPTION_MAX}`, detail: `LENGTH(${F("description")})` },
   h1EqualsTitle: { where: `${SERVED} AND ${F("h1")} IS NOT NULL AND LOWER(TRIM(${F("h1")})) = LOWER(TRIM(title))`, detail: "title" },
   headingSkips: { where: `${SERVED} AND ${F("headingSkips")} = 1` },
@@ -948,7 +954,7 @@ const SEO_ERRORS = [
   CRAWL_ISSUES.mixedContent.where, // security.mixed_content
   CRAWL_ISSUES.redirectChain.where, // http.redirect_chain
   CRAWL_ISSUES.metaRefresh.where, // http.meta_refresh
-  "(title IS NULL OR LENGTH(TRIM(title)) < 15)", // title.weak
+  WEAK_TITLE, // title.weak
 ].map((condition) => `(${condition})`).join(" OR ");
 const AI_ERRORS = [
   ...BASE_ERRORS,
@@ -983,7 +989,7 @@ export async function getCrawlCoverage(
       SUM(CASE WHEN crawl_state = 'pending' THEN 1 ELSE 0 END) AS pending_urls,
       SUM(CASE WHEN crawl_state = 'complete' AND is_empty_shell = 1 THEN 1 ELSE 0 END) AS empty_shell_urls,
       SUM(CASE WHEN crawl_state = 'complete' AND status >= 400 AND NOT (${CHALLENGE}) THEN 1 ELSE 0 END) AS http_error_urls,
-      SUM(CASE WHEN ${SERVED} AND (title IS NULL OR LENGTH(TRIM(title)) < 15) THEN 1 ELSE 0 END) AS missing_title_urls,
+      SUM(CASE WHEN ${SERVED} AND ${WEAK_TITLE} THEN 1 ELSE 0 END) AS missing_title_urls,
       SUM(CASE WHEN ${INDEXABLE} THEN 1 ELSE 0 END) AS indexable,
       SUM(CASE WHEN ${INDEXABLE} AND (${SEO_ERRORS}) THEN 1 ELSE 0 END) AS unhealthy_seo,
       SUM(CASE WHEN ${INDEXABLE} AND (${AI_ERRORS}) THEN 1 ELSE 0 END) AS unhealthy_ai,
@@ -1106,7 +1112,8 @@ export async function getCrawlCoverage(
     issueExamples,
     health: {
       indexable: Number(row?.indexable ?? 0), unhealthySeo: Number(row?.unhealthy_seo ?? 0), unhealthyAi: Number(row?.unhealthy_ai ?? 0),
-      checked: Number(row?.checked_rows ?? 0) > 0,
+      // Nine in ten crawled rows must carry the content signals: a re-run reuses unchanged rows from before them for up to 30 days.
+      checked: Number(row?.checked_rows ?? 0) > 0 && Number(row?.checked_rows ?? 0) >= Number(row?.completed_urls ?? 0) * 0.9,
     },
     duplicateDescriptionGroups: descriptions.results.map((group) => ({ description: String(group.description), count: Number(group.n), examples: String(group.urls).split(" ").slice(0, 8) })),
     ...(linkGraph ? { linkGraph } : {}),

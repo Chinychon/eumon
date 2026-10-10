@@ -11,6 +11,16 @@ import { elementSpans, findTags, innerText, parseAttributes, stripElements, visi
 const QUESTION = /[?？]\s*$|^\s*(?:(?:how|what|why|when|which|who|can|should|is|are|do|does|apa|bagaimana|mengapa|kenapa|bila|bilakah|berapa|siapa|adakah)\b|如何|什么|为什么|怎么|哪)/i;
 export const isQuestionHeading = (text: string) => QUESTION.test(text.trim());
 
+/** Han, kana and Hangul: scripts written without spaces between words, and about twice as wide as Latin letters. */
+const CJK = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af\uf900-\ufaff]/g;
+/** Words in a text: spaced words, plus two CJK characters to a word. */
+export const countWords = (text: string) => text.replace(CJK, " ").split(/\s+/).filter(Boolean).length + Math.round((text.match(CJK) ?? []).length / 2);
+/** A title's width with CJK characters counted twice, or undefined when it has none (its width is its length). */
+export const titleWidth = (title: string | undefined) => {
+  const cjk = title?.match(CJK)?.length ?? 0;
+  return cjk ? title!.trim().length + cjk : undefined;
+};
+
 // A currency before the number, or a unit after it. `(?![a-z])` instead of `\b`: there is no word boundary after `%`.
 const STAT = /(?:RM|USD|SGD|IDR|Rp|S?\$)\s?\d[\d,.]*|\d[\d,.]*\s?(?:%|percent|peratus|persen|million|juta|billion|bilion|km|kg|mm|cm|years?|tahun|months?|bulan|minutes?|minit|hours?|jam|days?|hari|patients?|pesakit|pasien)(?![a-z])/gi;
 export const countStatistics = (text: string) => (text.match(STAT) ?? []).length;
@@ -55,7 +65,7 @@ export function contentSignals(html: string, pageUrl: string, ld: { jsonLdTypes:
   const main = elementSpans(html, ["main", "article"])[0];
   const mainHtml = main ? html.slice(main.contentStart, main.contentEnd) : stripElements(html, ["nav", "header", "footer", "aside", "form"]);
   const mainText = visibleText(mainHtml);
-  const words = mainText.split(/\s+/).filter(Boolean).length;
+  const words = countWords(mainText);
   const headings = elementSpans(html, ["h1", "h2", "h3", "h4", "h5", "h6"]).sort((a, b) => a.start - b.start);
   const text = (span: { contentStart: number; contentEnd: number }, source = html) => innerText(source.slice(span.contentStart, Math.min(span.contentEnd, span.contentStart + 2000)));
   const h1Span = headings.find((heading) => heading.tag.toLowerCase() === "h1");

@@ -1,37 +1,61 @@
 import { AI_PROBE_AGENTS, CHECKS, finding, type Finding } from "@organic-growth/core";
-import { isBotChallenge, type Fetcher } from "./index.js";
+import { BROWSER_UA, isBotChallenge, type Fetcher } from "./index.js";
 import { parseRobots } from "./robots.js";
 
 /*
  * What a firewall does to AI crawlers that robots.txt allows, and how the
  * host answers: the other host form, the HTTP homepage, HSTS, and llms.txt.
- * One analysis step: 7 agents × up to 6 pages, plus 4 host fetches.
+ * Each page is fetched first as a browser (the baseline) and then as each
+ * agent at the address the browser landed on. A page that refuses the browser
+ * too says nothing about AI crawlers; a fetch that throws, or a rate limit,
+ * is not measured. The probe stops at its subrequest budget, redirects
+ * included, and leaves the rest unmeasured.
  */
 
+/** `fetched`: pages where the agent got an answer and the browser was served; `refused`: those that refused or challenged the agent. */
 export type AiProbe = { agent: string; search: boolean; allowedByRobots: boolean; fetched: number; refused: number; challenge: boolean };
-export type HostProbe = { wwwDuplicate: boolean; httpRedirected: boolean | null; hsts: boolean; llmsTxt: "missing" | "present" | "malformed" };
+/** Null when the fetch that would tell failed. */
+export type HostProbe = { wwwDuplicate: boolean; httpRedirected: boolean | null; hsts: boolean | null; llmsTxt: "missing" | "present" | "malformed" | null };
 export type HostProbeResult = { ai: AiProbe[]; host: HostProbe; robotsReadable: boolean };
 
-/** Statuses a firewall or rate limiter answers with. */
-const REFUSED = new Set([401, 403, 429, 503]);
+/** Statuses a firewall refuses a crawler with. 429 is a rate limit, not a policy, so it is not counted. */
+const REFUSED = new Set([401, 403, 503]);
+const served = (result: { status: number; headers: Record<string, string>; body: string } | null) => Boolean(result && result.status < 400 && !isBotChallenge(result));
 
-/** Fetches each page as each AI agent robots.txt allows it (`robotsTxt` null: no rules), and counts refusals and challenge pages. */
-export async function probeAiCrawlers(urls: string[], robotsTxt: string | null, fetcher: Fetcher): Promise<AiProbe[]> {
-  const out: AiProbe[] = [];
-  // One agent at a time, its pages together: at most six requests in flight.
-  for (const entry of AI_PROBE_AGENTS) {
+/** Fetches each page as a browser, then as each AI agent robots.txt allows (`robotsTxt` null: no rules), within `budget` subrequests. */
+export async function probeAiCrawlers(urls: string[], robotsTxt: string | null, fetcher: Fetcher, options: { budget?: number } = {}): Promise<AiProbe[]> {
+  const budget = options.budget ?? 40;
+  let spent = 0;
+  // Every fetch costs one subrequest plus one per redirect it followed.
+  const fetchOnce = async (url: string, userAgent: string) => {
+    if (spent >= budget) return undefined;
+    spent++;
+    const result = await fetcher(url, { userAgent, maxBytes: 64_000 }).catch(() => null);
+    spent += result?.hops ?? 0;
+    return result;
+  };
+  const agents = AI_PROBE_AGENTS.map((entry) => {
     const policy = robotsTxt ? parseRobots(robotsTxt, entry.agent.toLowerCase(), { exact: true }) : null;
-    const allowed = urls.filter((url) => !policy || policy.isAllowed(new URL(url).pathname));
-    const results = await Promise.all(allowed.map((url) => fetcher(url, { userAgent: entry.userAgent }).catch(() => null)));
-    let refused = 0;
-    let challenge = false;
-    for (const result of results) {
-      if (!result || REFUSED.has(result.status)) refused++;
-      if (result && isBotChallenge(result)) challenge = true;
+    return { entry, policy, probe: { agent: entry.agent, search: entry.search, allowedByRobots: !policy || policy.isAllowed("/"), fetched: 0, refused: 0, challenge: false } as AiProbe };
+  });
+  for (const [index, url] of urls.entries()) {
+    const baseline = await fetchOnce(url, BROWSER_UA);
+    if (!baseline || !served(baseline)) continue;
+    const target = baseline.finalUrl || url;
+    const path = new URL(target).pathname;
+    // A different agent goes first on each page, so a burst limit does not always land on the same ones.
+    const order = agents.map((_, position) => agents[(position + index) % agents.length]!);
+    // One at a time, so the budget sees each redirect before the next fetch starts.
+    for (const agent of order.filter((entry) => !entry.policy || entry.policy.isAllowed(path))) {
+      const result = await fetchOnce(target, agent.entry.userAgent);
+      if (!result || result.status === 429) continue;
+      agent.probe.fetched++;
+      const challenged = isBotChallenge(result);
+      if (challenged || REFUSED.has(result.status)) agent.probe.refused++;
+      if (challenged) agent.probe.challenge = true;
     }
-    out.push({ agent: entry.agent, search: entry.search, allowedByRobots: !policy || policy.isAllowed("/"), fetched: allowed.length, refused, challenge });
   }
-  return out;
+  return agents.map((agent) => agent.probe);
 }
 
 const looksLikeLlmsTxt = (body: string) => /^\s*#\s+\S/.test(body) && !/^\s*<(!doctype|html)/i.test(body);
@@ -41,18 +65,19 @@ const bareHost = (hostname: string) => hostname.replace(/^www\./, "");
 export async function probeHost(baseUrl: string, fetcher: Fetcher): Promise<HostProbe> {
   const site = new URL(baseUrl);
   const otherHost = site.hostname.startsWith("www.") ? site.hostname.slice(4) : `www.${site.hostname}`;
+  const small = { maxBytes: 64_000 };
   const [home, other, http, llms] = await Promise.all([
-    fetcher(`${site.origin}/`).catch(() => null),
-    fetcher(`${site.protocol}//${otherHost}/`).catch(() => null),
-    site.protocol === "https:" ? fetcher(`http://${site.host}/`).catch(() => null) : Promise.resolve(null),
+    fetcher(`${site.origin}/`, small).catch(() => null),
+    fetcher(`${site.protocol}//${otherHost}/`, small).catch(() => null),
+    site.protocol === "https:" ? fetcher(`http://${site.host}/`, small).catch(() => null) : Promise.resolve(null),
     fetcher(`${site.origin}/llms.txt`, { maxBytes: 200_000 }).catch(() => null),
   ]);
   return {
     // Answering 200 at its own address, rather than redirecting to the site's.
     wwwDuplicate: Boolean(other && other.status === 200 && new URL(other.finalUrl || other.url).hostname === otherHost),
     httpRedirected: http ? new URL(http.finalUrl || http.url).protocol === "https:" && bareHost(new URL(http.finalUrl || http.url).hostname) === bareHost(site.hostname) : null,
-    hsts: Boolean(home?.headers["strict-transport-security"]),
-    llmsTxt: !llms || llms.status !== 200 || !llms.body.trim() ? "missing" : looksLikeLlmsTxt(llms.body) ? "present" : "malformed",
+    hsts: home ? Boolean(home.headers["strict-transport-security"]) : null,
+    llmsTxt: !llms ? null : llms.status !== 200 || !llms.body.trim() ? "missing" : looksLikeLlmsTxt(llms.body) ? "present" : "malformed",
   };
 }
 
@@ -68,7 +93,7 @@ export function findingsFromHostProbe(input: { siteId: string; analysisId: strin
     out.push(finding(CHECKS["ai.crawler_refused"]!, {
       ...base, impact: 75,
       title: `The firewall refuses ${refused.map((agent) => agent.agent).join(", ")}`,
-      summary: `robots.txt allows ${refused.map((agent) => agent.agent).join(", ")}, but every page probed refused ${refused.length === 1 ? "it" : "them"}${challenged ? " with a bot challenge (Cloudflare's AI crawler setting blocks them by default on new zones)" : ""}. Those assistants cannot read or cite the site.`,
+      summary: `robots.txt allows ${refused.map((agent) => agent.agent).join(", ")}, but every page probed refused requests that identify as ${refused.length === 1 ? "it" : "them"}${challenged ? " with a bot challenge (Cloudflare's AI crawler setting blocks them by default on new zones)" : ""}, while the same pages served a browser. If the firewall only lets verified crawlers through, the real ${refused.length === 1 ? "crawler" : "crawlers"} may still get in; otherwise those assistants cannot read or cite the site. Check the firewall's AI and bot rules.`,
       evidence: { refused: refused.map((agent) => ({ agent: agent.agent, pages: agent.fetched, challenge: agent.challenge })) },
     }));
   }
@@ -78,7 +103,7 @@ export function findingsFromHostProbe(input: { siteId: string; analysisId: strin
   if (host.httpRedirected === false) {
     out.push(finding(CHECKS["server.http_not_redirected"]!, { ...base, impact: 70, title: "The HTTP homepage does not redirect to HTTPS", summary: "http:// requests are served or sent elsewhere instead of being redirected to the https:// site, so visitors and crawlers can stay on an insecure copy.", evidence: { host } }));
   }
-  if (!host.hsts) {
+  if (host.hsts === false) {
     out.push(finding(CHECKS["security.hsts_missing"]!, { ...base, impact: 10, title: "The homepage sends no HSTS header", summary: "Without Strict-Transport-Security, browsers may try the HTTP version first. A security hardening, not a ranking factor.", evidence: { host } }));
   }
   if (host.llmsTxt === "missing") {

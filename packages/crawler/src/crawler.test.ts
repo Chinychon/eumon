@@ -486,6 +486,9 @@ describe("redirect hops and HSTS", () => {
     assert.equal(page.redirectHops, 2);
     assert.equal(page.hsts, true);
     assert.equal(page.viewport, false, "always written, so absence means not checked");
+    assert.equal(page.titleWidth, undefined, "a Latin title's width is its length");
+    const zh = await fetchGooglebotPage("https://x.com/zh", async (url) => ({ url, finalUrl: url, status: 200, headers: {}, body: "<html><head><title>吉隆坡牙科 - 首页</title></head><body></body></html>" }));
+    assert.equal(zh.titleWidth, 17, "five Han characters count twice");
   });
 });
 

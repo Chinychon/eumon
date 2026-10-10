@@ -28,6 +28,10 @@ export type AuditContext = {
 };
 
 const RECRAWL = "run a full crawl once after deploying";
+/** The part of the link graph each link check reads; null until links are recorded for nearly the whole crawl. */
+const LINK_PARTS: Record<string, "brokenLinks" | "orphans" | "singleInbound" | "depth"> = {
+  "links.broken_internal": "brokenLinks", "links.orphan": "orphans", "links.single_inbound": "singleInbound", "links.depth": "depth",
+};
 /** Checks that read fields the crawler records since the audit engine; rows from older crawls lack them. */
 const NEEDS_NEW_FIELDS = new Set([
   "http.redirect_chain", "http.meta_refresh", "security.mixed_content", "security.http_links", "title.length", "description.length", "description.duplicate",
@@ -64,6 +68,8 @@ export function auditTable(ctx: AuditContext): AuditRow[] {
     if (NEEDS_NEW_FIELDS.has(check.id) && ctx.coverage && !ctx.coverage.health?.checked) return skip(RECRAWL);
     if (check.id === "ai.crawler_refused" && !ctx.robotsReadable) return skip("robots.txt could not be read");
     if (check.sources.includes("probe") && check.id !== "server.soft_404_probe" && !ctx.probed) return skip("the AI crawler and host probe");
+    const linkPart = LINK_PARTS[check.id];
+    if (linkPart && !ctx.coverage?.linkGraph?.[linkPart]) return skip(needs);
     if (check.id === "links.depth" && ctx.coverage?.linkGraph?.depth?.skipped) return skip(ctx.coverage.linkGraph.depth.skipped);
     return { id: check.id, status: "passed" };
   });

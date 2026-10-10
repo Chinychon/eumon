@@ -50,6 +50,11 @@ describe("content signals", () => {
     assert.equal(s.entitySchema, false);
   });
 
+  it("counts Chinese text by characters, two to a word", () => {
+    const s = contentSignals(`<html><body><main><p>${"我们的牙医在每次治疗前都会解释每一个步骤".repeat(20)}</p></main></body></html>`, "https://site.example/zh/a", { jsonLdTypes: [], jsonLd: [] });
+    assert.ok(s.words >= 150, `${s.words} words`);
+  });
+
   it("finds an organisation with sameAs, and no author or date on a plain page", () => {
     const s = contentSignals("<html><body><p>Hello</p></body></html>", "https://site.example/", { jsonLdTypes: ["Dentist"], jsonLd: [{ "@type": "Dentist", name: "X", sameAs: ["https://facebook.com/x"] }] });
     assert.equal(s.entitySchema, true);

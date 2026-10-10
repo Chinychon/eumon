@@ -170,6 +170,8 @@ export type CrawlPageResult = {
   redirectHops?: number;
   /** The response carried Strict-Transport-Security. */
   hsts?: boolean;
+  /** The title's display width when it has CJK characters (each counts twice); absent means its length. */
+  titleWidth?: number;
   /*
    * Content signals (packages/crawler/src/content-signals.ts). `viewport`,
    * `words`, `leadWords`, `images`, `landmarks`, `listsOrTables`,

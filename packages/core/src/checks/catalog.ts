@@ -21,7 +21,7 @@ export const CATALOG: Check[] = [
       how: "Remove the site-wide Disallow from the group that applies to Googlebot (its own group, or User-agent: *) and keep only intentional private path blocks.",
       severity: "Always CRITICAL: the whole site is affected.",
     } }),
-  c({ id: "robots.foreign_sitemap", name: "Sitemap on another domain", pillars: ["seo"], category: "sitemap", class: "error", scope: "site", sources: ["crawl"], fix: "robots",
+  c({ id: "robots.foreign_sitemap", name: "Sitemap on another domain", pillars: ["seo"], category: "sitemap", class: "warning", scope: "site", sources: ["crawl"], fix: "robots",
     docs: {
       what: "robots.txt names a sitemap on a different host than the site.",
       why: "Search engines discover pages through the sitemap robots.txt declares; a foreign or stale sitemap, often an agency’s staging domain, hides the site’s real pages.",
@@ -51,7 +51,7 @@ export const CATALOG: Check[] = [
     } }),
 
   // Server and HTTP
-  c({ id: "server.soft_404_probe", name: "200 for pages that don’t exist", pillars: ["seo"], category: "indexing", class: "error", scope: "site", sources: ["probe"], fix: "server",
+  c({ id: "server.soft_404_probe", name: "200 for pages that don’t exist", pillars: ["seo"], category: "indexing", class: "warning", scope: "site", sources: ["probe"], fix: "server",
     docs: {
       what: "The analysis requests a URL that cannot exist; the site answers it with a status under 400 (often the homepage or a generic page).",
       why: "Every mistyped or removed URL becomes a crawlable page with the same content. Google calls these soft 404s, crawls them, indexes nothing, and keeps coming back.",
@@ -461,7 +461,7 @@ export const CATALOG: Check[] = [
       how: "Redirect the other host form to the site's address with a permanent (301) redirect at the DNS, CDN or server level.",
       severity: "Fixed at 40 (MEDIUM): every page exists twice.",
     } }),
-  c({ id: "server.http_not_redirected", name: "HTTP homepage not redirected", pillars: ["seo"], category: "indexing", class: "error", scope: "site", sources: ["probe"], fix: "redirect",
+  c({ id: "server.http_not_redirected", name: "HTTP homepage not redirected", pillars: ["seo"], category: "indexing", class: "warning", scope: "site", sources: ["probe"], fix: "redirect",
     docs: {
       what: "The http:// homepage answers 200, or redirects somewhere other than the https:// homepage.",
       why: "Visitors and crawlers that arrive over HTTP stay on an insecure copy of the site, and the site exists twice.",

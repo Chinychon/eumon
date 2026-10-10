@@ -54,7 +54,19 @@ describe("audit coverage", () => {
     assert.equal(c.issues?.titleLength, 1, "Dr G is under 30 characters; legacy titles are not checked");
     assert.deepEqual(c.issueExamples?.snippetBlocked, [{ url: u("/c") }]);
     // indexable: a, b (a chain stays in), c, e, f, g; unhealthy SEO: b (mixed content, chain), f (500), g (weak title); AI: c (snippet), f
-    assert.deepEqual(c.health, { indexable: 6, unhealthySeo: 3, unhealthyAi: 2, checked: true });
+    // Two of the seven crawled rows predate the content signals: under nine in ten, so the crawl is not counted as checked.
+    assert.deepEqual(c.health, { indexable: 6, unhealthySeo: 3, unhealthyAi: 2, checked: false });
+  });
+
+  it("counts the crawl as checked when nine in ten rows carry the content signals", async () => {
+    const pages = Array.from({ length: 9 }, (_, i) => current(`/p${i}`)).concat(legacy("/old"));
+    assert.equal((await getCrawlCoverage(await site(pages), "an1")).health?.checked, true);
+  });
+
+  it("measures Chinese titles by width, so a normal Chinese title is neither weak nor short", async () => {
+    const c = await getCrawlCoverage(await site([current("/zh/a", { title: "吉隆坡牙科诊所 - 首页", titleWidth: 21 }), current("/zh/b", { title: "牙医", titleWidth: 4 })]), "an1");
+    assert.equal(c.missingTitleUrls, 1, "only the two-character title is weak");
+    assert.equal(c.health?.unhealthySeo, 1);
   });
 
   it("says the health is unchecked when no row carries the new fields", async () => {
@@ -72,8 +84,9 @@ describe("audit coverage", () => {
 });
 
 describe("link graph", () => {
-  const pages = ["/", "/a", "/b", "/c", "/d", "/orphan"].map((path) => current(path)).concat(legacy("/gone", { status: 404, title: "Not found" }));
-  const links: Array<[string, string]> = [["/", "/a"], ["/a", "/b"], ["/b", "/c"], ["/c", "/d"], ["/a", "/gone"]];
+  const pages = ["/", "/a", "/b", "/c", "/d", "/orphan"].map((path) => current(path)).concat(legacy("/gone", { status: 404, title: "Not found" }), legacy("/busy", { status: 429 }), legacy("/walled", { status: 403, botChallenge: true }));
+  // /busy was rate-limited and /walled challenged: Eumon could not read them, so links to them are not broken.
+  const links: Array<[string, string]> = [["/", "/a"], ["/a", "/b"], ["/b", "/c"], ["/c", "/d"], ["/a", "/gone"], ["/b", "/busy"], ["/b", "/walled"]];
 
   it("finds orphans, single-inbound pages, broken links and deep pages", async () => {
     const r = await linkGraphIssues(await site(pages, links), "s", "an1");
@@ -106,5 +119,7 @@ describe("probe pages", () => {
     ]);
     assert.deepEqual(await probePages(db, "an1", 5), [u("/doctors/a"), u("/blog/x")]);
     assert.deepEqual(await probePages(db, "an1", 1), [u("/doctors/a")]);
+    const moved = await site([current("/doctors/a", { finalUrl: u("/doctors/a/") })]);
+    assert.deepEqual(await probePages(moved, "an1", 5), [u("/doctors/a/")], "the address the page answers at, so the probe spends no redirect");
   });
 });

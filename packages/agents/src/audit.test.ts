@@ -48,6 +48,14 @@ describe("auditTable", () => {
     assert.deepEqual(rows.find((row) => row.id === "security.hsts_missing"), { id: "security.hsts_missing", status: "skipped", reason: "the AI crawler and host probe" });
   });
 
+  it("skips the link checks when the crawl did not record links", () => {
+    const rows = auditTable(ctx({ coverage: { ...ctx().coverage!, linkGraph: { orphans: null, singleInbound: null, brokenLinks: null, depth: null } } }));
+    for (const id of ["links.orphan", "links.broken_internal", "links.single_inbound", "links.depth"]) {
+      assert.deepEqual(rows.find((row) => row.id === id), { id, status: "skipped", reason: "a full crawl with links recorded" });
+    }
+    assert.equal(auditTable(ctx({ coverage: { ...ctx().coverage!, linkGraph: undefined } })).find((row) => row.id === "links.orphan")!.status, "skipped");
+  });
+
   it("skips the crawler probe when robots.txt was unreadable", () => {
     assert.deepEqual(auditTable(ctx({ robotsReadable: false })).find((row) => row.id === "ai.crawler_refused"), { id: "ai.crawler_refused", status: "skipped", reason: "robots.txt could not be read" });
   });
@@ -69,6 +77,13 @@ describe("pillarScores", () => {
     const scores = pillarScores(ctx({ findings: [blocked] }));
     assert.deepEqual(scores.seo, { value: 0, indexable: 10, unhealthy: 2, reason: "robots.txt blocks Googlebot from the entire site" });
     assert.equal(scores.ai.value, 90, "an SEO error does not zero the AI score");
+  });
+
+  it("zeroes the SEO score only for problems that stop indexing", () => {
+    for (const id of ["server.soft_404_probe", "robots.foreign_sitemap", "server.http_not_redirected"]) {
+      assert.equal(pillarScores(ctx({ findings: [finding(CHECKS[id]!, base)] })).seo.value, 80, id);
+    }
+    assert.equal(pillarScores(ctx({ findings: [finding(CHECKS["indexing.homepage_noindex"]!, base)] })).seo.value, 0);
   });
 
   it("does not zero the AI score for deliberate robots.txt blocks or an unreadable robots.txt", () => {

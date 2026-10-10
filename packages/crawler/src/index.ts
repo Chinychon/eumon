@@ -1,7 +1,7 @@
 import type { CrawlPageResult, Finding, SitemapAudit } from "@organic-growth/core";
 import { CHECKS, finding, organicImpactScore, simhash } from "@organic-growth/core";
 import { contentMarkup, elementSpans, findTags, hasToken, innerText, parseAttributes, stripElements, visibleText } from "./html.js";
-import { contentSignals } from "./content-signals.js";
+import { contentSignals, titleWidth } from "./content-signals.js";
 import { GOOGLEBOT_TOKEN, parseRobots, type RobotsPolicy } from "./robots.js";
 import { classifyLanguage, classifyUrlType, isSameSite, sameDocument } from "./urls.js";
 
@@ -453,6 +453,7 @@ function toCrawlResult(
     ...(isSoftNotFound(fetchResult.status, signals) ? { softNotFound: true } : {}),
     ...(signals.metaRefresh ? { metaRefresh: signals.metaRefresh } : {}),
     redirectHops: some(fetchResult.hops),
+    titleWidth: titleWidth(signals.title),
     hsts: some(Boolean(fetchResult.headers["strict-transport-security"])),
     lang: some(content.lang), imagesNoAlt: some(content.imagesNoAlt), mixedContent: some(content.mixedContent), httpLinks: some(content.httpLinks),
     externalLinks: some(content.externalLinks), h1: some(content.h1), questionHeadings: some(content.questionHeadings), statistics: some(content.statistics),

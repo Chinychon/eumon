@@ -6,23 +6,26 @@ import { BrandMark } from "../components/pixel";
 import { Button, Field } from "../components/ui";
 
 declare global {
-  interface Window { turnstile?: { render(el: HTMLElement, options: { sitekey: string; callback(token: string): void }): string } }
+  interface Window { turnstile?: { render(el: HTMLElement, options: { sitekey: string; callback(token: string): void }): string; reset(id?: string): void } }
 }
 
 /** Turnstile guards the email and password endpoints (Better Auth's captcha plugin reads x-captcha-response). */
 function useTurnstile(siteKey: string, active: boolean) {
   const ref = useRef<HTMLDivElement>(null);
   const [token, setToken] = useState("");
+  const widget = useRef<string | undefined>(undefined);
   useEffect(() => {
     if (!active || !ref.current) return;
     const script = document.createElement("script");
     script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js";
     script.async = true;
-    script.onload = () => ref.current && window.turnstile?.render(ref.current, { sitekey: siteKey, callback: setToken });
+    script.onload = () => ref.current && (widget.current = window.turnstile?.render(ref.current, { sitekey: siteKey, callback: setToken }));
     document.head.appendChild(script);
     return () => { script.remove(); };
   }, [siteKey, active]);
-  return { ref, token };
+  /** Tokens are single-use: call after every attempt. */
+  const reset = () => { setToken(""); window.turnstile?.reset(widget.current); };
+  return { ref, token, reset };
 }
 
 export function SignInForm({ next, email: emailOn, password: passwordOn, turnstileSiteKey }: { next: string; email: boolean; password: boolean; turnstileSiteKey: string }) {
@@ -39,6 +42,7 @@ export function SignInForm({ next, email: emailOn, password: passwordOn, turnsti
     setBusy(label); setError(""); setMessage("");
     const result = await action().catch((caught: unknown) => ({ error: { message: caught instanceof Error ? caught.message : String(caught) } }));
     setBusy("");
+    if (label !== "google") turnstile.reset();
     if (result?.error) setError(result.error.message ?? "That didn't work. Try again.");
     return !result?.error;
   }

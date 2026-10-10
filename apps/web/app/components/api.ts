@@ -23,7 +23,7 @@ export async function api<T>(path: string, init: ApiInit = {}): Promise<T> {
     data = null;
   }
   if (!response.ok) {
-    if (response.status === 401 && typeof window !== "undefined") {
+    if (response.status === 401 && typeof window !== "undefined" && !window.location.pathname.startsWith("/sign-in")) {
       window.location.assign(`/sign-in?next=${encodeURIComponent(window.location.pathname + window.location.search)}`);
     }
     const message = (data as { error?: unknown } | null)?.error;

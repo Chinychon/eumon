@@ -6,6 +6,6 @@ describe("safeNext", () => {
   it("keeps same-site paths and sends everything else home", () => {
     assert.equal(safeNext("/?view=setup"), "/?view=setup");
     assert.equal(safeNext("/invite/inv_1"), "/invite/inv_1");
-    for (const bad of [null, "", "//evil.com", "https://evil.com", "/\\evil.com", "javascript:alert(1)", "evil"]) assert.equal(safeNext(bad), "/", String(bad));
+    for (const bad of [null, "", "//evil.com", "https://evil.com", "/\\evil.com", "javascript:alert(1)", "evil", "/\t/evil.com", "/\n/evil.com", "/\r/evil.com", "/ /evil.com"]) assert.equal(safeNext(bad), "/", String(bad));
   });
 });

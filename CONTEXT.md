@@ -20,6 +20,9 @@ Short definitions of the domain terms that name modules and seams. Architecture 
 - **Landing source**: where a session first landed from (`search`, `ai:<assistant>`, `other`), kept on `page_sessions.source`; it splits Eumon-page leads (`leads_eumon.<source>`).
 - **Question search**: a query phrased as a question (`QUESTION_QUERY_PATTERN`), counted from the 28-day query list the sync already fetches.
 - **AI readiness**: an analysis's robots.txt verdict per AI token (exact token match), llms.txt, and FAQ markup. Blocking is reported (`ai_visibility` findings), never auto-fixed.
+- **AI answer** (`ai_prompts`, `ai_answer_checks`, `apps/web/src/ai-answers.ts`): a question the user tracks (up to 25 per target market), asked weekly to ChatGPT, Gemini, Google AI Mode and Perplexity through DataForSEO, with the answer and its sources kept as one check per engine.
+- **Mentioned / cited**: an answer **mentions** the brand when it names the brand, the site's domain or its domain label as written; it **cites** the site when one of its sources is on the site's domain. Competitors named or cited in the same answer are kept with it.
+- **Share of voice**: answers that name or cite a domain, divided by all such answers across the site and its competitors, per engine.
 
 ## Sync
 
@@ -46,6 +49,8 @@ Short definitions of the domain terms that name modules and seams. Architecture 
 - **Near-duplicate**: two indexable pages with the same title whose text fingerprints (`simhash` of the main content — `<main>`/`<article>`, or the body without nav, header, footer, aside and forms — 64 bits kept in `result_json.textHash`) are within 6 bits; `suffixed` when their URLs differ only by a trailing code with a digit in it — the same record listed twice. Reused crawl results from before these fields existed carry none of them: run a full crawl once after deploying them.
 - **Locale split**: the full-crawl findings end their summary with the count per language version (the URL's locale prefix, `default` for none) when the crawl has more than one; titles stay the same, so History keys do.
 - **Rank finding** (`findingsFromRanks`): a tracked keyword five or more places under its best in the 30 days before the fall began (best 20 or better), or out of the ten after holding a position seven days. A finding stays while the keyword is still down (checks are read over 90 days), so History marks it resolved only when the keyword recovers; thresholds in `RANKS`. A tracked keyword not in the ten that Search Console averages at 30 or better is a `ranking` opportunity unless one already names the query.
+- **AI answer finding**: "AI assistants name competitors but not you for N of M questions" (answers naming a competitor and neither naming nor citing the site), and "<Engine> stopped citing you for N questions since <day>" (cited in an earlier check and not in the latest one). Both read only today's competitors; empty answers are notes, not rows.
+- **AI answer opportunity**: "Get cited for “…” in AI answers (<Market>)", one per tracked question where a competitor is cited in some answer and the site in none of them.
 
 ## Data
 

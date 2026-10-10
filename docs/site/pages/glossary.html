@@ -129,7 +129,7 @@
   <h2 id="accounts">Accounts and access</h2>
   <dl>
     <dt>Workspace (<code>organization</code>, <code class="path">packages/db/src/workspaces.ts</code>)</dt>
-    <dd>the unit that owns sites, people, limits and GitHub installations; a Better Auth organization. Every site belongs to one (<code>sites.workspace_id</code>). Each user may create one workspace (<code>organizationLimit: 1</code>), so free limits can't be multiplied, and the API can't delete one. A session has an <strong>active workspace</strong>, the one the dashboard shows.</dd>
+    <dd>the unit that owns sites, people, limits and GitHub installations; a Better Auth organization. Every site belongs to one (<code>sites.workspace_id</code>). Each user may own one workspace (<code>organizationLimit</code>), so free limits can't be multiplied; being a Member or Client of other workspaces doesn't count. The API can't delete a workspace. A session has an <strong>active workspace</strong>, the one the dashboard shows.</dd>
     <dt>Initial workspace (<code>ws_initial</code>)</dt>
     <dd>the workspace that holds every site from before accounts, created by migration 0024 with no limits.</dd>
     <dt>Role</dt>
@@ -149,7 +149,7 @@
     <dt>Free limits (<code>FREE_LIMITS</code>, <code class="path">apps/web/src/limits.ts:18</code>)</dt>
     <dd>what a workspace may do until <code>/admin</code> raises it: 1 site, 3 analyses, 500 scraped pages, 20 Ask questions and 10 AI runs a day, 3 people (everyone in the workspace, whatever their role, plus pending invitations), and no DataForSEO, pull requests or Sheets export. Overrides live in <code>workspace_limits</code>; a null number is unlimited.</dd>
     <dt>Metering, charge (<code>workspace_usage</code>)</dt>
-    <dd>a daily counter per workspace and metered action, charged by <code>charge</code> before the work starts; past the limit the route answers 429 and the allowance resets at midnight UTC. An <strong>AI run</strong> is one model-backed action: scoping, a source preview, template design or regeneration, dedupe, title suggestions, a proposed code change.</dd>
+    <dd>a daily counter per workspace and metered action, charged by <code>charge</code> once the route's own checks pass, just before the work; past the limit the route answers 429 and the allowance resets at midnight UTC. An analysis, collection or scope that then can't start is given back by <code>refund</code>. An <strong>AI run</strong> is one model-backed action: scoping, a source preview's sample extraction, template design, dedupe, title suggestions, a proposed code change.</dd>
     <dt>Feature (<code>dataForSeo</code>, <code>pullRequests</code>, <code>sheetsExport</code>)</dt>
     <dd>an on/off limit. A route that needs a feature the workspace lacks answers 403; the sync leaves the DataForSEO key out for such a workspace (<code>keysForLimits</code>).</dd>
     <dt>GitHub installation</dt>

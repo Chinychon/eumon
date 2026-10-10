@@ -95,9 +95,8 @@ npx cf workers secrets list --worker eumon</code></pre>
   <p>The page calls two routes, which you can also use from a terminal (see <a href="#ops--observability">Observability</a> for the cookie and <code>Origin</code> header):</p>
   <ul>
     <li><code>GET /api/admin/workspaces</code>: the free defaults and every workspace with its usage and overrides.</li>
-    <li><code>PUT /api/admin/workspaces/&lt;workspaceId&gt;/limits</code>: the JSON body becomes the workspace's overrides, stored in <code>workspace_limits</code>. Numbers are whole numbers or <code>null</code> (unlimited); features are <code>true</code> or <code>false</code>; unknown keys are dropped.</li>
+    <li><code>PUT /api/admin/workspaces/&lt;workspaceId&gt;/limits</code>: the JSON body is merged into the workspace's overrides in <code>workspace_limits</code> (<code class="path">apps/web/app/api/admin/workspaces/[workspaceId]/limits/route.ts:24</code>). Limits left out keep their value, so <code>{"sites": 5}</code> changes only the site limit. A value equal to the free default is dropped rather than stored, so the workspace follows <code>FREE_LIMITS</code> if that changes. Numbers are whole numbers or <code>null</code> (unlimited); features are <code>true</code> or <code>false</code>; unknown keys are dropped.</li>
   </ul>
-  <div class="callout trap"><p>The <code>PUT</code> replaces the overrides; it does not merge them (<code class="path">apps/web/app/api/admin/workspaces/[workspaceId]/limits/route.ts:24</code>). A body of <code>{"sites": 5}</code> raises the site limit and puts every other limit back to the free default. The <code>/admin</code> form always sends every field; by hand, send them all too.</p></div>
 
   <h2 id="cron-trigger">The cron trigger</h2>
   <p>The daily Results sync is a Worker Cron Trigger, <code>triggers.scheduled({ schedule: "15 4 * * *" })</code> (<code class="path">apps/web/cloudflare.config.ts:12</code>). At 04:15 UTC Cloudflare calls <code>scheduled</code> in <code class="path">apps/web/worker.ts:52</code>, which runs <code>startDailySyncs</code> (<code class="path">apps/web/src/sync-steps.ts:212</code>): one <code>search-sync</code> Workflow instance per site, with the ID <code>daily-&lt;YYYY-MM-DD&gt;-&lt;siteId&gt;</code>. Because the ID is fixed for the day, a second firing creates nothing. The cron does not pass through the sign-in gate. "Sync now" creates <code>manual-&lt;siteId&gt;-&lt;window&gt;</code> instances through <code>POST /api/sites/&lt;siteId&gt;/results/sync</code>; clicks within ten minutes join one run, and a click while that day's daily run is in flight gets a 409.</p>
@@ -118,7 +117,7 @@ npx wrangler workflows instances describe site-analysis &lt;instance-id&gt;</cod
   <table>
     <thead><tr><th>Workflow</th><th>Instance ID</th><th>Created by</th></tr></thead>
     <tbody>
-      <tr><td><code>site-analysis</code></td><td>The analysis ID (<code>analysis_…</code>)</td><td><code class="path">apps/web/app/api/sites/[siteId]/analyses/route.ts:57</code></td></tr>
+      <tr><td><code>site-analysis</code></td><td>The analysis ID (<code>analysis_…</code>)</td><td><code class="path">apps/web/app/api/sites/[siteId]/analyses/route.ts:59</code></td></tr>
       <tr><td><code>dataset-scrape</code></td><td>The scrape job ID</td><td><code class="path">apps/web/app/api/datasets/[datasetId]/scrape/route.ts:32</code></td></tr>
       <tr><td><code>search-sync</code></td><td><code>daily-&lt;day&gt;-&lt;siteId&gt;</code> or <code>manual-&lt;siteId&gt;-&lt;window&gt;</code></td><td><code class="path">apps/web/src/sync-steps.ts:191</code></td></tr>
     </tbody>

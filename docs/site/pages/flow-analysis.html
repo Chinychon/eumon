@@ -15,18 +15,14 @@
   <p><code>POST /api/sites/[siteId]/analyses</code> lives in <code class="path">apps/web/app/api/sites/[siteId]/analyses/route.ts:31</code>. In order, it:</p>
   <ol>
     <li>Checks the caller with <code>requireSite(request, siteId, "write")</code>: 401 without a session, 404 when the site doesn't exist or isn't in the caller's workspace, 403 for a Client.</li>
-    <li>Charges one analysis to the workspace (<code>charge</code>, metric <code>analysesPerDay</code>); past the day's limit it answers 429. The charge comes before the checks below, so a request that then gets a 409 has still used one.</li>
     <li>Reads the JSON body. <code>full</code> is true only when the body has <code>full: true</code>; otherwise the run reuses crawl results that still stand (see <a href="#flow-analysis--workflow-steps">step 2, enqueue-full-crawl</a>).</li>
-    <li>Looks at the latest analysis for the site (<code>getLatestAnalysisForSite</code>). If it is <code>queued</code> or <code>running</code>:
-      <ul>
-        <li>if <code>analysisStalled(latest)</code> is false, it answers 409 "An analysis is already running for this site.";</li>
-        <li>if it is stalled, it terminates that Workflow instance (errors ignored) and marks the old run <code>failed</code> with "It stopped making progress, so a new run replaced it." before starting the new one, so the old run cannot come back and write alongside it.</li>
-      </ul>
-    </li>
+    <li>Looks at the latest analysis for the site (<code>getLatestAnalysisForSite</code>). If it is <code>queued</code> or <code>running</code> and <code>analysisStalled(latest)</code> is false, it answers 409 "An analysis is already running for this site."</li>
+    <li>Charges one analysis to the workspace (<code>charge</code>, metric <code>analysesPerDay</code>, line 42); past the day's limit it answers 429. Nothing is charged before this point, so a 409 costs nothing.</li>
+    <li>If the latest run was queued or running but stalled, it terminates that Workflow instance (errors ignored) and marks the old run <code>failed</code> with "It stopped making progress, so a new run replaced it." before starting the new one, so the old run cannot come back and write alongside it.</li>
     <li>Creates an id with <code>createId("analysis")</code>.</li>
     <li><strong>Demo branch.</strong> If <code>siteId === DEMO_SITE_ID</code>, it calls <code>startDemoRun</code> and returns 202 with status <code>running</code>. No Workflow is created: the demo site is served from memory and its run is simulated as the progress view polls (the progress route calls <code>advanceDemoRun</code>).</li>
     <li>Otherwise it inserts the <code>analyses</code> row with <code>createAnalysis</code> (status <code>queued</code>), then calls <code>env.ANALYSIS_WORKFLOW.create({ id: analysisId, params: { analysisId, siteId, full } })</code>. The Workflow instance id is the analysis id, which is how the cancel route and the stalled-run handling find it again.</li>
-    <li>If <code>create</code> throws, the row is marked <code>failed</code> with the error and the route answers 503. On success it answers 202 with status <code>queued</code>.</li>
+    <li>If <code>create</code> throws, the row is marked <code>failed</code> with the error, the analysis is given back (<code>refund</code>), and the route answers 503. On success it answers 202 with status <code>queued</code>.</li>
   </ol>
   <p><code>analysisStalled</code> (<code class="path">packages/db/src/index.ts:212</code>) is true when a queued or running analysis has had no progress update for more than 45 minutes (<code>STALL_MS</code>), measured from <code>progress.updatedAt</code>, or from <code>created_at</code> if it never reported progress. A restarted local dev server ends Workflow runs without telling the database, which is what this catches.</p>
 

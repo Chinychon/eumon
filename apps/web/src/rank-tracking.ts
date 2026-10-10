@@ -22,6 +22,17 @@ const RANK: StepOptions = { retries: { limit: 1, delay: 30_000 }, timeout: 3 * 6
 export type RankTarget = { keyword: string; market: string };
 type Auth = { login: string; password: string };
 
+/** Slices of at most RANK_STEP pairs, never mixing markets: a step then costs 1 + 40 + 1 + 2 subrequests whatever the market count. */
+export function slices(targets: RankTarget[]): RankTarget[][] {
+  const out: RankTarget[][] = [];
+  for (const target of targets) {
+    const last = out[out.length - 1];
+    if (last && last.length < RANK_STEP && last[0]!.market === target.market) last.push(target);
+    else out.push([target]);
+  }
+  return out;
+}
+
 /** Every tracked keyword in every covered market, minus the pairs already checked today. */
 export async function rankQueue(db: D1Like, site: SiteRecord, today: string): Promise<{ targets: RankTarget[]; notes: string[] }> {
   const [keywords, markets, done] = await Promise.all([listTrackedKeywords(db, site.id), listSiteMarkets(db, site.id), checkedPairsOn(db, site.id, today)]);
@@ -31,7 +42,8 @@ export async function rankQueue(db: D1Like, site: SiteRecord, today: string): Pr
     notes.push(`ranks skipped ${market}: DataForSEO doesn't cover it`);
     return false;
   });
-  const targets = keywords.flatMap((keyword) => covered.map((market) => ({ keyword, market }))).filter((target) => !done.has(`${target.keyword}|${target.market}`));
+  // Market-major, so a step's slice stays in one market (see `slices`).
+  const targets = covered.flatMap((market) => keywords.map((keyword) => ({ keyword, market }))).filter((target) => !done.has(`${target.keyword}|${target.market}`));
   return { targets, notes };
 }
 
@@ -83,8 +95,9 @@ export async function trackRanks(db: D1Like, safe: Safe, site: SiteRecord, auth:
   let checked = 0;
   let cost = 0;
   let steps = 0;
-  for (let offset = 0, round = 1; offset < queue.ok.targets.length; offset += RANK_STEP, round++) {
-    const slice = queue.ok.targets.slice(offset, offset + RANK_STEP);
+  let round = 0;
+  for (const slice of slices(queue.ok.targets)) {
+    round++;
     const result = await safe(`ranks-${round}`, () => checkRanks(db, site, auth, today, slice, fetchFn), RANK);
     if ("error" in result) { notes.push(`ranks failed: ${result.error}`); break; }
     steps++;

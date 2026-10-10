@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import type { SerpResult } from "@organic-growth/core";
 import { getSite, getSnapshot, listMetricSeries, listRankChecks, saveRankChecks, setSiteMarkets, setTrackedKeywords, upsertSite } from "@organic-growth/db";
 import { openSqliteD1 } from "@organic-growth/db/sqlite";
-import { checkRanks, rankQueue, RANK_STEP, writeRankCounts } from "./rank-tracking.ts";
+import { checkRanks, rankQueue, slices, RANK_STEP, writeRankCounts } from "./rank-tracking.ts";
 
 const today = "2026-10-07";
 const at = `${today}T04:15:00.000Z`;
@@ -59,6 +59,15 @@ describe("rank tracking steps", () => {
     await writeRankCounts(db, record, today);
     const series = await listMetricSeries(db, "s", ["sync.ranks", "tracked_checked", "tracked_top3", "tracked_top10", "tracked_unranked", "tracked_position_sum"], today, today);
     assert.deepEqual(Object.fromEntries(Object.entries(series).map(([metric, points]) => [metric, points[0]?.value])), { "sync.ranks": 5, tracked_checked: 2, tracked_top3: 1, tracked_top10: 1, tracked_unranked: 1, tracked_position_sum: 3 });
+  });
+
+  it("cuts slices that never mix markets, so a step's subrequests don't grow with the market count", async () => {
+    const { db, record } = await site(["mys", "sgp"], ["kw 1", "kw 2", "kw 3"]);
+    const cut = slices((await rankQueue(db, record, today)).targets);
+    assert.equal(cut.length, 2);
+    assert.ok(cut.every((slice) => new Set(slice.map((target) => target.market)).size === 1));
+    const many = Array.from({ length: 41 }, (_, index) => ({ keyword: `k${index}`, market: "mys" }));
+    assert.deepEqual(slices(many).map((slice) => slice.length), [40, 1]);
   });
 
   it("the step size is 40", () => { assert.equal(RANK_STEP, 40); });

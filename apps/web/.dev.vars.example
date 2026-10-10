@@ -23,3 +23,18 @@ DEEPSEEK_API_KEY=
 ANTHROPIC_API_KEY=
 # Optional model override for the active provider, e.g. deepseek-v4-pro for higher-quality scoping and copy.
 LLM_MODEL=
+
+# Accounts. At least 32 random characters; not the same as SESSION_SECRET.
+BETTER_AUTH_SECRET=replace-with-at-least-32-random-characters
+# Owners of the workspace holding the pre-accounts sites, and of /admin. Comma-separated.
+BOOTSTRAP_OWNER_EMAIL=you@example.com
+# Cloudflare Turnstile test keys (always pass) for local dev; real keys from the Turnstile dashboard in production.
+TURNSTILE_SITE_KEY=1x00000000000000000000AA
+TURNSTILE_SECRET_KEY=1x0000000000000000000000000000000AA
+# The GitHub App's Client ID and a client secret (GitHub App settings → General).
+GITHUB_APP_CLIENT_ID=
+GITHUB_APP_CLIENT_SECRET=
+# Optional, off until Workers Paid: email sign-in and verification, and password sign-in (needs email).
+# EMAIL_ENABLED=true
+# EMAIL_FROM=no-reply@your-domain
+# PASSWORD_SIGNIN=true

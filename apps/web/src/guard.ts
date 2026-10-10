@@ -11,12 +11,10 @@ import { fail } from "./server";
  */
 
 export type Viewer = { userId: string; email: string; emailVerified: boolean; workspaceId: string | null };
-// ponytail: Task 10 declares the auth secrets on Env; drop this cast then.
-const authEnv = env as unknown as AuthEnv;
 type SiteAccess = { viewer: Viewer; site: SiteRecord; role: WorkspaceRole };
 
 export async function viewer(request: Request): Promise<Viewer | null> {
-  const session = await authFor(authEnv).api.getSession({ headers: request.headers });
+  const session = await authFor(env).api.getSession({ headers: request.headers });
   if (!session) return null;
   return {
     userId: session.user.id,
@@ -61,6 +59,6 @@ export async function requireWorkspace(request: Request, need: Need): Promise<{ 
 export async function requirePlatformAdmin(request: Request): Promise<Viewer | Response> {
   const who = await viewer(request);
   if (!who) return fail("Sign in to continue.", 401);
-  if (!who.emailVerified || !adminEmails(authEnv).includes(who.email.toLowerCase())) return fail("Not found.", 404);
+  if (!who.emailVerified || !adminEmails(env).includes(who.email.toLowerCase())) return fail("Not found.", 404);
   return who;
 }

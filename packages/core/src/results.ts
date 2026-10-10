@@ -3,6 +3,7 @@
  * the API, the client link, and the tests all compute the same numbers.
  */
 
+import { AI_ANSWER_ENGINES, aiAnswersView, type AiAnswerCheck, type AiAnswersView } from "./ai-answers.js";
 import { AI_ASSISTANTS, AI_ENGINES, type AiAssistant, type AiEngine } from "./ai-agents.js";
 import { keywordsView, type KeywordsInput } from "./keywords.js";
 import type { PageTypeOutcome } from "./whatsapp.js";
@@ -122,6 +123,8 @@ export const METRICS = {
   serp: ["sync.serp", "sync.serp_competitors", "serp_ai_overviews", "serp_ai_cited"],
   /** Rank tracking: pairs checked a day, how many in the top 3 and 10, not in the ten, and the sum of ranked positions. */
   ranks: ["sync.ranks", "tracked_checked", "tracked_top3", "tracked_top10", "tracked_unranked", "tracked_position_sum"],
+  /** AI answer tracking: answers checked, mentioning the brand, citing the site — overall and per engine. Plus `ai_answers_mentioned:<domain>` and `ai_answers_cited:<domain>` for each current competitor. */
+  aiAnswers: ["sync.ai_answers", "ai_answers_checked", "ai_answers_mentioned", "ai_answers_cited", ...AI_ANSWER_ENGINES.flatMap(({ engine }) => [`ai_answers_checked.${engine}`, `ai_answers_mentioned.${engine}`, `ai_answers_cited.${engine}`])],
   /** DataForSEO Backlinks: the site's profile. Plus `backlinks:<domain>`, `ref_domains:<domain>` and `backlink_rank:<domain>` for each current competitor. */
   backlinks: ["sync.backlinks", "backlinks", "ref_domains", "backlink_rank"],
   /** Bing Webmaster Tools: daily clicks and impressions (Bing and the products built on its index), and crawl counts. */
@@ -170,6 +173,8 @@ export type ResultsInput = {
   links?: LinksInput;
   /** Crawler requests from the site's server or CDN logs, per day; undefined when no log has been received. */
   crawlLog?: CrawlDayRow[];
+  /** The tracked questions, their answer checks (last 90 days), and the site's bare domain. */
+  aiAnswers?: { prompts: string[]; checks: AiAnswerCheck[]; site: string };
 };
 
 export type SpeedValue = { p75: number | null; rating: SpeedRating | null };
@@ -240,6 +245,7 @@ export type ResultsView = {
   /** From the site's server or CDN logs; null until a log arrives. */
   crawlLog: CrawlLogView | null;
   ai: AiView;
+  aiAnswers: AiAnswersView;
 };
 
 /** AI visibility: who reads Eumon's pages for AI assistants, who sends visitors, and what that brings. */
@@ -405,6 +411,11 @@ export function resultsView(input: ResultsInput): ResultsView {
     crawlersAllowed: allowed === null || checked === null ? null : { allowed, checked },
   };
 
+  const aiAnswers = aiAnswersView({
+    prompts: input.aiAnswers?.prompts ?? [], markets: input.markets, checks: input.aiAnswers?.checks ?? [], site: input.aiAnswers?.site ?? "",
+    competitors: input.competitors ?? [], today, overview: { searches: serp.aiOverview.searches, citesYou: serp.aiOverview.citesYou },
+  });
+
   const ga4Sessions = weekly(series.ga4_organic_sessions, from, today, googleComplete);
   const ga4Events = weekly(series.ga4_organic_key_events, from, today, googleComplete);
 
@@ -433,6 +444,6 @@ export function resultsView(input: ResultsInput): ResultsView {
       value: latest(series.site_health, today),
       day: series.site_health?.length ? series.site_health[series.site_health.length - 1]!.day : null,
     },
-    speed, lab, authority, keywords, serp, ranks, links, bing, indexNow, crawlLog, outcomes, ai,
+    speed, lab, authority, keywords, serp, ranks, links, bing, indexNow, crawlLog, outcomes, ai, aiAnswers,
   };
 }

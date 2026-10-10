@@ -6,7 +6,7 @@
  * row, so every answer carries what it cost; the account allows one task per
  * request.
  */
-import { bareDomain, type BacklinkSummary, type LinkGap, type RankedKeyword, type SerpCompetitor, type SerpFeature, type SerpResult } from "@organic-growth/core";
+import { bareDomain, type AiAnswerEngine, type AiSource, type BacklinkSummary, type LinkGap, type RankedKeyword, type SerpCompetitor, type SerpFeature, type SerpResult } from "@organic-growth/core";
 
 export type DataForSeoAuth = { login: string; password: string };
 
@@ -189,4 +189,77 @@ export async function fetchLinkGap(auth: DataForSeoAuth, competitors: string[], 
     exclude_targets: [site], limit: 100, order_by: ["1.rank,desc"], exclude_internal_backlinks: true, backlinks_status_type: "live",
   }, fetchFn);
   return { rows: linkGapRows(result, targets), cost };
+}
+
+type ScraperResult = { markdown?: string | null; items?: Array<{ text?: string | null; markdown?: string | null }> | null; sources?: Array<{ domain?: string | null; url?: string | null }> | null };
+type AiNode = { text?: string | null; markdown?: string | null; references?: Array<{ domain?: string | null; url?: string | null }> | null; items?: AiNode[] | null };
+type ResponsesResult = { items?: Array<{ sections?: Array<{ text?: string | null; annotations?: Array<{ url?: string | null }> | null }> | null }> | null };
+
+/** A source as Eumon keeps it: its bare domain (from the URL when DataForSEO gives none) and URL, kept only when http(s) since the card links it; sources with neither are dropped. */
+function source(entry: { domain?: string | null; url?: string | null }): AiSource[] {
+  const url = /^https?:\/\//i.test(entry.url ?? "") ? entry.url! : "";
+  let domain = entry.domain ?? "";
+  if (!domain && url) { try { domain = new URL(url).hostname; } catch { return []; } }
+  return domain ? [{ domain: bareDomain(domain), url }] : [];
+}
+
+/** Each source once: by URL, or by domain when it has no URL; the first occurrence stays. */
+function uniqueSources(sources: AiSource[]): AiSource[] {
+  const seen = new Set<string>();
+  return sources.filter((entry) => {
+    const key = entry.url || entry.domain;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+/** ChatGPT and Gemini as people see them (DataForSEO's LLM Scraper). */
+function scraperAnswer(result: ScraperResult | undefined) {
+  const text = result?.markdown || (result?.items ?? []).map((item) => item.markdown || item.text || "").filter(Boolean).join("\n");
+  return { text, sources: uniqueSources((result?.sources ?? []).flatMap(source)) };
+}
+
+/** Google's AI Mode: the text of each AI Overview node (not repeated from a node that already has it) and every reference, however deeply nested. */
+function aiModeAnswer(result: { items?: AiNode[] | null } | undefined) {
+  const texts: string[] = [];
+  const sources: AiSource[] = [];
+  const walk = (node: AiNode, hasText: boolean) => {
+    const text = node.markdown || node.text;
+    if (text && !hasText) texts.push(text);
+    for (const reference of node.references ?? []) sources.push(...source(reference));
+    for (const child of node.items ?? []) walk(child, hasText || !!text);
+  };
+  for (const item of result?.items ?? []) walk(item, false);
+  return { text: texts.join("\n"), sources: uniqueSources(sources) };
+}
+
+/** Perplexity's answer through its API (Sonar searches the web), with the URLs it annotates. */
+function responsesAnswer(result: ResponsesResult | undefined) {
+  const sections = (result?.items ?? []).flatMap((item) => item.sections ?? []);
+  return { text: sections.map((section) => section.text ?? "").filter(Boolean).join("\n"), sources: uniqueSources(sections.flatMap((section) => section.annotations ?? []).flatMap(source)) };
+}
+
+/** One question asked of one AI engine in a market: the answer's text and the sources it cites, and what the ask cost. */
+export async function fetchAiAnswer(auth: DataForSeoAuth, input: { engine: AiAnswerEngine; prompt: string; location: number; language: string; countryIso2: string | null }, fetchFn: typeof fetch = fetch): Promise<{ text: string; sources: AiSource[]; cost: number }> {
+  switch (input.engine) {
+    case "chatgpt": {
+      const { result, cost } = await post<ScraperResult>(auth, "ai_optimization/chat_gpt/llm_scraper/live/advanced", { keyword: input.prompt, location_code: input.location, language_code: input.language, force_web_search: true }, fetchFn);
+      return { ...scraperAnswer(result), cost };
+    }
+    case "gemini": {
+      const { result, cost } = await post<ScraperResult>(auth, "ai_optimization/gemini/llm_scraper/live/advanced", { keyword: input.prompt, location_code: input.location, language_code: input.language }, fetchFn);
+      return { ...scraperAnswer(result), cost };
+    }
+    case "ai_mode": {
+      const { result, cost } = await post<{ items?: AiNode[] | null }>(auth, "serp/google/ai_mode/live/advanced", { keyword: input.prompt, location_code: input.location, language_code: input.language }, fetchFn);
+      return { ...aiModeAnswer(result), cost };
+    }
+    case "perplexity": {
+      const { result, cost } = await post<ResponsesResult>(auth, "ai_optimization/perplexity/llm_responses", {
+        user_prompt: input.prompt, model_name: "sonar", max_output_tokens: 2048, ...(input.countryIso2 ? { web_search_country_iso_code: input.countryIso2 } : {}),
+      }, fetchFn);
+      return { ...responsesAnswer(result), cost };
+    }
+  }
 }

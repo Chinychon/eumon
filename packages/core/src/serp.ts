@@ -56,7 +56,7 @@ const DIRECTORIES = [
 
 export const bareDomain = (host: string) => host.toLowerCase().replace(/^www\./, "");
 
-const isOrUnder = (domain: string, root: string) => domain === root || domain.endsWith(`.${root}`);
+export const isOrUnder = (domain: string, root: string) => domain === root || domain.endsWith(`.${root}`);
 
 /** Platforms (social, video, encyclopedias) rank everywhere but aren't rivals; directories list businesses like the site's. */
 export function competitorKind(domain: string): CompetitorKind {

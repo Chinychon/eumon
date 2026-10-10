@@ -1,6 +1,6 @@
 import { addDays, RESULT_METRICS, resultsView, type ResultsView, type SiteRecord } from "@organic-growth/core";
-import { DEMO_SITE_ID } from "@organic-growth/agents";
-import { getPageSettings, getTopQueriesSnapshot, indexStatusCounts, listMetricSeries, listRankChecks, listSiteCompetitorDomains, listSiteMarkets, listTrackedKeywords, outcomesByPageType, publishedPages, type D1Like } from "@organic-growth/db";
+import { authorityDomain, DEMO_SITE_ID } from "@organic-growth/agents";
+import { getPageSettings, listAiAnswerChecks, listAiPrompts, getTopQueriesSnapshot, indexStatusCounts, listMetricSeries, listRankChecks, listSiteCompetitorDomains, listSiteMarkets, listTrackedKeywords, outcomesByPageType, publishedPages, type D1Like } from "@organic-growth/db";
 import { ANALYTICS_SCOPE, googleScopes } from "./gsc-auth.ts";
 import { loadConnectorLists } from "./connectors-data.ts";
 import { loadKeywords } from "./keywords-data.ts";
@@ -16,7 +16,7 @@ export async function loadResults(db: D1Like, site: SiteRecord, today = new Date
     indexStatusCounts(db, site.id),
     listSiteMarkets(db, site.id),
   ]);
-  const [topQueries, keywords, settings, byPageType, connectors, tracked, checks] = await Promise.all([
+  const [topQueries, keywords, settings, byPageType, connectors, tracked, checks, prompts, answers] = await Promise.all([
     site.gscProperty ? getTopQueriesSnapshot(db, site.id, { property: site.gscProperty, markets }) : null,
     loadKeywords(db, site, { markets, competitors }),
     getPageSettings(db, site.id),
@@ -25,11 +25,14 @@ export async function loadResults(db: D1Like, site: SiteRecord, today = new Date
     loadConnectorLists(db, site, { markets, competitors }, today),
     listTrackedKeywords(db, site.id),
     listRankChecks(db, site.id, addDays(today, -90)),
+    listAiPrompts(db, site.id),
+    listAiAnswerChecks(db, site.id, addDays(today, -90)),
   ]);
   return resultsView({
     today, goLive: pages.goLive, markets, series, index, published: pages.published,
     searchConnected: Boolean(site.gscProperty), ga4Connected: Boolean(site.ga4Property), topQueries, competitors, keywords, ...connectors,
     ranks: { tracked, checks },
+    aiAnswers: { prompts, checks: answers, site: authorityDomain(site.baseUrl) },
     outcomes: { currency: settings?.currency ?? null, byPageType },
   });
 }

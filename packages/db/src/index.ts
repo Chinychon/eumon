@@ -26,6 +26,7 @@ export * from "./history.js";
 export * from "./search-console.js";
 export * from "./workspaces.js";
 export * from "./ranks.js";
+export * from "./ai-answers.js";
 import { saveFindingKeys } from "./history.js";
 import { analysisHealthPoints, upsertMetricPoints } from "./metrics.js";
 

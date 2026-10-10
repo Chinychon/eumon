@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { DEMO_SITE_ID } from "@organic-growth/agents";
-import { createAnalysis, enqueueAnalysisCrawlUrls, listMetricSeries, listSyncRuns, saveCrawlBatch, updateAnalysisStatus, updateSiteGscProperty, upsertSite } from "@organic-growth/db";
+import { createAnalysis, enqueueAnalysisCrawlUrls, listMetricSeries, listSyncRuns, saveCrawlBatch, setLimitOverrides, setSiteMarkets, setTrackedKeywords, updateAnalysisStatus, updateSiteGscProperty, upsertSite } from "@organic-growth/db";
 import { openSqliteD1 } from "@organic-growth/db/sqlite";
 import { SEARCH_CONSOLE_SCOPE } from "./gsc-auth.ts";
 import { pacificDayStart, startDailySyncs, startSync, syncSite, type StepLike, type SyncDeps } from "./sync-steps.ts";
@@ -274,5 +274,41 @@ describe("startSync and startDailySyncs", () => {
     assert.deepEqual(await startDailySyncs({ DB: db, SEARCH_SYNC_WORKFLOW: binding }, now), [], "a second firing the same day creates nothing");
     const broken = { create: async () => { throw new Error("binding unavailable"); }, get: async () => { throw new Error("instance.not_found"); } };
     await assert.rejects(() => startSync({ SEARCH_SYNC_WORKFLOW: broken }, { siteId: "s", trigger: "manual" }, now), /binding unavailable/);
+  });
+
+  it("checks tracked keywords 40 a step when the workspace may spend DataForSEO, and spends nothing on a second run the same day", async () => {
+    const db = openSqliteD1();
+    await addSite(db, "s", "");
+    await db.prepare(`INSERT INTO organization (id, name, slug, createdAt) VALUES ('w', 'w', 'w', ?)`).bind(at).run();
+    await setLimitOverrides(db, "w", { dataForSeo: true });
+    await db.prepare("UPDATE sites SET workspace_id = 'w' WHERE id = 's'").run();
+    await setSiteMarkets(db, "s", ["mys"]);
+    await setTrackedKeywords(db, "s", Array.from({ length: 41 }, (_, index) => `kw ${index}`));
+    let serps = 0;
+    const fetchFn = (async (url: string) => {
+      if (!url.includes("/serp/")) return new Response(JSON.stringify({ rows: [] }));
+      serps++;
+      return new Response(JSON.stringify({ status_code: 20000, tasks: [{ status_code: 20000, cost: 0.004, result: [{ item_types: ["organic"], items: [{ type: "organic", rank_group: 1, domain: "s.com", url: "https://s.com/p", title: "t" }] }] }] }));
+    }) as typeof fetch;
+    const { steps, step, count } = recorder();
+    const keys = { dataForSeo: { login: "me", password: "pw" } };
+    const run = () => syncSite(deps(db, count, PASS, { keys, google: () => ({ connect: async () => ({ token: "t", scopes: [] }), fetchFn }) }), step, "s", "daily");
+    let notes = await run();
+    assert.ok(notes.includes("ranks: 41 checked in 2 steps, $0.16"), notes.join("; "));
+    assert.equal(steps.filter((entry) => /^s\/ranks-\d+$/.test(entry.name)).length, 2);
+    assert.equal(serps, 41);
+    notes = await run();
+    assert.equal(serps, 41, "a pair already checked today is not asked again");
+    assert.ok(!notes.some((note) => note.startsWith("ranks:")), notes.join("; "));
+  });
+
+  it("does not check ranks for a site without the DataForSEO feature", async () => {
+    const db = openSqliteD1();
+    await addSite(db, "s", "");
+    await setSiteMarkets(db, "s", ["mys"]);
+    await setTrackedKeywords(db, "s", ["kw"]);
+    const { steps, step, count } = recorder();
+    await syncSite(deps(db, count, PASS, { keys: { dataForSeo: { login: "me", password: "pw" } } }), step, "s", "daily");
+    assert.ok(!steps.some((entry) => entry.name.startsWith("s/ranks-")), "FREE_LIMITS has dataForSeo: false; a site without a workspace follows it");
   });
 });

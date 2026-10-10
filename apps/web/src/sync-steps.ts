@@ -4,6 +4,7 @@ import {
   countInspectionsSince, getSite, indexStatusCounts, listSitesForResults, publishedPages, recordSyncRun, upsertMetricPoints, urlsToInspect, type D1Like, type SyncTrigger,
 } from "@organic-growth/db";
 import { FREE_LIMITS, keysForLimits, limitsFor } from "./limits.ts";
+import { trackRanks } from "./rank-tracking.ts";
 import { syncResults, type GoogleAccess, type SignalKeys } from "./results-sync.ts";
 import { COVERAGE_URLS_PER_DAY, inspectEumonPages, inspectQueuedUrls, INSPECTION_STEP, PAGE_INSPECTIONS_PER_DAY } from "./url-inspection.ts";
 
@@ -94,6 +95,9 @@ export async function syncSite(deps: SyncDeps, step: StepLike, siteId: string, t
       return syncResults(deps.db, site, deps.now(), deps.google(siteId), keys).catch((error) => [`results failed: ${message(error)}`]);
     }, { retries: { limit: 1, delay: 60_000 } });
     notes.push(...("ok" in sources ? sources.ok : [`results failed: ${sources.error}`]));
+    // Rank tracking: DataForSEO where the workspace may spend it, after the sources so a new keyword list is priced first.
+    const rankKeys = site.workspaceId ? keysForLimits(deps.keys, await limitsFor(deps.db, site.workspaceId)) : keysForLimits(deps.keys, FREE_LIMITS);
+    if (rankKeys.dataForSeo) notes.push(...await trackRanks(deps.db, safe, site, rankKeys.dataForSeo, startedAt.slice(0, 10), deps.google(siteId).fetchFn));
     // A site whose Google access failed has nothing to inspect with.
     if (inspects && !notes.some((note) => note.startsWith("google failed"))) notes.push(...await inspectSite(deps, safe, site, startedAt.slice(0, 10), spent, published));
   }

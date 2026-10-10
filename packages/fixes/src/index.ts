@@ -7,3 +7,4 @@ export * from "./validate.js";
 export * from "./code.js";
 export * from "./snippet.js";
 export * from "./edit/metadata.js";
+export * from "./edit/jsonld.js";

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { JSON_LD_COMPONENT } from "./edit/jsonld.js";
 import { validateEdit, validateFile } from "./validate.js";
 
 const source = `import x from "x";\nexport const metadata = {\n  title: "Old",\n};\nexport default function P() { return <main/>; }\n`;
@@ -119,7 +120,13 @@ describe("appended text", () => {
 describe("validateFile", () => {
   it("allows only the whole-file targets", () => {
     assert.equal(validateFile("public/llms.txt", "# x", []).ok, true);
-    assert.equal(validateFile("components/eumon-json-ld.tsx", "export function EumonJsonLd() { return null; }", []).ok, true);
+    assert.equal(validateFile("components/eumon-json-ld.tsx", JSON_LD_COMPONENT, []).ok, true);
+    assert.equal(validateFile("src/components/eumon-json-ld.tsx", JSON_LD_COMPONENT, []).ok, true);
     assert.equal(validateFile("next.config.js", "x", []).ok, false);
+  });
+  it("refuses any component that isn't exactly Eumon's", () => {
+    assert.equal(validateFile("components/eumon-json-ld.tsx", `import fs from "fs";\n${JSON_LD_COMPONENT}`, []).ok, false);
+    assert.equal(validateFile("src/components/eumon-json-ld.tsx", JSON_LD_COMPONENT + "// x\n", []).ok, false);
+    assert.equal(validateFile("components/eumon-json-ld.tsx", "export function EumonJsonLd() { return null; }", []).ok, false);
   });
 });

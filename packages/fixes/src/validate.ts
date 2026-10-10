@@ -1,4 +1,5 @@
 import { parseModule, walk, type AstNode } from "./ast.js";
+import { JSON_LD_COMPONENT } from "./edit/jsonld.js";
 import type { Edit, Range } from "./types.js";
 
 export const ALLOWED_FILES: RegExp[] = [
@@ -53,6 +54,7 @@ function fileProblem(path: string, sensitivePaths: string[]): string | null {
 export function validateFile(path: string, content: string, sensitivePaths: string[]): { ok: true } | { ok: false; reason: string } {
   const problem = fileProblem(path, sensitivePaths);
   if (problem) return { ok: false, reason: problem };
+  if (/^(src\/)?components\/eumon-json-ld\.tsx$/.test(path) && content !== JSON_LD_COMPONENT) return { ok: false, reason: `${path} may only contain Eumon's own component` };
   if (content.length > 60_000) return { ok: false, reason: `${path} would be over 60 KB` };
   if (CODE.test(path)) { try { parseModule(content); } catch { return { ok: false, reason: `${path} doesn't parse` }; } }
   return { ok: true };

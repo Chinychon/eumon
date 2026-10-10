@@ -6,7 +6,7 @@
     <dt>Stages fixes</dt><dd>At the end of each analysis</dd>
     <dt>Main code</dt><dd><code class="path">apps/web/src/fix-steps.ts</code>, <code class="path">apps/web/src/fix-run.ts</code>, <code class="path">apps/web/src/fix-sweep.ts</code>, <code class="path">apps/web/src/fix-github.ts</code>, <code class="path">packages/fixes/src/</code></dd>
     <dt>Webhook</dt><dd><code>POST /api/github/webhook</code></dd>
-    <dt>Migration</dt><dd><code class="path">packages/db/migrations/0027_fix_engine.sql</code></dd>
+    <dt>Migration</dt><dd><code class="path">packages/db/migrations/0028_fix_engine.sql</code></dd>
   </dl>
 
   <h2 id="what-it-does">What it does</h2>
@@ -54,5 +54,5 @@
     <li><strong>Existing installations.</strong> Each installation must accept the new permissions before fixes work on its repositories.</li>
   </ol>
 
-  <div class="callout warn"><p>Apply migration <code>0027_fix_engine.sql</code> to the remote database before the deploy that includes the fix engine (see <a href="#ops--migrations">Remote migrations</a>). It adds the fix tables and the per-site settings, including the PR budget.</p></div>
+  <div class="callout warn"><p>Apply migration <code>0028_fix_engine.sql</code> to the remote database before the deploy that includes the fix engine (see <a href="#ops--migrations">Remote migrations</a>). It adds the fix tables and the per-site settings, including the PR budget.</p></div>
 </article>

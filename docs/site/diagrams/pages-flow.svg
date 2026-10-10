@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 392" role="img" aria-labelledby="dg-pages-flow-title dg-pages-flow-desc">
   <title id="dg-pages-flow-title">Landing-page pipeline</title>
-  <desc id="dg-pages-flow-desc">The operator approves a proposed scope and its sources; Eumon collects records with the robots-aware dataset-scrape Workflow, merges duplicates and generates pages behind a quality gate; pages are served on the client's domain through a proxy to /p, measured through sessions, leads and Search Console, and optimized with a CTA bandit and title suggestions that feed back into what is served.</desc>
+  <desc id="dg-pages-flow-desc">The user approves a proposed scope and its sources; Eumon collects records with the robots-aware dataset-scrape Workflow, merges duplicates and generates pages behind a quality gate; pages are served on the client's domain through a proxy to /p, measured through sessions, leads and Search Console, and optimized with a CTA bandit and title suggestions that feed back into what is served.</desc>
   <defs>
     <marker id="dg-pages-flow-arrow" viewBox="0 0 8 6" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,3 L0,6 Z" class="d-arrowhead"/></marker>
   </defs>
@@ -13,7 +13,7 @@
   <line x1="0" y1="232" x2="960" y2="232" class="d-zone"/>
   <line x1="0" y1="328" x2="960" y2="328" class="d-zone"/>
   <line x1="88" y1="40" x2="88" y2="328" class="d-zone"/>
-  <text x="44" y="92" font-size="9" letter-spacing="0.08em" text-anchor="middle" class="d-mono d-muted">OPERATOR</text>
+  <text x="44" y="92" font-size="9" letter-spacing="0.08em" text-anchor="middle" class="d-mono d-muted">USER</text>
   <text x="44" y="188" font-size="9" letter-spacing="0.08em" text-anchor="middle" class="d-mono d-muted">EUMON</text>
   <text x="44" y="276" font-size="9" letter-spacing="0.08em" text-anchor="middle" class="d-mono d-muted">CLIENT</text>
   <text x="44" y="288" font-size="9" letter-spacing="0.08em" text-anchor="middle" class="d-mono d-muted">DOMAIN</text>

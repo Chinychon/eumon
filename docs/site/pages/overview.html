@@ -5,10 +5,10 @@
   <figure data-diagram="architecture"><figcaption>One Cloudflare Worker serves the dashboard, the API and the public landing pages, and runs three Workflows against one D1 database.</figcaption></figure>
 
   <h2 id="what-it-is">What Eumon is</h2>
-  <p>Eumon is an organic growth engine for small businesses. It has two halves that share one site record, one database and one dashboard.</p>
+  <p>Eumon is an organic growth engine for businesses of any size, from a single-location business to a large company running many sites. It has two halves that share one site record, one database and one dashboard.</p>
 
   <h3>Site analysis, Results and History</h3>
-  <p>Given only a website URL, Eumon analyses the site the way Google sees it. The analysis Workflow (<code>SiteAnalysisWorkflow</code>, <code class="path">apps/web/src/analysis-workflow.ts</code>) reads the sitemap and robots.txt, fetches every sitemap URL as Googlebot, groups the results by page type, compares the server HTML with what a browser renders, and turns all of that into ranked technical findings and a growth plan of prioritised opportunities. Competitors the operator names are compared by the kinds of pages they publish. When a GitHub repository is connected, Eumon inspects the code per route and can propose fixes as draft pull requests.</p>
+  <p>Given only a website URL, Eumon analyses the site the way Google sees it. The analysis Workflow (<code>SiteAnalysisWorkflow</code>, <code class="path">apps/web/src/analysis-workflow.ts</code>) reads the sitemap and robots.txt, fetches every sitemap URL as Googlebot, groups the results by page type, compares the server HTML with what a browser renders, and turns all of that into ranked technical findings and a growth plan of prioritised opportunities. Competitors you name are compared by the kinds of pages they publish. When a GitHub repository is connected, Eumon inspects the code per route and can propose fixes as draft pull requests.</p>
   <p>Around the analysis sit two longer-running views:</p>
   <ul>
     <li><strong>Results</strong>: numbers synced once a day per site by <code>SearchSyncWorkflow</code> (Search Console, GA4, URL inspection, speed, authority, keywords, and optional connectors such as DataForSEO and Bing). They are stored as one value per site, metric and day in the <code>metric_points</code> ledger. See <a href="#flow-sync">the sync flow</a>.</li>
@@ -29,11 +29,11 @@
 
   <h2 id="who-uses-it">Who uses it</h2>
   <ul>
-    <li><strong>The operator</strong>: Eumon's founder, who runs it on their own sites and on client sites as a done-for-you service. They analyse a site, collect its data, publish pages, and watch which pages bring customers.</li>
-    <li><strong>Clients</strong>: see their numbers through a read-only client link (<code>/r/&lt;token&gt;</code>), a signed and revocable token that stacks every Results section into one report.</li>
+    <li><strong>Dashboard users</strong>: analyse a site, connect its data sources, collect data, publish pages, and watch which pages bring customers. A user can manage one site or many.</li>
+    <li><strong>Read-only viewers</strong>: see a site's numbers through a read-only client link (<code>/r/&lt;token&gt;</code>), a signed and revocable token that stacks every Results section into one report.</li>
   </ul>
-  <p>The app has no built-in user accounts. The hostname goes behind Cloudflare Access, with the public paths (<code>/p/*</code>, <code>/api/sites/*/events</code>, <code>/r/*</code>, <code>/api/r/*</code>) excluded (<code class="path">apps/web/README.md</code>).</p>
-  <p>The running example is <strong>medbaycare.com</strong>, the operator's own medical-tourism site: one page per doctor, procedure and hospital. A second test case, edeadesign.com.my, is a Drupal site with no client-side JavaScript, used by the collection eval. The engine stays generic: no client's heuristics are hard-coded (<code class="path">apps/web/PRODUCT.md</code>). The first market is Southeast Asian SMBs, where leads usually arrive by WhatsApp or phone.</p>
+  <div class="callout note"><p>For now, sign-in is handled outside the app: the hostname goes behind Cloudflare Access, with the public paths excluded (<a href="#web-app--access-control">Web app: access control</a>). Built-in accounts and roles are on the way, and this section will change when they land.</p></div>
+  <p>The engine stays generic: nothing about any one business or industry is hard-coded. Datasets, fields and page ideas come from each site's own pages and search data.</p>
 
   <h2 id="monorepo-map">Monorepo map</h2>
   <p>An npm workspace (<code class="path">package.json</code>) with one app and nine packages. The packages compile with <code>tsc</code> to <code>dist/</code>, and the web app imports those built copies.</p>
@@ -52,7 +52,7 @@
       <tr><td><a href="#packages--sdk"><code>packages/sdk</code></a></td><td>Browser conversion tracker for JavaScript sites; reads the same <code>eumon_sid</code> cookie as the landing pages.</td></tr>
     </tbody>
   </table>
-  <p>Outside the workspaces: <code class="path">evals/edea-malls.mjs</code> (collection quality eval) and <code class="path">scripts/audit-site.mjs</code> (site analysis from the command line). Both are covered in <a href="#getting-started--evals-and-audit">Getting started</a>.</p>
+  <p>Outside the workspaces: <code class="path">evals/</code> (a collection quality eval) and <code class="path">scripts/audit-site.mjs</code> (site analysis from the command line). Both are covered in <a href="#getting-started--evals-and-audit">Getting started</a>.</p>
 
   <h2 id="where-next">Where to go next</h2>
   <ul>

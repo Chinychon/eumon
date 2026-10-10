@@ -24,8 +24,8 @@
     <li><strong>Work split into steps.</strong> Competitor research and the data inventory each run in their own Workflow step, so a slow or failing part retries alone and has its own query budget (<a href="#flow-analysis">the analysis flow</a>).</li>
   </ul>
 
-  <h2 id="medbay-incident">Case study: the 2026-10-10 MedBay incident</h2>
-  <p>The first real production analysis ran against medbaycare.com, a site with 22,913 URLs in its sitemap. It took production down for the rest of the UTC day and showed three limits at once.</p>
+  <h2 id="d1-incident">Case study: the 2026-10-10 D1 outage</h2>
+  <p>The first real production analysis of a large site ran against a sitemap of 22,913 URLs. It took production down for the rest of the UTC day and showed three limits at once.</p>
   <h3>What happened</h3>
   <ol>
     <li>The crawl queued every sitemap URL and ran 108 <code>crawl-batch-&lt;n&gt;</code> steps of 100 URLs. They finished in about 15 seconds in total, because almost every fetch failed fast: D1 recorded 14,730 "mark failed" updates and no successful page saves.</li>
@@ -50,7 +50,7 @@
   </table>
   <h3>Still open</h3>
   <ul>
-    <li><strong>Why the fetches failed.</strong> The error text of the failed pages has not been read yet. medbaycare.com is behind Cloudflare, so its bot protection may be refusing Googlebot-agent fetches from Workers; or the 50-subrequest cap is cutting off a 100-URL batch. Re-run the analysis and read the error on the failed rows (<code>crawl_state = 'failed'</code>, message in <code>result_json</code> at <code>$.error</code>, <code class="path">packages/db/src/index.ts:550</code>) before changing anything.</li>
+    <li><strong>Why the fetches failed.</strong> The error text of the failed pages has not been read yet. That site is behind Cloudflare, so its bot protection may be refusing Googlebot-agent fetches from Workers; or the 50-subrequest cap is cutting off a 100-URL batch. Re-run the analysis and read the error on the failed rows (<code>crawl_state = 'failed'</code>, message in <code>result_json</code> at <code>$.error</code>, <code class="path">packages/db/src/index.ts:550</code>) before changing anything.</li>
     <li><strong>Calls per invocation.</strong> A Workflow invocation has to stay under 1,000 calls to Cloudflare services. Each crawl step does D1 reads, the save batches and a progress write that doubles as the cancel check; that total has to be counted against the cap, and batch size brought under 50 fetches.</li>
   </ul>
   <div class="callout trap"><p>A D1 quota outage is not a bug in the app, but it takes the whole app down: every page that queries returns 500 until midnight UTC, and nothing can be cancelled from the dashboard. Before running an analysis on a large site, check <code>npx wrangler d1 info eumon-prod</code> and the per-query reads in <code>d1 insights</code> (<a href="#ops--observability">commands</a>).</p></div>

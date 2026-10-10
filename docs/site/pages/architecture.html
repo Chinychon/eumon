@@ -7,7 +7,7 @@
   <h2 id="one-worker">One Worker does everything</h2>
   <p>There is a single deployable: the <code>apps/web</code> workspace (<code>@organic-growth/web</code>), deployed as the Worker named <code>eumon</code>. The same Worker:</p>
   <ul>
-    <li>renders the operator dashboard at <code>/</code>,</li>
+    <li>renders the dashboard at <code>/</code>,</li>
     <li>answers the JSON API under <code>/api/*</code>,</li>
     <li>serves published landing pages under <code>/p/&lt;siteId&gt;/…</code> and the client share link under <code>/r/&lt;token&gt;</code>,</li>
     <li>runs the daily cron trigger,</li>
@@ -83,7 +83,7 @@
   <table>
     <thead><tr><th>Path</th><th>File</th><th>What it is</th></tr></thead>
     <tbody>
-      <tr><td><code>/</code></td><td><code class="path">apps/web/app/page.tsx</code></td><td>The operator dashboard, a single client component that switches views in place and keeps the view in the query string. See <a href="#web-app">Web app</a>.</td></tr>
+      <tr><td><code>/</code></td><td><code class="path">apps/web/app/page.tsx</code></td><td>The dashboard, a single client component that switches views in place and keeps the view in the query string. See <a href="#web-app">Web app</a>.</td></tr>
       <tr><td><code>/api/*</code></td><td><code>apps/web/app/api/**/route.ts</code></td><td>JSON route handlers, one file per path, exporting <code>GET</code>, <code>POST</code>, <code>PATCH</code>, <code>PUT</code>, <code>DELETE</code> or <code>OPTIONS</code>. Full list in <a href="#web-app--api-routes">Web app: API routes</a>.</td></tr>
       <tr><td><code>/p/:siteId/…</code></td><td><code class="path">apps/web/app/p/[siteId]/[[...path]]/route.ts</code></td><td>Public landing pages, hub page, sitemap, IndexNow key file and the analytics beacon. Rendering is in <code class="path">apps/web/src/public-pages.ts</code>.</td></tr>
       <tr><td><code>/r/:token</code></td><td><code class="path">apps/web/app/r/[token]/page.tsx</code></td><td>The client's read-only Results page, fed by <code>GET /api/r/:token</code>.</td></tr>

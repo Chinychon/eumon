@@ -130,6 +130,19 @@ th { text-align: left; font: 400 11px/1.3 var(--mono); letter-spacing: .08em; te
 td { padding: 9px 12px; border-bottom: 1px solid var(--line); vertical-align: top; font-variant-numeric: tabular-nums; }
 tr:last-child td { border-bottom: 0; }
 td code { font-size: 12px; }
+td:first-child code { white-space: nowrap; }
+article p, article li, article dd, td, .lede { text-wrap: pretty; }
+.map { margin: 0 0 20px; border: 1px solid var(--line); background: var(--surface); }
+.map-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+.map-tools input { width: min(320px, 100%); height: 32px; padding: 0 10px; border: 1px solid var(--control-line); border-radius: 0; background: var(--paper); color: var(--ink); font: 400 12px var(--mono); }
+.map-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font: 400 11px/1.4 var(--mono); color: var(--muted); }
+.map-legend i { display: inline-block; width: 8px; height: 8px; margin-right: 5px; }
+.map-canvas { height: min(560px, 70vh); }
+.map-info { padding: 12px; border-top: 1px solid var(--line); font-size: 13px; color: var(--muted); }
+.map-info h4 { margin: 12px 0 4px; font: 400 11px/1.3 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--soft); }
+.map-info .list { max-height: 180px; overflow-y: auto; }
+.map-info button { display: block; padding: 2px 0; border: 0; background: none; color: var(--green-ink); font: 400 12px/1.5 var(--mono); text-align: left; cursor: pointer; }
+.map-info button:hover { text-decoration: underline; }
 dl { margin: 0 0 18px; }
 dt { margin-top: 14px; font-weight: 500; color: var(--ink); }
 dd { margin: 3px 0 0; color: var(--ink-2); }
@@ -278,6 +291,7 @@ figure.diagram.missing .diagram-scroll { font: 400 12px var(--mono); color: var(
     const [pageId, section] = (hash || "").replace(/^#/, "").split("--");
     const page = articles.find((a) => a.id === pageId) || articles.find((a) => a.id === order[0]);
     articles.forEach((a) => { a.hidden = a !== page; });
+    page.dispatchEvent(new Event("show"));
     $$("a[data-page]", toc).forEach((a) => { if (a.dataset.page === page.id) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current"); });
     $("#crumb").innerHTML = `${page.dataset.group} / <b>${page.dataset.title}</b>`;
     document.title = `${page.dataset.title} · Eumon Developer Docs`;

@@ -84,7 +84,7 @@ Production deploys through Cloudflare Workers Builds on every merge to `main` (d
 
 ## Documentation
 
-The [developer docs](https://claude.ai/artifact/96Bbrh2aPtYBp1ozKx82Pd) (a private Claude artifact) explain the architecture, the analysis, sync and landing-page flows, the data model, every package and route, operations, and the known limits. Their source is `docs/site/` (one HTML fragment per page plus SVG diagrams); `node docs/site/build.mjs` builds them into one browsable page (`docs/site/dist/`, ignored by git) and fails on a broken link, a duplicate id or a missing diagram; republish that page to the same artifact after changing a page. Also in the repo: `CONTEXT.md` (glossary), `apps/web/DESIGN.md` (design system), and `docs/superpowers/specs/` (one design record per feature).
+The [developer docs](https://claude.ai/artifact/96Bbrh2aPtYBp1ozKx82Pd) (a private Claude artifact) explain the architecture, the analysis, sync and landing-page flows, the data model, every package and route, operations, and the known limits, plus a codebase map: an interactive graph of every source file and its dependencies, reduced from a [graphify](https://github.com/safishamsi/graphify) graph (`/graphify .` writes `graphify-out/`; the build saves the reduced map to `docs/site/codebase-map.json`). Their source is `docs/site/` (one HTML fragment per page plus SVG diagrams); `node docs/site/build.mjs` builds them into one browsable page (`docs/site/dist/`, ignored by git) and fails on a broken link, a duplicate id or a missing diagram; republish that page to the same artifact after changing a page. Also in the repo: `CONTEXT.md` (glossary), `apps/web/DESIGN.md` (design system), and `docs/superpowers/specs/` (one design record per feature).
 
 ## Principles
 

@@ -87,7 +87,7 @@ npm run build       # build:packages, then the production Worker bundle (vite bu
 
   <h2 id="evals-and-audit">The eval and audit CLIs</h2>
   <h3><code>npm run eval</code></h3>
-  <p><code class="path">evals/edea-malls.mjs</code> runs the real collection pipeline (list discovery with pagination, extraction with the configured model, merging repeated mentions, duplicate resolution) against edeadesign.com.my, then grades it against an answer key parsed from the same pages without AI. It reports venue precision, claim precision and claim recall, and exits with status 1 below the thresholds (0.95, 0.98, 0.9). Run it before and after changing extraction prompts or merge logic.</p>
+  <p>The eval in <code class="path">evals/</code> runs the real collection pipeline (list discovery with pagination, extraction with the configured model, merging repeated mentions, duplicate resolution) against a public directory site, then grades it against an answer key parsed from the same pages without AI. It reports entity precision, claim precision and claim recall, and exits with status 1 below the thresholds (0.95, 0.98, 0.9). Run it before and after changing extraction prompts or merge logic.</p>
   <p>It needs <code>DEEPSEEK_API_KEY</code> or <code>ANTHROPIC_API_KEY</code>, from the environment or read directly from <code class="path">apps/web/.dev.vars</code> (so the declaration rule above does not apply). A run makes about 30 model calls, a few US cents, and fetches about 30 public pages.</p>
 
   <h3><code>npm run audit</code></h3>

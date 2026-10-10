@@ -5,7 +5,7 @@
   <div class="callout note"><p>An accounts and security-hardening branch is in progress and will change access control, route guards and sign-in. This page describes <code>main</code> as of 2026-10-10.</p></div>
 
   <h2 id="dashboard">The dashboard</h2>
-  <p>The whole operator console is one client component, <code class="path">apps/web/app/page.tsx</code>, rendered at <code>/</code>. It loads the site list from <code>GET /api/sites</code>, keeps the selected site, view, tab and Ask thread in the query string (<code>?site=…&amp;view=…&amp;tab=…&amp;thread=…</code>) so a refresh or shared link lands on the same place, and switches views in place without route changes. The left rail is the <code>NAV</code> array at the top of the file.</p>
+  <p>The whole dashboard is one client component, <code class="path">apps/web/app/page.tsx</code>, rendered at <code>/</code>. It loads the site list from <code>GET /api/sites</code>, keeps the selected site, view, tab and Ask thread in the query string (<code>?site=…&amp;view=…&amp;tab=…&amp;thread=…</code>) so a refresh or shared link lands on the same place, and switches views in place without route changes. The left rail is the <code>NAV</code> array at the top of the file.</p>
   <table>
     <thead><tr><th>Rail item</th><th>View key</th><th>Component</th></tr></thead>
     <tbody>
@@ -58,7 +58,7 @@
   <p>"Sync now" is polled separately: <code>OverviewView.tsx</code> checks the sync record every four seconds for up to fifteen minutes and asks <code>GET /api/sites/:siteId/results/sync?id=…</code> for the Workflow instance status. See <a href="#flow-sync">Results sync flow</a>.</p>
 
   <h2 id="api-routes">API routes</h2>
-  <p>Each path is a <code>route.ts</code> under <code>apps/web/app/api/</code>; <code>:name</code> is a <code>[name]</code> folder. All are operator routes unless the table says otherwise (see <a href="#web-app--access-control">Access control</a>).</p>
+  <p>Each path is a <code>route.ts</code> under <code>apps/web/app/api/</code>; <code>:name</code> is a <code>[name]</code> folder. All are dashboard routes unless the table says otherwise (see <a href="#web-app--access-control">Access control</a>).</p>
 
   <h3>Sites and settings</h3>
   <table>
@@ -254,7 +254,7 @@
   <p><code>apps/web/public/</code> holds <code>manifest.json</code> and the icons, referenced from <code class="path">apps/web/app/layout.tsx</code>, so the dashboard can be installed as a standalone app. <code>public/sw.js</code> is a retired service worker: nothing registers it any more, and its only job is to clear the old offline cache and unregister itself in browsers that installed an earlier version.</p>
 
   <h2 id="access-control">Access control</h2>
-  <p>On <code>main</code> the app has no user accounts, no sign-in and no middleware. Operator routes do not check who is calling. The intended protection is <strong>Cloudflare Access</strong> in front of the hostname, configured in Cloudflare, not in this repo (<code class="path">apps/web/README.md</code>, "Access control").</p>
+  <p>On <code>main</code> the app has no user accounts, no sign-in and no middleware yet; built-in accounts and roles are on the way and will replace this section. Dashboard routes do not check who is calling. The intended protection is <strong>Cloudflare Access</strong> in front of the hostname, configured in Cloudflare, not in this repo (<code class="path">apps/web/README.md</code>, "Access control").</p>
   <p>The README lists the paths that must be excluded from Access, or landing pages and tracking stop working:</p>
   <ul>
     <li><code>/p/*</code>: landing pages, sitemap and the analytics beacon.</li>

@@ -10,16 +10,77 @@ const here = dirname(fileURLToPath(import.meta.url));
 const ORDER = [
   "overview", "getting-started",
   "architecture", "flow-analysis", "flow-sync", "flow-pages", "data-model",
-  "packages", "web-app", "findings", "glossary",
+  "packages", "codebase-map", "web-app", "findings", "glossary",
   "ops", "gotchas",
 ];
 
 const problems = [];
+const esc = (t) => String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+// Codebase map: a file-level view of graphify's symbol graph. graphify-out/ is gitignored, so the
+// reduced map is saved to codebase-map.json and the docs still build without a graph.
+const graphFile = join(here, "../../graphify-out/graph.json");
+const mapFile = join(here, "codebase-map.json");
+if (existsSync(graphFile)) writeFileSync(mapFile, JSON.stringify(codebaseMap(JSON.parse(readFileSync(graphFile, "utf8")))) + "\n");
+const map = existsSync(mapFile) ? JSON.parse(readFileSync(mapFile, "utf8")) : null;
+if (!map) problems.push("missing codebase-map.json: run /graphify . at the repo root, then build again");
+
+function codebaseMap(g) {
+  // Source files only: no tests, no build output, no client-specific evals.
+  const keep = (f) => /^(apps|packages|scripts)\/.*\.(ts|tsx|mjs|js)$/.test(f ?? "") && !/\.test\.|\/dist\/|edea|medbay/i.test(f);
+  const fileOf = new Map(), votes = new Map(), bySymbol = new Map();
+  for (const n of g.nodes) {
+    if (!keep(n.source_file)) continue;
+    fileOf.set(n.id, n.source_file);
+    const v = votes.get(n.source_file) ?? new Map();
+    v.set(n.community_name, (v.get(n.community_name) ?? 0) + 1);
+    votes.set(n.source_file, v);
+    const pkg = n.source_file.match(/^packages\/([^/]+)\/src\//)?.[1];
+    if (pkg) bySymbol.set(`${pkg.replace("-", "_")}:${n.label.replace(/\(\)$/, "").toLowerCase()}`, n.source_file);
+  }
+  // Imports of another workspace point at its built dist/index; send them back to the source file that defines the symbol.
+  const resolve = (id) => {
+    if (fileOf.has(id)) return fileOf.get(id);
+    const m = id.match(/^packages_(.+?)_dist_index(?:_(.+))?$/);
+    if (!m) return undefined;
+    const index = `packages/${m[1].replace("_", "-")}/src/index.ts`;
+    return bySymbol.get(`${m[1]}:${m[2]}`) ?? (votes.has(index) ? index : undefined);
+  };
+  const files = [...votes.keys()].sort();
+  const at = new Map(files.map((f, i) => [f, i]));
+  const edges = new Map();
+  for (const e of g.links) {
+    const a = at.get(resolve(e.source)), b = at.get(resolve(e.target));
+    if (a !== undefined && b !== undefined && a !== b) edges.set(`${a}>${b}`, [a, b]);
+  }
+  const area = (f) => [...votes.get(f)].sort((x, y) => y[1] - x[1])[0][0];
+  const areas = [...new Set(files.map(area))].sort();
+  const degree = files.map(() => 0);
+  for (const [a, b] of edges.values()) { degree[a]++; degree[b]++; }
+  return {
+    commit: (g.built_at_commit ?? "").slice(0, 7),
+    areas,
+    files: files.map((f, i) => [f, areas.indexOf(area(f)), degree[i]]),
+    edges: [...edges.values()],
+  };
+}
+
+function areasTable({ areas, files }) {
+  const rows = areas.map((name, i) => ({ name, files: files.filter((f) => f[1] === i).map((f) => f[0]) }))
+    .sort((a, b) => b.files.length - a.files.length || a.name.localeCompare(b.name));
+  return `<table><thead><tr><th>Area</th><th>Files</th></tr></thead><tbody>${rows.map((a) =>
+    `<tr><td>${esc(a.name)}</td><td>${a.files.map((f) => `<code class="path">${esc(f)}</code>`).join(" ")}</td></tr>`).join("")}</tbody></table>`;
+}
+
 const pages = ORDER.map((slug) => {
   const file = join(here, "pages", `${slug}.html`);
   if (!existsSync(file)) { problems.push(`missing page: pages/${slug}.html`); return ""; }
   let html = readFileSync(file, "utf8");
   if (!html.includes(`<article id="${slug}"`)) problems.push(`pages/${slug}.html: <article> must have id="${slug}"`);
+  if (map) html = html
+    .replace("<!--MAP-DATA-->", `<script type="application/json" id="map-data">${JSON.stringify(map).replace(/</g, "\\u003c")}</script>`)
+    .replace("<!--MAP-AREAS-->", areasTable(map))
+    .replaceAll("<!--MAP-STATS-->", `${map.files.length} source files and ${map.edges.length} dependencies, from a graph built at <code>${map.commit}</code>`);
   // Section ids are page-scoped in the built page: <h2 id="x"> becomes "slug--x", so #slug--x deep-links work.
   html = html.replace(/<h2 id="([^"]+)"/g, (_, id) => `<h2 id="${slug}--${id}"`);
   html = html.replace(/<table>/g, '<div class="table-wrap"><table>').replace(/<\/table>/g, "</table></div>");

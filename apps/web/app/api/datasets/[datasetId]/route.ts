@@ -3,9 +3,12 @@ import type { Dataset } from "@organic-growth/core";
 import { deleteDataset, getDataset, upsertDataset } from "@organic-growth/db";
 import { validateFields } from "../../../../src/datasets";
 import { fail, json, readJson } from "../../../../src/server";
+import { requireOwned } from "../../../../src/guard";
 
 export async function PATCH(request: Request, context: { params: Promise<{ datasetId: string }> }) {
   const { datasetId } = await context.params;
+  const access = await requireOwned(request, "dataset", datasetId, "write");
+  if (access instanceof Response) return access;
   const dataset = await getDataset(env.DB, datasetId);
   if (!dataset) return fail("Dataset not found.", 404);
   const body = await readJson<Partial<Record<keyof Dataset, unknown>>>(request);
@@ -27,8 +30,10 @@ export async function PATCH(request: Request, context: { params: Promise<{ datas
   return json({ dataset: next });
 }
 
-export async function DELETE(_request: Request, context: { params: Promise<{ datasetId: string }> }) {
+export async function DELETE(request: Request, context: { params: Promise<{ datasetId: string }> }) {
   const { datasetId } = await context.params;
+  const access = await requireOwned(request, "dataset", datasetId, "write");
+  if (access instanceof Response) return access;
   if (!(await getDataset(env.DB, datasetId))) return fail("Dataset not found.", 404);
   await deleteDataset(env.DB, datasetId);
   return json({ deleted: true });

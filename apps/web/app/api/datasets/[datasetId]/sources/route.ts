@@ -1,18 +1,20 @@
 import { env } from "cloudflare:workers";
 import { createId, type DataSourceKind } from "@organic-growth/core";
-import { getDataset, getSite, upsertSource } from "@organic-growth/db";
+import { getDataset, upsertSource } from "@organic-growth/db";
 import { SOURCE_KINDS, validateUrlPattern } from "../../../../../src/datasets";
 import { fail, isPublicHttpUrl, json, readJson } from "../../../../../src/server";
 import { isSupabaseProjectUrl, saveSupabaseKey, validateSupabaseKey } from "../../../../../src/supabase-source";
+import { requireOwned } from "../../../../../src/guard";
 
 const TABLE = /^[A-Za-z_][A-Za-z0-9_]{0,62}$/;
 
 export async function POST(request: Request, context: { params: Promise<{ datasetId: string }> }) {
   const { datasetId } = await context.params;
+  const access = await requireOwned(request, "dataset", datasetId, "write");
+  if (access instanceof Response) return access;
   const dataset = await getDataset(env.DB, datasetId);
   if (!dataset) return fail("Dataset not found.", 404);
-  const site = await getSite(env.DB, dataset.siteId);
-  if (!site) return fail("Site not found.", 404);
+  const { site } = access;
   const body = await readJson<{ url?: unknown; kind?: unknown; urlPattern?: unknown; maxPages?: unknown; table?: unknown; key?: unknown }>(request);
   const kind = SOURCE_KINDS.includes(body?.kind as DataSourceKind) ? body!.kind as DataSourceKind : "listing";
   if (kind === "supabase") {

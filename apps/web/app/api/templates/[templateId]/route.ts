@@ -3,11 +3,14 @@ import type { FaqPattern, PageTemplate } from "@organic-growth/core";
 import { deleteTemplate, getDataset, getTemplate, upsertTemplate } from "@organic-growth/db";
 import { unknownPlaceholders } from "@organic-growth/pages";
 import { fail, json, readJson } from "../../../../src/server";
+import { requireOwned } from "../../../../src/guard";
 
 const PATTERN_FIELDS = ["pathPattern", "titlePattern", "descriptionPattern", "h1Pattern", "introPattern"] as const;
 
-export async function GET(_request: Request, context: { params: Promise<{ templateId: string }> }) {
+export async function GET(request: Request, context: { params: Promise<{ templateId: string }> }) {
   const { templateId } = await context.params;
+  const access = await requireOwned(request, "template", templateId, "read");
+  if (access instanceof Response) return access;
   const template = await getTemplate(env.DB, templateId);
   return template ? json({ template }) : fail("Template not found.", 404);
 }
@@ -15,6 +18,8 @@ export async function GET(_request: Request, context: { params: Promise<{ templa
 /** Edits copy patterns and display settings; every placeholder must exist in the dataset. */
 export async function PATCH(request: Request, context: { params: Promise<{ templateId: string }> }) {
   const { templateId } = await context.params;
+  const access = await requireOwned(request, "template", templateId, "write");
+  if (access instanceof Response) return access;
   const template = await getTemplate(env.DB, templateId);
   if (!template) return fail("Template not found.", 404);
   const dataset = await getDataset(env.DB, template.datasetId);
@@ -53,8 +58,10 @@ export async function PATCH(request: Request, context: { params: Promise<{ templ
   return json({ template: next });
 }
 
-export async function DELETE(_request: Request, context: { params: Promise<{ templateId: string }> }) {
+export async function DELETE(request: Request, context: { params: Promise<{ templateId: string }> }) {
   const { templateId } = await context.params;
+  const access = await requireOwned(request, "template", templateId, "write");
+  if (access instanceof Response) return access;
   if (!(await getTemplate(env.DB, templateId))) return fail("Template not found.", 404);
   await deleteTemplate(env.DB, templateId);
   return json({ deleted: true });

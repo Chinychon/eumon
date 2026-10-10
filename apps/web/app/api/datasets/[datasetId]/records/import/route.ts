@@ -2,10 +2,13 @@ import { env } from "cloudflare:workers";
 import { getDataset, upsertDataset, upsertRecords } from "@organic-growth/db";
 import { mapCsvRows, parseCsv } from "@organic-growth/scraper";
 import { fail, json, readText } from "../../../../../../src/server";
+import { requireOwned } from "../../../../../../src/guard";
 
 /** Imports records from CSV; headers are matched to fields by key or label. */
 export async function POST(request: Request, context: { params: Promise<{ datasetId: string }> }) {
   const { datasetId } = await context.params;
+  const access = await requireOwned(request, "dataset", datasetId, "write");
+  if (access instanceof Response) return access;
   const dataset = await getDataset(env.DB, datasetId);
   if (!dataset) return fail("Dataset not found.", 404);
   const text = await readText(request, 5 * 1024 * 1024);

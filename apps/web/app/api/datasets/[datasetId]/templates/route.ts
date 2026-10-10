@@ -1,10 +1,11 @@
 import { env } from "cloudflare:workers";
 import { createId, type PageIdea, type PageTemplate } from "@organic-growth/core";
-import { getDataset, getSite, getSiteScope, listAllRecords, listRecords, upsertTemplate } from "@organic-growth/db";
+import { getDataset, getSiteScope, listAllRecords, listRecords, upsertTemplate } from "@organic-growth/db";
 import { defaultTemplate, proposeTemplate } from "@organic-growth/pages";
 import { regenerateTemplate } from "../../../../../src/page-engine";
 import { describeModelError } from "@organic-growth/ai";
 import { appLlm, fail, json, readJson, settingsFor } from "../../../../../src/server";
+import { requireOwned } from "../../../../../src/guard";
 
 /**
  * Designs a page template for one of the dataset's page ideas (AI-written
@@ -13,10 +14,11 @@ import { appLlm, fail, json, readJson, settingsFor } from "../../../../../src/se
  */
 export async function POST(request: Request, context: { params: Promise<{ datasetId: string }> }) {
   const { datasetId } = await context.params;
+  const access = await requireOwned(request, "dataset", datasetId, "write");
+  if (access instanceof Response) return access;
   const dataset = await getDataset(env.DB, datasetId);
   if (!dataset) return fail("Dataset not found.", 404);
-  const site = await getSite(env.DB, dataset.siteId);
-  if (!site) return fail("Site not found.", 404);
+  const { site } = access;
   const body = (await readJson<{ ideaIndex?: unknown; groupBy?: unknown; useAi?: unknown }>(request)) ?? {};
   const keys = new Set(dataset.fields.map((field) => field.key));
   const idea: PageIdea | undefined = typeof body.ideaIndex === "number"

@@ -2,11 +2,14 @@ import { env } from "cloudflare:workers";
 import type { GeneratedPageStatus } from "@organic-growth/core";
 import { getTemplate, listPages } from "@organic-growth/db";
 import { fail, json } from "../../../../../src/server";
+import { requireOwned } from "../../../../../src/guard";
 
 const STATUSES: GeneratedPageStatus[] = ["draft", "published", "thin", "duplicate", "unpublished", "retired"];
 
 export async function GET(request: Request, context: { params: Promise<{ templateId: string }> }) {
   const { templateId } = await context.params;
+  const access = await requireOwned(request, "template", templateId, "read");
+  if (access instanceof Response) return access;
   const template = await getTemplate(env.DB, templateId);
   if (!template) return fail("Template not found.", 404);
   const params = new URL(request.url).searchParams;

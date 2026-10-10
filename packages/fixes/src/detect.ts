@@ -42,7 +42,7 @@ export function headProblems(pages: PageHead[], siteName: string, multiLocale: S
       if (description.length < 70 || description.length > 170) problems.push("description-length");
     }
     if (!page.canonical) problems.push("canonical-missing");
-    if (page.hreflang.length === 0 && multiLocale.has(stripLocale(pathOf(page.url)).path)) problems.push("hreflang-missing");
+    if (page.hreflang.length === 0 && multiLocale.has(stripLocale(pathOf(page.url) ?? "/").path)) problems.push("hreflang-missing");
     if (problems.length) out.set(page.url, problems);
   }
   return out;
@@ -51,7 +51,9 @@ export function headProblems(pages: PageHead[], siteName: string, multiLocale: S
 export function detect(input: DetectInput): FixCandidate[] {
   const locales = new Map<string, Set<string>>();
   for (const page of input.pages) {
-    const { locale, path } = stripLocale(pathOf(page.url));
+    const raw = pathOf(page.url);
+    if (raw === null) continue;
+    const { locale, path } = stripLocale(raw);
     locales.set(path, (locales.get(path) ?? new Set<string>()).add(locale ?? "default"));
   }
   const multiLocale = new Set([...locales].filter(([, set]) => set.size > 1).map(([path]) => path));
@@ -60,6 +62,7 @@ export function detect(input: DetectInput): FixCandidate[] {
   const byRoute = new Map<RouteRef, PageHead[]>();
   for (const page of input.pages) {
     const path = pathOf(page.url);
+    if (path === null) continue;
     const route = routeForPath(path, input.routes) ?? routeForPath(stripLocale(path).path, input.routes);
     if (route) byRoute.set(route, [...(byRoute.get(route) ?? []), page]);
   }

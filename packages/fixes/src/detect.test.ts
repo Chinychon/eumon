@@ -20,6 +20,9 @@ describe("matching", () => {
   it("prefers the route with more static segments and strips locale prefixes", () => {
     assert.equal(routeForPath("/procedures/featured", routes)?.source, "app/procedures/featured/page.tsx");
     assert.equal(routeForPath("/procedures/acl", routes)?.source, "app/procedures/[slug]/page.tsx");
+    const mixed = [route("/:a/b/c", "x"), route("/p/:b/:c", "y")];
+    assert.equal(routeForPath("/p/q/c", mixed)?.source, "y");
+    assert.equal(routeForPath("/z/featured", [route("/:a/featured", "a"), route("/:b/featured", "b")]), undefined);
     assert.deepEqual(stripLocale("/id/procedures/acl"), { locale: "id", path: "/procedures/acl" });
     assert.deepEqual(stripLocale("/identity"), { locale: null, path: "/identity" });
   });
@@ -76,5 +79,10 @@ describe("detect", () => {
     assert.equal(head.length, 1);
     assert.equal(head[0]!.urls.length, 20);
     assert.ok(!head[0]!.urls.includes("https://x.com/procedures/gone"));
+  });
+
+  it("skips pages whose URL does not parse", () => {
+    const pages = [page("not a url", { title: undefined, description: undefined, canonical: undefined })];
+    assert.equal(detect({ ...base, pages }).some((c) => c.kind === "head" || c.kind === "metadata-base"), false);
   });
 });

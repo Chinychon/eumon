@@ -447,4 +447,5 @@ export * from "./log-coverage.js";
 export * from "./trend-signals.js";
 export * from "./rank-findings.js";
 export * from "./ai-answer-findings.js";
+export * from "./link-findings.js";
 export * from "./not-found-probe.js";

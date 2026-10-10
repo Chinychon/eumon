@@ -51,5 +51,5 @@ export async function loadConnectorLists(db: D1Like, site: Pick<SiteRecord, "id"
 
 /** Everything the analysis takes from the connectors, in the shape the pipeline reads. */
 export function connectorSignals(lists: ConnectorLists, logCoverage: LogCoverage | null, searchConsole: SearchConsoleSignal | null = null, trends: TrendSignals | null = null, inventory: InventorySignal[] = [], ranks: RankSignals | null = null, aiAnswers: AiAnswerSignals | null = null): ConnectorSignals {
-  return { serp: lists.serp.lists.flatMap((list) => list.rows), suggestions: lists.serp.suggestions, links: lists.links, logCoverage, searchConsole, trends, inventory, ranks, aiAnswers };
+  return { serp: lists.serp.lists.flatMap((list) => list.rows), suggestions: lists.serp.suggestions, links: lists.links, logCoverage, searchConsole, trends, inventory, ranks, aiAnswers, referring: lists.referring };
 }

@@ -5,6 +5,8 @@
  * competitors it names or cites instead.
  */
 
+import { bareDomain } from "./serp.js";
+
 export const AI_ANSWER_ENGINES = [
   { engine: "chatgpt", label: "ChatGPT" },
   { engine: "gemini", label: "Gemini" },
@@ -35,3 +37,43 @@ export type AiAnswerCheck = {
   rivals: AiRival[];
   excerpt: string;
 };
+
+const isOrUnder = (domain: string, root: string) => domain === root || domain.endsWith(`.${root}`);
+/** "brightsmile.example" → "brightsmile"; "rival-dental.example" → "rival-dental". */
+const domainLabel = (domain: string) => bareDomain(domain).split(".")[0] ?? domain;
+const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** A whole-word pattern for a name; a hyphen or space in it matches either, or nothing; names of three characters or fewer match only in their exact case. */
+function namePattern(name: string): RegExp {
+  const body = escapeRegExp(name.trim()).replace(/[\s-]+/g, "[\\s-]?");
+  return new RegExp(`(^|[^\\p{L}\\p{N}])${body}($|[^\\p{L}\\p{N}])`, name.trim().length <= 3 ? "u" : "iu");
+}
+
+function firstMention(text: string, names: string[]): number {
+  let first = -1;
+  for (const name of names) {
+    const match = namePattern(name).exec(text);
+    if (match) {
+      const at = match.index + match[1]!.length;
+      if (first < 0 || at < first) first = at;
+    }
+  }
+  return first;
+}
+
+const EXCERPT = 600;
+
+/** What one answer says about the site: mentioned (a brand name, the domain or its label in the text), cited (a source on the site's domain), and which competitors it names or cites. */
+export function readAnswer(input: { text: string; sources: AiSource[]; brandNames: string[]; site: string; competitors: string[] }) {
+  const site = bareDomain(input.site);
+  const names = [...new Set([...input.brandNames, site, domainLabel(site)])].filter((name) => name.trim().length >= 2);
+  const at = firstMention(input.text, names);
+  const domains = [...new Set(input.sources.map((source) => bareDomain(source.domain)))];
+  const rank = domains.findIndex((domain) => isOrUnder(domain, site));
+  const rivals: AiRival[] = input.competitors.map((competitor) => {
+    const domain = bareDomain(competitor);
+    return { domain, mentioned: firstMention(input.text, [domain, domainLabel(domain)]) >= 0, cited: domains.some((source) => isOrUnder(source, domain)) };
+  }).filter((rival) => rival.mentioned || rival.cited);
+  const start = at < 0 ? 0 : Math.max(0, Math.min(at - EXCERPT / 2, input.text.length - EXCERPT));
+  return { mentioned: at >= 0, cited: rank >= 0, citedRank: rank >= 0 ? rank + 1 : null, rivals, excerpt: input.text.slice(start, start + EXCERPT) };
+}

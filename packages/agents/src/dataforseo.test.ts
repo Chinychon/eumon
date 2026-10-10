@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { dataForSeoLocation, fetchBacklinkSummary, fetchKeywordOverview, fetchRankedKeywords, fetchSerp } from "./dataforseo.js";
+import { dataForSeoLocation, fetchAiAnswer, fetchBacklinkSummary, fetchKeywordOverview, fetchRankedKeywords, fetchSerp } from "./dataforseo.js";
 
 const auth = { login: "me@example.com", password: "secret" };
 const envelope = (task: object) => JSON.stringify({ version: "0.1.20260917", status_code: 20000, status_message: "Ok.", cost: 0.0132, tasks_count: 1, tasks_error: 0, tasks: [task] });
@@ -70,5 +70,41 @@ describe("DataForSEO client", () => {
     await assert.rejects(fetchRankedKeywords(auth, "x.com", 2360, oneTask), /only one task/);
     const http = (async () => new Response("down", { status: 503 })) as unknown as typeof fetch;
     await assert.rejects(fetchRankedKeywords(auth, "x.com", 2360, http), /503/);
+  });
+  it("asks each AI engine at its endpoint and reads the answer and its sources", async () => {
+    const asked: Array<{ url: string; task: Record<string, unknown> }> = [];
+    const results: Record<string, object> = {
+      "chat_gpt/llm_scraper": { markdown: "Bright Smile is a good choice.", sources: [{ domain: "www.brightsmile.example", url: "https://www.brightsmile.example/p", title: "t" }, { domain: null, url: "https://wiki.example/a" }] },
+      "gemini/llm_scraper": { markdown: null, items: [{ type: "gemini_text", text: "Try Rival." }], sources: [] },
+      "google/ai_mode": { items: [{ type: "ai_overview", items: [{ type: "ai_overview_element", markdown: "Clinics: Rival Dental.", references: [{ type: "ai_overview_reference", domain: "rival-dental.example", url: "https://rival-dental.example/x" }] }] }] },
+      "perplexity/llm_responses": { items: [{ type: "message", sections: [{ type: "text", text: "Bright Smile [1]", annotations: [{ title: "brightsmile.example", url: "https://brightsmile.example/a" }] }] }] },
+    };
+    const fetchFn = (async (url: string, init?: RequestInit) => {
+      asked.push({ url, task: JSON.parse(String(init?.body))[0] });
+      const key = Object.keys(results).find((part) => url.includes(part))!;
+      return new Response(envelope({ status_code: 20000, status_message: "Ok.", cost: 0.004, result: [results[key]] }));
+    }) as typeof fetch;
+    const input = { prompt: "best dentist kl", location: 2458, language: "en", countryIso2: "MY" };
+    const chatgpt = await fetchAiAnswer(auth, { ...input, engine: "chatgpt" }, fetchFn);
+    assert.deepEqual(chatgpt, { text: "Bright Smile is a good choice.", sources: [{ domain: "brightsmile.example", url: "https://www.brightsmile.example/p" }, { domain: "wiki.example", url: "https://wiki.example/a" }], cost: 0.004 });
+    assert.equal((await fetchAiAnswer(auth, { ...input, engine: "gemini" }, fetchFn)).text, "Try Rival.");
+    assert.deepEqual((await fetchAiAnswer(auth, { ...input, engine: "ai_mode" }, fetchFn)).sources, [{ domain: "rival-dental.example", url: "https://rival-dental.example/x" }]);
+    const perplexity = await fetchAiAnswer(auth, { ...input, engine: "perplexity" }, fetchFn);
+    assert.deepEqual(perplexity.sources, [{ domain: "brightsmile.example", url: "https://brightsmile.example/a" }]);
+    assert.deepEqual(asked.map((call) => call.url), [
+      "https://api.dataforseo.com/v3/ai_optimization/chat_gpt/llm_scraper/live/advanced",
+      "https://api.dataforseo.com/v3/ai_optimization/gemini/llm_scraper/live/advanced",
+      "https://api.dataforseo.com/v3/serp/google/ai_mode/live/advanced",
+      "https://api.dataforseo.com/v3/ai_optimization/perplexity/llm_responses/live",
+    ]);
+    assert.deepEqual(asked[0]!.task, { keyword: "best dentist kl", location_code: 2458, language_code: "en", force_web_search: true });
+    assert.deepEqual(asked[3]!.task, { user_prompt: "best dentist kl", model_name: "sonar", max_output_tokens: 1024, web_search_country_iso_code: "MY" });
+  });
+
+  it("an answer with nothing in it is an empty answer, not an error; a refused task throws", async () => {
+    const empty = (async () => new Response(envelope({ status_code: 20000, status_message: "Ok.", cost: 0.004, result: null }))) as unknown as typeof fetch;
+    assert.deepEqual(await fetchAiAnswer(auth, { engine: "chatgpt", prompt: "q", location: 2458, language: "en", countryIso2: null }, empty), { text: "", sources: [], cost: 0.004 });
+    const refused = (async () => new Response(envelope({ status_code: 40501, status_message: "Invalid Field: 'location_code'.", cost: 0, result: null }))) as unknown as typeof fetch;
+    await assert.rejects(fetchAiAnswer(auth, { engine: "gemini", prompt: "q", location: 2458, language: "en", countryIso2: null }, refused), /location_code/);
   });
 });

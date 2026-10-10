@@ -13,6 +13,8 @@ export type Finding = { id: string; category: string; severity: string; title: s
 type Saved = Awaited<ReturnType<typeof runFullAnalysis>> & {
   /** Unchanged pages whose results were carried over from the last crawl. */
   crawlReuse?: { urls: number; from?: string };
+  /** Why content grading skipped or stopped this analysis: "content grading skipped “q”: …". */
+  contentGradingNotes?: string[];
 };
 type Later = "coverage" | "competition" | "aiReadiness" | "conversion" | "search" | "repo" | "rendering" | "audit";
 export type Report = Omit<Saved, Later> & Partial<Pick<Saved, Later>>;

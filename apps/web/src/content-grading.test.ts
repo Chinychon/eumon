@@ -98,7 +98,7 @@ describe("content targets", () => {
     const result = await contentTargets(db, site, today, { dataForSeo: auth }, stub.fetchFn);
     assert.deepEqual(stub.asked, ["kw b"], "only the stale page is fetched");
     assert.deepEqual(result.targets.map((t) => t.query).sort(), ["kw a", "kw b"]);
-    assert.deepEqual(result.notes, []);
+    assert.deepEqual(result.notes, ["content grading: 1 results page fetched, $0.00"], "the DataForSEO spend is noted");
     assert.equal(result.serp["kw a|mys"]!.checkedAt, "2026-09-20");
     assert.equal(result.serp["kw b|mys"]!.checkedAt, today);
     const saved = (await getSnapshot<SerpResult>(db, "s", "serp", "mys"))!;
@@ -168,14 +168,15 @@ describe("gradeContentSteps", () => {
     assert.deepEqual(step.names, ["content-targets"]);
   });
 
-  it("grades five targets a step, then saves, with a retry and a 10-minute timeout per grading step", async () => {
+  it("grades four targets a step, then saves, with a retry and a 10-minute timeout per grading step", async () => {
     const { db } = await setup(keywords);
     await saveSnapshot(db, "s", { kind: "serp", scope: "mys", periodEnd: today, rows: keywords.map((k) => serpRow(k, today)) });
     const step = recorder();
     const notes = await gradeContentSteps(step, deps(db, null));
-    assert.equal(CONTENT_STEP, 5);
+    assert.equal(CONTENT_STEP, 4);
     assert.deepEqual(step.names, ["content-targets", "content-grades-1", "content-grades-2", "content-save"]);
-    assert.deepEqual([step.outputs[1], step.outputs[2]].map((out) => (out as { notes: string[] }).notes.length), [5, 2]);
+    assert.deepEqual([step.outputs[1], step.outputs[2]].map((out) => (out as { notes: string[] }).notes.length), [4, 3]);
+    assert.deepEqual(step.options[0], { retries: { limit: 1, delay: 10_000 } });
     assert.deepEqual(step.options[1], { retries: { limit: 1, delay: 10_000 }, timeout: 10 * 60_000 });
     assert.equal(notes.length, 7);
     assert.ok(notes.every((note) => note.endsWith(": no AI model configured")));

@@ -8,23 +8,27 @@ import {
 import { charge, FREE_LIMITS, keysForLimits, limitsFor } from "./limits.ts";
 import { saveSerpRows } from "./rank-tracking.ts";
 import type { SignalKeys } from "./results-sync.ts";
-import { marketLocation, said } from "./source-helpers.ts";
+import { dollars, marketLocation, said } from "./source-helpers.ts";
 import type { StepLike, StepOptions } from "./sync-steps.ts";
 
 /*
  * Content grading's analysis steps: pick the searches due and find who ranks
  * for each (the `serp` snapshot, or DataForSEO where the workspace may spend
- * it), grade five a step (4 pages and 3 robots.txt each: ≤ 35 fetches), then
- * keep the latest grade per search in the `content_grades` snapshot.
+ * it), grade four a step, then keep the latest grade per search in the
+ * `content_grades` snapshot. Per target: 1 own page + 3 robots.txt + 3 rival
+ * pages + 1–2 AI calls (DeepSeek retries once on bad JSON), redirect hops
+ * extra: about 36 fetches a step at worst, under the Free plan's 50 with room
+ * for hops. D1 calls don't count.
  */
 
-export const CONTENT_STEP = 5;
+export const CONTENT_STEP = 4;
 const KIND = "content_grades";
 /** A results page older than this is fetched again. */
 const SERP_DAYS = 28;
 /** Grades kept this long after their last check. */
 const KEEP_DAYS = 90;
-const GRADE: StepOptions = { retries: { limit: 1, delay: 10_000 }, timeout: 10 * 60_000 };
+const RETRY_ONCE: StepOptions = { retries: { limit: 1, delay: 10_000 } };
+const GRADE: StepOptions = { ...RETRY_ONCE, timeout: 10 * 60_000 };
 
 type Site = Pick<SiteRecord, "id" | "baseUrl" | "workspaceId">;
 const key = (query: string, market: string) => `${query.trim().toLowerCase()}|${market}`;
@@ -64,6 +68,7 @@ export async function contentTargets(db: D1Like, site: SiteRecord, today: string
     const language = ((await getPageSettings(db, site.id)) ?? defaultPageSettings(site.id, site.name, site.baseUrl)).language;
     const answers = await Promise.allSettled(missing.map((target) => fetchSerp(keys.dataForSeo!, { keyword: target.query, location: marketLocation(target.market)!, language, site: scope(site), checkedAt: today, volume: null }, fetchFn)));
     const pages = new Map<string, SerpResult[]>();
+    let cost = 0;
     answers.forEach((answer, index) => {
       const target = missing[index]!;
       if (answer.status === "rejected") {
@@ -71,9 +76,12 @@ export async function contentTargets(db: D1Like, site: SiteRecord, today: string
         return;
       }
       serp[key(target.query, target.market)] = answer.value.row;
+      cost += answer.value.cost;
       pages.set(target.market, [...(pages.get(target.market) ?? []), answer.value.row]);
     });
     for (const [market, rows] of pages) await saveSerpRows(db, site.id, market, rows, today);
+    const fetched = [...pages.values()].flat().length;
+    if (fetched) notes.push(`content grading: ${fetched} results page${fetched === 1 ? "" : "s"} fetched, ${dollars(cost)}`);
   }
   return { targets: picked.filter((target) => serp[key(target.query, target.market)]), serp, notes };
 }
@@ -89,6 +97,7 @@ export async function gradeSlice(db: D1Like, site: Site, slice: ContentTarget[],
   const rows: ContentGradeRow[] = [];
   const notes: string[] = [];
   // One AI run per target that reaches the AI; a site outside any workspace has no ledger (and grades at most 8 an analysis).
+  // A retried step charges its targets again: the first attempt's charges aren't refunded.
   const beforeAi = async () => {
     const refusal = site.workspaceId ? await charge(db, site.workspaceId, "aiRunsPerDay") : null;
     if (refusal) throw new AllowanceRefused(refusal);
@@ -109,7 +118,7 @@ export async function gradeSlice(db: D1Like, site: Site, slice: ContentTarget[],
 export type ContentDeps = { db: D1Like; siteId: string; now: () => Date; keys: SignalKeys; llm: () => JsonLlm | null; fetcher?: Fetcher; fetchFn?: typeof fetch };
 
 /**
- * The analysis' content steps: targets, five a step, save. A step that dies costs its note and the analysis goes on.
+ * The analysis' content steps: targets, four a step, save. A step that dies costs its note and the analysis goes on.
  * Keys and the AI client are made inside each step: a step's output is persisted, so credentials never pass through one.
  */
 export async function gradeContentSteps(step: StepLike, deps: ContentDeps): Promise<string[]> {
@@ -133,7 +142,7 @@ export async function gradeContentSteps(step: StepLike, deps: ContentDeps): Prom
     const keys = keysForLimits(deps.keys, record.workspaceId ? await limitsFor(db, record.workspaceId) : FREE_LIMITS);
     const today = deps.now().toISOString().slice(0, 10);
     return { today, ...(await contentTargets(db, record, today, keys, deps.fetchFn)) };
-  });
+  }, RETRY_ONCE);
   if ("error" in picked) return [`content grading failed: ${picked.error}`];
   const { today, targets, serp } = picked.ok;
   const notes = [...picked.ok.notes];

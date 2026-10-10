@@ -162,7 +162,7 @@ export class SiteAnalysisWorkflow extends WorkflowEntrypoint<AppEnv, AnalysisPay
       // Its own step, so its queries have their own budget and a failure costs only the inventory.
       const inventory = await step.do("inventory", () => loadInventories(db, siteId, { analysisId }).catch(() => []));
 
-      // Content grading before the findings, so they see this analysis' grades. Its own steps, five searches a step; a dead step costs its note.
+      // Content grading before the findings, so they see this analysis' grades. Its own steps, four searches a step; a dead step costs its note.
       const contentNotes = await gradeContentSteps(workflowSteps(step), {
         db, siteId, now: () => new Date(), keys: signalKeys(this.env), llm: () => makeLlm(this.env),
       });

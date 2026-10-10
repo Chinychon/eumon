@@ -61,7 +61,7 @@ export function RankTrackingCard({ ranks, siteId, operator, hasCredentials, hasM
 
   const empty = !hasCredentials ? (operator ? "Add DataForSEO credentials (DATAFORSEO_LOGIN and DATAFORSEO_PASSWORD) to track positions." : "Not measured yet.")
     : !hasMarkets ? (operator ? "Set target markets in Setup: positions are checked per country." : "Not measured yet.")
-    : !ranks.tracked ? (operator ? null : "No keywords are tracked yet.")
+    : !ranks.tracked ? (operator ? "Add the searches you want to watch." : "No keywords are tracked yet.")
     : !ranks.checked ? "First check at the next sync." : null;
   const keywordCount = draft.split("\n").filter((line) => line.trim()).length;
   // A pair not checked yet (just added, an uncovered market, a failed check) has no position to report; the client link leaves it out.
@@ -72,7 +72,7 @@ export function RankTrackingCard({ ranks, siteId, operator, hasCredentials, hasM
       {!empty && ranks.checked > 0 && (
         <>
           <div className="metrics-grid results-inline">
-            <Kpi label="Tracked" value={ranks.tracked} />
+            <Kpi label="Tracked searches" value={ranks.checked} caption={`${ranks.tracked} keyword${ranks.tracked === 1 ? "" : "s"} × ${markets.length} market${markets.length === 1 ? "" : "s"}`} />
             <Kpi label="In the top 3" value={ranks.top3} />
             <Kpi label="In the top 10" value={ranks.top10} />
             <Kpi label="Not in the top 10" value={ranks.unranked} />
@@ -114,7 +114,7 @@ export function RankTrackingCard({ ranks, siteId, operator, hasCredentials, hasM
       {operator && hasCredentials && hasMarkets && (
         <>
           <div className="section-title">Keywords to track</div>
-          <textarea className="textarea" style={{ minHeight: 96 }} placeholder={"dental implants\nbraces price kuala lumpur"} value={draft} onChange={(event) => setText(event.target.value)} />
+          <textarea className="textarea" aria-label="Keywords to track, one per line" style={{ minHeight: 96 }} placeholder={"dental implants\nbraces price kuala lumpur"} value={draft} onChange={(event) => setText(event.target.value)} />
           <div className="row" style={{ gap: 12, alignItems: "center", marginTop: 8 }}>
             <Button small variant="secondary" disabled={!changed} busy={busy} onClick={save}>Save keywords</Button>
             <span className="small muted">

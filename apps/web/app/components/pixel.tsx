@@ -118,7 +118,7 @@ export function Seedling({ growing = false, scale = 4, className }: { growing?: 
 
 type Bed = { family: string; total: number; done: number; blocked: number; emptyShells: number; errors: number };
 
-const PENDING = 0, HEALTHY = 1, EMPTY = 2, ERROR = 3, BLOCKED = 4, BLOOM = 5;
+const PENDING = 0, HEALTHY = 1, EMPTY = 2, ERROR = 3, BLOCKED = 4;
 const STATE_NAMES = ["Waiting", "Served", "Empty HTML", "Error", "Blocked", "Blooming"];
 const MAX_HEIGHT = 168;
 const GROW_MS = 520;
@@ -147,17 +147,15 @@ function plotFor(urls: number, beds: number, width: number, height = MAX_HEIGHT)
 /**
  * The crawl garden: one square per URL (or per few, on big sites), grouped
  * in beds by page type. A square sprouts when its URL is fetched, wilts amber
- * for empty HTML, turns red for errors, greys out when robots.txt blocks it,
- * and the healthy ones bloom when the analysis finishes. Counts are exact per
- * bed; where a problem sits inside its bed carries no meaning.
+ * for empty HTML, turns red for errors, and greys out when robots.txt blocks it.
+ * Counts are exact per bed; where a problem sits inside its bed carries no meaning.
  */
-export function CrawlGarden({ families, bloom = false, label, fill = false }: { families: Bed[]; bloom?: boolean; label: string; fill?: boolean }) {
+export function CrawlGarden({ families, label, fill = false }: { families: Bed[]; label: string; fill?: boolean }) {
   const box = useRef<HTMLDivElement>(null);
   /** With `fill`, the squares size themselves to this area, which takes the card's free height. */
   const area = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const beds = useRef(new Map<string, { states: Uint8Array; born: Float64Array }>());
-  const bloomed = useRef(false);
   const frame = useRef(0);
   const [width, setWidth] = useState(0);
   const [height, setHeight] = useState(0);
@@ -223,20 +221,6 @@ export function CrawlGarden({ families, bloom = false, label, fill = false }: { 
         entry.born[slot] = reduced || total <= 1 ? now : now + (rank / (total - 1)) * sweep;
       }
     }
-    if (bloom && !bloomed.current) {
-      bloomed.current = true;
-      const squares = [...beds.current.values()].reduce((sum, entry) => sum + entry.states.length, 0);
-      let index = 0;
-      for (const entry of beds.current.values()) {
-        for (let i = 0; i < entry.states.length; i++, index++) {
-          if (entry.states[i] === HEALTHY && ((i * 2654435761) >>> 0) % 19 === 0) {
-            entry.states[i] = BLOOM;
-            // Blooms follow the same sweep, after the last square has grown.
-            entry.born[i] = now + 120 + (squares > 1 ? (index / (squares - 1)) * SWEEP_MS : 0);
-          }
-        }
-      }
-    }
   }
 
   useEffect(() => {
@@ -246,7 +230,7 @@ export function CrawlGarden({ families, bloom = false, label, fill = false }: { 
     const colour = (name: string) => css.getPropertyValue(name).trim();
     const colours = {
       soil: colour("--px-soil"), leaf: colour("--px-leaf"), leaf2: colour("--px-leaf-2"), wilt: colour("--px-wilt"),
-      error: colour("--px-error"), stone: colour("--px-stone"), bloom: colour("--px-bloom"), bloom2: colour("--px-bloom-2"),
+      error: colour("--px-error"), stone: colour("--px-stone"),
     };
     const dpr = Math.max(1, Math.round(window.devicePixelRatio || 1));
     const cells = families.reduce((sum, bed) => sum + Math.ceil(bed.total / plot.k) + 1, 0) - 1;
@@ -287,13 +271,12 @@ export function CrawlGarden({ families, bloom = false, label, fill = false }: { 
             continue;
           }
           const height = Math.max(dpr, Math.round(size * grown));
-          const fill = state === HEALTHY ? colours.leaf : state === EMPTY ? colours.wilt : state === ERROR ? colours.error : state === BLOCKED ? colours.stone : colours.bloom;
+          const fill = state === HEALTHY ? colours.leaf : state === EMPTY ? colours.wilt : state === ERROR ? colours.error : colours.stone;
           context.fillStyle = fill;
           context.fillRect(x, y + size - height, size, height);
           if (grown === 1 && size >= 3 * dpr) {
             const spot = Math.max(dpr, Math.round(size / 3));
             if (state === HEALTHY) { context.fillStyle = colours.leaf2; context.fillRect(x, y, spot, spot); }
-            if (state === BLOOM) { context.fillStyle = colours.bloom2; context.fillRect(x + Math.round((size - spot) / 2), y + Math.round((size - spot) / 2), spot, spot); }
           }
         }
         index++; // the path between beds

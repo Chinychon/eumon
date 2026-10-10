@@ -294,7 +294,7 @@ export function CompetitorsSection({ report, site, competitors, onNavigate }: { 
       </Card>
     );
   }
-  const domains = competition.competitors.filter((competitor) => competitor.analyzed).slice(0, 3);
+  const domains = competition.competitors.filter((competitor) => competitor.analyzed).slice(0, 5);
   const you = new URL(site.baseUrl).hostname.replace(/^www\./, "");
   const rows = gapsFirst(competition);
   const pages = (entry?: { pages: number; urls?: number; languages?: number }) => (entry?.pages

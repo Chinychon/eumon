@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import type { CrawlPageResult } from "@organic-growth/core";
 import { createAnalysis, enqueueAnalysisCrawlUrls, getCrawlCoverage, linkGraphIssues, probePages, saveCrawlBatch, upsertSite } from "./index.js";
 import { openSqliteD1 } from "./sqlite.js";
+import type { D1Like } from "./d1.js";
 
 const u = (path: string) => `https://x.com${path}`;
 const family = (path: string) => (path === "/" ? "home" : path.split("/").filter(Boolean).length > 1 ? path.split("/")[1]! : "page");
@@ -18,8 +19,16 @@ const current = (path: string, overrides: Partial<CrawlPageResult> = {}): CrawlP
   viewport: true, lang: "en", words: 400, leadWords: 40, images: 2, landmarks: 3, listsOrTables: true, articleLike: false, author: false, entitySchema: false, ...overrides,
 });
 
+/** D1 refuses a compound SELECT with more terms than SQLite's default allows ("too many terms in compound SELECT"); the leads query's four terms run there, so more than four is refused here. */
+function d1Strict(db: D1Like): D1Like {
+  return { ...db, prepare: (query: string) => {
+    if ((query.match(/\b(UNION|INTERSECT|EXCEPT)\b/gi) ?? []).length > 3) throw new Error("D1_ERROR: too many terms in compound SELECT: SQLITE_ERROR");
+    return db.prepare(query);
+  }, batch: db.batch?.bind(db) } as D1Like;
+}
+
 async function site(pages: CrawlPageResult[], links: Array<[string, string]> = []) {
-  const db = openSqliteD1();
+  const db = d1Strict(openSqliteD1());
   const now = new Date().toISOString();
   await upsertSite(db, { id: "s", name: "x.com", baseUrl: "https://x.com", createdAt: now, updatedAt: now });
   await createAnalysis(db, { id: "an1", siteId: "s", status: "running", createdAt: now });

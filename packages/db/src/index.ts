@@ -1002,14 +1002,21 @@ export async function getCrawlCoverage(
   const issues: Partial<Record<CrawlIssue, number>> = {};
   for (const key of issueKeys) issues[key] = Number(row?.[`issue_${key}`] ?? 0);
 
-  // Eight examples per issue in one statement: one query per issue would pass the Free plan's 50 queries a request.
+  // Eight examples per issue in one statement: one query per issue would pass the Free plan's 50 queries a request,
+  // and a UNION of one SELECT per issue passes D1's limit on compound SELECT terms. So each page is paired with the
+  // issue keys and kept where that issue's condition holds, then numbered per issue.
   const issueExamples: Partial<Record<CrawlIssue, CrawlIssueExample[]>> = {};
   const withExamples = issueKeys.filter((key) => issues[key]);
   if (withExamples.length) {
+    const when = (pick: (key: (typeof withExamples)[number]) => string) => withExamples.map((key) => `WHEN '${key}' THEN (${pick(key)})`).join(" ");
     const { results } = await db.prepare(
-      `SELECT issue, url, detail FROM (${withExamples.map((key) => `SELECT '${key}' AS issue, url, ${CRAWL_ISSUES[key].detail ?? "NULL"} AS detail, ROW_NUMBER() OVER (ORDER BY url) AS rn FROM pages WHERE analysis_id = ?1 AND ${CRAWL_ISSUES[key].where}`).join(" UNION ALL ")})
+      `SELECT issue, url, detail FROM (
+         SELECT issue_keys.value AS issue, pages.url AS url, CASE issue_keys.value ${when((key) => CRAWL_ISSUES[key].detail ?? "NULL")} END AS detail,
+           ROW_NUMBER() OVER (PARTITION BY issue_keys.value ORDER BY pages.url) AS rn
+         FROM pages JOIN json_each(?2) AS issue_keys
+         WHERE pages.analysis_id = ?1 AND (CASE issue_keys.value ${when((key) => CRAWL_ISSUES[key].where)} ELSE 0 END))
        WHERE rn <= 8 ORDER BY issue, url`,
-    ).bind(analysisId).all<{ issue: CrawlIssue; url: string; detail: unknown }>();
+    ).bind(analysisId, JSON.stringify(withExamples)).all<{ issue: CrawlIssue; url: string; detail: unknown }>();
     for (const example of results) {
       (issueExamples[example.issue] ??= []).push(example.detail == null || example.detail === ""
         ? { url: example.url }

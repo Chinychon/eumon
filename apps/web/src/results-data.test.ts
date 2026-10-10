@@ -100,7 +100,7 @@ describe("results payload", () => {
     await upsertSite(db, { id: "s", name: "x.com", baseUrl: "https://www.x.com", createdAt: at, updatedAt: at });
     await setAiPrompts(db, "s", ["best dentist"]);
     await setSiteMarkets(db, "s", ["mys"]);
-    await saveAiAnswerChecks(db, "s", [{ prompt: "best dentist", market: "mys", engine: "chatgpt", day: today, mentioned: true, cited: true, citedRank: 1, sources: [{ domain: "x.com", url: "https://x.com/" }], rivals: [], excerpt: "x.com" }]);
+    await saveAiAnswerChecks(db, "s", [{ prompt: "best dentist", market: "mys", engine: "chatgpt", day: today, answered: true, mentioned: true, cited: true, citedRank: 1, sources: [{ domain: "x.com", url: "https://x.com/" }], rivals: [], excerpt: "x.com" }]);
     const view = await loadResults(db, (await getSite(db, "s"))!, today);
     assert.deepEqual(view.aiAnswers.rows.map((row) => [row.prompt, row.market, row.cells.chatgpt?.mentioned]), [["best dentist", "mys", true]]);
     assert.deepEqual(view.aiAnswers.topDomains, [{ domain: "x.com", answers: 1, kind: "site" }], "the site is the bare domain");

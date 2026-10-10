@@ -12,7 +12,7 @@ async function site() {
   return db;
 }
 const check = (prompt: string, day: string, engine: AiAnswerCheck["engine"] = "chatgpt", cited = false): AiAnswerCheck => ({
-  prompt, market: "mys", engine, day, mentioned: cited, cited, citedRank: cited ? 2 : null,
+  prompt, market: "mys", engine, day, answered: true, mentioned: cited, cited, citedRank: cited ? 2 : null,
   sources: cited ? [{ domain: "other.example", url: "https://other.example/a" }, { domain: "x.com", url: "https://x.com/p" }] : [],
   rivals: [{ domain: "rival.example", mentioned: true, cited: false }], excerpt: "…",
 });
@@ -34,7 +34,15 @@ describe("AI answer store", () => {
     const rows = await listAiAnswerChecks(db, "s", "2026-10-01");
     assert.equal(rows.length, 2);
     assert.deepEqual(rows.find((row) => row.engine === "chatgpt"), check("q", "2026-10-07", "chatgpt", true));
-    assert.deepEqual(await aiLastChecked(db, "s"), new Map([["q|mys|chatgpt", "2026-10-07"], ["q|mys|gemini", "2026-10-07"]]));
+    assert.deepEqual(await aiLastChecked(db, "s", "2026-07-09"), new Map([["q|mys|chatgpt", { day: "2026-10-07", answered: true }], ["q|mys|gemini", { day: "2026-10-07", answered: true }]]));
+  });
+
+  it("lists only answered checks; the last attempt reads every row of the last 90 days, answered or not", async () => {
+    const db = await site();
+    const attempt = (prompt: string, day: string, engine: AiAnswerCheck["engine"]): AiAnswerCheck => ({ ...check(prompt, day, engine), answered: false, rivals: [], excerpt: "" });
+    await saveAiAnswerChecks(db, "s", [check("q", "2026-10-01"), attempt("q", "2026-10-07", "chatgpt"), attempt("q", "2026-10-07", "gemini"), check("old", "2026-06-01")]);
+    assert.deepEqual((await listAiAnswerChecks(db, "s", "2026-01-01")).map((row) => `${row.prompt}|${row.engine}|${row.day}`), ["old|chatgpt|2026-06-01", "q|chatgpt|2026-10-01"]);
+    assert.deepEqual(await aiLastChecked(db, "s", "2026-07-09"), new Map([["q|mys|chatgpt", { day: "2026-10-07", answered: false }], ["q|mys|gemini", { day: "2026-10-07", answered: false }]]));
   });
 
   it("prunes before a day, and deleting the site removes everything", async () => {

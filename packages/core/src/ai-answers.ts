@@ -20,6 +20,8 @@ export const AI_PROMPTS_MAX = 25;
 export const AI_BRAND_NAMES_MAX = 5;
 /** A question is asked again in a market and engine once its last answer is this many days old. */
 export const AI_CHECK_FRESH_DAYS = 7;
+/** An attempt with no answer (refused, or empty) is retried after this many days: a refusal or empty answer is often temporary, and a short wait keeps a persistently failing engine from starving the queue or charging daily. */
+export const AI_RETRY_DAYS = 2;
 
 export const normalizePrompt = (text: string) => text.trim().replace(/\s+/g, " ");
 
@@ -30,6 +32,8 @@ export type AiAnswerCheck = {
   market: string;
   engine: AiAnswerEngine;
   day: string;
+  /** False for an attempt that got no answer (refused, or empty): saved so the queue knows it was tried, never read as an answer. */
+  answered: boolean;
   mentioned: boolean;
   cited: boolean;
   /** The site's place among the answer's distinct source domains (1 = first), or null when not cited. */

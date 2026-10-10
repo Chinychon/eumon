@@ -9,7 +9,7 @@ const today = "2026-10-10";
 const day = (back: number) => new Date(Date.UTC(2026, 9, 10 - back)).toISOString().slice(0, 10);
 /** One answer, `back` days ago; each of `rivals` is named and cited with a page of its own, each of `namedOnly` only named. */
 const check = (prompt: string, engine: AiAnswerCheck["engine"], back: number, options: { mentioned?: boolean; cited?: boolean; rivals?: string[]; namedOnly?: string[]; market?: string } = {}): AiAnswerCheck => ({
-  prompt, market: options.market ?? "mys", engine, day: day(back), mentioned: options.mentioned ?? false, cited: options.cited ?? false, citedRank: options.cited ? 1 : null,
+  prompt, market: options.market ?? "mys", engine, day: day(back), answered: true, mentioned: options.mentioned ?? false, cited: options.cited ?? false, citedRank: options.cited ? 1 : null,
   sources: [
     ...(options.cited ? [{ domain: "x.com", url: "https://x.com/p" }] : []),
     ...(options.rivals ?? []).map((domain) => ({ domain, url: `https://${domain}/${prompt.replace(/\W+/g, "-")}` })),

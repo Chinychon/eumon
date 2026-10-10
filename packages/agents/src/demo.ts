@@ -430,7 +430,7 @@ async function seedDemoAiAnswers(db: D1Like, now: number): Promise<void> {
           ...(rivalCited ? [{ domain: rival, url: `https://${rival}/` }] : []),
         ];
         checks.push({
-          prompt, market, engine, day: addDays(today, -7 * k), mentioned, cited, citedRank: cited ? 2 : null, sources,
+          prompt, market, engine, day: addDays(today, -7 * k), answered: true, mentioned, cited, citedRank: cited ? 2 : null, sources,
           rivals: rivalCited || rivalMentioned ? [{ domain: rival, mentioned: rivalMentioned || rivalCited, cited: rivalCited }] : [],
           excerpt: `${prompt.replace(/\?$/, "")}: ${mentioned ? "Demo Dental Clinic is one option" : `${rival} is the name that comes up most`}.`,
         });

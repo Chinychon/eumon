@@ -30,7 +30,7 @@ The scrapers return what a person sees in the product, not a bare model answer, 
 Migration `0026_ai_answers.sql` (0025 is rank tracking; renumber at merge if another branch took it):
 
 - `ai_prompts (site_id REFERENCES sites ON DELETE CASCADE, prompt, created_at, PRIMARY KEY (site_id, prompt))` — prompts trimmed, whitespace collapsed, 5–200 characters, case kept (answers can depend on it), de-duplicated case-insensitively.
-- `ai_brand_names (site_id REFERENCES sites ON DELETE CASCADE, name, PRIMARY KEY (site_id, name))` — up to 5 names the brand goes by; the site's name and its bare domain label are always matched too.
+- `ai_brand_names (site_id REFERENCES sites ON DELETE CASCADE, name, PRIMARY KEY (site_id, name))` — up to 5 names the brand goes by; the site's domain and its label are always matched too, and the site's name only if the user enters it.
 - `ai_answer_checks (site_id REFERENCES sites ON DELETE CASCADE, prompt, market, engine, day, mentioned INTEGER, cited INTEGER, cited_rank INTEGER NULL, sources_json, rivals_json, excerpt, PRIMARY KEY (site_id, prompt, market, engine, day))`, index `(site_id, day)`. `sources_json`: up to 20 `{ domain, url }` in the answer's order; `rivals_json`: competitor domains mentioned or cited, each `{ domain, mentioned, cited }`; `excerpt`: up to 600 characters of the answer around the first mention (or its start). Answers themselves aren't kept (size).
 
 `packages/db/src/ai-answers.ts`: `setAiPrompts`, `listAiPrompts`, `setAiBrandNames`, `listAiBrandNames`, `saveAiAnswerChecks` (batched upsert), `listAiAnswerChecks(db, siteId, fromDay)`, `aiCheckedSince(db, siteId, day): Set<"prompt|market|engine">`, `pruneAiAnswerChecks(db, siteId, before)` (older than 400 days).

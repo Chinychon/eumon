@@ -80,7 +80,7 @@ describe("readAnswer", () => {
 
 describe("aiAnswerPoints", () => {
   const check = (prompt: string, engine: AiAnswerCheck["engine"], day: string, mentioned: boolean, cited: boolean, rivals: AiAnswerCheck["rivals"] = []): AiAnswerCheck =>
-    ({ prompt, market: "mys", engine, day, mentioned, cited, citedRank: cited ? 1 : null, sources: [], rivals, excerpt: "" });
+    ({ prompt, market: "mys", engine, day, answered: true, mentioned, cited, citedRank: cited ? 1 : null, sources: [], rivals, excerpt: "" });
   it("counts the latest answer of each cell from the last 7 days, for current prompts only", () => {
     const checks = [
       check("a", "chatgpt", "2026-10-09", true, true, [{ domain: "r.example", mentioned: true, cited: false }]),
@@ -104,7 +104,7 @@ describe("aiAnswerPoints", () => {
 describe("aiAnswersView", () => {
   const src = (...domains: string[]) => domains.map((domain) => ({ domain, url: `https://${domain}/` }));
   const check = (prompt: string, engine: AiAnswerCheck["engine"], day: string, mentioned: boolean, cited: boolean, sources: AiAnswerCheck["sources"] = [], rivals: AiAnswerCheck["rivals"] = []): AiAnswerCheck =>
-    ({ prompt, market: "mys", engine, day, mentioned, cited, citedRank: cited ? 1 : null, sources, rivals, excerpt: `${prompt} ${engine} ${day}` });
+    ({ prompt, market: "mys", engine, day, answered: true, mentioned, cited, citedRank: cited ? 1 : null, sources, rivals, excerpt: `${prompt} ${engine} ${day}` });
   const checks = [
     check("a", "chatgpt", "2026-10-01", false, false, src("wiki.example")),
     check("a", "chatgpt", "2026-10-06", true, false, src("wiki.example")),

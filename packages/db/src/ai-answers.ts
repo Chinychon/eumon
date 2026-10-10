@@ -5,6 +5,7 @@ import { chunks, runStatements, type D1Like } from "./d1.js";
  * AI answer tracking: the questions (`ai_prompts`), the names the brand goes
  * by (`ai_brand_names`), and one row per question, market, engine and day
  * (`ai_answer_checks`). Answers aren't kept, only what was read from them.
+ * An attempt with no answer is a row with `answered = 0`: only the queue reads it.
  */
 
 /** Replaces the list; `created_at` is spaced a millisecond apart so the given order is the listed order. */
@@ -36,32 +37,33 @@ export async function listAiBrandNames(db: D1Like, siteId: string): Promise<stri
 /** One row per question, market, engine and day; a day saved twice keeps the later values. */
 export async function saveAiAnswerChecks(db: D1Like, siteId: string, rows: AiAnswerCheck[]): Promise<void> {
   const statements = rows.map((row) => db.prepare(
-    `INSERT INTO ai_answer_checks (site_id, prompt, market, engine, day, mentioned, cited, cited_rank, sources_json, rivals_json, excerpt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(site_id, prompt, market, engine, day) DO UPDATE SET mentioned = excluded.mentioned, cited = excluded.cited, cited_rank = excluded.cited_rank,
+    `INSERT INTO ai_answer_checks (site_id, prompt, market, engine, day, answered, mentioned, cited, cited_rank, sources_json, rivals_json, excerpt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(site_id, prompt, market, engine, day) DO UPDATE SET answered = excluded.answered, mentioned = excluded.mentioned, cited = excluded.cited, cited_rank = excluded.cited_rank,
        sources_json = excluded.sources_json, rivals_json = excluded.rivals_json, excerpt = excluded.excerpt`,
-  ).bind(siteId, row.prompt, row.market, row.engine, row.day, row.mentioned ? 1 : 0, row.cited ? 1 : 0, row.citedRank, JSON.stringify(row.sources), JSON.stringify(row.rivals), row.excerpt));
+  ).bind(siteId, row.prompt, row.market, row.engine, row.day, row.answered ? 1 : 0, row.mentioned ? 1 : 0, row.cited ? 1 : 0, row.citedRank, JSON.stringify(row.sources), JSON.stringify(row.rivals), row.excerpt));
   for (const group of chunks(statements, 100)) await runStatements(db, group);
 }
 
 type CheckRow = { prompt: string; market: string; engine: string; day: string; mentioned: number; cited: number; cited_rank: number | null; sources_json: string; rivals_json: string; excerpt: string };
 
-/** Checks from `fromDay` on, oldest first. */
+/** Answered checks from `fromDay` on, oldest first; attempts with no answer are left out. */
 export async function listAiAnswerChecks(db: D1Like, siteId: string, fromDay: string): Promise<AiAnswerCheck[]> {
   const { results } = await db.prepare(
-    "SELECT prompt, market, engine, day, mentioned, cited, cited_rank, sources_json, rivals_json, excerpt FROM ai_answer_checks WHERE site_id = ? AND day >= ? ORDER BY day, prompt, market, engine",
+    "SELECT prompt, market, engine, day, mentioned, cited, cited_rank, sources_json, rivals_json, excerpt FROM ai_answer_checks WHERE site_id = ? AND day >= ? AND answered = 1 ORDER BY day, prompt, market, engine",
   ).bind(siteId, fromDay).all<CheckRow>();
   return results.map((row) => ({
-    prompt: row.prompt, market: row.market, engine: row.engine as AiAnswerEngine, day: row.day,
+    prompt: row.prompt, market: row.market, engine: row.engine as AiAnswerEngine, day: row.day, answered: true,
     mentioned: Boolean(row.mentioned), cited: Boolean(row.cited), citedRank: row.cited_rank === null ? null : Number(row.cited_rank),
     sources: JSON.parse(row.sources_json), rivals: JSON.parse(row.rivals_json), excerpt: row.excerpt,
   }));
 }
 
-/** Each (prompt, market, engine)'s latest checked day, keyed `prompt|market|engine`, in one query, for deciding what is due. */
-export async function aiLastChecked(db: D1Like, siteId: string): Promise<Map<string, string>> {
-  const { results } = await db.prepare("SELECT prompt, market, engine, MAX(day) AS day FROM ai_answer_checks WHERE site_id = ? GROUP BY prompt, market, engine")
-    .bind(siteId).all<{ prompt: string; market: string; engine: string; day: string }>();
-  return new Map(results.map((row) => [`${row.prompt}|${row.market}|${row.engine}`, row.day]));
+/** Each (prompt, market, engine)'s latest attempt from `fromDay` on, answered or not, keyed `prompt|market|engine`, in one query, for deciding what is due. */
+export async function aiLastChecked(db: D1Like, siteId: string, fromDay: string): Promise<Map<string, { day: string; answered: boolean }>> {
+  // SQLite takes a bare column's value from the row that holds the MAX().
+  const { results } = await db.prepare("SELECT prompt, market, engine, MAX(day) AS day, answered FROM ai_answer_checks WHERE site_id = ? AND day >= ? GROUP BY prompt, market, engine")
+    .bind(siteId, fromDay).all<{ prompt: string; market: string; engine: string; day: string; answered: number }>();
+  return new Map(results.map((row) => [`${row.prompt}|${row.market}|${row.engine}`, { day: row.day, answered: Boolean(row.answered) }]));
 }
 
 export async function pruneAiAnswerChecks(db: D1Like, siteId: string, beforeDay: string): Promise<void> {

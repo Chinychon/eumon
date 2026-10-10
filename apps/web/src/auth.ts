@@ -3,7 +3,7 @@ import { APIError } from "better-auth/api";
 import { captcha, magicLink, organization } from "better-auth/plugins";
 import { createAccessControl } from "better-auth/plugins/access";
 import { defaultStatements, memberAc, ownerAc } from "better-auth/plugins/organization/access";
-import { grantInvitedSites, memberSlotsUsed, revokeWorkspaceSiteAccess, setUpNewUser, workspaceForNewSession, type D1Like } from "@organic-growth/db";
+import { grantInvitedSites, memberSlotsUsed, ownsWorkspace, revokeWorkspaceSiteAccess, setUpNewUser, workspaceForNewSession, type D1Like } from "@organic-growth/db";
 import { limitsFor } from "./limits.ts";
 import { hashPassword, verifyPassword } from "./passwords.ts";
 
@@ -89,8 +89,8 @@ export function createAuth(env: AuthEnv) {
         ac,
         roles,
         creatorRole: "owner",
-        // One workspace per user, so free limits can't be multiplied.
-        organizationLimit: 1,
+        // One owned workspace per user, so free limits can't be multiplied; being a Member or Client elsewhere doesn't count.
+        organizationLimit: (user) => ownsWorkspace(db, user.id),
         // Deleting a workspace must be a deliberate, built feature; the API must not let an owner wipe one.
         disableOrganizationDeletion: true,
         sendInvitationEmail: async ({ email, id, organization: workspace }, request) => {

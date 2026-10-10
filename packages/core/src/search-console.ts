@@ -48,7 +48,7 @@ export function gscReason(text: string): GscReason {
 
 /** The reason an export's file name carries ("…Drilldown-2026-10-09 Excluded by 'noindex' tag.zip"), if any. */
 export function reasonFromFileName(name: string): GscReason | null {
-  // "medbay.example-Coverage-Drilldown-2026-10-09 Excluded by 'noindex' tag.zip": only the words after the date, so the property's own name can't name a reason.
+  // "shop.example-Coverage-Drilldown-2026-10-09 Excluded by 'noindex' tag.zip": only the words after the date, so the property's own name can't name a reason.
   const stem = name.replace(/\.(zip|csv)$/i, "").replace(/^.*?\d{4}-\d{2}-\d{2}/, "");
   const reason = gscReason(stem);
   return reason === "other" ? null : reason;

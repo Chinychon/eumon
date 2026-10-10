@@ -27,7 +27,7 @@ export type TrendSignals = {
   impressions: DayPoint[];
   indexed: DayPoint[];
   indexedSource: "search_console" | "inspection" | null;
-  /** With the inspection sample: how many of Eumon's pages Google left out, to tell a fall Google caused from pages the operator unpublished. */
+  /** With the inspection sample: how many of Eumon's pages Google left out, to tell a fall Google caused from pages the user unpublished. */
   notIndexed: DayPoint[];
   crawlLog: CrawlDayRow[];
   today: string;

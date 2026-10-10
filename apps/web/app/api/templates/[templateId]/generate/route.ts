@@ -1,7 +1,6 @@
 import { env } from "cloudflare:workers";
 import { getTemplate } from "@organic-growth/db";
 import { regenerateTemplate } from "../../../../../src/page-engine";
-import { charge } from "../../../../../src/limits";
 import { fail, json } from "../../../../../src/server";
 import { requireOwned } from "../../../../../src/guard";
 
@@ -11,8 +10,7 @@ export async function POST(request: Request, context: { params: Promise<{ templa
   if (access instanceof Response) return access;
   const template = await getTemplate(env.DB, templateId);
   if (!template) return fail("Template not found.", 404);
-  const refusal = await charge(env.DB, access.site.workspaceId!, "aiRunsPerDay");
-  if (refusal) return fail(refusal, 429);
+  // Not metered: regenerating fills pages from data and calls no model.
   try {
     return json({ generation: await regenerateTemplate(access.site, template) });
   } catch (error) {

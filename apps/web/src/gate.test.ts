@@ -6,7 +6,7 @@ const req = (path: string, init: RequestInit = {}) => new Request(`https://app.e
 
 describe("gate", () => {
   it("lets public paths through without a session", () => {
-    for (const path of ["/p/site_1/doctors/tan", "/api/sites/site_1/events", "/r/abc", "/api/r/abc", "/api/logs/site_1", "/api/auth/sign-in/social", "/sign-in", "/invite/inv_1", "/manifest.json", "/sw.js", "/sw-register.js", "/assets/app.js", "/icon-192.png"]) {
+    for (const path of ["/p/site_1/doctors/tan", "/api/sites/site_1/events", "/r/abc", "/api/r/abc", "/api/logs/site_1", "/api/auth/sign-in/social", "/sign-in", "/invite/inv_1", "/manifest.json", "/sw.js", "/assets/app.js", "/icon-192.png"]) {
       assert.equal(isPublicPath(path), true, path);
       assert.equal(gate(req(path, { method: path.startsWith("/api/") ? "POST" : "GET", headers: { origin: "https://elsewhere.test" } }), false), null, path);
     }

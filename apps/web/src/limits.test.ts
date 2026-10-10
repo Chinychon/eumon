@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { INITIAL_WORKSPACE_ID, setLimitOverrides, type D1Like } from "@organic-growth/db";
 import { openSqliteD1 } from "@organic-growth/db/sqlite";
-import { charge, featureRefusal, FREE_LIMITS, keysForLimits, limitsFor } from "./limits.ts";
+import { charge, featureRefusal, FREE_LIMITS, keysForLimits, limitsFor, mergeOverrides, refund } from "./limits.ts";
 
 const AT = "2026-10-10T00:00:00.000Z";
 async function db(): Promise<D1Like> {
@@ -26,6 +26,22 @@ describe("limits", () => {
     for (let i = 0; i < 20; i++) assert.equal(await charge(d, "w", "askPerDay", 1, now), null);
     assert.match((await charge(d, "w", "askPerDay", 1, now))!, /20 .*resets at midnight UTC/);
     for (let i = 0; i < 50; i++) assert.equal(await charge(d, INITIAL_WORKSPACE_ID, "askPerDay", 1, now), null);
+  });
+
+  it("frees a refunded charge for the same day", async () => {
+    const d = await db();
+    const now = new Date(AT);
+    for (let i = 0; i < 3; i++) assert.equal(await charge(d, "w", "analysesPerDay", 1, now), null);
+    assert.notEqual(await charge(d, "w", "analysesPerDay", 1, now), null);
+    await refund(d, "w", "analysesPerDay", 1, now);
+    assert.equal(await charge(d, "w", "analysesPerDay", 1, now), null);
+  });
+
+  it("merges an admin's change into the overrides and drops values equal to the free default", () => {
+    const current = { askPerDay: 100, dataForSeo: true };
+    assert.deepEqual(mergeOverrides(current, { sites: 5 }), { askPerDay: 100, dataForSeo: true, sites: 5 }, "keys left out keep their value");
+    assert.deepEqual(mergeOverrides(current, { askPerDay: null }), { askPerDay: null, dataForSeo: true }, "null is unlimited, not a reset");
+    assert.deepEqual(mergeOverrides(current, { ...FREE_LIMITS, sites: 5 }), { sites: 5 }, "the admin form sends every limit; defaults are no override");
   });
 
   it("keeps paid features off for free workspaces", async () => {

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { getSite, listSitesForUser, setSiteWorkspace, siteForUser, upsertSite } from "./index.js";
-import { addSiteInvites, chargeUsage, grantInvitedSites, INITIAL_WORKSPACE_ID, memberRole, memberSlotsUsed, revokeWorkspaceSiteAccess, setUpNewUser, workspaceForNewSession } from "./workspaces.js";
+import { addSiteInvites, chargeUsage, grantInvitedSites, INITIAL_WORKSPACE_ID, memberRole, memberSlotsUsed, ownsWorkspace, refundUsage, revokeWorkspaceSiteAccess, setUpNewUser, workspaceForNewSession } from "./workspaces.js";
 import { openSqliteD1 } from "./sqlite.js";
 import type { D1Like } from "./d1.js";
 
@@ -124,6 +124,19 @@ describe("new users", () => {
   });
 });
 
+describe("ownsWorkspace", () => {
+  it("counts only workspaces the user owns, not ones they belong to", async () => {
+    const db = openSqliteD1();
+    await user(db, "u1", "u1@example.com");
+    await workspace(db, "w1");
+    await workspace(db, "w2");
+    await member(db, "w1", "u1", "member");
+    assert.equal(await ownsWorkspace(db, "u1"), false, "a member elsewhere may still create one");
+    await member(db, "w2", "u1", "owner");
+    assert.equal(await ownsWorkspace(db, "u1"), true);
+  });
+});
+
 describe("usage", () => {
   it("charges up to the limit and refuses past it, per day", async () => {
     const db = openSqliteD1();
@@ -135,6 +148,18 @@ describe("usage", () => {
     assert.equal(await charge(4, "2026-10-11"), false, "more than the limit at once");
     assert.equal(await charge(1, "2026-10-11"), true, "a new day");
     assert.equal(await chargeUsage(db, { workspaceId: "w1", day: "2026-10-10", metric: "askPerDay", amount: 50, limit: null }), true, "unlimited");
+  });
+
+  it("gives back a refunded amount, never below zero", async () => {
+    const db = openSqliteD1();
+    await workspace(db, "w1");
+    const usage = { workspaceId: "w1", day: "2026-10-10", metric: "analysesPerDay" };
+    for (let i = 0; i < 3; i++) assert.equal(await chargeUsage(db, { ...usage, amount: 1, limit: 3 }), true);
+    await refundUsage(db, { ...usage, amount: 1 });
+    assert.equal(await chargeUsage(db, { ...usage, amount: 1, limit: 3 }), true, "the refunded slot is free again");
+    await refundUsage(db, { ...usage, amount: 10 });
+    await refundUsage(db, { ...usage, day: "2026-10-11", amount: 1 });
+    assert.equal(await chargeUsage(db, { ...usage, amount: 3, limit: 3 }), true, "floored at zero");
   });
 });
 

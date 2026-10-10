@@ -254,7 +254,7 @@ export function demoSearchRows(now = Date.now()): SearchMetricRow[] {
 
 /*
  * Fictional DataForSEO answers for the demo, shaped like real ones (the
- * medbaycare.com answer in dataforseo.test.ts): brand and clinic-name searches
+ * recorded answer in dataforseo.test.ts): brand and clinic-name searches
  * that are navigational, Malay wording beside English, some keywords DataForSEO
  * has no difficulty or intent for, and many rankings past page one.
  */
@@ -613,7 +613,7 @@ async function seedPageEngine(db: D1Like, now: number) {
     await db.prepare("INSERT INTO cta_variants (id, site_id, label, copy, url, impressions, clicks, active, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)")
       .bind(id, DEMO_SITE_ID, label, copy, "https://wa.me/60123456789", impressions, clicks, goLive).run();
   }
-  // Three snippet rewrites Eumon suggested and the operator applied, far enough back to show their effect.
+  // Three snippet rewrites Eumon suggested and the user applied, far enough back to show their effect.
   for (const [index, [field, back]] of ([["title", 40], ["description", 33], ["title", 26]] as const).entries()) {
     const page = live[index * 5];
     if (!page) continue;

@@ -1,7 +1,7 @@
 import { runStatements, type D1Like } from "./d1.js";
 
 /*
- * What the console did and received, for the operator to check: each Results
+ * What the console did and received, for the user to check: each Results
  * sync with its notes, and the latest conversion events the tracker sent.
  */
 

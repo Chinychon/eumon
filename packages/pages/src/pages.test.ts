@@ -335,3 +335,37 @@ describe("buildPerformanceReport", () => {
     assert.ok(expectedCtr(1) > expectedCtr(3) && expectedCtr(3) > expectedCtr(9) && expectedCtr(9) > expectedCtr(15));
   });
 });
+
+describe("money in the details", () => {
+  const procedures: Pick<Dataset, "name" | "entityType" | "fields" | "keyField"> = {
+    name: "Procedures", entityType: "procedure", keyField: "name",
+    fields: [
+      { key: "name", label: "Procedure name", type: "text", required: true },
+      { key: "typical_cost_min", label: "Typical cost (from)", type: "number" },
+      { key: "doctor_count", label: "Doctors offering it", type: "number" },
+      { key: "currency", label: "Currency", type: "text" },
+    ],
+  };
+  const page = (data: DataRecord["data"]) => generatePages({
+    siteId: "site_1", siteName: "MedBay", dataset: procedures, records: [record("ultrasound", data)], mountPath: "/guides",
+    template: template({ pathPattern: "/guides/{name}", titlePattern: "{name}", descriptionPattern: "{name}.", h1Pattern: "{name}",
+      introPattern: "{name} is offered in Malaysia.", itemTitleField: "name", itemFields: ["typical_cost_min", "doctor_count", "currency"], faq: [] }),
+  })[0]!.items[0]!.fields;
+
+  it("shows a cost in the record's currency, and drops the separate currency row", () => {
+    const fields = page({ name: "Abdominal Ultrasound", typical_cost_min: 450, doctor_count: 613, currency: "MYR" });
+    assert.equal(fields.find((field) => field.label === "Typical cost (from)")?.value, "RM\u00a0450");
+    assert.equal(fields.find((field) => field.label === "Doctors offering it")?.value, "613", "counts are not money");
+    assert.equal(fields.find((field) => field.label === "Currency"), undefined);
+  });
+
+  it("keeps a plain number when the record names no currency", () => {
+    const fields = page({ name: "Abdominal Ultrasound", typical_cost_min: 450, doctor_count: 613 });
+    assert.equal(fields.find((field) => field.label === "Typical cost (from)")?.value, "450");
+  });
+
+  it("writes an unrecognised currency before the amount", () => {
+    const fields = page({ name: "Abdominal Ultrasound", typical_cost_min: 450, currency: "RM" });
+    assert.equal(fields.find((field) => field.label === "Typical cost (from)")?.value, "RM\u00a0450");
+  });
+});

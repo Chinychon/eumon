@@ -221,9 +221,12 @@ export class SiteAnalysisWorkflow extends WorkflowEntrypoint<AppEnv, AnalysisPay
         try {
           await page.setRequestInterception(true);
           // Request interception never sees WebSockets; block them so page scripts can't open sockets to anything.
-          const cdp = await page.createCDPSession();
-          await cdp.send("Network.enable");
-          await cdp.send("Network.setBlockedURLs", { urls: ["ws://*", "wss://*"] });
+          // Best-effort: if this browser build lacks CDP sessions, render anyway rather than drop the page.
+          try {
+            const cdp = await page.createCDPSession();
+            await cdp.send("Network.enable");
+            await cdp.send("Network.setBlockedURLs", { urls: ["ws://*", "wss://*"] });
+          } catch { /* socket block unavailable */ }
           page.on("request", (outbound) => {
             const target = outbound.url();
             const sameSiteNavigation = !outbound.isNavigationRequest() || new URL(target).origin === new URL(url).origin;

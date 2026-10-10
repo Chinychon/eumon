@@ -3,7 +3,7 @@ import { DEMO_SITE_ID, startDemoRun } from "@organic-growth/agents";
 import { createId } from "@organic-growth/core";
 import { analysisStalled, crawlPace, createAnalysis, getAnalysisJob, getLatestAnalysisForSite, getPreviousCompletedAnalysis, updateAnalysisStatus } from "@organic-growth/db";
 import { requireSite } from "../../../../../src/guard";
-import { charge } from "../../../../../src/limits";
+import { charge, refund } from "../../../../../src/limits";
 import { fail, readJson } from "../../../../../src/server";
 
 export async function GET(request: Request, context: { params: Promise<{ siteId: string }> }) {
@@ -33,13 +33,15 @@ export async function POST(request: Request, context: { params: Promise<{ siteId
   const access = await requireSite(request, siteId, "write");
   if (access instanceof Response) return access;
   const { site } = access;
-  const refusal = await charge(env.DB, site.workspaceId!, "analysesPerDay");
-  if (refusal) return fail(refusal, 429);
   // `full` re-crawls every page; otherwise unchanged results from the last crawl are reused.
   const full = (await readJson<{ full?: unknown }>(request))?.full === true;
   const latest = await getLatestAnalysisForSite(env.DB, siteId);
-  if (latest && (latest.status === "queued" || latest.status === "running")) {
-    if (!analysisStalled(latest)) return Response.json({ error: "An analysis is already running for this site." }, { status: 409 });
+  const active = latest && (latest.status === "queued" || latest.status === "running");
+  if (active && !analysisStalled(latest)) return Response.json({ error: "An analysis is already running for this site." }, { status: 409 });
+  // Charged only once the run will start, so a refused start costs nothing.
+  const refusal = await charge(env.DB, site.workspaceId!, "analysesPerDay");
+  if (refusal) return fail(refusal, 429);
+  if (active) {
     // A stalled run is closed before the new one starts, so it can't come back and write alongside it.
     await env.ANALYSIS_WORKFLOW.get(latest.id).then((instance) => instance.terminate()).catch(() => undefined);
     await updateAnalysisStatus(env.DB, latest.id, "failed", { error: "It stopped making progress, so a new run replaced it.", completedAt: new Date().toISOString() });
@@ -61,6 +63,7 @@ export async function POST(request: Request, context: { params: Promise<{ siteId
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not queue analysis.";
     await updateAnalysisStatus(env.DB, analysisId, "failed", { error: message, completedAt: new Date().toISOString() });
+    await refund(env.DB, site.workspaceId!, "analysesPerDay");
     return Response.json({ error: message }, { status: 503 });
   }
   return Response.json({ analysisId, status: "queued" }, { status: 202, headers: { "Cache-Control": "no-store" } });

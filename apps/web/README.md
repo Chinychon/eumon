@@ -69,7 +69,7 @@ Each user may own one workspace. Workspace deletion is disabled in the API, and 
 - `/api/logs/*` — server and CDN logs pushed by Logpush, Vercel, or a script, authenticated by a per-site token
 - `/api/auth/*` — Better Auth's own endpoints (rate limited per IP)
 - `/sign-in` and `/invite/*`
-- static files: `/manifest.json`, `/sw.js`, `/sw-register.js`, `/favicon.ico`, `/robots.txt`, `/icon-*.png`, `/assets/*`
+- static files: `/manifest.json`, `/sw.js`, `/favicon.ico`, `/robots.txt`, `/icon-*.png`, `/assets/*`
 
 **Free limits.** A workspace with no row in `workspace_limits` gets:
 
@@ -79,11 +79,11 @@ Each user may own one workspace. Workspace deletion is disabled in the API, and 
 | Analyses per day | 3 |
 | Scrape pages per day | 500 |
 | Ask questions per day | 20 |
-| AI runs per day (template generate, snippets, scope, source preview, dedupe, AI template design, change generation) | 10 |
+| AI runs per day (snippets, scope, a source preview's sample extraction, dedupe, AI template design, change generation) | 10 |
 | People (members + clients + pending invitations) | 3 |
 | DataForSEO, pull requests, Google Sheets export | off |
 
-A refused action answers `429` with a sentence saying what to do next. `/admin` (for the emails in `BOOTSTRAP_OWNER_EMAIL`) lists workspaces with today's usage and raises these limits.
+A refused action answers `429` with a sentence saying what to do next. An action is charged only once it is about to run, and refunded when it can't start (an analysis or collection the Workflow won't queue, a scope with no readable homepage). `/admin` (for the emails in `BOOTSTRAP_OWNER_EMAIL`) lists workspaces with today's usage and raises these limits; saving changes only the limits sent, and a limit set back to its free default stops being an override.
 
 **Bootstrap owner.** `BOOTSTRAP_OWNER_EMAIL` (comma-separated) names the platform admins. On first sign-in they become Owner of the initial workspace that holds the sites that existed before accounts, and they can open `/admin`.
 

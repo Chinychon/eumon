@@ -18,14 +18,14 @@ export async function POST(request: Request, context: { params: Promise<{ siteId
   const access = await requireSite(request, siteId, "write");
   if (access instanceof Response) return access;
   const { site } = access;
-  const refusal = await charge(env.DB, site.workspaceId!, "askPerDay");
-  if (refusal) return fail(refusal, 429);
   const body = await readJson<{ message?: unknown; threadId?: unknown; view?: unknown }>(request);
   const question = typeof body?.message === "string" ? body.message.trim().slice(0, 4000) : "";
   if (!question) return fail("Ask a question first.");
   const view = typeof body?.view === "string" ? body.view.slice(0, 40) : undefined;
   let thread = typeof body?.threadId === "string" && body.threadId ? await getAssistantThread(env.DB, siteId, body.threadId) : null;
   if (body?.threadId && !thread) return fail("That conversation no longer exists.", 404);
+  const refusal = await charge(env.DB, site.workspaceId!, "askPerDay");
+  if (refusal) return fail(refusal, 429);
   const history = thread ? historyMessages(await listAssistantMessages(env.DB, thread.id)) : [];
   thread ??= await createAssistantThread(env.DB, { id: createId("thread"), siteId, title: question.replace(/\s+/g, " ").slice(0, 300) });
   await appendAssistantMessage(env.DB, { id: createId("msg"), threadId: thread.id, role: "user", content: { text: question } });

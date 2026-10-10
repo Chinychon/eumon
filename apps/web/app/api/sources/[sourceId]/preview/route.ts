@@ -18,9 +18,6 @@ export async function POST(request: Request, context: { params: Promise<{ source
   if (!source) return fail("Source not found.", 404);
   const dataset = await getDataset(env.DB, source.datasetId);
   if (!dataset) return fail("Dataset not found.", 404);
-  const refusal = await charge(env.DB, access.site.workspaceId!, "aiRunsPerDay");
-  if (refusal) return fail(refusal, 429);
-
   const fetcher = new PoliteFetcher();
   let expanded;
   try {
@@ -42,8 +39,12 @@ export async function POST(request: Request, context: { params: Promise<{ source
   let sampleError: string | undefined;
   if (first) {
     const llm = appLlm();
+    // Only the sample extraction uses the model, so only it is charged; the match count and robots check stay free.
+    const refusal = llm instanceof Response ? null : await charge(env.DB, access.site.workspaceId!, "aiRunsPerDay");
     if (llm instanceof Response) {
       sampleError = ((await llm.json()) as { error: string }).error;
+    } else if (refusal) {
+      sampleError = refusal;
     } else {
       try {
         const response = await fetcher.fetch(first);

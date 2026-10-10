@@ -1,4 +1,4 @@
-import { chargeUsage, getLimitOverrides, type D1Like } from "@organic-growth/db";
+import { chargeUsage, getLimitOverrides, refundUsage, type D1Like } from "@organic-growth/db";
 import type { SignalKeys } from "./results-sync.ts";
 
 /** What a workspace may do. A null number is unlimited. */
@@ -20,6 +20,16 @@ export const FREE_LIMITS: Limits = {
   dataForSeo: false, pullRequests: false, sheetsExport: false,
 };
 
+/**
+ * An admin's change applied to a workspace's overrides. Keys left out keep their value;
+ * a value equal to the free default is no override at all, so the workspace follows FREE_LIMITS if that changes.
+ */
+export function mergeOverrides(current: Partial<Limits>, changes: Partial<Limits>): Partial<Limits> {
+  const merged: Record<string, unknown> = { ...current, ...changes };
+  for (const key of Object.keys(merged)) if (merged[key] === FREE_LIMITS[key as keyof Limits]) delete merged[key];
+  return merged as Partial<Limits>;
+}
+
 export async function limitsFor(db: D1Like, workspaceId: string): Promise<Limits> {
   return { ...FREE_LIMITS, ...(await getLimitOverrides(db, workspaceId)) as Partial<Limits> };
 }
@@ -34,6 +44,11 @@ export async function charge(db: D1Like, workspaceId: string, metric: Metered, a
   const limit = (await limitsFor(db, workspaceId))[metric];
   const ok = await chargeUsage(db, { workspaceId, day: now.toISOString().slice(0, 10), metric, amount, limit });
   return ok ? null : `Your workspace has used today's ${limit} ${METERED_LABEL[metric]}. The allowance resets at midnight UTC.`;
+}
+
+/** Gives back a charge for an action that then didn't run (it could not start, or found nothing to work on). */
+export async function refund(db: D1Like, workspaceId: string, metric: Metered, amount = 1, now = new Date()): Promise<void> {
+  await refundUsage(db, { workspaceId, day: now.toISOString().slice(0, 10), metric, amount });
 }
 
 export type Feature = "dataForSeo" | "pullRequests" | "sheetsExport";

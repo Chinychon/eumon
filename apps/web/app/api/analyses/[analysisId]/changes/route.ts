@@ -30,8 +30,8 @@ export async function POST(request: Request, context: { params: Promise<{ analys
   if (!finding || !["sitemap", "indexing"].includes(finding.category)) return Response.json({ error: "Only observed sitemap and indexing findings are eligible for automated configuration proposals." }, { status: 400 });
   const { site } = access;
   if (!site.githubInstallationId || !site.githubOwner || !site.githubRepo) return Response.json({ error: "Connect the site's GitHub repository to generate code changes." }, { status: 409 });
-  const refusal = await charge(env.DB, site.workspaceId!, "aiRunsPerDay");
-  if (refusal) return fail(refusal, 429);
+  const llm = appLlm();
+  if (llm instanceof Response) return llm;
   try {
     const token = await createInstallationToken(env.GITHUB_APP_ID, env.GITHUB_APP_PRIVATE_KEY, site.githubInstallationId);
     const client = createGitHubApiClient(token);
@@ -41,8 +41,9 @@ export async function POST(request: Request, context: { params: Promise<{ analys
       const content = await client.getFileContent(site.githubOwner, site.githubRepo, path, site.defaultBranch ?? "main");
       if (content !== null) candidates.push({ path, content });
     }
-    const llm = appLlm();
-    if (llm instanceof Response) return llm;
+    // Charged once the model is about to run: a repository GitHub can't read costs nothing.
+    const refusal = await charge(env.DB, site.workspaceId!, "aiRunsPerDay");
+    if (refusal) return fail(refusal, 429);
     let generated;
     try {
       generated = await generateSafeTechnicalChange(llm, { ...finding, category: finding.category as Finding["category"] }, candidates);

@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import { createId } from "@organic-growth/core";
 import { createJob, getDataset, getLatestJob, listSources, updateJob } from "@organic-growth/db";
-import { charge } from "../../../../../src/limits";
+import { charge, refund } from "../../../../../src/limits";
 import { fail, json, readJson } from "../../../../../src/server";
 import { requireOwned } from "../../../../../src/guard";
 
@@ -33,6 +33,7 @@ export async function POST(request: Request, context: { params: Promise<{ datase
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not start collection.";
     await updateJob(env.DB, jobId, { status: "failed", error: message });
+    await refund(env.DB, access.site.workspaceId!, "scrapePagesPerDay", pages);
     return fail(message, 503);
   }
   return json({ jobId, status: "queued" }, 202);

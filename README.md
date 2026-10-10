@@ -45,6 +45,9 @@ What each setting in `.dev.vars` unlocks (details in [apps/web/README.md](apps/w
 | `SESSION_SECRET` (32+ characters) | Also derives each site's IndexNow key and server-log token |
 | `SESSION_SECRET`, `OAUTH_ENCRYPTION_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Google Search Console data |
 | `GITHUB_APP_*` (plus `SESSION_SECRET`) | Repository analysis and draft pull requests |
+| `BETTER_AUTH_SECRET`, `BOOTSTRAP_OWNER_EMAIL` | Required in production: sign-in sessions, and the emails that own the initial workspace and `/admin` |
+| `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | Bot check on sign-in |
+| `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET` | Verifying who installs the GitHub App ("Request user authorization during installation" must be on) |
 
 ## Repository layout
 

@@ -76,9 +76,9 @@ The four fetches for one target run in parallel. Targets run in sequence inside 
 
 **Grade:** A ≥ 85, B ≥ 70, C ≥ 55, D ≥ 40, F below.
 
-`gradeContent({ page, competitors, language })` returns:
+`verifyTopics(proposals, { page, competitors, query })` keeps the AI's proposed topics whose citations and quotes check out, and `gradeContent({ page, competitors, topics })` grades the page on those topics. It returns null below 3 topics, otherwise:
 - `score` and `grade`;
-- `topics`: label, covered, and which competitors cover it;
+- `topics`: label, covered, which competitors cover it, and the verified quote (evidence);
 - `missing`: labels, up to 8, the most-covered first;
 - `ownWords` and `medianWords`;
 - `structure`: per feature, competitors yes/no and page yes/no.

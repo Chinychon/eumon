@@ -17,7 +17,8 @@ describe("verifyTopics citations", () => {
     rival("b.com", { headings: ["Harga LASIK di Malaysia", "LASIK recovery", "Risks and side effects"] }),
     rival("c.com", { headings: ["Side effects of LASIK", "Contact us"] }),
   ];
-  const verify = (proposals: TopicProposal[], over: { page?: GradedPage; competitors?: typeof competitors } = {}) => verifyTopics(proposals, { page: over.page ?? page(), competitors: over.competitors ?? competitors });
+  const verify = (proposals: TopicProposal[], over: { page?: GradedPage; competitors?: typeof competitors; query?: string } = {}) =>
+    verifyTopics(proposals, { page: over.page ?? page(), competitors: over.competitors ?? competitors, query: over.query ?? "" });
 
   it("keeps a topic whose citations exist on two competitors, with both domains", () => {
     const [t] = verify([proposal("Recovery", [["a.com", "Recovery time after LASIK"], ["b.com", "LASIK recovery"]])]);
@@ -37,11 +38,32 @@ describe("verifyTopics citations", () => {
     assert.equal(verify([proposal("Recovery", [["a.com", "Recovery time after LASIK"], ["b.com", "LASIK recovery"]])], { competitors: two }).length, 1);
   });
 
-  it("matches case, whitespace, curly quotes and end punctuation, and substrings of 4+ characters", () => {
-    const quoted = [rival("a.com", { headings: ["What’s the cost?"] }), rival("b.com", { headings: ["LASIK recovery time explained"] })];
-    const [t] = verify([proposal("Cost", [["a.com", "  WHAT'S   the cost "], ["b.com", "recovery time"]])], { competitors: quoted });
+  it("matches case, whitespace, curly quotes and end punctuation", () => {
+    const quoted = [rival("a.com", { headings: ["What’s the cost?"] }), rival("b.com", { headings: ["Cost – what to expect"] })];
+    const [t] = verify([proposal("Cost", [["a.com", "  WHAT'S   the cost "], ["b.com", "Cost - what to expect"]])], { competitors: quoted });
     assert.deepEqual(t.coveredBy, ["a.com", "b.com"]);
-    assert.deepEqual(verify([proposal("Cost", [["a.com", "What's the cost"], ["b.com", "tim"]])], { competitors: quoted }), []);
+  });
+
+  it("a fragment counts only on word boundaries and when it covers half the heading", () => {
+    const pairs = (a: string, b: string, cite: string) => verify([proposal("Topic", [["a.com", cite], ["b.com", cite]])], { competitors: [rival("a.com", { headings: [a] }), rival("b.com", { headings: [b] })] });
+    assert.deepEqual(pairs("Costa Rica clinics", "Low-cost options", "cost"), []);
+    assert.deepEqual(pairs("Our team", "Our team", "team"), []);
+    assert.equal(pairs("LASIK recovery time explained", "1. Recovery time", "recovery time").length, 1);
+    assert.equal(pairs("Q: How long is recovery?", "Q: How long is recovery?", "How long is recovery").length, 1);
+    assert.deepEqual(pairs("LASIK recovery time explained", "LASIK recovery time explained", "tim"), []);
+  });
+
+  it("skips citations of generic headings", () => {
+    const generic = [rival("a.com", { headings: ["Contact us", "Get in touch"] }), rival("b.com", { headings: ["Contact"] })];
+    assert.deepEqual(verify([proposal("Clinic locations", [["a.com", "Contact us"], ["b.com", "Contact"]])], { competitors: generic }), []);
+    assert.deepEqual(verify([proposal("Clinic locations", [["a.com", "Get in touch"], ["b.com", "Contact"]])], { competitors: generic }), []);
+  });
+
+  it("www and bare domains are one site on both sides", () => {
+    const www = [rival("www.a.com", { headings: ["LASIK risks"] }), rival("a.com", { headings: ["Risks of LASIK"] }), rival("b.com", { headings: ["Risks of LASIK"] })];
+    assert.deepEqual(verify([proposal("Risks", [["www.a.com", "LASIK risks"], ["a.com", "Risks of LASIK"]])], { competitors: www }), []);
+    const [t] = verify([proposal("Risks", [["a.com", "LASIK risks"], ["B.com", "Risks of LASIK"]])], { competitors: www });
+    assert.deepEqual(t.coveredBy, ["a.com", "b.com"]);
   });
 
   it("synonyms are the proposer's job: citations decide, not wording", () => {
@@ -52,9 +74,15 @@ describe("verifyTopics citations", () => {
 
   it("drops generic labels", () => {
     const cites: Array<[string, string]> = [["a.com", "Recovery time after LASIK"], ["b.com", "LASIK recovery"]];
-    for (const label of ["Frequently Asked Questions", "Leave a Reply", "Soalan lazim", "Contact us", "Recent posts", "Leave a comment", "Book a consultation", "Pertanyaan yang sering diajukan", "FAQ", "Kesimpulan"]) {
+    for (const label of ["Frequently Asked Questions", "Frequently asked questions (FAQ)", "FAQs:", "Leave a Reply", "Soalan lazim", "Contact us", "Contact", "Get in touch", "Book an appointment", "Why choose us", "Recent posts", "Leave a comment", "Book a consultation", "Pertanyaan yang sering diajukan", "Kesimpulan"]) {
       assert.deepEqual(verify([proposal(label, cites)]), [], label);
     }
+  });
+
+  it("tolerates malformed proposals", () => {
+    const junk = [null, { label: null, headings: "x", covered: "yes", evidence: 5 }, { label: "Recovery", headings: [null, { domain: "a.com" }, { domain: "a.com", heading: "Recovery time after LASIK" }, { domain: "b.com", heading: "LASIK recovery" }], covered: true, evidence: null }] as unknown as TopicProposal[];
+    assert.deepEqual(verify(junk).map((t) => t.label), ["Recovery"]);
+    assert.deepEqual(verify(null as unknown as TopicProposal[]), []);
   });
 
   it("merges duplicate labels and caps at 12, most-covered first", () => {
@@ -72,34 +100,59 @@ describe("verifyTopics citations", () => {
 });
 
 describe("verifyTopics evidence", () => {
-  const competitors = [rival("a.com", { headings: ["LASIK risks"] }), rival("b.com", { headings: ["Risks of LASIK"] })];
+  const competitors = [rival("a.com", { headings: ["LASIK risks", "Harga LASIK di Malaysia"] }), rival("b.com", { headings: ["Risks of LASIK", "Harga LASIK di Malaysia"] })];
   const cites: Array<[string, string]> = [["a.com", "LASIK risks"], ["b.com", "Risks of LASIK"]];
+  const TEXT = "LASIK is a procedure that reshapes the cornea. Most risks fade within weeks.\nThat’s why risks like DRY eyes are temporary.";
   const verdict = (evidence: string | null, over: Partial<GradedPage> = {}, covered = evidence !== null) =>
-    verifyTopics([{ ...proposal("Risks", cites, evidence), covered }], { page: page({ mainText: "Some patients get DRY eyes for a few weeks.\nThat’s normal.", ...over }), competitors })[0];
+    verifyTopics([{ ...proposal("Risks", cites, evidence), covered }], { page: page({ mainText: TEXT, headings: ["Book your appointment today"], ...over }), competitors, query: "lasik" })[0];
 
-  it("covered when the quote is in the page text, despite case, whitespace and curly quotes", () => {
-    const t = verdict("some patients   get dry eyes");
+  it("covered when the quote is in the page text, despite case, whitespace, line breaks and curly quotes", () => {
+    const t = verdict("why risks like   dry eyes");
     assert.equal(t.covered, true);
-    assert.equal(t.evidence, "some patients   get dry eyes");
-    assert.equal(verdict("a few weeks. That's normal.").covered, true);
+    assert.equal(t.evidence, "why risks like   dry eyes");
+    assert.equal(verdict("fade within weeks. That's why risks").covered, true);
   });
 
   it("covered when the quote is one of the page's headings", () => {
-    assert.equal(verdict("Risks and side effects", { headings: ["Risks and side effects"] }).covered, true);
+    assert.equal(verdict("Risks and side effects explained", { headings: ["Risks and side effects explained"] }).covered, true);
   });
 
   it("not covered when the quote is not on the page", () => {
-    const t = verdict("LASIK can cause halos at night");
+    const t = verdict("LASIK risks include halos at night");
     assert.equal(t.covered, false);
     assert.equal(t.evidence, null);
   });
 
-  it("not covered when the quote is shorter than 12 characters", () => {
-    assert.equal(verdict("dry eyes").covered, false);
+  it("not covered by off-topic, short or mid-word quotes", () => {
+    for (const quote of ["LASIK is a procedure", "Book your appointment today", "is a procedu", "sik is a procedure th", "dry eyes", "risks fade within"]) assert.equal(verdict(quote).covered, false, quote);
+  });
+
+  it("relevance counts words shared with the cited headings, minus the query", () => {
+    const [t] = verifyTopics([proposal("Cost", [["a.com", "Harga LASIK di Malaysia"], ["b.com", "Harga LASIK di Malaysia"]], "Harga LASIK bermula RM 3,000 untuk kedua-dua mata")], {
+      page: page({ mainText: "Harga LASIK bermula RM 3,000 untuk kedua-dua mata." }), competitors, query: "lasik",
+    });
+    assert.equal(t.covered, true);
+  });
+
+  it("normalises Unicode: dashes, invisible characters, composed accents, apostrophes and ellipses", () => {
+    const cases: Array<[string, string]> = [
+      ["Most risks fade—within a few weeks", "Most risks fade-within a few weeks"],
+      ["Most risks fade within 2–3 weeks", "Most risks fade within 2-3 weeks"],
+      ["Most risks​ fade within weeks", "Most risks fade within weeks"],
+      ["Most ri­sks fade within weeks", "Most risks fade within weeks"],
+      ["Les risques sont trés rares", "Les risques sont trés rares"],
+      ["Itʼs true the risks are small", "It's true the risks are small"],
+      ["The risks vary… ask your surgeon", "The risks vary... ask your surgeon"],
+    ];
+    for (const [text, quote] of cases) {
+      const label = text.startsWith("Les") ? "Risques" : "Risks";
+      const t = verifyTopics([{ ...proposal(label, cites, quote) }], { page: page({ mainText: text }), competitors, query: "" })[0];
+      assert.equal(t.covered, true, text);
+    }
   });
 
   it("covered:false stays uncovered even with a real quote", () => {
-    assert.equal(verdict("some patients get dry eyes", {}, false).covered, false);
+    assert.equal(verdict("why risks like dry eyes", {}, false).covered, false);
   });
 });
 

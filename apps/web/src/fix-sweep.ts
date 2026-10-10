@@ -47,7 +47,7 @@ export async function sweepFixes(deps: WebhookDeps & { random?: () => number }, 
           continue;
         }
         await ops.comment(fix.prNumber, CLOSE_NOTE).catch(() => undefined);
-      } else if (fix.status === "draft" && (await advanceFix(deps, ops, fix)) !== "waiting") changed++;
+      } else if (fix.status === "draft" && (await advanceFix(deps, ops, fix, site.name)) !== "waiting") changed++;
     } catch {
       // One bad repo never stops the sweep. A stale draft we still can't reach is dropped so it can't hog a slot forever.
       if (isStale(fix, now) && await transitionFix(deps.db, fix.id, STALE_FROM, { status: "closed", result: "Eumon couldn't reach this pull request after 7 days, so it stopped tracking it. Close it on GitHub if it's still open." }).catch(() => false)) changed++;

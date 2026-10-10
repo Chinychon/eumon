@@ -139,3 +139,39 @@ describe("webhook races and failures", () => {
     assert.equal(await handleGitHubEvent(deps, "status", { repository, state: "pending", sha: "h1" }), "ignored");
   });
 });
+
+const reshape = (db: Awaited<ReturnType<typeof setup>>["db"], kind: string, urls: string[], problems: string[]) =>
+  db.prepare("UPDATE changes SET fix_kind = ?, evidence_json = ? WHERE id = 'f1'").bind(kind, JSON.stringify({ files: {}, original: {}, urls, problems })).run();
+const check = { action: "completed", repository, check_suite: { head_sha: "h1" } };
+
+describe("preview verification (I6)", () => {
+  it("fails a duplicate-title fix when the preview pages still share a title", async () => {
+    const same = `<html><head><title>Procedures at Acme</title></head></html>`;
+    const { db, deps } = await setup({}, { "https://pr-7.vercel.app/p/a": { status: 200, body: same }, "https://pr-7.vercel.app/p/b": { status: 200, body: same } });
+    await reshape(db, "head", ["https://x.com/p/a", "https://x.com/p/b"], ["title-duplicate"]);
+    assert.equal(await handleGitHubEvent(deps, "check_suite", check), "failed");
+    assert.match((await getFix(db, "f1"))?.result ?? "", /title-duplicate/);
+  });
+
+  it("readies a duplicate-title fix when the preview titles differ", async () => {
+    const { db, deps } = await setup({}, {
+      "https://pr-7.vercel.app/p/a": { status: 200, body: "<html><head><title>ACL Reconstruction at Acme</title></head></html>" },
+      "https://pr-7.vercel.app/p/b": { status: 200, body: "<html><head><title>MRI Scan at Acme</title></head></html>" },
+    });
+    await reshape(db, "head", ["https://x.com/p/a", "https://x.com/p/b"], ["title-duplicate"]);
+    assert.equal(await handleGitHubEvent(deps, "check_suite", check), "ready");
+  });
+
+  it("treats a 404 or 429 preview page as no preview", async () => {
+    for (const status of [404, 429]) {
+      const { deps } = await setup({}, { "https://pr-7.vercel.app/p/a": { status, body: "" } });
+      assert.equal(await handleGitHubEvent(deps, "check_suite", check), "waiting", String(status));
+    }
+  });
+
+  it("waits for a robots.txt that answers 200", async () => {
+    const { db, deps } = await setup({}, { "https://pr-7.vercel.app/robots.txt": { status: 404, body: "" } });
+    await reshape(db, "ai-robots", [], []);
+    assert.equal(await handleGitHubEvent(deps, "check_suite", check), "waiting");
+  });
+});

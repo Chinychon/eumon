@@ -1,7 +1,7 @@
 import { parseHtmlSignals } from "@organic-growth/crawler";
 import { findFixByHeadSha, findFixByPr, findSitesByRepo, transitionFix, type D1Like, type FixRecord, type FixStatus } from "@organic-growth/db";
 import type { SiteRecord } from "@organic-growth/core";
-import { LLMS_MARKER, blockedAiSearchAgents } from "@organic-growth/fixes";
+import { LLMS_MARKER, blockedAiSearchAgents, headProblems, pathOf, stripLocale, type PageHead } from "@organic-growth/fixes";
 import type { GitHubOps } from "./fix-github.ts";
 
 export type WebhookDeps = {
@@ -33,26 +33,33 @@ export async function verifySignature(secret: string, body: string, header: stri
 type Obj = Record<string, unknown>;
 const obj = (v: unknown): Obj => (v && typeof v === "object" ? (v as Obj) : {});
 
-/** Whether the fetched page shows what the fix targets; returns the failing check, or null. */
-function missing(fix: FixRecord, pages: Array<{ url: string; body: string }>): string | null {
+/** Whether the fetched pages show what the fix targets; returns the failing check, or null. */
+function missing(fix: FixRecord, pages: Array<{ url: string; body: string }>, siteName: string): string | null {
   if (fix.kind === "llms-txt") return pages[0]?.body.includes(LLMS_MARKER) ? null : "llms.txt";
   if (fix.kind === "ai-robots") return pages[0] && blockedAiSearchAgents(pages[0].body).length === 0 ? null : "robots.txt";
+  if (fix.kind === "head") {
+    // The same checks that found the problems, run over the preview: none of the fixed problems may remain.
+    const heads: PageHead[] = pages.map(({ url, body }) => {
+      const s = parseHtmlSignals(body, url);
+      return { url, status: 200, ...(s.title ? { title: s.title } : {}), ...(s.description ? { description: s.description } : {}), ...(s.canonical ? { canonical: s.canonical } : {}), hreflang: s.hreflang, jsonLdTypes: s.jsonLdTypes };
+    });
+    const multiLocale = new Set(fix.problems.includes("hreflang-missing") ? heads.map((h) => stripLocale(pathOf(h.url) ?? "/").path) : []);
+    for (const problems of headProblems(heads, siteName, multiLocale).values()) {
+      const left = problems.find((p) => fix.problems.includes(p));
+      if (left) return left;
+    }
+    return null;
+  }
   for (const page of pages) {
     const s = parseHtmlSignals(page.body, page.url);
-    if (fix.kind === "jsonld") { if (s.jsonLdCount === 0) return "JSON-LD"; continue; }
-    if (fix.kind === "metadata-base") { if (!s.canonical) return "canonical"; continue; }
-    const host = new URL(fix.urls[0] ?? page.url).hostname.replace(/^www\./, "").split(".")[0]?.toLowerCase();
-    for (const p of fix.problems) {
-      if (p.startsWith("title-") && (!s.title || s.title.trim().toLowerCase() === host)) return "title";
-      if (p.startsWith("description-") && !(s.description && s.description.length >= 70 && s.description.length <= 170)) return "description";
-      if (p === "canonical-missing" && !s.canonical) return "canonical";
-      if (p === "hreflang-missing" && s.hreflang.length === 0) return "hreflang";
-    }
+    if (fix.kind === "jsonld" && s.jsonLdCount === 0) return "JSON-LD";
+    if (fix.kind === "metadata-base" && !s.canonical) return "canonical";
   }
   return null;
 }
 
-export async function advanceFix(deps: WebhookDeps, ops: GitHubOps, fix: FixRecord): Promise<"ready" | "failed" | "waiting"> {
+/** `siteName` is the site's name, so a title that is only the name still counts as missing on the preview. */
+export async function advanceFix(deps: WebhookDeps, ops: GitHubOps, fix: FixRecord, siteName = ""): Promise<"ready" | "failed" | "waiting"> {
   if (!fix.headSha || !fix.prNumber) return "waiting";
   const note = (body: string) => ops.comment(fix.prNumber!, body).catch(() => undefined);
   // Every final write is a compare-and-set on draft, so concurrent events and merges can't be overwritten or double-commented.
@@ -86,12 +93,12 @@ export async function advanceFix(deps: WebhookDeps, ops: GitHubOps, fix: FixReco
     let usable = checked.length > 0;
     for (const url of checked) {
       const res = await deps.fetchHtml(url);
-      // Locked (401/403), unreachable or erroring previews count as no preview; only a 200 can fail the fix.
-      if (!res || res.status === 401 || res.status === 403 || res.status >= 500) { usable = false; break; }
+      // Anything but a 200 (locked, missing, rate-limited, erroring or unreachable) counts as no preview; only a page that loads can fail the fix.
+      if (!res || res.status !== 200) { usable = false; break; }
       pages.push({ url, body: res.body });
     }
     if (usable) {
-      const which = missing(fix, pages);
+      const which = missing(fix, pages, siteName);
       if (which) return fail(`The preview deploy doesn't show the change in its HTML (${which}).`);
       return ready({ preview, checked, at: deps.now().toISOString() }, "Checks passed and the preview shows the change. Ready for your review.");
     }
@@ -138,7 +145,7 @@ export async function handleGitHubEvent(deps: WebhookDeps, event: string, payloa
     const fix = await findFixByHeadSha(deps.db, sha, site.id);
     if (!fix) continue;
     if (fix.status !== "draft") return "ignored";
-    return advanceFix(deps, await deps.opsFor(site), fix);
+    return advanceFix(deps, await deps.opsFor(site), fix, site.name);
   }
   return "ignored";
 }

@@ -229,7 +229,36 @@ export type CrawlIssue =
   | "invalidStructuredData"
   | "duplicateTitle"
   | "botFallback"
-  | "botChallenge";
+  | "botChallenge"
+  | "redirectChain"
+  | "metaRefresh"
+  | "mixedContent"
+  | "httpLinks"
+  | "titleLength"
+  | "descriptionLength"
+  | "duplicateDescription"
+  | "h1EqualsTitle"
+  | "headingSkips"
+  | "langMissing"
+  | "viewportMissing"
+  | "imagesNoAlt"
+  | "thinContent"
+  | "yearInSlug"
+  | "snippetBlocked"
+  | "stale"
+  | "noDate"
+  | "noAnswerStructure"
+  | "lowEvidence"
+  | "noAuthor"
+  | "noLandmarks";
+
+/** Internal-link problems from `page_links` against one crawl; null parts when the crawl recorded no links. */
+export type LinkGraphIssues = {
+  orphans: { count: number; examples: string[] } | null;
+  singleInbound: { count: number; examples: string[] } | null;
+  brokenLinks: { links: number; sources: number; targets: Array<{ path: string; status: number; from: number }> } | null;
+  depth: { deep: number; examples: string[]; skipped?: string } | null;
+};
 
 export type CrawlIssueExample = { url: string; detail?: string };
 
@@ -270,6 +299,10 @@ export type CrawlCoverage = {
   /** URL counts per issue. Absent in reports created before these checks existed. */
   issues?: Partial<Record<CrawlIssue, number>>;
   issueExamples?: Partial<Record<CrawlIssue, CrawlIssueExample[]>>;
+  /** Indexable pages, and those with an error-class issue per pillar (packages/core/src/checks/health.ts); `checked` is false when no row carries the content signals. */
+  health?: { indexable: number; unhealthySeo: number; unhealthyAi: number; checked: boolean };
+  duplicateDescriptionGroups?: Array<{ description: string; count: number; examples: string[] }>;
+  linkGraph?: LinkGraphIssues;
   duplicateTitleGroups?: Array<{ title: string; count: number; examples: string[] }>;
   /** Indexable pages with the same title whose text hashes are within a few bits; `suffixed` when their URLs differ only by a trailing code. */
   nearDuplicateGroups?: Array<{ title: string; urls: string[]; suffixed: boolean }>;

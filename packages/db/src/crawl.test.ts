@@ -72,7 +72,8 @@ describe("full-crawl coverage", async () => {
       robotsBlocked: 1,
       noindex: 1,
       canonicalMismatch: 1,
-      redirected: 2,
+      redirected: 1,
+      metaRefresh: 1,
       missingH1: 1,
       multipleH1: 1,
       missingDescription: 1,
@@ -81,9 +82,15 @@ describe("full-crawl coverage", async () => {
       botFallback: 1,
       botChallenge: 1,
       duplicateTitle: 2,
+      // Every page here shares one description; the rest are content checks these pages predate.
+      duplicateDescription: 6,
+      redirectChain: 0, mixedContent: 0, httpLinks: 0, titleLength: 0, descriptionLength: 0, h1EqualsTitle: 0, headingSkips: 0, langMissing: 0,
+      viewportMissing: 0, imagesNoAlt: 0, thinContent: 0, yearInSlug: 0, snippetBlocked: 0, stale: 0, noDate: 0, noAnswerStructure: 0, lowEvidence: 0,
+      noAuthor: 0, noLandmarks: 0,
     });
     assert.deepEqual(coverage.issueExamples?.canonicalMismatch, [{ url: u("/doctors/b"), detail: "https://x.com/" }]);
-    assert.deepEqual(coverage.issueExamples?.redirected, [{ url: u("/go/github"), detail: "https://github.com/x" }, { url: u("/old/page"), detail: u("/new/page") }]);
+    assert.deepEqual(coverage.issueExamples?.redirected, [{ url: u("/old/page"), detail: u("/new/page") }]);
+    assert.deepEqual(coverage.issueExamples?.metaRefresh, [{ url: u("/go/github"), detail: "https://github.com/x" }], "a meta refresh is its own check now");
     assert.deepEqual(coverage.issueExamples?.robotsBlocked, [{ url: u("/private/report") }]);
     assert.deepEqual(coverage.duplicateTitleGroups, [{ title: "Shared title", count: 2, examples: [u("/about"), u("/doctors/a")] }]);
     const procedures = coverage.families?.find((family) => family.family === "procedures");

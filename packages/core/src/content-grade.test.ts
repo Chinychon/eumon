@@ -142,6 +142,14 @@ describe("verifyTopics evidence", () => {
     assert.equal(covered("LASIK is a procedure that reshapes"), false);
   });
 
+  it("function words never tie a quote to its topic; Malay content words still do", () => {
+    const rivals = [rival("a.com", { headings: ["Risks and side effects", "Risiko"] }), rival("b.com", { headings: ["Risks and side effects", "Risiko"] })];
+    const covered = (label: string, quote: string) =>
+      verifyTopics([proposal(label, [["a.com", label], ["b.com", label]], quote)], { page: page({ mainText: `${quote}.` }), competitors: rivals, query: "lasik" })[0].covered;
+    assert.equal(covered("Risks and side effects", "Book now and save for your first visit"), false);
+    assert.equal(covered("Risiko", "Risiko LASIK termasuk mata kering"), true);
+  });
+
   it("normalises Unicode: dashes, invisible characters, composed accents, apostrophes and ellipses", () => {
     const cases: Array<[string, string]> = [
       ["Most risks fade—within a few weeks", "Most risks fade-within a few weeks"],

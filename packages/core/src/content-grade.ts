@@ -63,6 +63,12 @@ const norm = (text: unknown) =>
 
 const GENERIC = new Set(["contact", "contact us", "get in touch", "book an appointment", "book a consultation", "why choose us", "related posts", "recent posts", "share", "share this", "comments", "leave a reply", "leave a comment", "table of contents", "faq", "faqs", "frequently asked questions", "frequently asked questions (faq)", "soalan lazim", "pertanyaan yang sering diajukan", "hubungi kami", "artikel berkaitan", "kongsi", "hubungi", "daftar isi", "artikel terkait", "bagikan", "overview", "introduction", "conclusion", "summary", "references", "sources", "resources", "disclaimer", "kesimpulan", "pengenalan", "pendahuluan", "ringkasan", "rujukan", "penafian", "referensi", "sumber"].map(norm));
 
+/** Function words (EN, MS, ID) that would tie any quote to any topic; dropped from the relevance check only. */
+const FUNCTION_WORDS = new Set(
+  ("the and for are was you your our with from that this has have not but can how what why who when will its all any per out use after before about into more most " +
+    "dan yang untuk dengan ini itu ada akan dari pada oleh atau juga boleh anda kami bagi lagi sahaja telah bisa tidak sudah").split(" "),
+);
+
 const wordsOf = (text: string) => text.match(/[\p{L}\p{N}]+/gu) ?? [];
 const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 /** `needle` appears in `hay` with no letter or digit touching either end. */
@@ -78,8 +84,8 @@ export function verifyTopics(proposals: TopicProposal[], input: { page: GradedPa
   const rivals = input.competitors.map((c) => ({ domain: site(c.domain), headings: c.headings.map(norm) }));
   const pageText = [norm(input.page.mainText), ...input.page.headings.map(norm)];
   const query = new Set(norm(input.query).match(/\p{L}+/gu) ?? []);
-  // Words that tie a quote to its topic: 3+ letters (Malay "kos"), not the query's (every quote mentions the query).
-  const content = (text: string) => (text.match(/\p{L}+/gu) ?? []).filter((w) => w.length >= 3 && !query.has(w));
+  // Words that tie a quote to its topic: 3+ letters (Malay "kos"), not function words, not the query's (every quote mentions the query).
+  const content = (text: string) => (text.match(/\p{L}+/gu) ?? []).filter((w) => w.length >= 3 && !query.has(w) && !FUNCTION_WORDS.has(w));
   const topics = new Map<string, { label: string; domains: Set<string>; words: Set<string>; quotes: string[] }>();
 
   for (const p of proposals) {

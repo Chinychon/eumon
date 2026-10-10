@@ -1,9 +1,9 @@
 import type { DataRecord, Dataset, Finding, KeywordsInput, PageTemplate, RankedKeyword, SearchMetricRow } from "@organic-growth/core";
-import { addDays, findingKey, REF_ALPHABET, REF_LENGTH, slugify, suggestRedirect } from "@organic-growth/core";
-import { crawlGooglebotBatch, probeNotFound, researchSite, type Fetcher, type SiteResearch } from "@organic-growth/crawler";
+import { addDays, keyOf, REF_ALPHABET, REF_LENGTH, slugify, suggestRedirect } from "@organic-growth/core";
+import { crawlGooglebotBatch, probeAiCrawlers, probeHost, probeNotFound, researchSite, type Fetcher, type SiteResearch } from "@organic-growth/crawler";
 import {
   chunks, createAnalysis, createLead, recordLeadClick, updateLead, defaultPageSettings, recordSyncRun, recountCrawl, upsertPageSettings, datasetCoverage, deleteSite, getAnalysisJob, getCrawlCoverage, getCrawlProgress, importSearchConsoleUrls, insertChange, insertConversionEvent, listAllRecords,
-  listCrawlLogDays, listCrawlPageResults, listPendingCrawlUrls, recordLandingSession, replaceCurrentSearchMetrics, replacePageSearchMetrics, runStatements, saveAnalysisReport, saveCrawlBatch,
+  listCrawlLogDays, listCrawlPageResults, listPendingCrawlUrls, probePages, recordLandingSession, replaceCurrentSearchMetrics, replacePageSearchMetrics, runStatements, saveAnalysisReport, saveCrawlBatch,
   saveIndexStatus, saveSearchConsoleChart, saveSearchConsoleChecks, saveSearchConsoleSummary, saveSiteScope, saveSnapshot, searchConsoleReconciliation, saveTopQueriesSnapshot, saveUrlIndexStatus, listSiteCompetitorDomains, setSiteCompetitorDomains, syncFirstPartyResults, updateSiteGa4Property, upsertMetricPoints, type MetricPoint, setSiteMarkets, setTemplatePublication, syncTemplatePages, updateAnalysisProgress,
   updateAnalysisStatus, upsertDataset, upsertRecords, upsertSite, upsertTemplate, type D1Like,
 } from "@organic-growth/db";
@@ -51,7 +51,8 @@ const TREATMENT_LIST = Array.from({ length: 60 }, (_, i) => {
   const variant = Math.floor(i / TREATMENTS.length);
   return { slug: variant ? `${base}-${["for-children", "for-seniors", "same-day", "aftercare"][variant - 1]}` : base, base, price: 150 + ((i * 137) % 40) * 100 };
 });
-const BLOG = Array.from({ length: 900 }, (_, i) => `${TREATMENTS[i % TREATMENTS.length]}-guide-${i + 1}`);
+// Every tenth guide carries the year it was written in its address.
+const BLOG = Array.from({ length: 900 }, (_, i) => `${TREATMENTS[i % TREATMENTS.length]}-guide-${i + 1}${i % 10 === 0 ? "-2024" : ""}`);
 
 type Page = { path: string; family: string; index: number };
 
@@ -115,7 +116,8 @@ function document(input: { path: string; title: string; description: string; h1:
 function demoResponse(path: string, version: number): { status: number; body: string } | null {
   const [, first, second, third] = path.split("/");
   if (path === "/") return { status: 200, body: document({ path, title: "Demo Dental Clinic | Dentists in Malaysia and Singapore", description: "Demo data: a fictional dental clinic group.", h1: "Dental care across 11 clinics", body: `<p>${PROSE.repeat(3)}</p>`, tracking: true, jsonLd: { "@context": "https://schema.org", "@type": "Dentist", name: "Demo Dental Clinic" } }) };
-  if (first && !second && PAGES.includes(first)) return { status: 200, body: document({ path, title: `${title(first)} | Demo Dental Clinic`, description: `${title(first)} at Demo Dental Clinic.`, h1: title(first), body: `<p>${PROSE.repeat(2)}</p>`, tracking: true }) };
+  // The pricing page was told to keep its prices out of search snippets, which also keeps it out of AI answers.
+  if (first && !second && PAGES.includes(first)) return { status: 200, body: document({ path, title: `${title(first)} | Demo Dental Clinic`, description: `${title(first)} at Demo Dental Clinic.`, h1: title(first), body: `<p>${PROSE.repeat(2)}</p>`, tracking: true, robots: first === "pricing" ? "max-snippet:0" : undefined }) };
   if (first === "dentists" && second && !third) {
     // The duplicate listing: the same dentist under a slug with a code on the end.
     const index = DENTISTS.findIndex((dentist) => dentist.slug === second.replace(/-2b7f1a$/, ""));
@@ -146,7 +148,13 @@ function demoResponse(path: string, version: number): { status: number; body: st
     const index = BLOG.indexOf(slug ?? "");
     if (index < 0) return null;
     if (version === 1 && index % 180 === 7) return { status: 500, body: "<!doctype html><html><head><title>Error</title></head><body><h1>Something went wrong</h1></body></html>" };
-    return { status: 200, body: document({ path, title: `${title(slug!)} | Demo Dental Clinic blog`, description: `A guide from our dentists.`, h1: title(slug!), body: `<p>${PROSE.repeat(2)}</p>`, robots: index % 25 === 3 ? "noindex, follow" : undefined }) };
+    // Older guides: a 2024 date in their markup, and a hero image still linked over HTTP with no alt text.
+    const old = index % 9 === 4;
+    return { status: 200, body: document({
+      path, title: `${title(slug!)} | Demo Dental Clinic blog`, description: `A guide from our dentists.`, h1: title(slug!),
+      body: `${old ? '<img src="http://img.demo-clinic.example/hero.jpg">' : ""}<p>${PROSE.repeat(2)}</p>`, robots: index % 25 === 3 ? "noindex, follow" : undefined,
+      ...(old ? { jsonLd: { "@context": "https://schema.org", "@type": "BlogPosting", headline: title(slug!), datePublished: "2024-03-01" } } : {}),
+    }) };
   }
   if (first === "prices" && second && third) {
     const treatment = TREATMENT_LIST.findIndex((entry) => entry.slug === second);
@@ -187,10 +195,16 @@ export function demoFetcher(version: number, now = Date.now()): Fetcher {
   const settled = new Date(now - 60 * DAY).toISOString().slice(0, 10);
   const today = new Date(now).toISOString().slice(0, 10);
   const pages = demoPages().filter((page) => !(version === 3 && page.family === "dentists" && page.index >= DENTISTS.length - 12));
-  return async (url) => {
+  return async (url, init) => {
     const target = new URL(url);
-    const reply = (status: number, body: string, type = "text/html") => ({ url, status, finalUrl: url, headers: { "content-type": type }, body });
+    const reply = (status: number, body: string, type = "text/html") => ({ url, status, finalUrl: url, headers: { "content-type": type } as Record<string, string>, body });
     if (target.hostname === "demo-clinic.example") {
+      // The firewall challenges PerplexityBot although robots.txt allows it (Cloudflare's AI crawler setting).
+      if (/PerplexityBot/.test(init?.userAgent ?? "")) return { ...reply(403, "<!doctype html><html><head><title>Just a moment...</title></head><body></body></html>"), headers: { "cf-mitigated": "challenge" } };
+      // HTTP redirects to HTTPS.
+      if (target.protocol === "http:") return { ...reply(200, "<!doctype html><html><body></body></html>"), finalUrl: `${ORIGIN}${target.pathname}`, hops: 1 };
+      // An old address redirects twice before it reaches the page.
+      if (target.pathname === "/insurance") return { ...reply(200, demoResponse("/insurance", version)!.body), finalUrl: `${ORIGIN}/insurance-and-plans`, hops: 2 };
       if (target.pathname === "/robots.txt") return reply(200, "User-agent: *\nDisallow: /search\nDisallow: /blog/drafts/\n\nUser-agent: Bytespider\nUser-agent: CCBot\nDisallow: /\n\nSitemap: https://demo-clinic.example/sitemap.xml\n", "text/plain");
       if (target.pathname === "/sitemap.xml") {
         // Version 3 changed the price and dentist pages, so an update fetches only those again.
@@ -421,6 +435,10 @@ async function analyzeDemo(db: D1Like, input: { analysisId: string; version: num
     listCrawlPageResults(db, input.analysisId, 50),
     datasetCoverage(db, DEMO_SITE_ID),
   ]);
+  // The probe as the analysis workflow runs it: the homepage and one page per template, as each AI agent.
+  const robotsTxt = (await fetcher(`${ORIGIN}/robots.txt`)).body;
+  const pages = [`${ORIGIN}/`, ...await probePages(db, input.analysisId, 5)];
+  const hostProbe = { ai: await probeAiCrawlers(pages, robotsTxt, fetcher), host: await probeHost(ORIGIN, fetcher), robotsReadable: true };
   const report = await runFullAnalysis({
     analysisId: input.analysisId,
     siteId: DEMO_SITE_ID,
@@ -432,6 +450,7 @@ async function analyzeDemo(db: D1Like, input: { analysisId: string; version: num
     maxPages: 25,
     repeatability: false,
     notFoundProbe,
+    hostProbe,
     competitorResearch: research,
     datasets,
     targetMarkets: ["mys", "sgp"],
@@ -705,8 +724,8 @@ async function seedDemoSearchConsole(db: D1Like, now: number) {
 async function seedDemoFix(db: D1Like, now: number) {
   type Reported = { findings: Finding[] };
   const [first, second] = await Promise.all([getAnalysisJob(db, "analysis_demo_1"), getAnalysisJob(db, "analysis_demo_2")]);
-  const after = new Set((second?.report as Reported | undefined)?.findings.map(findingKey) ?? []);
-  const fixed = (first?.report as Reported | undefined)?.findings.find((finding) => !after.has(findingKey(finding)));
+  const after = new Set((second?.report as Reported | undefined)?.findings.map(keyOf) ?? []);
+  const fixed = (first?.report as Reported | undefined)?.findings.find((finding) => !after.has(keyOf(finding)));
   if (!fixed) return;
   await insertChange(db, {
     id: "change_demo_1", siteId: DEMO_SITE_ID, analysisId: "analysis_demo_1", findingId: fixed.id, title: fixed.title,

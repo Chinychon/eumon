@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { CrawlPageResult } from "@organic-growth/core";
-import { createAnalysis, enqueueAnalysisCrawlUrls, getCrawlCoverage, linkGraphIssues, saveCrawlBatch, upsertSite } from "./index.js";
+import { createAnalysis, enqueueAnalysisCrawlUrls, getCrawlCoverage, linkGraphIssues, probePages, saveCrawlBatch, upsertSite } from "./index.js";
 import { openSqliteD1 } from "./sqlite.js";
 
 const u = (path: string) => `https://x.com${path}`;
@@ -95,5 +95,16 @@ describe("link graph", () => {
   it("is part of the coverage", async () => {
     const c = await getCrawlCoverage(await site(pages, links), "an1");
     assert.equal(c.linkGraph?.orphans?.count, 1);
+  });
+});
+
+describe("probe pages", () => {
+  it("picks one served page per template, the largest templates first, never an empty shell or an error", async () => {
+    const db = await site([
+      current("/"), current("/doctors/a"), current("/doctors/b"), current("/doctors/c", { isEmptyShell: true }),
+      current("/blog/x"), legacy("/blog/y", { status: 500 }), current("/prices/a", { isEmptyShell: true }),
+    ]);
+    assert.deepEqual(await probePages(db, "an1", 5), [u("/doctors/a"), u("/blog/x")]);
+    assert.deepEqual(await probePages(db, "an1", 1), [u("/doctors/a")]);
   });
 });

@@ -9,6 +9,7 @@ import {
   getCrawlCoverage,
   getSite,
   listCrawlPageResults,
+  probePages,
   listPendingCrawlUrls,
   listRecordKeys,
   listSiteMarkets,
@@ -35,7 +36,6 @@ import {
   probeAiCrawlers,
   probeHost,
   robotsState,
-  samplePerFamily,
   researchSite,
   type SiteResearch,
   probeNotFound,
@@ -121,10 +121,10 @@ export class SiteAnalysisWorkflow extends WorkflowEntrypoint<AppEnv, AnalysisPay
         await progress("analysis", "Checking how AI crawlers and the host answer");
         const [robotsResponse, sample] = await Promise.all([
           defaultFetcher(new URL("/robots.txt", site.baseUrl).toString(), { maxBytes: 500_000 }).catch(() => null),
-          listCrawlPageResults(db, analysisId, 50),
+          probePages(db, analysisId, 5),
         ]);
         const robots = robotsState(robotsResponse);
-        const pages = [new URL("/", site.baseUrl).toString(), ...samplePerFamily(sample.filter((page) => page.status < 400 && !page.isEmptyShell && page.routeFamily !== "home").map((page) => page.finalUrl ?? page.url), 1, 5)];
+        const pages = [new URL("/", site.baseUrl).toString(), ...sample];
         const ai = robots.robots === "unreadable" ? [] : await probeAiCrawlers([...new Set(pages)], robots.body ?? null, defaultFetcher);
         return { ai, host: await probeHost(site.baseUrl, defaultFetcher), robotsReadable: robots.robots !== "unreadable" };
       });

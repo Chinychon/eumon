@@ -793,6 +793,16 @@ export type LinkFamily = {
   orphans: { count: number; examples: string[] } | null;
 };
 
+/** One served page per template (not the homepage, not an empty shell, error or challenge), the largest templates first: the pages the AI crawler probe fetches. */
+export async function probePages(db: D1Like, analysisId: string, limit: number): Promise<string[]> {
+  const { results } = await db.prepare(
+    `SELECT route_family AS family, MIN(url) AS url, COUNT(*) AS n FROM pages
+     WHERE analysis_id = ? AND ${SERVED} AND is_empty_shell = 0 AND NOT (${CHALLENGE}) AND route_family != 'home'
+     GROUP BY route_family ORDER BY n DESC, family LIMIT ?`,
+  ).bind(analysisId, limit).all<{ url: string }>();
+  return results.map((row) => String(row.url));
+}
+
 /**
  * Internal-link problems in one crawl, from `page_links`: orphans (no page
  * links in), pages with one link in, links to pages that fail, and pages more

@@ -54,7 +54,7 @@ const norm = (text: unknown) =>
   String(text ?? "")
     .normalize("NFKC") // composes accents; "…" becomes "...", a no-break space a space
     .toLowerCase()
-    .replace(/[­​-‍⁠﻿]/g, "") // soft hyphen and zero-width characters
+    .replace(/[\u00AD\u200B-\u200D\u2060\uFEFF]/g, "") // soft hyphen and zero-width characters
     .replace(/[‘’‛ʼ′]/g, "'")
     .replace(/[“”]/g, '"')
     .replace(/[‐-―−]/g, "-") // hyphens, dashes and minus
@@ -78,8 +78,8 @@ export function verifyTopics(proposals: TopicProposal[], input: { page: GradedPa
   const rivals = input.competitors.map((c) => ({ domain: site(c.domain), headings: c.headings.map(norm) }));
   const pageText = [norm(input.page.mainText), ...input.page.headings.map(norm)];
   const query = new Set(norm(input.query).match(/\p{L}+/gu) ?? []);
-  // Words that tie a quote to its topic: 4+ letters, not the query's (every quote mentions the query).
-  const content = (text: string) => (text.match(/\p{L}+/gu) ?? []).filter((w) => w.length >= 4 && !query.has(w));
+  // Words that tie a quote to its topic: 3+ letters (Malay "kos"), not the query's (every quote mentions the query).
+  const content = (text: string) => (text.match(/\p{L}+/gu) ?? []).filter((w) => w.length >= 3 && !query.has(w));
   const topics = new Map<string, { label: string; domains: Set<string>; words: Set<string>; quotes: string[] }>();
 
   for (const p of proposals) {

@@ -134,12 +134,20 @@ describe("verifyTopics evidence", () => {
     assert.equal(t.covered, true);
   });
 
+  it("a 3-letter word like Malay \"Kos\" ties a quote to its topic; the query alone does not", () => {
+    const kos = [rival("a.com", { headings: ["Kos"] }), rival("b.com", { headings: ["Kos"] })];
+    const covered = (quote: string) =>
+      verifyTopics([proposal("Kos", [["a.com", "Kos"], ["b.com", "Kos"]], quote)], { page: page({ mainText: "Kos LASIK ialah RM 3,000 setiap mata. LASIK is a procedure that reshapes the cornea." }), competitors: kos, query: "lasik" })[0].covered;
+    assert.equal(covered("Kos LASIK ialah RM 3,000 setiap mata"), true);
+    assert.equal(covered("LASIK is a procedure that reshapes"), false);
+  });
+
   it("normalises Unicode: dashes, invisible characters, composed accents, apostrophes and ellipses", () => {
     const cases: Array<[string, string]> = [
       ["Most risks fade—within a few weeks", "Most risks fade-within a few weeks"],
       ["Most risks fade within 2–3 weeks", "Most risks fade within 2-3 weeks"],
-      ["Most risks​ fade within weeks", "Most risks fade within weeks"],
-      ["Most ri­sks fade within weeks", "Most risks fade within weeks"],
+      ["Most risks\u200B fade within weeks", "Most risks fade within weeks"],
+      ["Most ri\u00ADsks fade within weeks", "Most risks fade within weeks"],
       ["Les risques sont trés rares", "Les risques sont trés rares"],
       ["Itʼs true the risks are small", "It's true the risks are small"],
       ["The risks vary… ask your surgeon", "The risks vary... ask your surgeon"],

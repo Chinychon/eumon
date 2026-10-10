@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import { addGithubInstallation } from "@organic-growth/db";
 import { requireWorkspace } from "../../../../src/guard";
-import { ownsInstallation } from "../../../../src/github-install";
+import { checkInstallation } from "../../../../src/github-install";
 
 function cookie(request: Request, name: string): string | undefined {
   return request.headers.get("Cookie")?.split(";").map((part) => part.trim())
@@ -32,7 +32,9 @@ export async function GET(request: Request) {
   if (!state || !expected || state !== expected || !installationId || !/^\d+$/.test(installationId)) return refuse("installation_invalid");
   if (!code) return refuse("authorization_missing");
   try {
-    if (!(await ownsInstallation(fetch, { clientId: env.GITHUB_APP_CLIENT_ID, clientSecret: env.GITHUB_APP_CLIENT_SECRET, code, installationId }))) return refuse("installation_not_yours");
+    const check = await checkInstallation(fetch, { clientId: env.GITHUB_APP_CLIENT_ID, clientSecret: env.GITHUB_APP_CLIENT_SECRET, code, installationId });
+    if (check === "not_yours") return refuse("installation_not_yours");
+    if (check === "org_check_unavailable") return refuse("org_permission_missing");
     await addGithubInstallation(env.DB, access.viewer.workspaceId, installationId);
   } catch {
     return refuse("installation_failed");

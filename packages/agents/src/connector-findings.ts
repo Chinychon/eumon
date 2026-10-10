@@ -4,6 +4,7 @@ import {
 } from "@organic-growth/core";
 import type { SearchConsoleReconciliation } from "@organic-growth/db";
 import type { Inventory } from "@organic-growth/pages";
+import type { ContentGradeRow } from "./content-targets.js";
 
 /*
  * What the connectors beyond Google add to an analysis: findings from the
@@ -46,6 +47,8 @@ export type ConnectorSignals = {
   trends?: TrendSignals | null;
   inventory?: InventorySignal[];
   ranks?: RankSignals | null;
+  /** The latest grade per graded search, from the `content_grades` snapshot. */
+  contentGrades?: ContentGradeRow[];
   aiAnswers?: AiAnswerSignals | null;
   referring?: BacklinksInput | null;
 };

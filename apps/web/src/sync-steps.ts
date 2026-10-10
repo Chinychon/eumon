@@ -1,3 +1,4 @@
+import type { WorkflowStep } from "cloudflare:workers";
 import { DEMO_SITE_ID } from "@organic-growth/agents";
 import { addDays, createId, type SiteRecord } from "@organic-growth/core";
 import {
@@ -24,6 +25,15 @@ import { COVERAGE_URLS_PER_DAY, inspectEumonPages, inspectQueuedUrls, INSPECTION
 export type StepOptions = { retries?: { limit: number; delay: number }; timeout?: number };
 /** `step.do` with an optional retry policy and timeout (milliseconds); tests pass a plain function. */
 export type StepLike = { do<T>(name: string, fn: () => Promise<T>, options?: StepOptions): Promise<T> };
+/** A Workflow's `step` as a StepLike. Step results here are strings, numbers and plain objects, which Workflows serialise; the cast only bridges its generic constraint. */
+export const workflowSteps = (step: WorkflowStep): StepLike => ({
+  do: <T>(name: string, fn: () => Promise<T>, options?: StepOptions) => (options
+    ? step.do(name, {
+      ...(options.retries ? { retries: { limit: options.retries.limit, delay: options.retries.delay, backoff: "constant" as const } } : {}),
+      ...(options.timeout ? { timeout: options.timeout } : {}),
+    }, fn as never)
+    : step.do(name, fn as never)) as unknown as Promise<T>,
+});
 export type SyncDeps = {
   db: D1Like;
   google: (siteId: string) => GoogleAccess;

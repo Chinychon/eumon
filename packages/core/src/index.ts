@@ -22,3 +22,4 @@ export * from "./trends.js";
 export * from "./fingerprint.js";
 export * from "./backlinks.js";
 export * from "./checks/index.js";
+export * from "./content-grade.js";

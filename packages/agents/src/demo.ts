@@ -1,8 +1,8 @@
-import type { AiAnswerCheck, DataRecord, Dataset, Finding, KeywordsInput, PageTemplate, RankCheck, RankedKeyword, SearchMetricRow } from "@organic-growth/core";
+import type { AiAnswerCheck, ContentGradeRow, DataRecord, Dataset, Finding, KeywordsInput, PageTemplate, RankCheck, RankedKeyword, SearchMetricRow } from "@organic-growth/core";
 import { addDays, aiAnswerPoints, keyOf, REF_ALPHABET, REF_LENGTH, slugify, suggestRedirect } from "@organic-growth/core";
 import { crawlGooglebotBatch, probeAiCrawlers, probeHost, probeNotFound, researchSite, type Fetcher, type SiteResearch } from "@organic-growth/crawler";
 import {
-  chunks, createAnalysis, createLead, recordLeadClick, updateLead, defaultPageSettings, recordSyncRun, recountCrawl, upsertPageSettings, datasetCoverage, deleteSite, getAnalysisJob, getCrawlCoverage, getCrawlProgress, importSearchConsoleUrls, insertChange, insertConversionEvent, listAllRecords,
+  chunks, getSnapshot, createAnalysis, createLead, recordLeadClick, updateLead, defaultPageSettings, recordSyncRun, recountCrawl, upsertPageSettings, datasetCoverage, deleteSite, getAnalysisJob, getCrawlCoverage, getCrawlProgress, importSearchConsoleUrls, insertChange, insertConversionEvent, listAllRecords,
   listCrawlLogDays, loadReferringLists, listCrawlPageResults, listPendingCrawlUrls, probePages, recordLandingSession, replaceCurrentSearchMetrics, replacePageSearchMetrics, runStatements, saveAnalysisReport, saveCrawlBatch,
   saveAiAnswerChecks, setAiBrandNames, setAiPrompts, saveIndexStatus, saveRankChecks, setTrackedKeywords, saveSearchConsoleChart, saveSearchConsoleChecks, saveSearchConsoleSummary, saveSiteScope, saveSnapshot, searchConsoleReconciliation, saveTopQueriesSnapshot, saveUrlIndexStatus, listSiteCompetitorDomains, setSiteCompetitorDomains, syncFirstPartyResults, updateSiteGa4Property, upsertMetricPoints, type MetricPoint, setSiteMarkets, setTemplatePublication, syncTemplatePages, updateAnalysisProgress,
   updateAnalysisStatus, upsertDataset, upsertRecords, upsertSite, upsertTemplate, type D1Like,
@@ -550,6 +550,7 @@ async function analyzeDemo(db: D1Like, input: { analysisId: string; version: num
       ranks: await loadRankSignals(db, DEMO_SITE_ID, new Date(input.now).toISOString().slice(0, 10)),
       aiAnswers: await loadAiAnswerSignals(db, DEMO_SITE_ID, new Date(input.now).toISOString().slice(0, 10)),
       referring: await loadReferringLists(db, DEMO_SITE_ID, own, new Date(input.now).toISOString().slice(0, 10)),
+      contentGrades: (await getSnapshot<ContentGradeRow>(db, DEMO_SITE_ID, "content_grades", "demo-clinic.example"))?.rows ?? [],
     },
     crawlCoverage: { coverage, examples },
     renderPages: (urls) => renderDemo(urls, input.version),

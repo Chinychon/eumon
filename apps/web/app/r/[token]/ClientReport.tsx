@@ -3,6 +3,7 @@
 import { formatDay } from "../../components/api";
 import { BacklinksCard, BingCard, SearchResultsCard } from "../../components/results/ConnectorCards";
 import { AiAnswersCard } from "../../components/results/AiAnswersCard";
+import { ContentGradesCard } from "../../components/results/ContentGradesCard";
 import { KeywordsCard } from "../../components/results/KeywordsCard";
 import { RankTrackingCard } from "../../components/results/RankTrackingCard";
 import { AiReadersCard, AiReferralsCard, AUTHORITY_NOTE, AuthoritySection, EnquiriesCard, GoogleSearchCard, KeyNumbers, ProofHeadline, QuestionSearchesCard, SpeedSection } from "../../components/results/sections";
@@ -35,6 +36,7 @@ export function ClientReport({ token }: { token: string }) {
             <GoogleSearchCard data={data} operator={false} />
             {data.results.bing && <BingCard data={data} operator={false} />}
             {data.results.ranks.checked > 0 && <RankTrackingCard ranks={data.results.ranks} siteId="" operator={false} hasCredentials={data.site.signals.keywords} hasMarkets={data.results.markets.length > 0} markets={data.results.markets} />}
+            {data.results.contentGrades.length > 0 && <ContentGradesCard grades={data.results.contentGrades} operator={false} hasCredentials={data.site.signals.keywords} />}
             <KeywordsCard keywords={data.results.keywords} host={new URL(data.site.baseUrl).hostname} operator={false} hasCredentials={data.site.signals.keywords} hasMarkets={data.results.markets.length > 0}
               searchTop10={data.results.search?.buckets.find((bucket) => bucket.top === 10)?.queries ?? null} />
             {data.results.serp.checked > 0 && <SearchResultsCard data={data} operator={false} />}

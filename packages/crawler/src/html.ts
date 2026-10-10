@@ -111,6 +111,12 @@ export function contentMarkup(html: string): string {
   return stripElements(html, ["script", "style", "noscript", "template", "svg"]);
 }
 
+/** The page's main content: the first `<main>` or `<article>`, else the page without nav, header, footer, aside and forms. */
+export function mainMarkup(html: string): string {
+  const main = elementSpans(html, ["main", "article"])[0];
+  return main ? html.slice(main.contentStart, main.contentEnd) : stripElements(html, ["nav", "header", "footer", "aside", "form"]);
+}
+
 /** Visible text of an HTML document or fragment, whitespace-collapsed. */
 export function visibleText(html: string): string {
   return decodeEntities(contentMarkup(html).replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim();

@@ -94,6 +94,17 @@ describe("results payload", () => {
     assert.deepEqual(view.ranks.rows.map((row) => [row.keyword, row.position]), [["kw", 4]]);
   });
 
+  it("loads the stored content grades, worst first, and survives an unreadable snapshot", async () => {
+    const db = openSqliteD1();
+    const at = new Date().toISOString();
+    const today = at.slice(0, 10);
+    await upsertSite(db, { id: "s", name: "x.com", baseUrl: "https://x.com", createdAt: at, updatedAt: at });
+    const row = (query: string, score: number, grade: string, impressions: number) => ({ query, market: "mys", page: "https://x.com/p", checkedAt: at, source: "search", impressions, competitors: [], score, grade, topics: [], covered: 0, missing: [], ownWords: 0, medianWords: 0, structure: [] });
+    await saveSnapshot(db, "s", { kind: "content_grades", scope: "x.com", periodEnd: today, rows: [row("b", 80, "B", 5), row("f", 10, "F", 1), row("f2", 10, "F", 9)] });
+    const view = await loadResults(db, (await getSite(db, "s"))!, today);
+    assert.deepEqual(view.contentGrades.map((grade) => grade.query), ["f2", "f", "b"]);
+  });
+
   it("loads tracked questions and their answers into the view", async () => {
     const db = openSqliteD1();
     const at = new Date().toISOString();

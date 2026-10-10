@@ -390,6 +390,15 @@ export const CATALOG: Check[] = [
       severity: "35 plus 2 per place between the best and 11, plus 15 when the best was in the top 3, capped at 80.",
     } }),
 
+  // Content grading
+  c({ id: "content.coverage_gap", name: "Pages trail the top results", pillars: ["seo"], category: "content", class: "warning", scope: "site", sources: ["connector"], fix: "content", requires: "graded searches",
+    docs: {
+      what: "Two or more of the site's pages, graded against the top three results for their search, cover under half of the topics those results share (at least three topics).",
+      why: "A page that leaves out what the top results answer gives searchers, and the AI answers that quote pages, little reason to pick it.",
+      how: "Add a section for each missing topic, in your own words and with your own facts. Answer the question in the opening lines, and use lists or tables where the top results do.",
+      severity: "25 plus 5 per page, capped at 65.",
+    } }),
+
   // Backlinks (referring domains)
   c({ id: "backlinks.broken_targets", name: "Links to missing pages", pillars: ["seo"], category: "search", class: "warning", scope: "site", sources: ["connector"], fix: "redirect", requires: "referring-domain data",
     docs: {

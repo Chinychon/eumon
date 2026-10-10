@@ -1,4 +1,4 @@
-import { elementSpans, findTags, innerText, parseAttributes, stripElements, visibleText } from "./html.js";
+import { elementSpans, findTags, innerText, mainMarkup, parseAttributes, visibleText } from "./html.js";
 
 /*
  * What the AI-visibility and on-page checks read from one page, in the
@@ -62,8 +62,7 @@ export function contentSignals(html: string, pageUrl: string, ld: { jsonLdTypes:
   const metas = findTags(html, "meta");
   const meta = (key: string) => metas.find((tag) => (tag.name ?? tag.property)?.toLowerCase() === key)?.content;
   const robots = [meta("robots"), meta("googlebot")].filter(Boolean).join(",");
-  const main = elementSpans(html, ["main", "article"])[0];
-  const mainHtml = main ? html.slice(main.contentStart, main.contentEnd) : stripElements(html, ["nav", "header", "footer", "aside", "form"]);
+  const mainHtml = mainMarkup(html);
   const mainText = visibleText(mainHtml);
   const words = countWords(mainText);
   const headings = elementSpans(html, ["h1", "h2", "h3", "h4", "h5", "h6"]).sort((a, b) => a.start - b.start);

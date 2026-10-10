@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { auditCounts, checksFor, doFirst, gapsFirst, pageTypeHealth, pillarOf, resolveLink, servedShare, type Finding, type Report } from "./report-model.ts";
+import { auditCounts, checksFor, contentGradesEmpty, doFirst, gapsFirst, pageTypeHealth, pillarOf, resolveLink, servedShare, type Finding, type Report } from "./report-model.ts";
 
 const finding = (title: string, severity: string, impact: number, category = "rendering"): Finding =>
   ({ id: title, category, severity, title, summary: "", organicImpactScore: impact });
@@ -102,5 +102,13 @@ describe("audit in the report", () => {
   it("counts the checks, and has nothing for an old report", () => {
     assert.deepEqual(auditCounts(report), { checks: 4, passed: 2, failed: 1, skipped: 1 });
     assert.equal(auditCounts({ findings: [] } as unknown as Report), null);
+  });
+
+  it("content grades ask for DataForSEO whenever it is missing, tracked markets or not: without it no results page can be fetched", () => {
+    const ask = "Add DataForSEO credentials so Eumon knows who ranks for your searches.";
+    assert.equal(contentGradesEmpty({ graded: 0, operator: true, hasCredentials: false }), ask);
+    assert.equal(contentGradesEmpty({ graded: 0, operator: false, hasCredentials: false }), "Not measured yet.");
+    assert.match(contentGradesEmpty({ graded: 0, operator: true, hasCredentials: true })!, /^Grades appear after the next analysis/);
+    assert.equal(contentGradesEmpty({ graded: 2, operator: true, hasCredentials: false }), null);
   });
 });

@@ -13,6 +13,8 @@ export type Finding = { id: string; category: string; severity: string; title: s
 type Saved = Awaited<ReturnType<typeof runFullAnalysis>> & {
   /** Unchanged pages whose results were carried over from the last crawl. */
   crawlReuse?: { urls: number; from?: string };
+  /** Why content grading skipped or stopped this analysis: "content grading skipped “q”: …". */
+  contentGradingNotes?: string[];
 };
 type Later = "coverage" | "competition" | "aiReadiness" | "conversion" | "search" | "repo" | "rendering" | "audit";
 export type Report = Omit<Saved, Later> & Partial<Pick<Saved, Later>>;
@@ -164,4 +166,11 @@ export function auditCounts(report: Report | null): { checks: number; passed: nu
   const rows = report?.audit?.checks;
   if (!rows) return null;
   return { checks: rows.length, passed: rows.filter((row) => row.status === "passed").length, failed: rows.filter((row) => row.status === "failed").length, skipped: rows.filter((row) => row.status === "skipped").length };
+}
+
+/** The Content grades card's empty state, or null when there are grades. Without DataForSEO no results page can be fetched, tracked keywords or not. */
+export function contentGradesEmpty(input: { graded: number; operator: boolean; hasCredentials: boolean }): string | null {
+  if (input.graded > 0) return null;
+  if (!input.hasCredentials) return input.operator ? "Add DataForSEO credentials so Eumon knows who ranks for your searches." : "Not measured yet.";
+  return "Grades appear after the next analysis, for your tracked keywords and the searches where you rank 4 to 15.";
 }

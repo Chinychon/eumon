@@ -45,6 +45,18 @@ import { googleAccessToken } from "./gsc-auth";
 import { searchConsoleReconciliation } from "@organic-growth/db";
 import { connectorSignals, loadConnectorLists } from "./connectors-data";
 import { loadKeywords } from "./keywords-data";
+import { gradeContentSteps, loadContentGrades } from "./content-grading";
+import { signalKeys } from "./results-access";
+import { workflowSteps } from "./sync-steps";
+
+/** The analysis' AI client, or null when no model is configured. Made where it is used: it never crosses a step boundary. */
+function makeLlm(env: AppEnv): JsonLlm | null {
+  try {
+    return createLlm(env);
+  } catch {
+    return null;
+  }
+}
 
 interface AnalysisPayload {
   analysisId: string;
@@ -150,6 +162,11 @@ export class SiteAnalysisWorkflow extends WorkflowEntrypoint<AppEnv, AnalysisPay
       // Its own step, so its queries have their own budget and a failure costs only the inventory.
       const inventory = await step.do("inventory", () => loadInventories(db, siteId, { analysisId }).catch(() => []));
 
+      // Content grading before the findings, so they see this analysis' grades. Its own steps, four searches a step; a dead step costs its note.
+      const contentNotes = await gradeContentSteps(workflowSteps(step), {
+        db, siteId, now: () => new Date(), keys: signalKeys(this.env), llm: () => makeLlm(this.env),
+      });
+
       // The step persists the report itself and returns only a summary: the
       // full report can exceed the Workflow step-output size limit.
       await step.do(
@@ -165,12 +182,8 @@ export class SiteAnalysisWorkflow extends WorkflowEntrypoint<AppEnv, AnalysisPay
               site.defaultBranch ?? "main",
             )
             : undefined;
-          let llm: JsonLlm | undefined;
-          try {
-            llm = createLlm(this.env);
-          } catch {
-            // No model configured: content types are matched by name and the plan is deterministic.
-          }
+          // No model configured: content types are matched by name and the plan is deterministic.
+          const llm = makeLlm(this.env) ?? undefined;
           let searchMetrics;
           if (site.gscProperty) {
             const accessToken = await googleAccessToken(
@@ -196,7 +209,8 @@ export class SiteAnalysisWorkflow extends WorkflowEntrypoint<AppEnv, AnalysisPay
             loadConnectorLists(db, { id: siteId, baseUrl: site.baseUrl }, { markets: targetMarkets, competitors }),
             crawlLogCoverage(db, siteId, analysisId),
             searchConsoleReconciliation(db, siteId, analysisId).catch(() => null),
-          ]).then(async ([lists, coverage, searchConsole]) => connectorSignals(lists, coverage, searchConsole, await loadTrendSignals(db, siteId, lists.crawlLog).catch(() => null), inventory, ranks, aiAnswers)).catch(() => connectorSignals({ serp: { lists: [], suggestions: [] }, links: undefined } as never, null, null, null, inventory, ranks, aiAnswers));
+          ]).then(async ([lists, coverage, searchConsole]) => connectorSignals(lists, coverage, searchConsole, await loadTrendSignals(db, siteId, lists.crawlLog).catch(() => null), inventory, ranks, aiAnswers)).catch(() => connectorSignals({ serp: { lists: [], suggestions: [] }, links: undefined } as never, null, null, null, inventory, ranks, aiAnswers))
+            .then(async (signals) => ({ ...signals, contentGrades: await loadContentGrades(db, { id: siteId, baseUrl: site.baseUrl }).catch(() => []) }));
           const raw = await runFullAnalysis({
             analysisId,
             siteId,
@@ -226,6 +240,7 @@ export class SiteAnalysisWorkflow extends WorkflowEntrypoint<AppEnv, AnalysisPay
           await progress("saving", "Saving findings and growth plan");
           await saveAnalysisReport(db, analysisId, {
             ...raw, plan, sitemapUrlsDeclared: queued.declared,
+            ...(contentNotes.length ? { contentGradingNotes: contentNotes } : {}),
             ...(queued.reused ? { crawlReuse: { urls: queued.reused, from: queued.reusedFrom } } : {}),
           }, plan.highestImpactOpportunity);
           return plan.highestImpactOpportunity;

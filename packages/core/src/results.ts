@@ -10,6 +10,7 @@ import type { PageTypeOutcome } from "./whatsapp.js";
 import { backlinksView, type BacklinksInput, type BacklinksView } from "./backlinks.js";
 import { linksView, type LinksInput, type LinksView } from "./links.js";
 import { addDays } from "./dates.js";
+import type { ContentGradeRow } from "./content-grade.js";
 import { ranksView, type RankCheck, type RanksView } from "./ranks.js";
 import { serpView, type CompetitorSuggestion, type SerpResult, type SerpView } from "./serp.js";
 import { crawlLogView, type CrawlDayRow, type CrawlLogView } from "./server-logs.js";
@@ -171,6 +172,8 @@ export type ResultsInput = {
   serp?: { lists: Array<{ market: string; periodEnd: string; rows: SerpResult[] }>; suggestions: CompetitorSuggestion[] };
   /** The tracked keywords and their daily checks (last 90 days). */
   ranks?: { tracked: string[]; checks: RankCheck[] };
+  /** The stored content grades, one per graded search. */
+  contentGrades?: ContentGradeRow[];
   /** Link profiles for the site and each current competitor, and the link gap. */
   links?: LinksInput;
   /** The site's stored referring domains (bounded lists) and spam networks; null when none are stored. */
@@ -239,6 +242,8 @@ export type ResultsView = {
   };
   serp: SerpView;
   ranks: RanksView;
+  /** Worst grade first, then the most impressions. */
+  contentGrades: ContentGradeRow[];
   links: LinksView & { history: DayValue[]; own: BacklinksView | null };
   /** Bing Webmaster Tools; null until its first sync. */
   bing: {
@@ -367,6 +372,7 @@ export function resultsView(input: ResultsInput): ResultsView {
     byPageType: input.outcomes?.byPageType ?? [],
   };
   const serp = serpView(input.serp?.lists ?? [], input.serp?.suggestions ?? []);
+  const contentGrades = [...(input.contentGrades ?? [])].sort((a, b) => a.score - b.score || (b.impressions ?? 0) - (a.impressions ?? 0));
   const ranks = ranksView({ tracked: input.ranks?.tracked ?? [], markets: input.markets, checks: input.ranks?.checks ?? [], today: input.today });
   const links = { ...linksView(input.links ?? { site: keywordLists.site, competitors: input.competitors ?? [], synced: false, summaries: [], gap: null }), history: series.ref_domains ?? [], own: input.referring ? backlinksView(input.referring) : null };
   // Bing reports through yesterday, like the first-party numbers.
@@ -454,6 +460,6 @@ export function resultsView(input: ResultsInput): ResultsView {
       seo: { value: latest(series.health_seo, today), before: latest(series.health_seo, addDays(today, -28)), day: series.health_seo?.at(-1)?.day ?? null },
       ai: { value: latest(series.health_ai, today), before: latest(series.health_ai, addDays(today, -28)), day: series.health_ai?.at(-1)?.day ?? null },
     },
-    speed, lab, authority, keywords, serp, ranks, links, bing, indexNow, crawlLog, outcomes, ai, aiAnswers,
+    speed, lab, authority, keywords, serp, ranks, contentGrades, links, bing, indexNow, crawlLog, outcomes, ai, aiAnswers,
   };
 }

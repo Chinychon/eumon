@@ -5,6 +5,7 @@ import { AiReadinessCard, CompetitorsSection, ConversionSections, IndexCoverageC
 import type { Navigate, Report } from "./report-model";
 import { BacklinksCard, BingCard, CompetitorSuggestionsCard, SearchResultsCard } from "./results/ConnectorCards";
 import { AiAnswersCard } from "./results/AiAnswersCard";
+import { ContentGradesCard } from "./results/ContentGradesCard";
 import { KeywordsCard } from "./results/KeywordsCard";
 import { RankTrackingCard } from "./results/RankTrackingCard";
 import { SearchConsoleCard } from "./results/SearchConsoleCard";
@@ -64,11 +65,12 @@ export function EnquiriesPanel({ site, data, report, leads, onNavigate, onLeadsC
 }
 
 /** What the site's searches are worth, which searches competitors win, each domain's share of visibility, and what the results pages hold. */
-export function KeywordsPanel({ site, data, onSaved }: { site: SiteRecord; data: Payload; onSaved?: () => void }) {
+export function KeywordsPanel({ site, data, report, onSaved }: { site: SiteRecord; data: Payload; report: Report | null; onSaved?: () => void }) {
   const { results } = data;
   return (
     <div className="results">
       <RankTrackingCard ranks={results.ranks} siteId={site.id} operator hasCredentials={data.site.signals.keywords} hasMarkets={results.markets.length > 0} markets={results.markets} onSaved={onSaved} />
+      <ContentGradesCard grades={results.contentGrades} operator hasCredentials={data.site.signals.keywords} notes={report?.contentGradingNotes} />
       <KeywordsCard keywords={results.keywords} host={new URL(site.baseUrl).hostname} operator hasCredentials={data.site.signals.keywords} hasMarkets={results.markets.length > 0}
         searchTop10={results.search?.buckets.find((bucket) => bucket.top === 10)?.queries ?? null} />
       <SearchResultsCard data={data} operator />

@@ -15,7 +15,7 @@ describe("check registry", () => {
       if (check.category !== "conversion" && !check.id.startsWith("data.")) assert.ok(check.pillars.length > 0, `${check.id} needs a pillar`);
       if (check.docs.unscored) assert.equal(check.class, "notice", `${check.id} unscored checks are notices`);
     }
-    assert.equal(ids.size, 99);
+    assert.equal(ids.size, 100);
   });
 
   it("lists checks that are deliberately not run, each with a reason", () => {

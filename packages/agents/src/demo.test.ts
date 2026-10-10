@@ -138,6 +138,19 @@ describe("demo site", () => {
   });
 });
 
+describe("demo site content grades", () => {
+  it("grades five searches, two of which trail the top results", async () => {
+    const db = openSqliteD1();
+    await seedDemoSite(db, Date.now());
+    const snapshot = await getSnapshot<{ grade: string; page: string }>(db, DEMO_SITE_ID, "content_grades", "demo-clinic.example");
+    assert.deepEqual(snapshot?.rows.map((row) => row.grade).sort(), ["A", "B", "B", "D", "F"]);
+    assert.ok(snapshot!.rows.every((row) => row.page.startsWith("https://demo-clinic.example/")), "rows belong to the demo site");
+    const report = (await getAnalysisJob(db, "analysis_demo_2"))!.report as { findings: Array<{ title: string }>; opportunities: Array<{ title: string }> };
+    assert.ok(report.findings.some((f) => f.title === "2 pages cover less than half of what the top results cover"), report.findings.map((f) => f.title).join(" | "));
+    assert.equal(report.opportunities.filter((o) => o.title.startsWith("Cover what the top results cover for \u201c")).length, 2, report.opportunities.map((o) => o.title).join(" | "));
+  });
+});
+
 describe("demo site audit", () => {
   it("shows every new check at least once, and both health scores", async () => {
     const db = openSqliteD1();
@@ -145,11 +158,11 @@ describe("demo site audit", () => {
     type Report = { findings: Array<{ checkId?: string; title: string }>; audit: { seo: { value: number | null }; ai: { value: number | null; reason?: string }; checks: Array<{ id: string; status: string }> } };
     const report = (await getAnalysisJob(db, "analysis_demo_2"))!.report as Report;
     const failed = new Set(report.findings.map((finding) => finding.checkId));
-    for (const id of ["http.redirect_chain", "security.mixed_content", "ai.snippet_blocked", "links.orphan", "links.broken_internal", "ai.stale", "ai.no_author", "url.year_in_slug", "security.hsts_missing", "ai.crawler_refused", "image.alt_missing", "title.length", "backlinks.broken_targets", "backlinks.lost", "backlinks.spam_wave"]) {
+    for (const id of ["http.redirect_chain", "security.mixed_content", "ai.snippet_blocked", "links.orphan", "links.broken_internal", "ai.stale", "ai.no_author", "url.year_in_slug", "security.hsts_missing", "ai.crawler_refused", "image.alt_missing", "title.length", "backlinks.broken_targets", "backlinks.lost", "backlinks.spam_wave", "content.coverage_gap"]) {
       assert.ok(failed.has(id), `${id} not in ${[...failed].join(", ")}`);
     }
     assert.ok(typeof report.audit.seo.value === "number" && report.audit.seo.value > 0 && report.audit.seo.value < 100, `SEO ${report.audit.seo.value}`);
     assert.ok(typeof report.audit.ai.value === "number" && report.audit.ai.value > 0, `AI ${report.audit.ai.value} ${report.audit.ai.reason ?? ""}`);
-    assert.equal(report.audit.checks.length, 99);
+    assert.equal(report.audit.checks.length, 100);
   });
 });

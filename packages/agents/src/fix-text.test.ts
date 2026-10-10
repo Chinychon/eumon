@@ -77,6 +77,21 @@ describe("checkFixText guardrails", () => {
     const stop = { ...input, samples: input.samples.map((s) => ({ ...s, text: s.text + " Stop by today." })) };
     assert.ok(bad({ description: good.description!.replace("compare", "top compare") }, stop).some((e) => e.includes('"top"')));
   });
+  it("accepts a domain as the site name", () => assert.deepEqual(checkFixText({ ...input, siteName: "harbourclinic.my" }, good), []));
+  it("allows a shared non-title value on two pages", () => {
+    const shared = { ...input, paths: [...input.paths, "procedure.category"], samples: input.samples.map((s) => ({ ...s, text: s.text + " Orthopaedics." })) };
+    const e = (url: string, name: string) => ({ url, values: [{ path: "procedure.name", value: name }, { path: "procedure.category", value: "Orthopaedics" }] });
+    const text = { ...good, description: "{procedure.name} in Malaysia: compare {procedure.category} costs and specialists, then send a free WhatsApp enquiry for a quote.", examples: [e("https://x.com/procedures/acl", "ACL Reconstruction"), e("https://x.com/procedures/mri", "MRI Scan")] };
+    assert.deepEqual(checkFixText(shared, text), []);
+  });
+  it("does not treat a colon as a sentence start", () => {
+    assert.ok(bad({ description: good.description!.replace("compare", "Gleneagles compare") }).some((e) => e.includes("Gleneagles")));
+    assert.ok(bad({ description: good.description!.replace("compare", "compare Gleneagles") }).some((e) => e.includes("Gleneagles")));
+  });
+  it("takes names from the site, not the search queries, outside the qualifier", () => {
+    const q = { ...input, queries: [...input.queries, "gleneagles"] };
+    assert.ok(checkFixText(q, { ...good, description: good.description!.replace("compare", "compare, cheaper than Gleneagles,") }).some((e) => e.includes("Gleneagles")));
+  });
   it("rejects invented capitalised names", () => assert.ok(bad({ description: good.description!.replace("enquiry", "enquiry at Zenith") }).some((e) => e.includes("Zenith"))));
   it("rejects a one-character example value", () => {
     const e = bad({ examples: [{ url: "https://x.com/procedures/acl", values: [{ path: "procedure.name", value: "A" }] }, good.examples[1]!] });
@@ -120,7 +135,7 @@ describe("writeFixText", () => {
     assert.equal(lenient.ok, false);
     const throwing = { model: "fake", async json() { throw new Error("boom"); } } as unknown as JsonLlm;
     const r = await writeFixText(throwing, input, { calls: 5 });
-    assert.ok(!r.ok && r.reason.includes("boom"));
+    assert.ok(!r.ok && r.reason.includes("couldn't be used") && !r.reason.includes("boom"));
   });
 
   it("writes nothing without samples", async () => {

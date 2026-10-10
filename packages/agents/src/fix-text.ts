@@ -41,7 +41,6 @@ export function render(pattern: string, values: Map<string, string>): string {
   for (const path of new Set(placeholders(pattern))) out = out.split(`{${path}}`).join(values.get(path) ?? `{${path}}`);
   return out;
 }
-const stripPlaceholders = (pattern: string) => render(pattern, new Map(placeholders(pattern).map((p) => [p, " "])));
 
 export function titleOf(text: FixText, values: Map<string, string>, siteName: string, dynamic: boolean): string | null {
   if (!text.titleSubject) return null;
@@ -72,7 +71,8 @@ export function checkFixText(input: FixTextInput, text: FixText): string[] {
   const corpusText = [...input.samples.map((s) => [s.title, s.h1, s.description, s.text].join(" ")), input.siteName].join(" ");
   const corpus = padded(corpusText);
   const corpusNumbers = new Set(numbers(corpusText));
-  const known = new Set([...tokens(corpusText), ...tokens(input.queries.join(" ")), ...functionWords]);
+  const known = new Set([...tokens(corpusText), ...functionWords]);
+  const distinctPaths = new Set([...(input.dynamic && text.titleSubject ? [text.titleSubject] : []), ...text.schema.filter((s) => s.field === "name").map((s) => s.path)]);
   const siteTokens = new Set(tokens(input.siteName));
 
   if (!input.dynamic && text.titleSubject) {
@@ -89,7 +89,7 @@ export function checkFixText(input: FixTextInput, text: FixText): string[] {
       const value = values.get(path);
       if (!value) errors.add(`fact: no example value for ${path} on ${sample.url}`);
       else if (value.trim().length < 3 || !page.includes(padded(value))) errors.add(`fact: "${value}" for ${path} isn't on ${sample.url}`);
-      if (value && input.dynamic && input.samples.length > 1) {
+      if (value && distinctPaths.has(path) && input.samples.length > 1) {
         const key = `${path}\u0000${norm(value)}`;
         if (seen.has(key)) errors.add(`fact: ${path} has the same value "${value}" on ${seen.get(key)} and ${sample.url}`);
         else seen.set(key, sample.url);
@@ -103,7 +103,9 @@ export function checkFixText(input: FixTextInput, text: FixText): string[] {
       const expected = FUNCTION_WORDS[lang];
       if (expected && !tokens(description).some((w) => expected.includes(w))) errors.add(`language: the description isn't in "${lang}"`);
     }
-    for (const out of [title, description]) {
+    const subject = input.dynamic ? values.get(text.titleSubject ?? "") ?? "" : text.titleSubject ?? "";
+    const body = title ? titleOf(text, values, "", input.dynamic)!.replace(/ \| $/, "") : null; // the site name suffix is the site's own words
+    for (const out of [body, description]) {
       if (!out) continue;
       if (/[{}]/.test(out)) errors.add("fact: a variable was left unfilled");
       if (/(?![0-9])\p{Nd}/u.test(out)) errors.add("fact: non-ASCII digits aren't allowed");
@@ -111,11 +113,13 @@ export function checkFixText(input: FixTextInput, text: FixText): string[] {
       if (/https?:|www\.|\b[\w-]+\.[a-z]{2,}\b/i.test(out)) errors.add("fact: web addresses aren't allowed");
       const padOut = padded(out);
       for (const word of BANNED) if (padOut.includes(` ${word.replace("-", " ")} `) && !corpus.includes(` ${word.replace("-", " ")} `)) errors.add(`claim: "${word}" isn't used on the site`);
-      for (const m of out.matchAll(WORD)) {
+      // names: the title's subject and the description; the qualifier is checked against the queries instead
+      const named = out === body ? subject : out;
+      for (const m of named.matchAll(WORD)) {
         const word = m[0];
         if (!/^\p{Lu}/u.test(word)) continue;
-        const before = out.slice(0, m.index).trimEnd();
-        if (!before || /[.!?:|]$/.test(before)) continue;
+        const before = named.slice(0, m.index).trimEnd();
+        if (!before || /[.!?|]$/.test(before)) continue;
         if (!known.has(word.toLowerCase()) && !siteTokens.has(word.toLowerCase())) errors.add(`fact: "${word}" isn't on the site`);
       }
     }
@@ -181,7 +185,8 @@ function parseAnswer(x: unknown): Answer | string {
   return x as unknown as Answer;
 }
 
-const unusable = (cause: string): FixTextResult => ({ ok: false, reason: `The AI's answer couldn't be used (${cause}).` });
+// the provider's own error text stays out of user-facing copy
+const unusable = (_cause: string): FixTextResult => ({ ok: false, reason: "The AI's answer couldn't be used, so this fix is offered as a snippet instead." });
 
 export async function writeFixText(llm: JsonLlm, input: FixTextInput, budget: { calls: number }): Promise<FixTextResult> {
   if (input.samples.length === 0) return { ok: false, reason: "No sample pages could be fetched, so there's nothing to write from." };

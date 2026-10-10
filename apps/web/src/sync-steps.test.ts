@@ -289,7 +289,7 @@ describe("startSync and startDailySyncs", () => {
     const fetchFn = (async (url: string) => {
       if (url.includes("ai_optimization") || url.includes("ai_mode")) {
         serps.ai++;
-        return new Response(JSON.stringify({ status_code: 20000, tasks: [{ status_code: 20000, cost: 0.01, result: [{ markdown: "text", sources: [], items: [] }] }] }));
+        return new Response(JSON.stringify({ status_code: 20000, tasks: [{ status_code: 20000, cost: 0.01, result: [{ markdown: "text", sources: [], items: [{ type: "message", markdown: "text", sections: [{ type: "text", text: "text" }] }] }] }] }));
       }
       if (!url.includes("/serp/")) return new Response(JSON.stringify({ rows: [] }));
       serps.count++;

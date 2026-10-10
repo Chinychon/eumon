@@ -6,6 +6,7 @@ import type { Check } from "./types.js";
 
 export * from "./types.js";
 export * from "./thresholds.js";
+export * from "./health.js";
 export { NOT_RUN } from "./not-run.js";
 
 /** Every check by id. */

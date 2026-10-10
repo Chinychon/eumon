@@ -160,3 +160,17 @@ describe("runFullAnalysis with a host probe", () => {
     assert.deepEqual(report.aiReadiness.probe, hostProbe.ai);
   });
 });
+
+describe("runFullAnalysis audit", () => {
+  it("puts an audit table and both scores on the report", async () => {
+    const report = await runFullAnalysis({ analysisId: "a", siteId: "s", name: "Clinic", baseUrl: "https://clinic.example", fetcher: fixtureSite(), repeatability: false, maxPages: 5 });
+    assert.equal(report.audit.checks.length, CHECKS && Object.keys(CHECKS).length);
+    assert.equal(report.audit.seo.value, null, "no full crawl, no score");
+  });
+
+  it("skips the crawler probe when robots.txt could not be read", async () => {
+    const report = await runFullAnalysis({ analysisId: "a", siteId: "s", name: "Clinic", baseUrl: "https://clinic.example", fetcher: fixtureSite(), repeatability: false, maxPages: 5,
+      hostProbe: { ai: [], host: { wwwDuplicate: false, httpRedirected: true, hsts: true, llmsTxt: "present" }, robotsReadable: false } });
+    assert.deepEqual(report.audit.checks.find((row) => row.id === "ai.crawler_refused"), { id: "ai.crawler_refused", status: "skipped", reason: "robots.txt could not be read" });
+  });
+});

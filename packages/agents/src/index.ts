@@ -420,6 +420,7 @@ function renderGrowthPlanMarkdown(input: {
 }
 
 export * from "./pipeline.js";
+export * from "./audit.js";
 export * from "./inventory-data.js";
 export * from "./github-pr.js";
 export * from "./ai-plan.js";

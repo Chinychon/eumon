@@ -52,6 +52,7 @@ import {
 import { findingsFromCode } from "./code-findings.js";
 import { findingsFromCrawlLog, findingsFromInventory, findingsFromSearchConsoleImport, findingsFromTrends, type ConnectorSignals } from "./connector-findings.js";
 import { notFoundProbeFinding } from "./not-found-probe.js";
+import { buildAudit } from "./audit.js";
 import { auditConversion, findingsFromConversion } from "./conversion.js";
 import {
   compareCompetition,
@@ -395,6 +396,20 @@ export async function runFullAnalysis(input: RunAnalysisInput) {
     connectors: input.connectors,
   };
 
+  const audit = buildAudit({
+    findings: rankedFindings,
+    coverage: fullCrawl ? input.crawlCoverage?.coverage : undefined,
+    hasRepo: Boolean(repo),
+    hasSearch: searchMetrics.length > 0,
+    hasLogs: Boolean(input.connectors?.logCoverage),
+    hasDataset: (input.datasets ?? []).length > 0,
+    rendered: comparisons.length > 0,
+    languages: Math.max(input.crawlCoverage?.coverage.locales?.length ?? 1, new Set(pageResults.map((page) => page.locale ?? "default")).size),
+    hasDataForSeo: Boolean(input.keywords),
+    robotsReadable: input.hostProbe?.robotsReadable ?? robots.robots !== "unreadable",
+    probed: Boolean(input.hostProbe),
+    probe: input.hostProbe?.ai,
+  });
   const opportunities = buildOpportunities(bundle);
   const plan = synthesizeGrowthPlan(bundle);
   const searchNarrative = analyzeSearchTraffic(searchMetrics, brandTerms, search);
@@ -409,6 +424,7 @@ export async function runFullAnalysis(input: RunAnalysisInput) {
     coverage: input.crawlCoverage?.coverage ?? null,
     pages: pageResults,
     findings: rankedFindings,
+    audit,
     competitors,
     opportunities,
     plan,

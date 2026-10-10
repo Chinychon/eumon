@@ -99,7 +99,8 @@ export const METRICS = {
     ...AI_ASSISTANTS.map(({ assistant }) => `ai_referral_visits.${assistant}`),
   ],
   /** Plus how many of the AI robots.txt tokens the site allows, of how many checked. */
-  analysis: ["site_health", "crawl_urls", "crawl_empty_shells", "crawl_http_errors", "crawl_noindex", "ai_crawlers_allowed", "ai_crawlers_checked"],
+  /** Plus the two health scores (`health_seo`, `health_ai`), their denominator and unhealthy counts, from the report's audit. */
+  analysis: ["site_health", "crawl_urls", "crawl_empty_shells", "crawl_http_errors", "crawl_noindex", "ai_crawlers_allowed", "ai_crawlers_checked", "health_seo", "health_ai", "health_pages", "health_unhealthy_seo", "health_unhealthy_ai"],
   /** Search Console: daily series (whole site, Eumon pages, target markets), Monday ranking buckets, index status. */
   search: [
     "sync.search", "sync.search@markets", "sync.rankings",

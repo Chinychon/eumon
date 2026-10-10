@@ -96,6 +96,21 @@ describe("loadReferringLists", () => {
     assert.equal(lists.counts.spam, 1);
     assert.equal(lists.asOf, "2026-10-10");
     assert.equal(lists.networks.length, 1);
+    assert.deepEqual(lists.anchors, [{ anchor: "x", domains: 31 }], "every live real link, not only the top 25");
+  });
+
+  it("counts the anchor mix over every live real link, case and spaces aside, top ten", async () => {
+    const db = await site();
+    await replaceReferringDomains(db, "s", [
+      ...Array.from({ length: 30 }, (_, i) => row(`c${i}.example`, { anchor: i % 2 ? "Clinic " : "clinic" })),
+      ...Array.from({ length: 3 }, (_, i) => row(`e${i}.example`, { anchor: "" })),
+      ...Array.from({ length: 12 }, (_, i) => row(`o${i}.example`, { anchor: `other ${i}` })),
+      row("lost.example", { anchor: "", lost: true }),
+      row("spam.example", { anchor: "clinic", spam: true, spamReason: "network" }),
+    ]);
+    const { anchors } = (await loadReferringLists(db, "s", "x.com", "2026-10-10"))!;
+    assert.equal(anchors.length, 10);
+    assert.deepEqual(anchors.slice(0, 2).map((a) => [a.anchor.trim().toLowerCase(), a.domains]), [["clinic", 30], ["", 3]]);
   });
 
   it("still shows a site whose links are all lost", async () => {

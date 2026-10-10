@@ -10,7 +10,7 @@ const row = (i: number, over: Partial<ReferringDomain> = {}): ReferringDomain =>
 const input = (over: { brokenReal?: number; lostReal?: number; newSpam?: number; broken?: ReferringDomain[]; lost?: ReferringDomain[] } = {}): BacklinksInput => ({
   asOf: "2026-10-10",
   counts: { real: 50, spam: 0, newReal: 0, lostReal: over.lostReal ?? 0, brokenReal: over.brokenReal ?? 0, dofollowReal: 40, newSpam: over.newSpam ?? 0, total: 50 },
-  top: [], newReal: [], lostReal: over.lost ?? [], brokenReal: over.broken ?? [],
+  top: [], newReal: [], lostReal: over.lost ?? [], brokenReal: over.broken ?? [], anchors: [],
   networks: [{ key: "k", kind: "anchor", label: "anchor “cheap pills”", domains: 25, since: "2026-10-01", example: "https://s.com" }],
 });
 const run = (referring: BacklinksInput | null) => findingsFromReferring({ siteId: "s", analysisId: "a", referring });

@@ -50,16 +50,20 @@ export async function referringDomainCounts(db: D1Like, siteId: string, since: s
   return { real: n("real"), spam: n("spam"), newReal: n("new_real"), lostReal: n("lost_real"), brokenReal: n("broken_real"), dofollowReal: n("dofollow_real"), newSpam: n("new_spam"), total: n("total") };
 }
 
-/** What the card and findings read: counts, short real lists (never the whole table) and the networks grouped at refresh; null when the site has no rows. */
+/** What the card and findings read in seven queries: counts, short real lists and the anchor mix (never the whole table), and the networks grouped at refresh; null when the site has no rows. */
 export async function loadReferringLists(db: D1Like, siteId: string, domain: string, today: string): Promise<BacklinksInput | null> {
   const month = addDays(today, -30);
-  const [counts, top, newReal, lostReal, brokenReal, networks] = await Promise.all([
+  const [counts, top, newReal, lostReal, brokenReal, networks, anchors] = await Promise.all([
     referringDomainCounts(db, siteId, month),
     listReferringDomains(db, siteId, { spam: false, limit: 25 }),
     listReferringDomains(db, siteId, { spam: false, newSince: month, limit: 10 }),
     listReferringDomains(db, siteId, { spam: false, lostSince: month, limit: 10 }),
     listReferringDomains(db, siteId, { spam: false, broken: true, limit: 25 }),
     getSnapshot<SpamNetwork>(db, siteId, "spam_networks", domain),
+    db.prepare(
+      `SELECT anchor, COUNT(*) AS domains FROM referring_domains WHERE site_id = ? AND spam = 0 AND lost = 0
+       GROUP BY lower(trim(anchor)) ORDER BY domains DESC LIMIT 10`,
+    ).bind(siteId).all<{ anchor: string; domains: number }>().then(({ results }) => results.map((row) => ({ anchor: row.anchor, domains: Number(row.domains) }))),
   ]);
-  return counts.total === 0 ? null : { asOf: networks?.periodEnd ?? null, counts, top, newReal, lostReal, brokenReal, networks: networks?.rows ?? [] };
+  return counts.total === 0 ? null : { asOf: networks?.periodEnd ?? null, counts, top, newReal, lostReal, brokenReal, networks: networks?.rows ?? [], anchors };
 }

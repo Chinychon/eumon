@@ -123,12 +123,14 @@ describe("backlinksView", () => {
   it("the lists and anchor mix, capped", () => {
     const top = classifyReferringDomains(many(30, (i) => ({ anchor: i < 5 ? "" : i < 12 ? "clinic" : `a${i}` })), SITE);
     const counts = { real: 30, spam: 0, newReal: 0, lostReal: 0, brokenReal: 0, dofollowReal: 30, newSpam: 0, total: 30 };
-    const view = backlinksView({ asOf: "2026-10-10", counts, top, newReal: top.slice(0, 2), lostReal: [], brokenReal: [], networks: [] });
+    const anchors = [{ anchor: "clinic", domains: 70 }, { anchor: "", domains: 50 }, ...Array.from({ length: 12 }, (_, i) => ({ anchor: `a${i}`, domains: 1 }))];
+    const view = backlinksView({ asOf: "2026-10-10", counts, top, newReal: top.slice(0, 2), lostReal: [], brokenReal: [], networks: [], anchors });
     const net = (i: number) => ({ key: `anchor:${i}`, kind: "anchor" as const, label: `a${i}`, domains: 20 - i, since: "2026-09-01", example: "https://n.example/" });
     assert.equal(view.top.length, 25);
-    assert.deepEqual(view.anchors.slice(0, 2), [{ anchor: "clinic", domains: 7 }, { anchor: "(no text)", domains: 5 }]);
+    assert.deepEqual(view.anchors.slice(0, 2), [{ anchor: "clinic", domains: 70 }, { anchor: "(no text)", domains: 50 }], "the mix the store counted over every live real link");
+    assert.equal(view.anchors.length, 10);
     assert.equal(view.newReal.length, 2);
     assert.deepEqual(view.networks, []);
-    assert.equal(backlinksView({ asOf: null, counts, top: [], newReal: [], lostReal: [], brokenReal: [], networks: Array.from({ length: 7 }, (_, i) => net(i)) }).networks.length, 5);
+    assert.equal(backlinksView({ asOf: null, counts, top: [], newReal: [], lostReal: [], brokenReal: [], networks: Array.from({ length: 7 }, (_, i) => net(i)), anchors: [] }).networks.length, 5);
   });
 });

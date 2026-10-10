@@ -142,23 +142,18 @@ export type BacklinksView = {
 const LIST_CAP = 25;
 const ANCHOR_CAP = 10;
 
-/** What the view reads: the bounded lists, and the networks the last refresh grouped from every spam row. */
-export type BacklinksInput = { asOf: string | null; counts: ReferringCounts; top: ReferringDomain[]; newReal: ReferringDomain[]; lostReal: ReferringDomain[]; brokenReal: ReferringDomain[]; networks: SpamNetwork[] };
+/** What the view reads: the bounded lists, the anchor mix over every live real link, and the networks the last refresh grouped from every spam row. */
+export type BacklinksInput = {
+  asOf: string | null; counts: ReferringCounts; top: ReferringDomain[]; newReal: ReferringDomain[]; lostReal: ReferringDomain[]; brokenReal: ReferringDomain[]; networks: SpamNetwork[];
+  anchors: Array<{ anchor: string; domains: number }>;
+};
 
 export function backlinksView(input: BacklinksInput): BacklinksView {
-  const mix = new Map<string, { anchor: string; domains: number }>();
-  for (const row of input.top) {
-    if (row.spam) continue;
-    const anchor = row.anchor.trim() || "(no text)";
-    const entry = mix.get(squash(anchor)) ?? { anchor, domains: 0 };
-    entry.domains++;
-    mix.set(squash(anchor), entry);
-  }
   return {
     asOf: input.asOf,
     counts: input.counts,
     top: input.top.slice(0, LIST_CAP),
-    anchors: [...mix.values()].sort((a, b) => b.domains - a.domains).slice(0, ANCHOR_CAP),
+    anchors: input.anchors.slice(0, ANCHOR_CAP).map((entry) => ({ anchor: entry.anchor.trim() || "(no text)", domains: entry.domains })),
     networks: input.networks.slice(0, 5),
     newReal: input.newReal.slice(0, LIST_CAP),
     lostReal: input.lostReal.slice(0, LIST_CAP),

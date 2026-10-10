@@ -306,7 +306,7 @@
   <p>The full flow from dataset to served page is on <a href="#flow-pages">Landing page flow</a>.</p>
 
   <h3>Conversion events with CORS</h3>
-  <p><code class="path">apps/web/app/api/sites/[siteId]/events/route.ts</code> receives events from the tracking snippet (from <code>GET /api/sites/:siteId/integration</code>) or from <code>@organic-growth/sdk</code>.</p>
+  <p><code class="path">apps/web/app/api/sites/[siteId]/events/route.ts</code> receives events from the tracking snippet (from <code>GET /api/sites/:siteId/integration</code>).</p>
   <ul>
     <li><code>OPTIONS</code> and <code>POST</code> accept a request only when its <code>Origin</code> is the same site as the site's <code>baseUrl</code> or its landing-page <code>publicOrigin</code> (www and apex count as one). Otherwise 403.</li>
     <li>The allowed origin is echoed in <code>Access-Control-Allow-Origin</code> with <code>Vary: Origin</code>; preflight allows <code>POST, OPTIONS</code> and <code>Content-Type</code>, cached for a day.</li>

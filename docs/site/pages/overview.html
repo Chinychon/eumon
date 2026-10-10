@@ -47,7 +47,7 @@
   <p>The engine stays generic: nothing about any one business or industry is hard-coded. Datasets, fields and page ideas come from each site's own pages and search data.</p>
 
   <h2 id="monorepo-map">Monorepo map</h2>
-  <p>An npm workspace (<code class="path">package.json</code>) with one app and nine packages. The packages compile with <code>tsc</code> to <code>dist/</code>, and the web app imports those built copies.</p>
+  <p>An npm workspace (<code class="path">package.json</code>) with one app and eight packages. The packages compile with <code>tsc</code> to <code>dist/</code>, and the web app imports those built copies.</p>
   <table>
     <thead><tr><th>Workspace</th><th>Job</th></tr></thead>
     <tbody>
@@ -60,7 +60,6 @@
       <tr><td><a href="#packages--pages"><code>packages/pages</code></a></td><td>Page generation with quality gates, HTML rendering, CTA testing and performance insights.</td></tr>
       <tr><td><a href="#packages--repo-analyzer"><code>packages/repo-analyzer</code></a></td><td>Stack detection and per-route code inspection of a connected repository.</td></tr>
       <tr><td><a href="#packages--agents"><code>packages/agents</code></a></td><td>The analysis pipeline, growth plan, search and competitor analysis, connector clients (Search Console, GA4, DataForSEO, Bing), pull request generation, and the demo site.</td></tr>
-      <tr><td><a href="#packages--sdk"><code>packages/sdk</code></a></td><td>Browser conversion tracker for JavaScript sites; reads the same <code>eumon_sid</code> cookie as the landing pages.</td></tr>
     </tbody>
   </table>
   <p>Outside the workspaces: <code class="path">evals/</code> (a collection quality eval) and <code class="path">scripts/audit-site.mjs</code> (site analysis from the command line). Both are covered in <a href="#getting-started--evals-and-audit">Getting started</a>.</p>

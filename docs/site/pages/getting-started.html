@@ -97,7 +97,7 @@ npm run build:packages</code></pre>
   <h2 id="tests">Run the tests</h2>
   <pre><code>npm test                              # build:packages, then every workspace's test script
 npm test -w @organic-growth/db        # one workspace</code></pre>
-  <p>Tests use <code>node:test</code>, no framework. Each package compiles its sources and tests with <code>tsconfig.test.json</code> into <code>dist-test/</code>, then runs <code>node --test "dist-test/**/*.test.js"</code>. The web app runs <code>node --test</code> directly on <code>app/**/*.test.ts</code> and <code>src/**/*.test.ts</code>. <code>packages/sdk</code> has no tests. Database tests run against an in-memory SQLite database through <code class="path">packages/db/src/sqlite.ts</code>, not Miniflare.</p>
+  <p>Tests use <code>node:test</code>, no framework. Each package compiles its sources and tests with <code>tsconfig.test.json</code> into <code>dist-test/</code>, then runs <code>node --test "dist-test/**/*.test.js"</code>. The web app runs <code>node --test</code> directly on <code>app/**/*.test.ts</code> and <code>src/**/*.test.ts</code>. Database tests run against an in-memory SQLite database through <code class="path">packages/db/src/sqlite.ts</code>, not Miniflare.</p>
 
   <h2 id="typecheck-build">Typecheck and build</h2>
   <pre><code>npm run typecheck   # build:packages, then tsc --noEmit in every workspace

@@ -64,7 +64,6 @@ What each setting in `.dev.vars` unlocks (details in [apps/web/README.md](apps/w
 | `packages/pages` | Page generation with quality gates, HTML rendering, CTA testing, performance insights. |
 | `packages/repo-analyzer` | Stack detection (framework, router, CMS, database, deployment) and per-route code inspection: rendering mode, browser-side data fetching, where titles come from, request waterfalls, and unpaginated queries. |
 | `packages/agents` | Growth plan synthesis; search analysis (target-market share, intent mix, striking distance, skipped snippets, cannibalization); competitor comparison; code findings; Search Console client; safe-change and pull request generation. |
-| `packages/sdk` | Browser conversion tracker for JavaScript sites. |
 
 Built on Cloudflare Workers ([vinext](https://www.npmjs.com/package/vinext) + React), D1, Workflows, and Browser Rendering.
 

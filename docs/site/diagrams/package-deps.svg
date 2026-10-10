@@ -30,12 +30,6 @@
   <rect x="556" y="46" width="36" height="12" rx="2" class="d-node"/>
   <text x="574" y="55" font-size="8" text-anchor="middle" class="d-mono d-muted">0 in</text>
 
-  <rect x="640" y="40" width="160" height="56" rx="0" class="d-node"/>
-  <text x="652" y="66" font-size="13" class="d-name d-ink">sdk</text>
-  <text x="652" y="83" font-size="10" class="d-mono d-muted">core only</text>
-  <rect x="756" y="46" width="36" height="12" rx="2" class="d-node"/>
-  <text x="774" y="55" font-size="8" text-anchor="middle" class="d-mono d-muted">0 in</text>
-
   <!-- Rank 1 -->
   <rect x="40" y="160" width="160" height="56" rx="0" class="d-node"/>
   <text x="52" y="186" font-size="13" class="d-name d-ink">scraper</text>

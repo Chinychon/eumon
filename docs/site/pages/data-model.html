@@ -114,7 +114,7 @@
     <li><code>page_metrics_daily</code> counters: <code>googlebot_hits</code> from server renders, <code>views</code> and <code>cta_clicks</code> from the in-page beacon, <code>search_clicks</code> and <code>search_impressions</code> overwritten by Search Console syncs.</li>
     <li><code>page_sessions</code> records the first Eumon page an anonymous session landed on, and <code>source</code> (0017: <code>search</code>, <code>ai:&lt;assistant&gt;</code> or <code>other</code>). Its <code>page_id</code> has no foreign key on purpose, so a session still counts as having landed on an Eumon page after the page is removed.</li>
     <li><code>ai_page_daily</code> (0017) counts per page and day: <code>signal</code> <code>fetch</code> (an AI agent requested the page, <code>name</code> is its token) or <code>referral</code> (a person arrived from an assistant).</li>
-    <li><code>conversion_events</code> are the tracking script's and SDK's events (<a href="#packages--sdk">sdk</a>), joined to <code>page_sessions</code> by <code>session_id</code> for attribution.</li>
+    <li><code>conversion_events</code> are the tracking script's events, joined to <code>page_sessions</code> by <code>session_id</code> for attribution.</li>
   </ul>
 
   <h2 id="leads-and-assistant">Leads and Ask Eumon threads</h2>

@@ -15,17 +15,26 @@ export type PageHeadRow = { url: string; status: number; title?: string; descrip
 
 const opt = (value: unknown) => (value === null || value === undefined ? undefined : String(value));
 
+function parse<T>(text: unknown, fallback: T): T {
+  try {
+    const value = JSON.parse(String(text ?? ""));
+    return value === null || typeof value !== "object" ? fallback : (value as T);
+  } catch {
+    return fallback;
+  }
+}
+
 function mapFix(row: Record<string, unknown>): FixRecord {
-  const evidence = JSON.parse(String(row.evidence_json ?? "{}")) as { files?: Record<string, string>; original?: Record<string, string>; urls?: string[]; problems?: string[]; snippet?: string };
+  const evidence = parse(row.evidence_json, {}) as { files?: Record<string, string>; original?: Record<string, string>; urls?: string[]; problems?: string[]; snippet?: string };
   return {
     id: String(row.id), siteId: String(row.site_id), analysisId: String(row.analysis_id), kind: String(row.fix_kind ?? ""), route: String(row.route ?? ""),
     filePath: String(row.file_path ?? ""), fileSha: opt(row.file_sha), title: String(row.title), reason: String(row.reason),
     files: evidence.files ?? {}, original: evidence.original ?? {}, urls: evidence.urls ?? [], problems: evidence.problems ?? [], snippet: evidence.snippet,
     beforeSnippet: opt(row.before_snippet), afterSnippet: opt(row.after_snippet), promptSha: opt(row.prompt_sha),
-    warnings: JSON.parse(String(row.warnings_json ?? "[]")) as string[], score: Number(row.score ?? 0), status: String(row.status) as FixStatus,
+    warnings: parse<string[]>(row.warnings_json, []), score: Number(row.score ?? 0), status: String(row.status) as FixStatus,
     prUrl: opt(row.pr_url), prNumber: row.pr_number === null || row.pr_number === undefined ? undefined : Number(row.pr_number),
     branch: opt(row.branch), headSha: opt(row.head_sha), prNodeId: opt(row.pr_node_id), previewUrl: opt(row.preview_url),
-    verification: row.verification_json ? JSON.parse(String(row.verification_json)) as Record<string, unknown> : undefined,
+    verification: row.verification_json ? parse<Record<string, unknown> | undefined>(row.verification_json, undefined) : undefined,
     result: opt(row.result), createdAt: String(row.created_at), updatedAt: String(row.updated_at ?? row.created_at),
   };
 }
@@ -66,8 +75,8 @@ export async function findFixByPr(db: D1Like, siteId: string, prNumber: number):
   return row ? mapFix(row) : null;
 }
 
-export async function findFixByHeadSha(db: D1Like, headSha: string): Promise<FixRecord | null> {
-  const row = await db.prepare("SELECT * FROM changes WHERE head_sha = ? AND fix_kind IS NOT NULL").bind(headSha).first<Record<string, unknown>>();
+export async function findFixByHeadSha(db: D1Like, headSha: string, siteId: string): Promise<FixRecord | null> {
+  const row = await db.prepare("SELECT * FROM changes WHERE head_sha = ? AND site_id = ? AND fix_kind IS NOT NULL").bind(headSha, siteId).first<Record<string, unknown>>();
   return row ? mapFix(row) : null;
 }
 
@@ -116,7 +125,8 @@ export async function listPageHeads(db: D1Like, analysisId: string): Promise<Pag
   });
 }
 
-export async function findSiteByRepo(db: D1Like, owner: string, repo: string): Promise<SiteRecord | null> {
-  const row = await db.prepare("SELECT id FROM sites WHERE lower(github_owner) = lower(?) AND lower(github_repo) = lower(?) LIMIT 1").bind(owner, repo).first<{ id: string }>();
-  return row ? getSite(db, row.id) : null;
+export async function findSitesByRepo(db: D1Like, owner: string, repo: string): Promise<SiteRecord[]> {
+  const { results } = await db.prepare("SELECT id FROM sites WHERE lower(github_owner) = lower(?) AND lower(github_repo) = lower(?) ORDER BY created_at, id").bind(owner, repo).all<{ id: string }>();
+  const sites = await Promise.all(results.map((row) => getSite(db, row.id)));
+  return sites.filter((site): site is SiteRecord => site !== null);
 }

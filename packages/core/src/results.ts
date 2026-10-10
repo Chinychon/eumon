@@ -3,6 +3,7 @@
  * the API, the client link, and the tests all compute the same numbers.
  */
 
+import { AI_ANSWER_ENGINES } from "./ai-answers.js";
 import { AI_ASSISTANTS, AI_ENGINES, type AiAssistant, type AiEngine } from "./ai-agents.js";
 import { keywordsView, type KeywordsInput } from "./keywords.js";
 import type { PageTypeOutcome } from "./whatsapp.js";
@@ -122,6 +123,8 @@ export const METRICS = {
   serp: ["sync.serp", "sync.serp_competitors", "serp_ai_overviews", "serp_ai_cited"],
   /** Rank tracking: pairs checked a day, how many in the top 3 and 10, not in the ten, and the sum of ranked positions. */
   ranks: ["sync.ranks", "tracked_checked", "tracked_top3", "tracked_top10", "tracked_unranked", "tracked_position_sum"],
+  /** AI answer tracking: answers checked, mentioning the brand, citing the site — overall and per engine. Plus `ai_answers_mentioned:<domain>` and `ai_answers_cited:<domain>` for each current competitor. */
+  aiAnswers: ["sync.ai_answers", "ai_answers_checked", "ai_answers_mentioned", "ai_answers_cited", ...AI_ANSWER_ENGINES.flatMap(({ engine }) => [`ai_answers_checked.${engine}`, `ai_answers_mentioned.${engine}`, `ai_answers_cited.${engine}`])],
   /** DataForSEO Backlinks: the site's profile. Plus `backlinks:<domain>`, `ref_domains:<domain>` and `backlink_rank:<domain>` for each current competitor. */
   backlinks: ["sync.backlinks", "backlinks", "ref_domains", "backlink_rank"],
   /** Bing Webmaster Tools: daily clicks and impressions (Bing and the products built on its index), and crawl counts. */

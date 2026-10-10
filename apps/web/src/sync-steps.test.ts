@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { DEMO_SITE_ID } from "@organic-growth/agents";
-import { createAnalysis, enqueueAnalysisCrawlUrls, listMetricSeries, listSyncRuns, saveCrawlBatch, setLimitOverrides, setSiteMarkets, setTrackedKeywords, updateAnalysisStatus, updateSiteGscProperty, upsertSite } from "@organic-growth/db";
+import { createAnalysis, enqueueAnalysisCrawlUrls, listMetricSeries, listSyncRuns, saveCrawlBatch, setAiPrompts, setLimitOverrides, setSiteMarkets, setTrackedKeywords, updateAnalysisStatus, updateSiteGscProperty, upsertSite } from "@organic-growth/db";
 import { openSqliteD1 } from "@organic-growth/db/sqlite";
 import { SEARCH_CONSOLE_SCOPE } from "./gsc-auth.ts";
 import { pacificDayStart, startDailySyncs, startSync, syncSite, type StepLike, type SyncDeps } from "./sync-steps.ts";
@@ -285,8 +285,12 @@ describe("startSync and startDailySyncs", () => {
     await db.prepare("UPDATE sites SET workspace_id = 'w' WHERE id = 's'").run();
     await setSiteMarkets(db, "s", markets);
     await setTrackedKeywords(db, "s", Array.from({ length: keywords }, (_, index) => `kw ${index}`));
-    const serps = { count: 0 };
+    const serps = { count: 0, ai: 0 };
     const fetchFn = (async (url: string) => {
+      if (url.includes("ai_optimization") || url.includes("ai_mode")) {
+        serps.ai++;
+        return new Response(JSON.stringify({ status_code: 20000, tasks: [{ status_code: 20000, cost: 0.01, result: [{ markdown: "text", sources: [], items: [] }] }] }));
+      }
       if (!url.includes("/serp/")) return new Response(JSON.stringify({ rows: [] }));
       serps.count++;
       return new Response(JSON.stringify({ status_code: 20000, tasks: [{ status_code: 20000, cost: 0.004, result: [{ item_types: ["organic"], items: [{ type: "organic", rank_group: 1, domain: "s.com", url: "https://s.com/p", title: "t" }] }] }] }));
@@ -308,6 +312,20 @@ describe("startSync and startDailySyncs", () => {
     assert.ok(!notes.some((note) => note.startsWith("ranks:")), notes.join("; "));
   });
 
+  it("checks AI answers weekly when the workspace may spend DataForSEO, and fetches nothing more on a second run the same day", async () => {
+    const { db, steps, run, serps } = await rankSite(["mys"], 0);
+    await setAiPrompts(db, "s", ["best clinic", "cheap clinic"]);
+    const before = serps.ai;
+    await run();
+    const names = steps.map((entry) => entry.name);
+    assert.ok(names.includes("s/ai-queue"), names.join(", "));
+    assert.equal(names.filter((name) => /^s\/ai-\d+$/.test(name)).length, 1);
+    assert.ok(names.includes("s/ai-counts"));
+    assert.equal(serps.ai - before, 8);
+    await run();
+    assert.equal(serps.ai - before, 8, "cells checked this week are not asked again");
+  });
+
   it("goes on to the next slice when a rank step dies", async () => {
     const { steps, run } = await rankSite(["mys", "sgp"], 2, "s/ranks-1");
     const notes = await run();
@@ -317,9 +335,9 @@ describe("startSync and startDailySyncs", () => {
   });
 
   it("skips ranks with a note, and still records the run, when reading the workspace's limits dies", async () => {
-    const { db, steps, serps, run } = await rankSite(["mys"], 2, "s/ranks-limits");
+    const { db, steps, serps, run } = await rankSite(["mys"], 2, "s/dataforseo-limits");
     const notes = await run();
-    assert.ok(notes.includes("ranks failed: boom"), notes.join("; "));
+    assert.ok(notes.includes("dataforseo limits failed: boom"), notes.join("; "));
     assert.equal(serps.count, 0);
     assert.ok(steps.some((entry) => entry.name === "s/record"));
     assert.equal((await listSyncRuns(db, "s")).length, 1);

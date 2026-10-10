@@ -4,6 +4,7 @@ import {
   countInspectionsSince, getSite, indexStatusCounts, listSitesForResults, publishedPages, recordSyncRun, upsertMetricPoints, urlsToInspect, type D1Like, type SyncTrigger,
 } from "@organic-growth/db";
 import { FREE_LIMITS, keysForLimits, limitsFor } from "./limits.ts";
+import { trackAiAnswers } from "./ai-answers.ts";
 import { trackRanks } from "./rank-tracking.ts";
 import { syncResults, type GoogleAccess, type SignalKeys } from "./results-sync.ts";
 import { COVERAGE_URLS_PER_DAY, inspectEumonPages, inspectQueuedUrls, INSPECTION_STEP, PAGE_INSPECTIONS_PER_DAY } from "./url-inspection.ts";
@@ -99,9 +100,12 @@ export async function syncSite(deps: SyncDeps, step: StepLike, siteId: string, t
     // The step returns only whether it may: a step's output is persisted, so credentials never pass through one.
     const dataForSeo = deps.keys.dataForSeo;
     if (dataForSeo) {
-      const mayRank = await safe("ranks-limits", async () => site.workspaceId ? (await limitsFor(deps.db, site.workspaceId)).dataForSeo : FREE_LIMITS.dataForSeo);
-      if ("error" in mayRank) notes.push(`ranks failed: ${mayRank.error}`);
-      else if (mayRank.ok) notes.push(...await trackRanks(deps.db, safe, site, dataForSeo, startedAt.slice(0, 10), deps.google(siteId).fetchFn));
+      const mayRank = await safe("dataforseo-limits", async () => site.workspaceId ? (await limitsFor(deps.db, site.workspaceId)).dataForSeo : FREE_LIMITS.dataForSeo);
+      if ("error" in mayRank) notes.push(`dataforseo limits failed: ${mayRank.error}`);
+      else if (mayRank.ok) {
+        notes.push(...await trackRanks(deps.db, safe, site, dataForSeo, startedAt.slice(0, 10), deps.google(siteId).fetchFn));
+        notes.push(...await trackAiAnswers(deps.db, safe, site, dataForSeo, startedAt.slice(0, 10), deps.google(siteId).fetchFn));
+      }
     }
     // A site whose Google access failed has nothing to inspect with.
     if (inspects && !notes.some((note) => note.startsWith("google failed"))) notes.push(...await inspectSite(deps, safe, site, startedAt.slice(0, 10), spent, published));

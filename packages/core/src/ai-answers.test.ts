@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { readAnswer } from "./ai-answers.js";
+import { aiAnswerPoints, readAnswer, type AiAnswerCheck } from "./ai-answers.js";
 
 const base = { prompt: "best dentist kl", sources: [], brandNames: ["Bright Smile"], site: "brightsmile.example", competitors: ["rival-dental.example", "othersmile.example"] };
 
@@ -75,5 +75,28 @@ describe("readAnswer", () => {
 
   it("curly apostrophes match straight ones", () => {
     assert.equal(readAnswer({ ...base, brandNames: ["Joe's Dental"], text: "Try Joe\u2019s Dental." }).mentioned, true);
+  });
+});
+
+describe("aiAnswerPoints", () => {
+  const check = (prompt: string, engine: AiAnswerCheck["engine"], day: string, mentioned: boolean, cited: boolean, rivals: AiAnswerCheck["rivals"] = []): AiAnswerCheck =>
+    ({ prompt, market: "mys", engine, day, mentioned, cited, citedRank: cited ? 1 : null, sources: [], rivals, excerpt: "" });
+  it("counts the latest answer of each cell from the last 7 days, for current prompts only", () => {
+    const checks = [
+      check("a", "chatgpt", "2026-10-09", true, true, [{ domain: "r.example", mentioned: true, cited: false }]),
+      check("a", "chatgpt", "2026-10-05", false, false),
+      check("a", "gemini", "2026-10-08", true, false),
+      check("b", "chatgpt", "2026-10-09", false, true),
+      check("b", "gemini", "2026-09-30", true, true),
+      check("gone", "chatgpt", "2026-10-09", true, true),
+    ];
+    const points = Object.fromEntries(aiAnswerPoints(checks, ["a", "b"], ["mys"], ["r.example"], "2026-10-10").map((point) => [point.metric, point.value]));
+    assert.equal(points.ai_answers_checked, 3);
+    assert.equal(points.ai_answers_mentioned, 2);
+    assert.equal(points.ai_answers_cited, 2);
+    assert.equal(points["ai_answers_checked.chatgpt"], 2);
+    assert.equal(points["ai_answers_mentioned.gemini"], 1);
+    assert.equal(points["ai_answers_mentioned:r.example"], 1);
+    assert.equal(points["ai_answers_cited:r.example"], 0);
   });
 });

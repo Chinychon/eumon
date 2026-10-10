@@ -5,6 +5,7 @@
  * competitors it names or cites instead.
  */
 
+import { addDays } from "./dates.js";
 import { bareDomain, isOrUnder } from "./serp.js";
 
 export const AI_ANSWER_ENGINES = [
@@ -97,4 +98,37 @@ export function readAnswer(input: { text: string; prompt: string; sources: AiSou
   }).filter((rival) => rival.mentioned || rival.cited);
   const start = at < 0 ? 0 : Math.max(0, Math.min(at - EXCERPT / 2, text.length - EXCERPT));
   return { mentioned: at >= 0, cited: rank >= 0, citedRank: rank >= 0 ? rank + 1 : null, rivals, excerpt: text.slice(start, start + EXCERPT) };
+}
+
+/** The latest check of each (prompt, market, engine) among current prompts and markets. */
+export function latestChecks(checks: AiAnswerCheck[], prompts: string[], markets: string[]): AiAnswerCheck[] {
+  const wanted = new Set(prompts);
+  const latest = new Map<string, AiAnswerCheck>();
+  for (const check of checks) {
+    if (!wanted.has(check.prompt) || !markets.includes(check.market)) continue;
+    const key = `${check.prompt}|${check.market}|${check.engine}`;
+    const seen = latest.get(key);
+    if (!seen || check.day > seen.day) latest.set(key, check);
+  }
+  return [...latest.values()];
+}
+
+/** The day's ledger points over the latest answers of the last 7 days: answers checked, mentioning, citing — overall, per engine, and per competitor. */
+export function aiAnswerPoints(checks: AiAnswerCheck[], prompts: string[], markets: string[], competitors: string[], day: string) {
+  const recent = latestChecks(checks.filter((check) => check.day > addDays(day, -AI_CHECK_FRESH_DAYS)), prompts, markets);
+  const count = (rows: AiAnswerCheck[], pick: (row: AiAnswerCheck) => boolean) => rows.filter(pick).length;
+  const points = [
+    { metric: "ai_answers_checked", day, value: recent.length },
+    { metric: "ai_answers_mentioned", day, value: count(recent, (row) => row.mentioned) },
+    { metric: "ai_answers_cited", day, value: count(recent, (row) => row.cited) },
+  ];
+  for (const { engine } of AI_ANSWER_ENGINES) {
+    const rows = recent.filter((row) => row.engine === engine);
+    points.push({ metric: `ai_answers_checked.${engine}`, day, value: rows.length }, { metric: `ai_answers_mentioned.${engine}`, day, value: count(rows, (row) => row.mentioned) }, { metric: `ai_answers_cited.${engine}`, day, value: count(rows, (row) => row.cited) });
+  }
+  for (const domain of competitors) {
+    points.push({ metric: `ai_answers_mentioned:${domain}`, day, value: count(recent, (row) => row.rivals.some((rival) => rival.domain === domain && rival.mentioned)) },
+      { metric: `ai_answers_cited:${domain}`, day, value: count(recent, (row) => row.rivals.some((rival) => rival.domain === domain && rival.cited)) });
+  }
+  return points;
 }

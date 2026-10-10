@@ -403,7 +403,7 @@ async function seedDemoRanks(db: D1Like, now: number): Promise<void> {
  */
 async function seedDemoAiAnswers(db: D1Like, now: number): Promise<void> {
   const today = new Date(now).toISOString().slice(0, 10);
-  const market = "mys";
+  const market = "mys"; // the AI-question demo covers Malaysia only; Singapore's cells stay "not checked yet" (seeding it would duplicate the findings and could push the Malaysia opportunity out of the top five)
   const prompts = [
     ...TREATMENTS.slice(0, 4).map((slug) => `How much does ${slug.replace(/-/g, " ")} cost in Kuala Lumpur?`),
     "Which dental clinic in Kuala Lumpur is best for families?",
@@ -423,7 +423,10 @@ async function seedDemoAiAnswers(db: D1Like, now: number): Promise<void> {
         const rivalCited = !cited && (engine === "gemini" ? q >= 2 : engine !== "chatgpt" || q >= 2);
         const rivalMentioned = !mentioned && (rivalCited || engine === "chatgpt" || engine === "gemini");
         const sources = [
-          ...(cited ? [{ domain: "demo-clinic.example", url: `${ORIGIN}/treatments/${TREATMENTS[q % TREATMENTS.length]}` }] : []),
+          ...(cited ? [
+            { domain: "dentalhealth-info.example", url: `https://dentalhealth-info.example/guides/${slugify(prompt)}` },
+            { domain: new URL(ORIGIN).hostname, url: `${ORIGIN}/treatments/${TREATMENTS[q % TREATMENTS.length]}` },
+          ] : []),
           ...(rivalCited ? [{ domain: rival, url: `https://${rival}/` }] : []),
         ];
         checks.push({

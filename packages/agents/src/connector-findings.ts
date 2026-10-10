@@ -34,6 +34,8 @@ export type TrendSignals = {
 };
 
 import type { RankSignals } from "./rank-findings.js";
+import type { AiAnswerSignals } from "./ai-answer-findings.js";
+import type { BacklinksInput } from "@organic-growth/core";
 
 export type ConnectorSignals = {
   serp?: SerpResult[];
@@ -44,6 +46,8 @@ export type ConnectorSignals = {
   trends?: TrendSignals | null;
   inventory?: InventorySignal[];
   ranks?: RankSignals | null;
+  aiAnswers?: AiAnswerSignals | null;
+  referring?: BacklinksInput | null;
 };
 
 /** Fewer days of logs than this say nothing about what Googlebot skips. */

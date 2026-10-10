@@ -13,7 +13,7 @@ import {
 } from "@organic-growth/db";
 import { ANALYTICS_SCOPE } from "./gsc-auth.ts";
 import type { Source, SyncContext } from "./results-sync.ts";
-import { CONNECTOR_SOURCES } from "./connector-sources.ts";
+import { CONNECTOR_SOURCES, DATAFORSEO_CONNECTOR_SOURCES } from "./connector-sources.ts";
 import { dollars, eumonOrigin, FRESH_DAYS, marketLocation, noMarkets, said } from "./source-helpers.ts";
 
 /** Search Console and GA4 history fetched on a site's first sync. */
@@ -304,8 +304,12 @@ const keywordVolumes: Source = {
   },
 };
 
-export const SOURCES: Source[] = [
-  speed, lab, authority, firstParty, search, rankings, topQueryList, analytics, competitorKeywords, keywordVolumes,
-  // After the keyword lists: search competitors and results pages are chosen from them.
-  ...CONNECTOR_SOURCES,
-];
+/**
+ * The DataForSEO sources: the sync runs them in a step of their own, so
+ * neither step passes the Free plan's 50 subrequests. After the keyword
+ * lists: search competitors and results pages are chosen from them.
+ */
+export const DATAFORSEO_SOURCES: Source[] = [competitorKeywords, keywordVolumes, ...DATAFORSEO_CONNECTOR_SOURCES];
+/** Every source but DataForSEO's. */
+export const OTHER_SOURCES: Source[] = [speed, lab, authority, firstParty, search, rankings, topQueryList, analytics, ...CONNECTOR_SOURCES];
+export const SOURCES: Source[] = [...OTHER_SOURCES, ...DATAFORSEO_SOURCES];

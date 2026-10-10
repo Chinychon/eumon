@@ -54,6 +54,8 @@ import { findingsFromCrawlLog, findingsFromInventory, findingsFromSearchConsoleI
 import { notFoundProbeFinding } from "./not-found-probe.js";
 import { buildAudit } from "./audit.js";
 import { findingsFromRanks } from "./rank-findings.js";
+import { findingsFromReferring } from "./link-findings.js";
+import { findingsFromAiAnswers } from "./ai-answer-findings.js";
 import { auditConversion, findingsFromConversion } from "./conversion.js";
 import {
   compareCompetition,
@@ -373,6 +375,8 @@ export async function runFullAnalysis(input: RunAnalysisInput) {
   findings.push(...findingsFromTrends({ siteId: input.siteId, analysisId, trends: input.connectors?.trends ?? null, sitemapUrls: sitemap.totalUrls ?? null, discovered: input.connectors?.searchConsole?.summary?.rows.find((row) => row.reason === "discovered")?.pages ?? null }));
   findings.push(...findingsFromHostProbe({ siteId: input.siteId, analysisId, probe: input.hostProbe }));
   findings.push(...findingsFromRanks({ siteId: input.siteId, analysisId, ranks: input.connectors?.ranks }));
+  findings.push(...findingsFromAiAnswers({ siteId: input.siteId, analysisId, signals: input.connectors?.aiAnswers }));
+  findings.push(...findingsFromReferring({ siteId: input.siteId, analysisId, referring: input.connectors?.referring }));
   const probeFinding = input.notFoundProbe ? notFoundProbeFinding(input.notFoundProbe, input.siteId, analysisId) : null;
   if (probeFinding) findings.push(probeFinding);
   findings.push(...findingsFromInventory({ siteId: input.siteId, analysisId, inventories: input.connectors?.inventory ?? [] }));
@@ -409,6 +413,8 @@ export async function runFullAnalysis(input: RunAnalysisInput) {
     languages: Math.max(input.crawlCoverage?.coverage.locales?.length ?? 1, new Set(pageResults.map((page) => page.locale ?? "default")).size),
     hasDataForSeo: Boolean(input.keywords),
     hasRanks: Boolean(input.connectors?.ranks?.tracked.length),
+    hasAiQuestions: Boolean(input.connectors?.aiAnswers?.prompts.length),
+    hasReferring: Boolean(input.connectors?.referring),
     robotsReadable: input.hostProbe?.robotsReadable ?? robots.robots !== "unreadable",
     probed: Boolean(input.hostProbe),
     probe: input.hostProbe?.ai,

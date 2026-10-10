@@ -19,6 +19,7 @@ import { competitionOpportunities, counted, type CompetitionReport } from "./com
 import { linkGapOpportunity, withSerpContext, type ConnectorSignals } from "./connector-findings.js";
 import { estimateDemand } from "./demand.js";
 import { rankOpportunities } from "./rank-findings.js";
+import { aiAnswerOpportunities } from "./ai-answer-findings.js";
 import { analyzeSearch, searchOpportunities, type SearchInsights } from "./search.js";
 
 export interface AnalysisBundle {
@@ -125,7 +126,8 @@ export function buildOpportunities(bundle: AnalysisBundle): Opportunity[] {
   const links = linkGapOpportunity(bundle.connectors?.links, bundle.siteId, bundle.analysisId);
   const base = [...technical, ...fromSearch, ...contentGaps, ...unpublishedData, ...gaps, ...(links ? [links] : [])];
   const tracked = rankOpportunities({ siteId: bundle.siteId, analysisId: bundle.analysisId, ranks: bundle.connectors?.ranks, searchMetrics: bundle.searchMetrics, existing: base, demand });
-  return withSerpContext([...base, ...tracked], bundle.connectors?.serp)
+  const aiAnswers = aiAnswerOpportunities({ siteId: bundle.siteId, analysisId: bundle.analysisId, signals: bundle.connectors?.aiAnswers, existing: [...base, ...tracked] });
+  return withSerpContext([...base, ...tracked, ...aiAnswers], bundle.connectors?.serp)
     .sort((a, b) => b.priorityScore - a.priorityScore);
 }
 
@@ -444,5 +446,7 @@ export * from "./connector-findings.js";
 export * from "./log-coverage.js";
 export * from "./trend-signals.js";
 export * from "./rank-findings.js";
+export * from "./ai-answer-findings.js";
+export * from "./link-findings.js";
 export * from "./not-found-probe.js";
 export * from "./fix-text.js";

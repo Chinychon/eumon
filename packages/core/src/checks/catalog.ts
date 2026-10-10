@@ -358,6 +358,22 @@ export const CATALOG: Check[] = [
       severity: "30 plus 12 per tenfold of URLs, capped at 70.",
     } }),
 
+  // AI answer tracking
+  c({ id: "answers.competitors_named", name: "AI answers name competitors, not you", pillars: ["ai"], category: "ai_visibility", class: "warning", scope: "site", sources: ["connector"], fix: "content", requires: "tracked AI questions",
+    docs: {
+      what: "For three or more of the questions the site tracks, two or more AI assistants (ChatGPT, Gemini, Google AI Mode, Perplexity) name or cite a competitor in their latest answer and neither name nor cite the site.",
+      why: "These are the questions customers ask assistants instead of searching; an answer that names competitors sends the customer there.",
+      how: "Answer each question directly in the first lines of a page, with figures and sources; add a question-and-answer section; keep the page's date current; and get listed on the sites AI cites for these questions (the AI answers card shows them).",
+      severity: "30 plus 5 per question, capped at 70.",
+    } }),
+  c({ id: "answers.citation_lost", name: "An AI assistant stopped citing you", pillars: ["ai"], category: "ai_visibility", class: "warning", scope: "site", sources: ["connector"], fix: "content", requires: "tracked AI questions",
+    docs: {
+      what: "One AI assistant cited the site for two or more tracked questions and no longer does, in the latest answers of the last 90 days. One finding per assistant.",
+      why: "A lost citation is lost visibility at the moment someone asks; the date and the sites it cites now point at what replaced the site.",
+      how: "Compare the page the assistant used to cite with the pages it cites now, then strengthen the answer: direct first lines, figures and sources, a current date. History records the return.",
+      severity: "40 plus 5 per question, capped at 75.",
+    } }),
+
   // Rank tracking
   c({ id: "rank.fell", name: "Tracked keyword fell", pillars: ["seo"], category: "search", class: "warning", scope: "site", sources: ["connector"], fix: "content", requires: "tracked keywords",
     docs: {
@@ -372,6 +388,29 @@ export const CATALOG: Check[] = [
       why: "Off the first page a search brings almost no clicks; a drop after a stable hold usually has a cause on the page or on the results page.",
       how: "Compare the page with the top three on today's results page (the Keywords tab shows them), check that it still answers the search and loads quickly, and strengthen its title and the internal links to it. History records the recovery.",
       severity: "35 plus 2 per place between the best and 11, plus 15 when the best was in the top 3, capped at 80.",
+    } }),
+
+  // Backlinks (referring domains)
+  c({ id: "backlinks.broken_targets", name: "Links to missing pages", pillars: ["seo"], category: "search", class: "warning", scope: "site", sources: ["connector"], fix: "redirect", requires: "referring-domain data",
+    docs: {
+      what: "Three or more real (not spam) sites link to addresses on the site that no longer answer, from the referring-domain profile (DataForSEO).",
+      why: "A link to a missing page passes nothing; the site loses authority it already earned.",
+      how: "Redirect each missing address to its closest live page, or restore the page; these links count again once the address answers. The Search Console import suggests redirects for missing addresses.",
+      severity: "30 plus 4 per linking site, capped at 70.",
+    } }),
+  c({ id: "backlinks.lost", name: "Links lost in 30 days", pillars: ["seo"], category: "search", class: "warning", scope: "site", sources: ["connector"], fix: "none", requires: "referring-domain data",
+    docs: {
+      what: "Three or more real (not spam) sites stopped linking to the site in the last 30 days.",
+      why: "Lost links are lost authority; a cluster often has one cause, such as a moved page or a changed partner site.",
+      how: "Check whether each linking page changed or your page moved; ask the strongest sites to restore the link, and redirect any moved page.",
+      severity: "25 plus 3 per site, capped at 60.",
+    } }),
+  c({ id: "backlinks.spam_wave", name: "Wave of spam links", pillars: ["seo"], category: "search", class: "notice", scope: "site", sources: ["connector"], fix: "none", requires: "referring-domain data",
+    docs: {
+      what: "Twenty or more spam sites started linking to the site in the last 30 days, with the networks they belong to.",
+      why: "Google ignores links like these, so most sites need do nothing; a wave is worth knowing about in case a manual action follows.",
+      how: "Don't buy links, and check Search Console's Manual actions page; disavow only if it reports one. Eumon leaves these sites out of your link counts.",
+      severity: "Always LOW (impact 15).",
     } }),
 
   // Trends and logs

@@ -4,6 +4,7 @@ import type { SiteRecord } from "@organic-growth/core";
 import { AiReadinessCard, CompetitorsSection, ConversionSections, IndexCoverageCard, SearchAnalysis } from "./ReportTabs";
 import type { Navigate, Report } from "./report-model";
 import { BacklinksCard, BingCard, CompetitorSuggestionsCard, SearchResultsCard } from "./results/ConnectorCards";
+import { AiAnswersCard } from "./results/AiAnswersCard";
 import { KeywordsCard } from "./results/KeywordsCard";
 import { RankTrackingCard } from "./results/RankTrackingCard";
 import { SearchConsoleCard } from "./results/SearchConsoleCard";
@@ -90,10 +91,11 @@ export function CompetitorsPanel({ site, data, report, onNavigate, onCompetitors
   );
 }
 
-/** Which AI assistants read the site's pages, the visits they send, question searches, and whether the site lets them in. */
-export function AiPanel({ data, report, onNavigate }: { data: Payload; report: Report | null; onNavigate: Navigate }) {
+/** What AI assistants answer to the questions tracked, which read the site's pages, the visits they send, question searches, and whether the site lets them in. */
+export function AiPanel({ site, data, report, onNavigate, onSaved }: { site: SiteRecord; data: Payload; report: Report | null; onNavigate: Navigate; onSaved?: () => void }) {
   return (
     <div className="results">
+      <AiAnswersCard view={data.results.aiAnswers} siteId={site.id} operator hasCredentials={data.site.signals.keywords} hasMarkets={data.results.markets.length > 0} onSaved={onSaved} />
       <AiReadersCard data={data} operator onNavigate={onNavigate} />
       <AiReferralsCard data={data} operator onNavigate={onNavigate} />
       <QuestionSearchesCard data={data} operator onNavigate={onNavigate} />

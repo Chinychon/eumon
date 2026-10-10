@@ -1,5 +1,5 @@
 import { parseHtmlSignals } from "@organic-growth/crawler";
-import { findFixByHeadSha, findFixByPr, findSitesByRepo, transitionFix, type D1Like, type FixRecord } from "@organic-growth/db";
+import { findFixByHeadSha, findFixByPr, findSitesByRepo, transitionFix, type D1Like, type FixRecord, type FixStatus } from "@organic-growth/db";
 import type { SiteRecord } from "@organic-growth/core";
 import { LLMS_MARKER, blockedAiSearchAgents } from "@organic-growth/fixes";
 import type { GitHubOps } from "./fix-github.ts";
@@ -12,6 +12,11 @@ export type WebhookDeps = {
 };
 
 const NO_PREVIEW_MS = 30 * 60_000;
+/** A merge on GitHub wins over any status but merged and reverted, so a reopened and merged PR is still recorded. */
+export const MERGE_FROM: FixStatus[] = ["draft", "ready", "failed", "closed", "rejected"];
+/** Statuses whose PR is open on GitHub, so closing it there means it was rejected. */
+export const CLOSE_FROM: FixStatus[] = ["draft", "ready", "failed"];
+export const CLOSED_ON_GITHUB = "Closed without merging on GitHub.";
 
 export async function verifySignature(secret: string, body: string, header: string | null): Promise<boolean> {
   if (!secret || !header?.startsWith("sha256=")) return false;
@@ -110,8 +115,8 @@ export async function handleGitHubEvent(deps: WebhookDeps, event: string, payloa
     for (const site of sites) {
       const fix = await findFixByPr(deps.db, site.id, pr.number);
       if (!fix) continue;
-      if (pr.merged === true) { return (await transitionFix(deps.db, fix.id, ["draft", "ready", "failed", "closed"], { status: "merged" })) ? "merged" : "ignored"; }
-      return (await transitionFix(deps.db, fix.id, ["draft", "ready"], { status: "rejected", result: "Closed without merging on GitHub." })) ? "rejected" : "ignored";
+      if (pr.merged === true) { return (await transitionFix(deps.db, fix.id, MERGE_FROM, { status: "merged" })) ? "merged" : "ignored"; }
+      return (await transitionFix(deps.db, fix.id, CLOSE_FROM, { status: "rejected", result: CLOSED_ON_GITHUB })) ? "rejected" : "ignored";
     }
     return "ignored";
   }

@@ -1,12 +1,14 @@
 import type { GitHubOps } from "./fix-github.ts";
-import { getSite, listOpenFixes, transitionFix, type FixRecord } from "@organic-growth/db";
-import { advanceFix, type WebhookDeps } from "./github-webhook.ts";
+import { getSite, listOpenFixes, transitionFix, type FixRecord, type FixStatus } from "@organic-growth/db";
+import { advanceFix, CLOSE_FROM, CLOSED_ON_GITHUB, MERGE_FROM, type WebhookDeps } from "./github-webhook.ts";
 
 const STALE_MS = 7 * 86_400_000;
 const POOL = 200;
 const CLOSE_NOTE = "Eumon closed this draft after 7 days without checks passing.";
+const STALE_FROM: FixStatus[] = ["draft", "failed"];
 
-const isStale = (f: FixRecord, now: number) => now - new Date(f.updatedAt).getTime() >= STALE_MS;
+/** Drafts and failed PRs untouched for 7 days are closed; a ready PR waits for its reviewer however long it takes. */
+const isStale = (f: FixRecord, now: number) => f.status !== "ready" && now - new Date(f.updatedAt).getTime() >= STALE_MS;
 
 /** Stale drafts first (oldest first), then a random pick of the rest, so no fix is starved without a migration. */
 function pick(fixes: FixRecord[], limit: number, now: number, random: () => number): FixRecord[] {
@@ -19,7 +21,7 @@ function pick(fixes: FixRecord[], limit: number, now: number, random: () => numb
   return [...stale, ...fresh].slice(0, limit);
 }
 
-/** Catches up on PR events the webhook missed and closes stale drafts. Returns how many fixes changed status. */
+/** Catches up on PR events the webhook missed, advances drafts, and closes stale drafts and failed PRs. Returns how many fixes changed status. */
 export async function sweepFixes(deps: WebhookDeps & { random?: () => number }, limit = 4): Promise<number> {
   let changed = 0;
   const opsBySite = new Map<string, Promise<GitHubOps>>();
@@ -32,11 +34,11 @@ export async function sweepFixes(deps: WebhookDeps & { random?: () => number }, 
       const ops = await opsBySite.get(site.id)!;
       const pr = await ops.getPullRequest(fix.prNumber);
       if (pr.merged) {
-        if (await transitionFix(deps.db, fix.id, ["draft", "ready", "failed", "closed"], { status: "merged" })) changed++;
+        if (await transitionFix(deps.db, fix.id, MERGE_FROM, { status: "merged" })) changed++;
       } else if (pr.state === "closed") {
-        if (await transitionFix(deps.db, fix.id, ["draft", "ready"], { status: "rejected", result: "Closed without merging on GitHub." })) changed++;
+        if (await transitionFix(deps.db, fix.id, CLOSE_FROM, { status: "rejected", result: CLOSED_ON_GITHUB })) changed++;
       } else if (isStale(fix, now)) {
-        if (!(await transitionFix(deps.db, fix.id, ["draft"], { status: "closed", result: CLOSE_NOTE }))) continue;
+        if (!(await transitionFix(deps.db, fix.id, STALE_FROM, { status: "closed", result: CLOSE_NOTE }))) continue;
         changed++;
         try {
           await ops.close(fix.prNumber);
@@ -45,10 +47,10 @@ export async function sweepFixes(deps: WebhookDeps & { random?: () => number }, 
           continue;
         }
         await ops.comment(fix.prNumber, CLOSE_NOTE).catch(() => undefined);
-      } else if ((await advanceFix(deps, ops, fix)) !== "waiting") changed++;
+      } else if (fix.status === "draft" && (await advanceFix(deps, ops, fix)) !== "waiting") changed++;
     } catch {
       // One bad repo never stops the sweep. A stale draft we still can't reach is dropped so it can't hog a slot forever.
-      if (isStale(fix, now) && await transitionFix(deps.db, fix.id, ["draft"], { status: "closed", result: "Eumon couldn't reach this pull request after 7 days, so it stopped tracking it. Close it on GitHub if it's still open." }).catch(() => false)) changed++;
+      if (isStale(fix, now) && await transitionFix(deps.db, fix.id, STALE_FROM, { status: "closed", result: "Eumon couldn't reach this pull request after 7 days, so it stopped tracking it. Close it on GitHub if it's still open." }).catch(() => false)) changed++;
     }
   }
   return changed;

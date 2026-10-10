@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { countOpenFixes, findFixByHeadSha, findSitesByRepo, findFixByPr, getFixSettings, hasLiveFix, listFixes, listPageHeads, setFixSettings, stageFix, transitionFix, updateFix, type FixRecord } from "./fixes.js";
+import { countOpenFixes, findFixByHeadSha, findSitesByRepo, findFixByPr, getFixSettings, hasLiveFix, listFixes, listOpenFixes, listPageHeads, setFixSettings, stageFix, transitionFix, updateFix, type FixRecord } from "./fixes.js";
 import { upsertSite } from "./index.js";
 import { openSqliteD1 } from "./sqlite.js";
 
@@ -29,7 +29,9 @@ describe("fix storage", () => {
     assert.equal((await findFixByHeadSha(db, "abc", "s"))?.status, "draft");
     assert.equal(await findFixByHeadSha(db, "abc", "other"), null, "scoped to the site");
     await updateFix(db, "f1", { status: "merged" });
-    assert.equal(await hasLiveFix(db, "s", "/procedures/:slug", "head"), false, "merged fixes don't block a new one");
+    assert.equal(await hasLiveFix(db, "s", "/procedures/:slug", "head"), true, "a fix merged within 30 days blocks a new one");
+    await db.prepare("UPDATE changes SET updated_at = '2020-01-01T00:00:00.000Z' WHERE id = 'f1'").run();
+    assert.equal(await hasLiveFix(db, "s", "/procedures/:slug", "head"), false, "older merged fixes don't block a new one");
     await updateFix(db, "f1", { status: "reverted" });
     assert.equal(await hasLiveFix(db, "s", "/procedures/:slug", "head"), true, "a reverted fix isn't tried again");
   });
@@ -69,5 +71,18 @@ describe("fix storage", () => {
     assert.equal(await transitionFix(db, "f1", ["draft"], { status: "ready" }), true);
     assert.equal(await transitionFix(db, "f1", ["draft"], { status: "failed" }), false);
     assert.equal((await listFixes(db, "s"))[0]?.status, "ready");
+  });
+
+  it("treats a failed fix with an open PR as live and open (I3, I4)", async () => {
+    const db = await setup();
+    await stageFix(db, fix({ status: "failed" }));
+    assert.equal(await hasLiveFix(db, "s", "/procedures/:slug", "head"), false, "no PR: prepared again next run");
+    assert.equal(await countOpenFixes(db, "s"), 0);
+    await updateFix(db, "f1", { prNumber: 7 });
+    assert.equal(await hasLiveFix(db, "s", "/procedures/:slug", "head"), true);
+    assert.equal(await countOpenFixes(db, "s"), 1);
+    await stageFix(db, fix({ id: "f2", status: "ready" }));
+    await stageFix(db, fix({ id: "f3", status: "failed" }));
+    assert.deepEqual((await listOpenFixes(db, 10)).map((f) => f.id).sort(), ["f1", "f2"]);
   });
 });

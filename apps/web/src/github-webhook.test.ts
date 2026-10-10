@@ -124,6 +124,15 @@ describe("webhook races and failures", () => {
     assert.equal(await handleGitHubEvent(err.deps, "check_suite", { action: "completed", repository, check_suite: { head_sha: "h1" } }), "waiting");
   });
 
+  it("rejects a failed fix whose PR is closed, and records a later merge of a rejected one (I3)", async () => {
+    const { db, deps } = await setup();
+    await updateFix(db, "f1", { status: "failed" });
+    assert.equal(await handleGitHubEvent(deps, "pull_request", { action: "closed", repository, pull_request: { number: 7, merged: false } }), "rejected");
+    assert.equal((await getFix(db, "f1"))?.status, "rejected");
+    assert.equal(await handleGitHubEvent(deps, "pull_request", { action: "closed", repository, pull_request: { number: 7, merged: true } }), "merged");
+    assert.equal((await getFix(db, "f1"))?.status, "merged");
+  });
+
   it("ignores unfinished check events", async () => {
     const { deps } = await setup();
     assert.equal(await handleGitHubEvent(deps, "check_suite", { action: "requested", repository, check_suite: { head_sha: "h1" } }), "ignored");

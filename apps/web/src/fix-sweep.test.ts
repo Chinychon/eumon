@@ -121,4 +121,27 @@ describe("sweepFixes", () => {
     assert.equal(await sweepFixes(deps, 2), 1);
     assert.equal(await status(t, "g2"), "merged");
   });
+
+  it("catches up on a missed merge of a ready fix without re-checking it (I4)", async () => {
+    const t = await setup({ state: "closed", merged: true });
+    await updateFix(t.db, "f1", { status: "ready" });
+    let checked = 0;
+    t.ops.checkState = async () => { checked++; return "success"; };
+    assert.equal(await sweepFixes(t.deps), 1);
+    assert.equal((await getFix(t.db, "f1"))?.status, "merged");
+    assert.equal(checked, 0);
+  });
+
+  it("leaves an open ready PR alone, even an old one, and closes a stale failed one (I3, I4)", async () => {
+    const ready = await setup({}, 8);
+    await updateFix(ready.db, "f1", { status: "ready" });
+    let checked = 0;
+    ready.ops.checkState = async () => { checked++; return "success"; };
+    assert.equal(await sweepFixes(ready.deps), 0);
+    assert.deepEqual([ready.closed, checked, (await getFix(ready.db, "f1"))?.status], [[], 0, "ready"]);
+    const failed = await setup({}, 8);
+    await updateFix(failed.db, "f1", { status: "failed" });
+    assert.equal(await sweepFixes(failed.deps), 1);
+    assert.deepEqual([failed.closed, (await getFix(failed.db, "f1"))?.status], [[7], "closed"]);
+  });
 });

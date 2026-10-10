@@ -54,6 +54,14 @@ describe("fix run", () => {
     assert.deepEqual(await stageCandidates(deps, { ...input, candidates: [head] }), { staged: 0, skipped: 0 });
   });
 
+  it("doesn't re-stage a fix whose PR failed checks but is still open (I3)", async () => {
+    const { db, deps } = await setup();
+    await stageCandidates(deps, { ...input, candidates: [head] });
+    const [fix] = await listFixes(db, "s");
+    await updateFix(db, fix!.id, { status: "failed", prNumber: 4 });
+    assert.deepEqual(await stageCandidates(deps, { ...input, candidates: [head] }), { staged: 0, skipped: 0 });
+  });
+
   it("closes a staged fix whose file changed before the PR (Review Focus 1)", async () => {
     const { db, deps, files } = await setup();
     await stageCandidates(deps, { ...input, candidates: [head] });

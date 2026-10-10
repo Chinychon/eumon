@@ -65,8 +65,11 @@ export async function listFixes(db: D1Like, siteId: string, statuses?: FixStatus
   return results.map(mapFix);
 }
 
+/** Statuses whose pull request is still open on GitHub: drafts, ready ones, and failed ones that got as far as a PR. */
+const OPEN_PR = "(status IN ('draft', 'ready') OR (status = 'failed' AND pr_number IS NOT NULL))";
+
 export async function listOpenFixes(db: D1Like, limit: number): Promise<FixRecord[]> {
-  const { results } = await db.prepare("SELECT * FROM changes WHERE fix_kind IS NOT NULL AND status = 'draft' ORDER BY updated_at LIMIT ?").bind(limit).all<Record<string, unknown>>();
+  const { results } = await db.prepare(`SELECT * FROM changes WHERE fix_kind IS NOT NULL AND ${OPEN_PR} ORDER BY updated_at LIMIT ?`).bind(limit).all<Record<string, unknown>>();
   return results.map(mapFix);
 }
 
@@ -103,14 +106,18 @@ export async function transitionFix(db: D1Like, id: string, from: FixStatus[], p
   return (result?.meta?.changes ?? result?.changes ?? 0) > 0;
 }
 
+const MERGED_RECENTLY_MS = 30 * 86_400_000;
+
+/** Whether a route and kind already has a fix that a new one would duplicate or undo. A merge counts for 30 days, until a recrawl can show it. */
 export async function hasLiveFix(db: D1Like, siteId: string, route: string, kind: string): Promise<boolean> {
-  const row = await db.prepare("SELECT 1 AS yes FROM changes WHERE site_id = ? AND route = ? AND fix_kind = ? AND status IN ('staged', 'draft', 'ready', 'rejected', 'reverted') LIMIT 1")
-    .bind(siteId, route, kind).first();
+  const row = await db.prepare(`SELECT 1 AS yes FROM changes WHERE site_id = ? AND route = ? AND fix_kind = ?
+     AND (status IN ('staged', 'rejected', 'reverted') OR ${OPEN_PR} OR (status = 'merged' AND updated_at >= ?)) LIMIT 1`)
+    .bind(siteId, route, kind, new Date(Date.now() - MERGED_RECENTLY_MS).toISOString()).first();
   return Boolean(row);
 }
 
 export async function countOpenFixes(db: D1Like, siteId: string): Promise<number> {
-  const row = await db.prepare("SELECT COUNT(*) AS n FROM changes WHERE site_id = ? AND fix_kind IS NOT NULL AND status IN ('draft', 'ready')").bind(siteId).first<{ n: number }>();
+  const row = await db.prepare(`SELECT COUNT(*) AS n FROM changes WHERE site_id = ? AND fix_kind IS NOT NULL AND ${OPEN_PR}`).bind(siteId).first<{ n: number }>();
   return Number(row?.n ?? 0);
 }
 

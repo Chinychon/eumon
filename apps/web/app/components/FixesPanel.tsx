@@ -58,7 +58,7 @@ export function FixesPanel({ siteId, hasRepo }: { siteId: string; hasRepo: boole
           <div className="row">
             {fix.prUrl && <a href={fix.prUrl} target="_blank" rel="noreferrer">View pull request</a>}
             {fix.status === "staged" && <Button small busy={busy === fix.id} disabled={Boolean(busy)} onClick={() => act(fix.id, `/api/fixes/${fix.id}/open`)}>Open now</Button>}
-            {["staged", "draft", "ready"].includes(fix.status) && <Button small variant="ghost" disabled={Boolean(busy)} onClick={() => act(fix.id, `/api/fixes/${fix.id}/reject`)}>Reject</Button>}
+            {(["staged", "draft", "ready"].includes(fix.status) || (fix.status === "failed" && fix.prUrl)) && <Button small variant="ghost" disabled={Boolean(busy)} onClick={() => act(fix.id, `/api/fixes/${fix.id}/reject`)}>Reject</Button>}
           </div>
         </details>
       ))}

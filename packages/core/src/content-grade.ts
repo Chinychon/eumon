@@ -14,6 +14,17 @@ export type ContentGrade = {
   structure: Array<{ feature: "lists" | "questions" | "faq"; competitors: boolean; page: boolean }>;
 };
 
+/** A stored grade: the grade plus the search, page and rival pages it was made from. */
+export type ContentGradeRow = ContentGrade & {
+  query: string;
+  market: string;
+  page: string;
+  checkedAt: string;
+  source: "tracked" | "search";
+  impressions: number | null;
+  competitors: Array<{ domain: string; url: string; words: number }>;
+};
+
 export const CONTENT_GRADE = {
   MISSING_MAX: 8, // a longer list stops being actionable
   MIN_COMPETITORS_PER_TOPIC: 2, // one competitor's quirk is not a topic

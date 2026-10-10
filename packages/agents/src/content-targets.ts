@@ -1,7 +1,7 @@
 import { LlmError, LlmHttpError, type JsonLlm, type JsonRequest } from "@organic-growth/ai";
 import {
   addDays, bareDomain, competitorKind, gradeContent, TOPIC_PROPOSAL_SCHEMA, verifyTopics,
-  type ContentGrade, type GradedPage, type RankCheck, type SearchMetricRow, type SerpResult, type TopicProposal,
+  type ContentGrade, type ContentGradeRow, type GradedPage, type RankCheck, type SearchMetricRow, type SerpResult, type TopicProposal,
 } from "@organic-growth/core";
 import { BROWSER_UA, contentMarkup, contentSignals, defaultFetcher, elementSpans, fetchRobots, innerText, isEmptyShell, mainMarkup, parseHtmlSignals, type Fetcher } from "@organic-growth/crawler";
 
@@ -12,15 +12,7 @@ import { BROWSER_UA, contentMarkup, contentSignals, defaultFetcher, elementSpans
  */
 
 export type ContentTarget = { query: string; market: string; page: string; source: "tracked" | "search"; impressions: number | null };
-export type ContentGradeRow = ContentGrade & {
-  query: string;
-  market: string;
-  page: string;
-  checkedAt: string;
-  source: ContentTarget["source"];
-  impressions: number | null;
-  competitors: Array<{ domain: string; url: string; words: number }>;
-};
+export type { ContentGradeRow };
 
 export const CONTENT_TARGETS = {
   MAX: 8, // per analysis; the rest wait for the next one

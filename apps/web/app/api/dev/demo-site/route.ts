@@ -1,5 +1,7 @@
 import { env } from "cloudflare:workers";
-import { isLocalHost, seedDemoSite } from "@organic-growth/agents";
+import { DEMO_SITE_ID, isLocalHost, seedDemoSite } from "@organic-growth/agents";
+import { setSiteWorkspace } from "@organic-growth/db";
+import { requireWorkspace } from "../../../../src/guard";
 import { fail, json } from "../../../../src/server";
 
 /**
@@ -9,5 +11,9 @@ import { fail, json } from "../../../../src/server";
  */
 export async function POST(request: Request) {
   if (process.env.NODE_ENV === "production" && !isLocalHost(new URL(request.url).hostname)) return fail("Not found.", 404);
-  return json(await seedDemoSite(env.DB));
+  const access = await requireWorkspace(request, "write");
+  if (access instanceof Response) return access;
+  const result = await seedDemoSite(env.DB);
+  await setSiteWorkspace(env.DB, DEMO_SITE_ID, access.viewer.workspaceId);
+  return json(result);
 }

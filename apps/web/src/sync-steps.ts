@@ -3,6 +3,7 @@ import { addDays, createId, type SiteRecord } from "@organic-growth/core";
 import {
   countInspectionsSince, getSite, indexStatusCounts, listSitesForResults, publishedPages, recordSyncRun, upsertMetricPoints, urlsToInspect, type D1Like, type SyncTrigger,
 } from "@organic-growth/db";
+import { keysForLimits, limitsFor } from "./limits.ts";
 import { syncResults, type GoogleAccess, type SignalKeys } from "./results-sync.ts";
 import { COVERAGE_URLS_PER_DAY, inspectEumonPages, inspectQueuedUrls, INSPECTION_STEP, PAGE_INSPECTIONS_PER_DAY } from "./url-inspection.ts";
 
@@ -88,7 +89,10 @@ export async function syncSite(deps: SyncDeps, step: StepLike, siteId: string, t
       const pages = await safe("page-search", () => deps.pageSearch!(site).then((result) => `pages: ${n(result.queries)} query rows`, (error) => `pages failed: ${message(error)}`));
       notes.push("ok" in pages ? pages.ok : `pages failed: ${pages.error}`);
     }
-    const sources = await safe("sources", () => syncResults(deps.db, site, deps.now(), deps.google(siteId), deps.keys).catch((error) => [`results failed: ${message(error)}`]), { retries: { limit: 1, delay: 60_000 } });
+    const sources = await safe("sources", async () => {
+      const keys = site.workspaceId ? keysForLimits(deps.keys, await limitsFor(deps.db, site.workspaceId)) : deps.keys;
+      return syncResults(deps.db, site, deps.now(), deps.google(siteId), keys).catch((error) => [`results failed: ${message(error)}`]);
+    }, { retries: { limit: 1, delay: 60_000 } });
     notes.push(...("ok" in sources ? sources.ok : [`results failed: ${sources.error}`]));
     // A site whose Google access failed has nothing to inspect with.
     if (inspects && !notes.some((note) => note.startsWith("google failed"))) notes.push(...await inspectSite(deps, safe, site, startedAt.slice(0, 10), spent, published));

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { isProblemNote, type SiteRecord } from "@organic-growth/core";
 import { api, errorMessage, formatDay, formatNumber } from "./api";
 import { AnalysisProgress, isFinished, useRun, type RunDelta, type RunProgress } from "./AnalysisProgress";

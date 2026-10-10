@@ -106,4 +106,19 @@ describe("sweepFixes", () => {
     for (const id of ["g0", "g1", "g2"]) if ((await status(t, id)) === "merged") merged.push(id);
     assert.deepEqual(merged, ["g1"]);
   });
+
+  it("drops stale drafts it can't reach so a fresh one gets a slot next run", async () => {
+    const now = Date.now();
+    const old = new Date(now - 9 * 86_400_000).toISOString();
+    const t = await many([old, old, new Date(now).toISOString()]);
+    const real = t.ops.getPullRequest;
+    t.ops.getPullRequest = async (n) => { if (n < 22) throw new Error("boom"); return real(n); };
+    const deps = { ...t.deps, now: () => new Date(now) };
+    assert.equal(await sweepFixes(deps, 2), 2);
+    assert.equal(await status(t, "g0"), "closed");
+    assert.equal(await status(t, "g1"), "closed");
+    assert.equal(await status(t, "g2"), "draft");
+    assert.equal(await sweepFixes(deps, 2), 1);
+    assert.equal(await status(t, "g2"), "merged");
+  });
 });

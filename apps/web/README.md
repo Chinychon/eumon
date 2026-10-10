@@ -49,7 +49,7 @@ Every request passes `src/gate.ts` first: public paths pass, everything else nee
 
 - Magic link and email verification need `EMAIL_ENABLED=true` (Workers Paid, Cloudflare Email Service, and `EMAIL_FROM`).
 - Email + password needs `PASSWORD_SIGNIN=true` and email as well (its hashing exceeds the Free CPU limit and sign-up needs verification).
-- While email is off, invitations are copy-paste links shown in Setup → Members.
+- While email is off, invitations are copy-paste links shown in Setup → People.
 
 **Workspaces and roles.**
 
@@ -67,7 +67,7 @@ Each user may own one workspace. Workspace deletion is disabled in the API, and 
 - `/api/sites/:id/events` — conversion events from customer sites
 - `/r/*` and `/api/r/*` — client Results links (signed, revocable tokens)
 - `/api/logs/*` — server and CDN logs pushed by Logpush, Vercel, or a script, authenticated by a per-site token
-- `/api/auth/*` — Better Auth's own endpoints (rate limited per IP)
+- `/api/auth/*` — Better Auth's own endpoints (non-GET requests are rate limited per IP)
 - `/sign-in` and `/invite/*`
 - static files: `/manifest.json`, `/sw.js`, `/sw-register.js`, `/favicon.ico`, `/robots.txt`, `/icon-*.png`, `/assets/*`
 
@@ -83,7 +83,7 @@ Each user may own one workspace. Workspace deletion is disabled in the API, and 
 | People (members + clients + pending invitations) | 3 |
 | DataForSEO, pull requests, Google Sheets export | off |
 
-A refused action answers `429` with a sentence saying what to do next. `/admin` (for the emails in `BOOTSTRAP_OWNER_EMAIL`) lists workspaces with today's usage and raises these limits.
+A refused action answers with a sentence saying what to do next: `429` for the site count and the daily allowances, `403` for a feature the plan doesn't include. `/admin` (for the emails in `BOOTSTRAP_OWNER_EMAIL`) lists workspaces with today's usage and raises these limits.
 
 **Bootstrap owner.** `BOOTSTRAP_OWNER_EMAIL` (comma-separated) names the platform admins. On first sign-in they become Owner of the initial workspace that holds the sites that existed before accounts, and they can open `/admin`.
 
@@ -104,7 +104,7 @@ Production can stay on `workers.dev`; `previewUrls` is off so preview hostnames 
 
 ## Current boundaries
 
-- Competitors are owner-supplied domains (up to five per analysis). Eumon reads their sitemaps within a fixed budget (large sitemap indexes are sampled and extrapolated), inspects one page per major section as EumonBot (robots.txt respected), and compares content types with yours and with your datasets. There is no SERP or backlink data, so counts show where competitors invest, not what ranks.
+- Competitors are owner-supplied domains (up to five per analysis). Eumon reads their sitemaps within a fixed budget (large sitemap indexes are sampled and extrapolated), inspects one page per major section as EumonBot (robots.txt respected), and compares content types with yours and with your datasets. Sitemap counts show where competitors invest, not what ranks; with DataForSEO connected, Google results pages and backlinks show what ranks.
 - The scraper reads server-rendered HTML; sources that only render client-side, require logins, or block robots are skipped.
 - Collected facts are shown to the owner before anything is published, but extraction is model output — review records and page previews before publishing.
 - The analytics beacon is unauthenticated (as with any web analytics); counts can be inflated by deliberate abuse.

@@ -82,7 +82,7 @@
   <h2 id="data">Data</h2>
   <dl>
     <dt>Ownership</dt>
-    <dd>every table with a <code>site_id</code> cascades from <code>sites</code>, so deleting a site is <code>DELETE FROM sites</code> (<code>deleteSite</code> clears the two largest tables first). Crawl results (<code>pages</code>) and changes cascade from their analysis; daily page counters (<code>page_metrics_daily</code>, <code>ai_page_daily</code>) from their generated page. A new table that belongs to a site takes <code>REFERENCES sites(id) ON DELETE CASCADE</code>; the demo test checks nothing survives a delete.</dd>
+    <dd>every table with a <code>site_id</code> cascades from <code>sites</code>, so deleting a site is <code>DELETE FROM sites</code> (<code>deleteSite</code> clears the two largest tables first). Crawl results (<code>pages</code>) and changes cascade from their analysis; daily page counters (<code>page_metrics_daily</code>, <code>ai_page_daily</code>) from their generated page. A new table that belongs to a site takes <code>REFERENCES sites(id) ON DELETE CASCADE</code>; the demo test checks nothing survives a delete. A site in turn belongs to a workspace (<code>sites.workspace_id</code>), without a cascade: a workspace that still has sites can't be deleted.</dd>
     <dt>Crawl result (<code>pages</code>)</dt>
     <dd>one row per analysis and URL (<code>PRIMARY KEY (analysis_id, url)</code>). The page type (<code>route_family</code>) and reuse (<code>reused_from</code>, the earlier analysis a result was copied from) are columns; the rest of what the crawler saw is <code>result_json</code>.</dd>
     <dt>Google connection</dt>
@@ -124,6 +124,35 @@
     <dt>IndexNow</dt>
     <dd>Eumon's pages published, changed or taken down since the last submission (snapshot kind <code>indexnow</code> holds its moment), sent once the proxy is verified. The <strong>key</strong> is derived from <code>SESSION_SECRET</code> and served at <code>&lt;mount&gt;/&lt;key&gt;.txt</code>, so it vouches only for Eumon's pages.</dd>
     <dt>Crawl log (<code>crawl_log_daily</code>, <code>crawl_log_paths</code>)</dt>
-    <dd>crawler requests from the site's own server or CDN logs, posted to <code>/api/logs/&lt;siteId&gt;</code> with the site's <strong>log token</strong> (also derived from <code>SESSION_SECRET</code>). Per day, crawler (<code>googlebot</code>, <code>bingbot</code>, an AI agent's token, or <code>other</code>), page type, status class and query string; plus the latest Googlebot and Bingbot request per path. A person's request is never stored. <strong>Log coverage</strong> compares an analysis's sitemap URLs with the paths Googlebot requested in 30 days.</dd>
+    <dd>crawler requests from the site's own server or CDN logs, posted to <code>/api/logs/&lt;siteId&gt;</code> with the site's <strong>log token</strong>: derived from <code>SESSION_SECRET</code> until someone presses Rotate, then a random token stored in <code>sites.log_token</code>, and the old one stops working at once. Per day, crawler (<code>googlebot</code>, <code>bingbot</code>, an AI agent's token, or <code>other</code>), page type, status class and query string; plus the latest Googlebot and Bingbot request per path. A person's request is never stored. <strong>Log coverage</strong> compares an analysis's sitemap URLs with the paths Googlebot requested in 30 days.</dd>
+  </dl>
+  <h2 id="accounts">Accounts and access</h2>
+  <dl>
+    <dt>Workspace (<code>organization</code>, <code class="path">packages/db/src/workspaces.ts</code>)</dt>
+    <dd>the unit that owns sites, people, limits and GitHub installations; a Better Auth organization. Every site belongs to one (<code>sites.workspace_id</code>). Each user may create one workspace (<code>organizationLimit: 1</code>), so free limits can't be multiplied, and the API can't delete one. A session has an <strong>active workspace</strong>, the one the dashboard shows.</dd>
+    <dt>Initial workspace (<code>ws_initial</code>)</dt>
+    <dd>the workspace that holds every site from before accounts, created by migration 0024 with no limits.</dd>
+    <dt>Role</dt>
+    <dd>a person's place in one workspace (<code>member.role</code>). <strong>Owner</strong>: everything, including inviting and removing people and workspace administration. <strong>Member</strong>: reads and writes every site in the workspace and adds sites, but can't administer the workspace. <strong>Client</strong>: reads only, and only the sites granted to them; can't see who else is in the workspace. <code>allows</code> (<code class="path">apps/web/src/access.ts:6</code>) is the rule.</dd>
+    <dt>Need (<code>read</code>, <code>write</code>, <code>admin</code>)</dt>
+    <dd>what a route asks of the caller's role. Owners pass all three, members <code>read</code> and <code>write</code>, clients <code>read</code>.</dd>
+    <dt>Client site grant (<code>site_access</code>)</dt>
+    <dd>one site a client may see. A client invitation carries its sites (<code>site_access_invites</code>); accepting it replaces the client's grants in that workspace with the invitation's. Removing someone removes their grants.</dd>
+    <dt>Invitation</dt>
+    <dd>an offer to join a workspace with a role, for one email, accepted at <code>/invite/&lt;id&gt;</code>. While email sending is off, Setup → Members shows the link to copy and send by hand. A pending invitation counts against the members limit, and a new user with a pending invitation gets no personal workspace.</dd>
+    <dt>Bootstrap owner, platform admin (<code>BOOTSTRAP_OWNER_EMAIL</code>)</dt>
+    <dd>the comma-separated emails that, once verified, become owners of the initial workspace on sign-in and may use <code>/admin</code>. Its API answers 404 to anyone else.</dd>
+    <dt>Gate (<code class="path">apps/web/src/gate.ts</code>)</dt>
+    <dd>the first check on every request, in <code>worker.ts</code> before any route: public paths pass (landing pages, the events and log endpoints, client links, sign-in, invitations, static files), everything else needs a session (401 for <code>/api/</code>, a redirect to <code>/sign-in</code> otherwise), and a signed-in write to <code>/api/</code> must carry an <code>Origin</code> equal to the app's own (403). A route nobody guarded is still not public.</dd>
+    <dt>Route guard (<code class="path">apps/web/src/guard.ts</code>)</dt>
+    <dd>the check each API route makes after the gate: <code>requireSite</code> (a site and a need), <code>requireOwned</code> (a dataset, template, job, analysis… resolved to its site), <code>requireWorkspace</code> (the active workspace), <code>requirePlatformAdmin</code>. A site the caller can't see answers 404, the same as a missing one; a role that can't make the change answers 403.</dd>
+    <dt>Free limits (<code>FREE_LIMITS</code>, <code class="path">apps/web/src/limits.ts:18</code>)</dt>
+    <dd>what a workspace may do until <code>/admin</code> raises it: 1 site, 3 analyses, 500 scraped pages, 20 Ask questions and 10 AI runs a day, 3 people (everyone in the workspace, whatever their role, plus pending invitations), and no DataForSEO, pull requests or Sheets export. Overrides live in <code>workspace_limits</code>; a null number is unlimited.</dd>
+    <dt>Metering, charge (<code>workspace_usage</code>)</dt>
+    <dd>a daily counter per workspace and metered action, charged by <code>charge</code> before the work starts; past the limit the route answers 429 and the allowance resets at midnight UTC. An <strong>AI run</strong> is one model-backed action: scoping, a source preview, template design or regeneration, dedupe, title suggestions, a proposed code change.</dd>
+    <dt>Feature (<code>dataForSeo</code>, <code>pullRequests</code>, <code>sheetsExport</code>)</dt>
+    <dd>an on/off limit. A route that needs a feature the workspace lacks answers 403; the sync leaves the DataForSEO key out for such a workspace (<code>keysForLimits</code>).</dd>
+    <dt>GitHub installation</dt>
+    <dd>a GitHub App installation a workspace proved it owns (<code>workspace_github_installations</code>): the install callback trades GitHub's <code>code</code> for a user token and accepts the installation only if that user is its account, or an active admin of its organization (<code class="path">apps/web/src/github-install.ts:11</code>).</dd>
   </dl>
 </article>

@@ -1,8 +1,6 @@
 <article id="web-app" data-title="Web app" data-group="Reference">
   <h1>Web app</h1>
-  <p class="lede">Reference for <code>apps/web</code>: the dashboard's views and the components behind them, every API route, the shared server helpers, the public routes, and how access is controlled today. Use it to find where a screen or an endpoint lives.</p>
-
-  <div class="callout note"><p>An accounts and security-hardening branch is in progress and will change access control, route guards and sign-in. This page describes <code>main</code> as of 2026-10-10.</p></div>
+  <p class="lede">Reference for <code>apps/web</code>: the dashboard's views and the components behind them, the sign-in, invitation and admin pages, every API route with who may call it, the shared server helpers, the public routes, and how access is controlled. Use it to find where a screen or an endpoint lives, and what stops the wrong person reaching it.</p>
 
   <h2 id="dashboard">The dashboard</h2>
   <p>The whole dashboard is one client component, <code class="path">apps/web/app/page.tsx</code>, rendered at <code>/</code>. It loads the site list from <code>GET /api/sites</code>, keeps the selected site, view, tab and Ask thread in the query string (<code>?site=…&amp;view=…&amp;tab=…&amp;thread=…</code>) so a refresh or shared link lands on the same place, and switches views in place without route changes. The left rail is the <code>NAV</code> array at the top of the file.</p>
@@ -14,10 +12,27 @@
       <tr><td>Data</td><td><code>data</code></td><td><code>DataView</code> in <code class="path">apps/web/app/components/DataView.tsx</code>: scope, datasets, sources, collection jobs, CSV import, records (landing page engine steps 1 to 3).</td></tr>
       <tr><td>Landing pages</td><td><code>pages</code></td><td><code>PagesView</code> in <code class="path">apps/web/app/components/PagesView.tsx</code>: templates, generation, publishing, per-page status (steps 4 and 5).</td></tr>
       <tr><td>Page results</td><td><code>performance</code></td><td><code>PageResultsView</code> in <code class="path">apps/web/app/components/PageResultsView.tsx</code>: how generated pages perform and what to change (steps 6 and 7).</td></tr>
-      <tr><td>Setup</td><td><code>setup</code></td><td><code>ConnectionsView</code> (<code class="path">apps/web/app/components/ConnectionsView.tsx</code>: website, GitHub, Search Console, GA4, markets, competitors, plus <code>ConnectorSetup</code> from <code class="path">apps/web/app/components/ConnectorSetup.tsx</code> for the optional sources), then <code>SetupView</code> (<code class="path">apps/web/app/components/SetupView.tsx</code>: proxy rule, verification, conversion tracking snippet, sync history).</td></tr>
+      <tr><td>Setup</td><td><code>setup</code></td><td><code>ConnectionsView</code> (<code class="path">apps/web/app/components/ConnectionsView.tsx</code>: website, GitHub, Search Console, GA4, markets, competitors, plus <code>ConnectorSetup</code> from <code class="path">apps/web/app/components/ConnectorSetup.tsx</code> for the optional sources), then <code>SetupView</code> (<code class="path">apps/web/app/components/SetupView.tsx</code>: the People panel, proxy rule, verification, conversion tracking snippet, sync history).</td></tr>
     </tbody>
   </table>
   <p>With no site yet, or after "Add website", the page shows the <code>AddSite</code> form defined in <code>page.tsx</code> itself. Old view keys (<code>results</code>, <code>keywords</code>, <code>competitors</code>, <code>connections</code>) still resolve through <code>resolveLink</code> in <code class="path">apps/web/app/components/report-model.ts</code>, so saved links keep working.</p>
+
+  <h3>Who is signed in: <code>/api/me</code></h3>
+  <p>On load the dashboard calls <code>GET /api/me</code> (<code class="path">apps/web/app/page.tsx:121</code>). The route (<code class="path">apps/web/app/api/me/route.ts:7</code>) returns the user's ID and email, every workspace they belong to with their role in each, the active workspace (the one on the session), and <code>platformAdmin</code>. The dashboard uses it to:</p>
+  <ul>
+    <li>Show the active workspace's name in the top bar, a workspace switcher when the user belongs to more than one (it calls <code>authClient.organization.setActive</code> and reloads), an "Admin" link for platform admins, and "Sign out" (<code class="path">apps/web/app/page.tsx:182</code>).</li>
+    <li>Hide write views from Clients. For a Client the rail keeps only Dashboard, Landing pages and Page results; Home, Data and Setup are filtered out, and a link to a hidden view falls back to the Dashboard (<code class="path">apps/web/app/page.tsx:132</code>).</li>
+    <li>Show <code>NoWorkspace</code> when the user belongs to no workspace, for example because their invitation expired before they accepted it. Its one button creates a workspace through Better Auth and makes it active (<code class="path">apps/web/app/page.tsx:46</code>, used at line 147).</li>
+  </ul>
+  <div class="callout warn"><p>Hiding views is a convenience, not the protection. A Client still sees "Add website", the "Ask Eumon" button and the run controls on the Dashboard; the API refuses those calls with 403. Every rule that matters is in the route guards (<a href="#web-app--access-control">Access control</a>).</p></div>
+  <p><code class="path">apps/web/app/components/auth-client.ts</code> is the browser side of Better Auth: <code>createAuthClient</code> with the <code>organizationClient</code> and <code>magicLinkClient</code> plugins. The dashboard, the People panel, <code>/sign-in</code> and <code>/invite/:id</code> use it for sign-in, sign-out, switching workspace, listing members and accepting invitations. Everything else goes through <code>api()</code>.</p>
+
+  <h3>The People panel</h3>
+  <p><code>MembersPanel</code> (<code class="path">apps/web/app/components/MembersPanel.tsx:35</code>) is the first card in Setup, titled "People". It loads the workspace with <code>authClient.organization.getFullOrganization()</code> and lists members with their role, and invitations that are still pending. Members see the list; only Owners get the invite form and the "Remove" button (<code>canInvite</code> is <code>role === "owner"</code>, <code class="path">apps/web/app/components/SetupView.tsx:77</code>). Clients never reach Setup.</p>
+  <ul>
+    <li>The form takes an email and a role: Member (every site) or Client (read-only, on the sites ticked below the role). A Client invitation must name at least one site.</li>
+    <li>It posts to <code>POST /api/workspace/invitations</code>, which returns a link of the form <code>/invite/&lt;invitationId&gt;</code>. The panel shows the link to copy and send by hand, because invitation email is off until email sending is enabled (<code class="path">apps/web/src/auth.ts:31</code>).</li>
+  </ul>
 
   <h3>Dashboard tabs</h3>
   <p>The Dashboard view has one tab per question, listed in <code>OVERVIEW_TABS</code> (<code class="path">apps/web/app/components/OverviewView.tsx:22</code>).</p>
@@ -36,14 +51,34 @@
   </table>
   <p>The panels in <code>SitePanels.tsx</code> receive data that <code>OverviewView</code> loads once (<code>useResults</code> in <code class="path">apps/web/app/components/site-data.ts</code>, from <code>GET /api/sites/:siteId/results</code>). Report cards are built from <code>ReportTabs.tsx</code>, <code>results/*.tsx</code> and the chart primitives in <code class="path">apps/web/app/components/charts.tsx</code>. Card exports (CSV, Excel, clipboard, Google Sheets) live in <code>apps/web/app/components/export/</code>. What each finding means is on <a href="#findings">Findings</a>.</p>
 
+  <h2 id="account-pages">Sign-in, invitation and admin pages</h2>
+
+  <h3>Sign in: <code>/sign-in</code></h3>
+  <p><code class="path">apps/web/app/sign-in/page.tsx</code> is a server component that reads the flags and renders <code>SignInForm</code> (<code class="path">apps/web/app/sign-in/SignInForm.tsx</code>). One page signs people in and signs them up: the account is created on first use.</p>
+  <ul>
+    <li><strong>Google</strong> is always offered (<code>authClient.signIn.social</code>, <code class="path">apps/web/app/sign-in/SignInForm.tsx:54</code>). It is the only method on Workers Free.</li>
+    <li><strong>Magic link</strong> appears only when <code>EMAIL_ENABLED</code> is <code>"true"</code>. <strong>Email and password</strong> (with a "Create an account" toggle) appears only when <code>PASSWORD_SIGNIN</code> is also <code>"true"</code> (<code>emailEnabled</code> and <code>passwordEnabled</code>, <code class="path">apps/web/src/auth.ts:26</code>).</li>
+    <li><strong>Turnstile</strong> is loaded only when an email method is shown, and its token is sent as <code>x-captcha-response</code>. Better Auth's captcha plugin checks it on sign-up, email sign-in, magic link, password reset and verification email (<code class="path">apps/web/src/auth.ts:118</code>). Tokens are single use, so the widget resets after every attempt.</li>
+    <li><strong><code>next</code></strong> is where to go after signing in. <code>safeNext</code> (<code class="path">apps/web/src/next-path.ts:2</code>) returns it only when it is a path on this site; anything starting <code>//</code> or <code>/\</code>, containing control characters or whitespace, or resolving to another origin becomes <code>/</code>.</li>
+  </ul>
+  <p>The gate sends signed-out page requests here with <code>next</code> set to where they were going, and <code>api()</code> does the same in the browser when any call answers 401 (<code class="path">apps/web/app/components/api.ts:26</code>).</p>
+
+  <h3>Accept an invitation: <code>/invite/:id</code></h3>
+  <p><code class="path">apps/web/app/invite/[id]/page.tsx</code> is public, so a person who has never signed in can open their link. Signed out, it asks them to sign in with the invited address and links to <code>/sign-in?next=/invite/&lt;id&gt;</code>. Signed in, "Accept invitation" calls <code>authClient.organization.acceptInvitation</code>, makes that workspace active, and opens the dashboard. Accepting a Client invitation copies its sites into <code>site_access</code> (<code>afterAcceptInvitation</code>, <code class="path">apps/web/src/auth.ts:107</code>).</p>
+  <p>A new user whose email has a pending, unexpired invitation gets no personal workspace at sign-up, so they land in the invited one (<code>setUpNewUser</code>, <code class="path">packages/db/src/workspaces.ts:32</code>).</p>
+
+  <h3>Platform admin: <code>/admin</code></h3>
+  <p><code class="path">apps/web/app/admin/page.tsx</code> lists every workspace with its site count, people and today's usage against each metered limit, and a form per workspace to change its limits. Numbers left empty mean unlimited; the three features are checkboxes. It reads <code>GET /api/admin/workspaces</code> and saves with <code>PUT /api/admin/workspaces/:workspaceId/limits</code>. Anyone signed in can load the page, but the API answers 404 to anyone who is not a platform admin, and the page then shows "Not found." The dashboard's "Admin" link appears only for platform admins.</p>
+
   <h2 id="client-api">The client API helper</h2>
   <p>Every dashboard call goes through <code>api()</code> in <code class="path">apps/web/app/components/api.ts:10</code>:</p>
   <ul>
     <li><code>api&lt;T&gt;(path, init)</code> calls <code>fetch</code> with <code>cache: "no-store"</code>. Passing <code>json</code> in <code>init</code> serialises it and sets <code>Content-Type: application/json</code>.</li>
-    <li>On a non-2xx response it throws <code>ApiError</code>, carrying the server's <code>{ error }</code> message (or <code>Request failed (status)</code>) and the <code>status</code>.</li>
+    <li>On a 401 it sends the browser to <code>/sign-in?next=&lt;current path&gt;</code>, unless it is already on the sign-in page.</li>
+    <li>On any non-2xx response it throws <code>ApiError</code>, carrying the server's <code>{ error }</code> message (or <code>Request failed (status)</code>) and the <code>status</code>.</li>
     <li><code>errorMessage(error)</code> turns anything caught into a display string.</li>
   </ul>
-  <p>The same file has the formatting helpers <code>formatNumber</code>, <code>formatDay</code> and <code>percent</code>. The one call that does not use <code>api()</code> is the Ask stream (<code>POST /api/sites/:siteId/assistant</code>), which reads server-sent events with a raw <code>fetch</code> in <code>Ask.tsx</code>.</p>
+  <p>The same file has the formatting helpers <code>formatNumber</code>, <code>formatDay</code> and <code>percent</code>. The one dashboard call that does not use <code>api()</code> is the Ask stream (<code>POST /api/sites/:siteId/assistant</code>), which reads server-sent events with a raw <code>fetch</code> in <code>Ask.tsx</code>. Account calls go through <code>authClient</code> (above).</p>
 
   <h2 id="progress-polling">How analysis progress is polled</h2>
   <p><code class="path">apps/web/app/components/AnalysisProgress.tsx</code> polls <code>GET /api/analyses/:analysisId/progress</code> outside React, in a module-level <code>watches</code> map, so polling continues when the user leaves the Dashboard.</p>
@@ -58,154 +93,186 @@
   <p>"Sync now" is polled separately: <code>OverviewView.tsx</code> checks the sync record every four seconds for up to fifteen minutes and asks <code>GET /api/sites/:siteId/results/sync?id=…</code> for the Workflow instance status. See <a href="#flow-sync">Results sync flow</a>.</p>
 
   <h2 id="api-routes">API routes</h2>
-  <p>Each path is a <code>route.ts</code> under <code>apps/web/app/api/</code>; <code>:name</code> is a <code>[name]</code> folder. All are dashboard routes unless the table says otherwise (see <a href="#web-app--access-control">Access control</a>).</p>
+  <p>Each path is a <code>route.ts</code> under <code>apps/web/app/api/</code>; <code>:name</code> is a <code>[name]</code> folder. The <strong>Who</strong> column is the guard each handler calls first (<a href="#web-app--access-control">Access control</a> explains the guards):</p>
+  <dl class="facts">
+    <dt>Public</dt>
+    <dd>The gate lets the request through without a session; the route checks its own credential (a token, a signed link, an <code>Origin</code>).</dd>
+    <dt>Signed in</dt>
+    <dd>Any session (<code>requireViewer</code>).</dd>
+    <dt>Read</dt>
+    <dd>Owner or Member of the site's workspace, or a Client granted that site (<code>requireSite</code> or <code>requireOwned</code> with <code>"read"</code>).</dd>
+    <dt>Member+</dt>
+    <dd>Owner or Member of the site's workspace (<code>"write"</code>). A Client gets 403.</dd>
+    <dt>Owner</dt>
+    <dd>Owner only (<code>"admin"</code>).</dd>
+    <dt>(workspace)</dt>
+    <dd>Checked against the session's active workspace instead of a site (<code>requireWorkspace</code>).</dd>
+    <dt>Platform admin</dt>
+    <dd>A verified email listed in <code>BOOTSTRAP_OWNER_EMAIL</code> (<code>requirePlatformAdmin</code>).</dd>
+  </dl>
+  <p>The <strong>Limit</strong> column names what the call is counted against (<a href="#web-app--access-control">free limits</a>); blank means it is not metered.</p>
+  <p>Routes keyed by an ID other than a site (<code>/api/analyses/:analysisId</code>, <code>/api/changes/:changeId</code>, <code>/api/datasets/:datasetId</code>, <code>/api/jobs/:jobId</code>, <code>/api/records/:recordId</code>, <code>/api/sources/:sourceId</code>, <code>/api/templates/:templateId</code>, <code>/api/pages/:pageId</code>) are guarded through the site that owns the row. <code>requireOwned</code> (<code class="path">apps/web/src/guard.ts:41</code>) looks up the row's <code>site_id</code> in its table (<code>OWNER_TABLES</code>, <code class="path">apps/web/src/access.ts:13</code>), answers 404 if the row does not exist, and then applies the same check as a site route. Every one of those tables carries <code>site_id</code> directly, so there is one lookup per call.</p>
 
   <h3>Sites and settings</h3>
   <table>
-    <thead><tr><th>Method</th><th>Path</th><th>Purpose</th></tr></thead>
+    <thead><tr><th>Method</th><th>Path</th><th>Who</th><th>Limit</th><th>Purpose</th></tr></thead>
     <tbody>
-      <tr><td>GET</td><td><code>/api/sites</code></td><td>List sites.</td></tr>
-      <tr><td>POST</td><td><code>/api/sites</code></td><td>Add a site from a website URL, optionally with a GitHub repository.</td></tr>
-      <tr><td>DELETE</td><td><code>/api/sites/:siteId</code></td><td>Delete a site.</td></tr>
-      <tr><td>GET, PUT</td><td><code>/api/sites/:siteId/settings</code></td><td>Landing-page settings (mount path, public origin and the rest of <code>PageSettings</code>).</td></tr>
-      <tr><td>GET, PUT</td><td><code>/api/sites/:siteId/competitors</code></td><td>Owner-supplied competitor domains.</td></tr>
-      <tr><td>GET, PUT</td><td><code>/api/sites/:siteId/markets</code></td><td>Countries the business sells to (ISO 3166-1 alpha-3).</td></tr>
-      <tr><td>GET</td><td><code>/api/sites/:siteId/graph</code></td><td>How page types link to each other and to Eumon pages; <code>?family=</code> opens one type.</td></tr>
-      <tr><td>GET</td><td><code>/api/sites/:siteId/integration</code></td><td>Detected hosting, proxy snippets, hub and sitemap URLs, and the conversion tracking snippet.</td></tr>
-      <tr><td>POST</td><td><code>/api/sites/:siteId/integration</code></td><td>Verify the live proxy setup as Googlebot on the customer's domain.</td></tr>
-      <tr><td>GET</td><td><code>/api/sites/:siteId/connectors</code></td><td>Which optional keys are set, the log address and token, the IndexNow key file, last deliveries.</td></tr>
+      <tr><td>GET</td><td><code>/api/sites</code></td><td>Read (workspace)</td><td></td><td>The active workspace's sites the user can see: all of them for Owners and Members, the granted ones for a Client.</td></tr>
+      <tr><td>POST</td><td><code>/api/sites</code></td><td>Member+ (workspace)</td><td>Sites</td><td>Add a site to the active workspace from a website URL, optionally with a repository reachable through the workspace's GitHub installations.</td></tr>
+      <tr><td>DELETE</td><td><code>/api/sites/:siteId</code></td><td>Owner</td><td></td><td>Delete a site.</td></tr>
+      <tr><td>GET, PUT</td><td><code>/api/sites/:siteId/settings</code></td><td>Member+</td><td></td><td>Landing-page settings (mount path, public origin and the rest of <code>PageSettings</code>).</td></tr>
+      <tr><td>GET, PUT</td><td><code>/api/sites/:siteId/competitors</code></td><td>GET Read, PUT Member+</td><td></td><td>Competitor domains you supply.</td></tr>
+      <tr><td>GET, PUT</td><td><code>/api/sites/:siteId/markets</code></td><td>GET Read, PUT Member+</td><td></td><td>Countries the business sells to (ISO 3166-1 alpha-3).</td></tr>
+      <tr><td>GET</td><td><code>/api/sites/:siteId/graph</code></td><td>Read</td><td></td><td>How page types link to each other and to Eumon pages; <code>?family=</code> opens one type.</td></tr>
+      <tr><td>GET</td><td><code>/api/sites/:siteId/integration</code></td><td>Member+</td><td></td><td>Detected hosting, proxy snippets, hub and sitemap URLs, and the conversion tracking snippet.</td></tr>
+      <tr><td>POST</td><td><code>/api/sites/:siteId/integration</code></td><td>Member+</td><td></td><td>Verify the live proxy setup as Googlebot on the customer's domain.</td></tr>
+      <tr><td>GET</td><td><code>/api/sites/:siteId/connectors</code></td><td>Member+</td><td></td><td>Which optional keys are set, the log address and token, the IndexNow key file, last deliveries.</td></tr>
+      <tr><td>POST</td><td><code>/api/sites/:siteId/connectors</code></td><td>Member+</td><td></td><td>Rotate the site's log token; returns the new one. The old token stops working at once.</td></tr>
     </tbody>
   </table>
 
   <h3>Analyses and code changes</h3>
   <table>
-    <thead><tr><th>Method</th><th>Path</th><th>Purpose</th></tr></thead>
+    <thead><tr><th>Method</th><th>Path</th><th>Who</th><th>Limit</th><th>Purpose</th></tr></thead>
     <tbody>
-      <tr><td>GET</td><td><code>/api/sites/:siteId/analyses</code></td><td>Latest analysis, the previous completed report while a new one runs, and crawl pace.</td></tr>
-      <tr><td>POST</td><td><code>/api/sites/:siteId/analyses</code></td><td>Start an analysis (<code>{ full: true }</code> re-crawls everything); creates a <code>SiteAnalysisWorkflow</code> instance. 409 if one is already running.</td></tr>
-      <tr><td>GET</td><td><code>/api/analyses/:analysisId</code></td><td>One analysis job.</td></tr>
-      <tr><td>GET</td><td><code>/api/analyses/:analysisId/progress</code></td><td>Live stage, crawl counts, pace and time left (polled, see above).</td></tr>
-      <tr><td>POST</td><td><code>/api/analyses/:analysisId/cancel</code></td><td>Terminate the Workflow and record the analysis as cancelled.</td></tr>
-      <tr><td>GET</td><td><code>/api/analyses/:analysisId/changes</code></td><td>Proposed code changes for this analysis.</td></tr>
-      <tr><td>POST</td><td><code>/api/analyses/:analysisId/changes</code></td><td>Generate a safe config change for a sitemap or indexing finding (needs the GitHub repo and a model).</td></tr>
-      <tr><td>POST</td><td><code>/api/changes/:changeId/pull-request</code></td><td>Open a proposed change as a draft GitHub pull request.</td></tr>
+      <tr><td>GET</td><td><code>/api/sites/:siteId/analyses</code></td><td>Read</td><td></td><td>Latest analysis, the previous completed report while a new one runs, and crawl pace.</td></tr>
+      <tr><td>POST</td><td><code>/api/sites/:siteId/analyses</code></td><td>Member+</td><td>Analyses</td><td>Start an analysis (<code>{ full: true }</code> re-crawls everything); creates a <code>SiteAnalysisWorkflow</code> instance. 409 if one is already running.</td></tr>
+      <tr><td>GET</td><td><code>/api/analyses/:analysisId</code></td><td>Read</td><td></td><td>One analysis job.</td></tr>
+      <tr><td>GET</td><td><code>/api/analyses/:analysisId/progress</code></td><td>Read</td><td></td><td>Live stage, crawl counts, pace and time left (polled, see above).</td></tr>
+      <tr><td>POST</td><td><code>/api/analyses/:analysisId/cancel</code></td><td>Member+</td><td></td><td>Terminate the Workflow and record the analysis as cancelled.</td></tr>
+      <tr><td>GET</td><td><code>/api/analyses/:analysisId/changes</code></td><td>Read</td><td></td><td>Proposed code changes for this analysis.</td></tr>
+      <tr><td>POST</td><td><code>/api/analyses/:analysisId/changes</code></td><td>Member+</td><td>AI runs</td><td>Generate a <code>public/robots.txt</code> change for a sitemap or indexing finding (needs the GitHub repo and a model).</td></tr>
+      <tr><td>POST</td><td><code>/api/changes/:changeId/pull-request</code></td><td>Member+</td><td>Plan: pull requests</td><td>Open a proposed change as a draft GitHub pull request. Refused with 422 unless the stored change is plain <code>public/robots.txt</code>.</td></tr>
     </tbody>
   </table>
 
   <h3>Datasets, sources, records, templates and pages</h3>
   <table>
-    <thead><tr><th>Method</th><th>Path</th><th>Purpose</th></tr></thead>
+    <thead><tr><th>Method</th><th>Path</th><th>Who</th><th>Limit</th><th>Purpose</th></tr></thead>
     <tbody>
-      <tr><td>GET</td><td><code>/api/sites/:siteId/scope</code></td><td>The saved scope proposal.</td></tr>
-      <tr><td>POST</td><td><code>/api/sites/:siteId/scope</code></td><td>Propose datasets (fields, page ideas, sources) from the site and its search data. Uses the model.</td></tr>
-      <tr><td>GET</td><td><code>/api/sites/:siteId/datasets</code></td><td>Datasets with details, and the scope.</td></tr>
-      <tr><td>POST</td><td><code>/api/sites/:siteId/datasets</code></td><td>Create a dataset by hand.</td></tr>
-      <tr><td>PATCH, DELETE</td><td><code>/api/datasets/:datasetId</code></td><td>Edit fields, key field and status; or delete the dataset with its records and pages.</td></tr>
-      <tr><td>GET</td><td><code>/api/datasets/:datasetId/records</code></td><td>Records, paged, with <code>?q=</code> search.</td></tr>
-      <tr><td>POST</td><td><code>/api/datasets/:datasetId/records/import</code></td><td>Import records from CSV.</td></tr>
-      <tr><td>POST</td><td><code>/api/datasets/:datasetId/dedupe</code></td><td>Merge records that name the same entity.</td></tr>
-      <tr><td>GET</td><td><code>/api/datasets/:datasetId/inventory</code></td><td>Field fill rates, duplicates, thin and missing pages.</td></tr>
-      <tr><td>GET</td><td><code>/api/datasets/:datasetId/potential</code></td><td>How many pages the records support per page idea and grouping.</td></tr>
-      <tr><td>POST</td><td><code>/api/datasets/:datasetId/sources</code></td><td>Add a source to a dataset.</td></tr>
-      <tr><td>POST</td><td><code>/api/datasets/:datasetId/scrape</code></td><td>Start collection; creates a <code>ScrapeWorkflow</code> instance and returns its job ID.</td></tr>
-      <tr><td>GET</td><td><code>/api/jobs/:jobId</code></td><td>A collection job with queue counts and recent failures.</td></tr>
-      <tr><td>PATCH, DELETE</td><td><code>/api/sources/:sourceId</code></td><td>Approve or reject a source; or remove it.</td></tr>
-      <tr><td>POST</td><td><code>/api/sources/:sourceId/preview</code></td><td>Preview matches, robots.txt status and a sample extraction before collecting.</td></tr>
-      <tr><td>DELETE</td><td><code>/api/records/:recordId</code></td><td>Delete one record.</td></tr>
-      <tr><td>POST</td><td><code>/api/datasets/:datasetId/templates</code></td><td>Create a template for a page idea or grouping and generate its pages as drafts.</td></tr>
-      <tr><td>GET</td><td><code>/api/sites/:siteId/templates</code></td><td>Templates with page counts.</td></tr>
-      <tr><td>GET, PATCH, DELETE</td><td><code>/api/templates/:templateId</code></td><td>Read, edit copy patterns and display settings, or delete a template.</td></tr>
-      <tr><td>POST</td><td><code>/api/templates/:templateId/generate</code></td><td>Regenerate the template's pages.</td></tr>
-      <tr><td>GET</td><td><code>/api/templates/:templateId/pages</code></td><td>The template's pages, paged and filterable by status.</td></tr>
-      <tr><td>POST</td><td><code>/api/templates/:templateId/publish</code></td><td>Publish every quality-passing page, or unpublish with <code>{ publish: false }</code>.</td></tr>
-      <tr><td>PATCH</td><td><code>/api/pages/:pageId</code></td><td>Edit one page or change its status; each change is logged for measurement.</td></tr>
-      <tr><td>POST</td><td><code>/api/pages/:pageId/snippets</code></td><td>Three alternative titles and descriptions from the page's facts and real queries. Uses the model.</td></tr>
-      <tr><td>GET, POST</td><td><code>/api/sites/:siteId/cta-variants</code></td><td>List CTA variants; add one (the first also enrols the current CTA as control).</td></tr>
-      <tr><td>PATCH</td><td><code>/api/sites/:siteId/cta-variants/:variantId</code></td><td>Turn a variant on or off (<code>{ active }</code>).</td></tr>
+      <tr><td>GET</td><td><code>/api/sites/:siteId/scope</code></td><td>Member+</td><td></td><td>The saved scope proposal.</td></tr>
+      <tr><td>POST</td><td><code>/api/sites/:siteId/scope</code></td><td>Member+</td><td>AI runs</td><td>Propose datasets (fields, page ideas, sources) from the site and its search data. Uses the model.</td></tr>
+      <tr><td>GET</td><td><code>/api/sites/:siteId/datasets</code></td><td>Read</td><td></td><td>Datasets with details, and the scope.</td></tr>
+      <tr><td>POST</td><td><code>/api/sites/:siteId/datasets</code></td><td>Member+</td><td></td><td>Create a dataset by hand.</td></tr>
+      <tr><td>PATCH, DELETE</td><td><code>/api/datasets/:datasetId</code></td><td>Member+</td><td></td><td>Edit fields, key field and status; or delete the dataset with its records and pages.</td></tr>
+      <tr><td>GET</td><td><code>/api/datasets/:datasetId/records</code></td><td>Read</td><td></td><td>Records, paged, with <code>?q=</code> search.</td></tr>
+      <tr><td>POST</td><td><code>/api/datasets/:datasetId/records/import</code></td><td>Member+</td><td></td><td>Import records from CSV.</td></tr>
+      <tr><td>POST</td><td><code>/api/datasets/:datasetId/dedupe</code></td><td>Member+</td><td>AI runs</td><td>Merge records that name the same entity.</td></tr>
+      <tr><td>GET</td><td><code>/api/datasets/:datasetId/inventory</code></td><td>Read</td><td></td><td>Field fill rates, duplicates, thin and missing pages.</td></tr>
+      <tr><td>GET</td><td><code>/api/datasets/:datasetId/potential</code></td><td>Read</td><td></td><td>How many pages the records support per page idea and grouping.</td></tr>
+      <tr><td>POST</td><td><code>/api/datasets/:datasetId/sources</code></td><td>Member+</td><td></td><td>Add a source to a dataset.</td></tr>
+      <tr><td>POST</td><td><code>/api/datasets/:datasetId/scrape</code></td><td>Member+</td><td>Scrape pages</td><td>Start collection; creates a <code>ScrapeWorkflow</code> instance and returns its job ID. Charged the sum of the chosen sources' <code>maxPages</code>.</td></tr>
+      <tr><td>GET</td><td><code>/api/jobs/:jobId</code></td><td>Read</td><td></td><td>A collection job with queue counts and recent failures.</td></tr>
+      <tr><td>PATCH, DELETE</td><td><code>/api/sources/:sourceId</code></td><td>Member+</td><td></td><td>Approve or reject a source; or remove it.</td></tr>
+      <tr><td>POST</td><td><code>/api/sources/:sourceId/preview</code></td><td>Member+</td><td>AI runs</td><td>Preview matches, robots.txt status and a sample extraction before collecting.</td></tr>
+      <tr><td>DELETE</td><td><code>/api/records/:recordId</code></td><td>Member+</td><td></td><td>Delete one record.</td></tr>
+      <tr><td>POST</td><td><code>/api/datasets/:datasetId/templates</code></td><td>Member+</td><td>AI runs, when the model designs it</td><td>Create a template for a page idea or grouping and generate its pages as drafts.</td></tr>
+      <tr><td>GET</td><td><code>/api/sites/:siteId/templates</code></td><td>Read</td><td></td><td>Templates with page counts.</td></tr>
+      <tr><td>GET, PATCH, DELETE</td><td><code>/api/templates/:templateId</code></td><td>GET Read, PATCH and DELETE Member+</td><td></td><td>Read, edit copy patterns and display settings, or delete a template.</td></tr>
+      <tr><td>POST</td><td><code>/api/templates/:templateId/generate</code></td><td>Member+</td><td>AI runs</td><td>Regenerate the template's pages.</td></tr>
+      <tr><td>GET</td><td><code>/api/templates/:templateId/pages</code></td><td>Read</td><td></td><td>The template's pages, paged and filterable by status.</td></tr>
+      <tr><td>POST</td><td><code>/api/templates/:templateId/publish</code></td><td>Member+</td><td></td><td>Publish every quality-passing page, or unpublish with <code>{ publish: false }</code>.</td></tr>
+      <tr><td>PATCH</td><td><code>/api/pages/:pageId</code></td><td>Member+</td><td></td><td>Edit one page or change its status; each change is logged for measurement.</td></tr>
+      <tr><td>POST</td><td><code>/api/pages/:pageId/snippets</code></td><td>Member+</td><td>AI runs</td><td>Three alternative titles and descriptions from the page's facts and real queries. Uses the model.</td></tr>
+      <tr><td>GET, POST</td><td><code>/api/sites/:siteId/cta-variants</code></td><td>GET Read, POST Member+</td><td></td><td>List CTA variants; add one (the first also enrols the current CTA as control).</td></tr>
+      <tr><td>PATCH</td><td><code>/api/sites/:siteId/cta-variants/:variantId</code></td><td>Member+</td><td></td><td>Turn a variant on or off (<code>{ active }</code>).</td></tr>
     </tbody>
   </table>
 
   <h3>Results and sync</h3>
   <table>
-    <thead><tr><th>Method</th><th>Path</th><th>Purpose</th></tr></thead>
+    <thead><tr><th>Method</th><th>Path</th><th>Who</th><th>Limit</th><th>Purpose</th></tr></thead>
     <tbody>
-      <tr><td>GET</td><td><code>/api/sites/:siteId/results</code></td><td>The full Results payload the Dashboard tabs read.</td></tr>
-      <tr><td>POST</td><td><code>/api/sites/:siteId/results/sync</code></td><td>"Sync now": start (or join) a manual <code>SearchSyncWorkflow</code> run. 202, or 409 while the daily run is going.</td></tr>
-      <tr><td>GET</td><td><code>/api/sites/:siteId/results/sync</code></td><td>Status of one of the site's sync instances.</td></tr>
-      <tr><td>GET</td><td><code>/api/sites/:siteId/sync-runs</code></td><td>Latest syncs and what each source said (Setup, Sync history).</td></tr>
-      <tr><td>POST</td><td><code>/api/sites/:siteId/search-sync</code></td><td>Import the last 28 days of Search Console data for generated pages, inline (no Workflow).</td></tr>
-      <tr><td>GET</td><td><code>/api/sites/:siteId/performance</code></td><td>Which generated pages perform, suggestions, and whether past changes worked.</td></tr>
-      <tr><td>GET</td><td><code>/api/sites/:siteId/index-coverage</code></td><td>What Google did with the sitemap URLs (URL Inspection results).</td></tr>
-      <tr><td>GET, POST</td><td><code>/api/sites/:siteId/ga4/properties</code></td><td>List GA4 properties the Google connection can read; choose one.</td></tr>
-      <tr><td>POST</td><td><code>/api/sites/:siteId/share</code></td><td>Issue a client share link (<code>/r/&lt;token&gt;</code>).</td></tr>
-      <tr><td>DELETE</td><td><code>/api/sites/:siteId/share</code></td><td>Revoke every link issued so far (bumps the site's share version).</td></tr>
-      <tr><td>GET</td><td><code>/api/r/:token</code></td><td><strong>Public.</strong> The client's read-only Results for a valid token; 404 when expired or revoked.</td></tr>
+      <tr><td>GET</td><td><code>/api/sites/:siteId/results</code></td><td>Read</td><td></td><td>The full Results payload the Dashboard tabs read.</td></tr>
+      <tr><td>POST</td><td><code>/api/sites/:siteId/results/sync</code></td><td>Member+</td><td></td><td>"Sync now": start (or join) a manual <code>SearchSyncWorkflow</code> run. 202, or 409 while the daily run is going.</td></tr>
+      <tr><td>GET</td><td><code>/api/sites/:siteId/results/sync</code></td><td>Read</td><td></td><td>Status of one of the site's sync instances.</td></tr>
+      <tr><td>GET</td><td><code>/api/sites/:siteId/sync-runs</code></td><td>Read</td><td></td><td>Latest syncs and what each source said (Setup, Sync history).</td></tr>
+      <tr><td>POST</td><td><code>/api/sites/:siteId/search-sync</code></td><td>Member+</td><td></td><td>Import the last 28 days of Search Console data for generated pages, inline (no Workflow).</td></tr>
+      <tr><td>GET</td><td><code>/api/sites/:siteId/performance</code></td><td>Read</td><td></td><td>Which generated pages perform, suggestions, and whether past changes worked.</td></tr>
+      <tr><td>GET</td><td><code>/api/sites/:siteId/index-coverage</code></td><td>Read</td><td></td><td>What Google did with the sitemap URLs (URL Inspection results).</td></tr>
+      <tr><td>GET, POST</td><td><code>/api/sites/:siteId/ga4/properties</code></td><td>Member+</td><td></td><td>List GA4 properties the Google connection can read; choose one.</td></tr>
+      <tr><td>POST</td><td><code>/api/sites/:siteId/share</code></td><td>Member+</td><td></td><td>Issue a client share link (<code>/r/&lt;token&gt;</code>).</td></tr>
+      <tr><td>DELETE</td><td><code>/api/sites/:siteId/share</code></td><td>Member+</td><td></td><td>Revoke every link issued so far (bumps the site's share version).</td></tr>
+      <tr><td>GET</td><td><code>/api/r/:token</code></td><td>Public</td><td></td><td>The client's read-only Results for a valid token; 404 when expired or revoked.</td></tr>
     </tbody>
   </table>
 
   <h3>Search Console</h3>
   <table>
-    <thead><tr><th>Method</th><th>Path</th><th>Purpose</th></tr></thead>
+    <thead><tr><th>Method</th><th>Path</th><th>Who</th><th>Limit</th><th>Purpose</th></tr></thead>
     <tbody>
-      <tr><td>GET</td><td><code>/api/sites/:siteId/gsc/connect</code></td><td>Redirect to Google OAuth with signed state (Search Console, Analytics, Drive file scopes).</td></tr>
-      <tr><td>GET, POST</td><td><code>/api/sites/:siteId/gsc/properties</code></td><td>List Search Console properties; choose one (must be accessible to the account).</td></tr>
-      <tr><td>GET</td><td><code>/api/sites/:siteId/search-console</code></td><td>Imported URL lists reconciled with today, totals, redirect suggestions, indexed counts over time.</td></tr>
-      <tr><td>POST</td><td><code>/api/sites/:siteId/search-console/import</code></td><td>Import one Search Console CSV export.</td></tr>
-      <tr><td>POST</td><td><code>/api/sites/:siteId/search-console/check</code></td><td>Fetch the next few imported URLs the crawl doesn't know; called until none remain.</td></tr>
+      <tr><td>GET</td><td><code>/api/sites/:siteId/gsc/connect</code></td><td>Member+</td><td></td><td>Redirect to Google OAuth (Search Console, Analytics, Drive file scopes) with signed state and a nonce cookie (see <a href="#web-app--access-control">Access control</a>).</td></tr>
+      <tr><td>GET, POST</td><td><code>/api/sites/:siteId/gsc/properties</code></td><td>Member+</td><td></td><td>List Search Console properties; choose one (must be accessible to the account).</td></tr>
+      <tr><td>GET</td><td><code>/api/sites/:siteId/search-console</code></td><td>Read</td><td></td><td>Imported URL lists reconciled with today, totals, redirect suggestions, indexed counts over time.</td></tr>
+      <tr><td>POST</td><td><code>/api/sites/:siteId/search-console/import</code></td><td>Member+</td><td></td><td>Import one Search Console CSV export.</td></tr>
+      <tr><td>POST</td><td><code>/api/sites/:siteId/search-console/check</code></td><td>Member+</td><td></td><td>Fetch the next few imported URLs the crawl doesn't know; called until none remain.</td></tr>
     </tbody>
   </table>
 
   <h3>History</h3>
   <table>
-    <thead><tr><th>Method</th><th>Path</th><th>Purpose</th></tr></thead>
+    <thead><tr><th>Method</th><th>Path</th><th>Who</th><th>Limit</th><th>Purpose</th></tr></thead>
     <tbody>
-      <tr><td>GET</td><td><code>/api/sites/:siteId/history</code></td><td>Problems that went away, what fixed them, and every action taken through Eumon.</td></tr>
+      <tr><td>GET</td><td><code>/api/sites/:siteId/history</code></td><td>Read</td><td></td><td>Problems that went away, what fixed them, and every action taken through Eumon.</td></tr>
     </tbody>
   </table>
 
   <h3>Leads, events and logs</h3>
   <table>
-    <thead><tr><th>Method</th><th>Path</th><th>Purpose</th></tr></thead>
+    <thead><tr><th>Method</th><th>Path</th><th>Who</th><th>Limit</th><th>Purpose</th></tr></thead>
     <tbody>
-      <tr><td>OPTIONS, POST</td><td><code>/api/sites/:siteId/events</code></td><td><strong>Public, CORS.</strong> Conversion events from the customer's site (see below).</td></tr>
-      <tr><td>GET</td><td><code>/api/sites/:siteId/events/recent</code></td><td>Latest events received, to check the tracker is installed.</td></tr>
-      <tr><td>GET</td><td><code>/api/sites/:siteId/events/summary</code></td><td>Conversion totals.</td></tr>
-      <tr><td>GET</td><td><code>/api/sites/:siteId/leads</code></td><td>Latest 50 leads (<code>?open=1</code> for unresolved), or one lead by <code>?find=</code> code or pasted message.</td></tr>
-      <tr><td>POST</td><td><code>/api/sites/:siteId/leads</code></td><td>Enter an enquiry by hand.</td></tr>
-      <tr><td>PATCH</td><td><code>/api/sites/:siteId/leads/:leadId</code></td><td>Move a lead on (chat, qualified, customer, lost), set value or note.</td></tr>
-      <tr><td>POST</td><td><code>/api/logs/:siteId</code></td><td><strong>Token-checked.</strong> Access-log deliveries (Cloudflare Logpush, Vercel log drain, the forwarding Worker, or an uploaded nginx/Apache log). Up to 24 MB; only crawler requests are kept.</td></tr>
+      <tr><td>OPTIONS, POST</td><td><code>/api/sites/:siteId/events</code></td><td>Public, CORS</td><td></td><td>Conversion events from the customer's site (see below).</td></tr>
+      <tr><td>GET</td><td><code>/api/sites/:siteId/events/recent</code></td><td>Read</td><td></td><td>Latest events received, to check the tracker is installed.</td></tr>
+      <tr><td>GET</td><td><code>/api/sites/:siteId/events/summary</code></td><td>Read</td><td></td><td>Conversion totals.</td></tr>
+      <tr><td>GET</td><td><code>/api/sites/:siteId/leads</code></td><td>Read</td><td></td><td>Latest 50 leads (<code>?open=1</code> for unresolved), or one lead by <code>?find=</code> code or pasted message.</td></tr>
+      <tr><td>POST</td><td><code>/api/sites/:siteId/leads</code></td><td>Member+</td><td></td><td>Enter an enquiry by hand.</td></tr>
+      <tr><td>PATCH</td><td><code>/api/sites/:siteId/leads/:leadId</code></td><td>Member+</td><td></td><td>Move a lead on (chat, qualified, customer, lost), set value or note.</td></tr>
+      <tr><td>POST</td><td><code>/api/logs/:siteId</code></td><td>Public, log token</td><td></td><td>Access-log deliveries (Cloudflare Logpush, Vercel log drain, the forwarding Worker, or an uploaded nginx/Apache log). Up to 24 MB; only crawler requests are kept.</td></tr>
     </tbody>
   </table>
 
   <h3>Ask Eumon</h3>
   <table>
-    <thead><tr><th>Method</th><th>Path</th><th>Purpose</th></tr></thead>
+    <thead><tr><th>Method</th><th>Path</th><th>Who</th><th>Limit</th><th>Purpose</th></tr></thead>
     <tbody>
-      <tr><td>POST</td><td><code>/api/sites/:siteId/assistant</code></td><td>Answer one question as server-sent events (<code>thread</code>, <code>status</code>, <code>text</code>, <code>block</code>, <code>error</code>, <code>done</code>); saved to the thread even if the browser leaves.</td></tr>
-      <tr><td>GET</td><td><code>/api/sites/:siteId/assistant/threads</code></td><td>The site's conversations, most recent first.</td></tr>
-      <tr><td>GET, DELETE</td><td><code>/api/sites/:siteId/assistant/threads/:threadId</code></td><td>One conversation's messages; delete it.</td></tr>
+      <tr><td>POST</td><td><code>/api/sites/:siteId/assistant</code></td><td>Member+</td><td>Ask</td><td>Answer one question as server-sent events (<code>thread</code>, <code>status</code>, <code>text</code>, <code>block</code>, <code>error</code>, <code>done</code>); saved to the thread even if the browser leaves.</td></tr>
+      <tr><td>GET</td><td><code>/api/sites/:siteId/assistant/threads</code></td><td>Member+</td><td></td><td>The site's conversations, most recent first.</td></tr>
+      <tr><td>GET, DELETE</td><td><code>/api/sites/:siteId/assistant/threads/:threadId</code></td><td>Member+</td><td></td><td>One conversation's messages; delete it.</td></tr>
     </tbody>
   </table>
 
   <h3>GitHub and Google</h3>
   <table>
-    <thead><tr><th>Method</th><th>Path</th><th>Purpose</th></tr></thead>
+    <thead><tr><th>Method</th><th>Path</th><th>Who</th><th>Limit</th><th>Purpose</th></tr></thead>
     <tbody>
-      <tr><td>GET</td><td><code>/api/github/install</code></td><td>Redirect to the GitHub App install page with a state cookie (<code>og_github_state</code>).</td></tr>
-      <tr><td>GET</td><td><code>/api/github/callback</code></td><td>Check the state, store the installation ID in a signed <code>og_installation</code> cookie, redirect to the dashboard.</td></tr>
-      <tr><td>GET</td><td><code>/api/github/repositories</code></td><td>Repositories the installation in the cookie can see.</td></tr>
-      <tr><td>GET</td><td><code>/api/google/callback</code></td><td>Google OAuth callback: verify state, save the encrypted refresh token, redirect to the dashboard.</td></tr>
+      <tr><td>GET</td><td><code>/api/github/install</code></td><td>Member+ (workspace)</td><td></td><td>Redirect to the GitHub App install page with a state cookie (<code>og_github_state</code>).</td></tr>
+      <tr><td>GET</td><td><code>/api/github/callback</code></td><td>Member+ (workspace)</td><td></td><td>Check the state cookie and that the installer owns the installation, store it for the active workspace, redirect to the dashboard.</td></tr>
+      <tr><td>GET</td><td><code>/api/github/repositories</code></td><td>Member+ (workspace)</td><td></td><td>Repositories reachable through the active workspace's installations.</td></tr>
+      <tr><td>GET</td><td><code>/api/google/callback</code></td><td>Member+ on the site named in the state</td><td></td><td>Google OAuth callback: verify state, nonce cookie and user, save the encrypted refresh token, redirect to the dashboard.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Accounts and admin</h3>
+  <table>
+    <thead><tr><th>Method</th><th>Path</th><th>Who</th><th>Limit</th><th>Purpose</th></tr></thead>
+    <tbody>
+      <tr><td>GET</td><td><code>/api/me</code></td><td>Signed in</td><td></td><td>The user, their workspaces and roles, the active workspace, and whether they are a platform admin.</td></tr>
+      <tr><td>POST</td><td><code>/api/workspace/invitations</code></td><td>Owner (workspace)</td><td>People</td><td>Invite <code>{ email, role, siteIds }</code> to the active workspace; returns <code>{ invitationId, link }</code> with 201. A Client invitation needs at least one of the workspace's sites. Over the people limit, the answer is 400 with the reason.</td></tr>
+      <tr><td>GET</td><td><code>/api/admin/workspaces</code></td><td>Platform admin</td><td></td><td>The free defaults, and every workspace with its sites, people, today's usage and limit overrides.</td></tr>
+      <tr><td>PUT</td><td><code>/api/admin/workspaces/:workspaceId/limits</code></td><td>Platform admin</td><td></td><td>Replace a workspace's overrides. Numbers must be whole and non-negative, or <code>null</code> for unlimited; features <code>true</code> or <code>false</code>; unknown keys are dropped.</td></tr>
+      <tr><td>any</td><td><code>/api/auth/*</code></td><td>Public</td><td></td><td>Better Auth's own endpoints (sign-in, sign-up, session, OAuth callback, organization). There is no route file: <code class="path">apps/web/worker.ts:33</code> hands these to <code>authFor(env).handler</code>.</td></tr>
     </tbody>
   </table>
 
   <h3>Export and dev</h3>
   <table>
-    <thead><tr><th>Method</th><th>Path</th><th>Purpose</th></tr></thead>
+    <thead><tr><th>Method</th><th>Path</th><th>Who</th><th>Limit</th><th>Purpose</th></tr></thead>
     <tbody>
-      <tr><td>POST</td><td><code>/api/sites/:siteId/export/sheets</code></td><td>Create a Google Sheet from a report export using the site's Google connection.</td></tr>
-      <tr><td>POST</td><td><code>/api/dev/demo-site</code></td><td>Build or rebuild the fictional demo site. Returns 404 in a production build unless the request is addressed to localhost.</td></tr>
+      <tr><td>POST</td><td><code>/api/sites/:siteId/export/sheets</code></td><td>Member+</td><td>Plan: Sheets export</td><td>Create a Google Sheet from a report export using the site's Google connection.</td></tr>
+      <tr><td>POST</td><td><code>/api/dev/demo-site</code></td><td>Member+ (workspace)</td><td></td><td>Build or rebuild the fictional demo site and move it into the active workspace. Returns 404 in a production build unless the request is addressed to localhost.</td></tr>
     </tbody>
   </table>
+  <p><code class="path">apps/web/src/routes-guarded.test.ts</code> walks every <code>route.ts</code> and fails if a handler does not call one of the <code>require*</code> guards, apart from the three public ones (events, <code>/api/r/:token</code>, logs). A new route without a guard fails the test suite, and the gate would still refuse it to signed-out callers.</p>
 
   <h2 id="server-helpers">Shared server helpers</h2>
   <p><code class="path">apps/web/src/server.ts</code> holds the helpers most routes use:</p>
@@ -214,8 +281,8 @@
     <dd>JSON response with <code>Cache-Control: no-store</code>.</dd>
     <dt><code>fail(message, status = 400)</code></dt>
     <dd><code>{ error: message }</code> with <code>no-store</code>. This is the shape <code>api()</code> reads on the client.</dd>
-    <dt><code>readText(request, maxBytes)</code>, <code>readJson(request, maxBytes = 64 KB)</code></dt>
-    <dd>Read a body without trusting <code>Content-Length</code>; return <code>null</code> when it is too large or not a JSON object.</dd>
+    <dt><code>readText(source, maxBytes)</code>, <code>readJson(request, maxBytes = 64 KB)</code></dt>
+    <dd>Read a body without trusting <code>Content-Length</code>; return <code>null</code> when it is too large or not a JSON object. <code>readText</code> now lives in <code class="path">apps/web/src/body.ts</code> and works on requests and responses; <code>server.ts</code> re-exports it.</dd>
     <dt><code>appLlm()</code></dt>
     <dd>The configured model from <code>createLlm</code>, or a 503 response explaining how to configure one.</dd>
     <dt><code>llmFailure(error)</code></dt>
@@ -225,15 +292,16 @@
     <dt><code>isPublicHttpUrl(value)</code></dt>
     <dd>A URL string of at most 2048 characters that passes the crawler's <code>isSafePublicUrl</code>.</dd>
   </dl>
-  <p>Some older routes call <code>Response.json</code> directly with the same <code>{ error }</code> shape. Other server-side modules in <code>apps/web/src/</code> back specific routes: <code>public-pages.ts</code> (landing pages), <code>share.ts</code> (share tokens), <code>crawl-logs.ts</code> (log ingest), <code>gsc-auth.ts</code> (Google tokens), <code>results-data.ts</code> and <code>results-access.ts</code> (Results payload and keys), and the three Workflow files.</p>
+  <p>Some older routes call <code>Response.json</code> directly with the same <code>{ error }</code> shape. Other server-side modules in <code>apps/web/src/</code> back specific routes: <code>public-pages.ts</code> (landing pages), <code>share.ts</code> (share tokens), <code>crawl-logs.ts</code> (log ingest), <code>gsc-auth.ts</code> (Google tokens), <code>results-data.ts</code> and <code>results-access.ts</code> (Results payload and keys), and the three Workflow files. The access modules are <code>gate.ts</code>, <code>guard.ts</code>, <code>access.ts</code>, <code>limits.ts</code>, <code>auth.ts</code> (Better Auth), <code>auth-paths.ts</code>, <code>headers.ts</code>, <code>next-path.ts</code>, <code>github-install.ts</code>, <code>google-state.ts</code> and <code>passwords.ts</code>, all described below.</p>
 
   <h2 id="public-routes">Public routes</h2>
 
   <h3>Landing pages: <code>/p/:siteId/…</code></h3>
   <p><code class="path">apps/web/app/p/[siteId]/[[...path]]/route.ts</code> exports <code>GET</code>, <code>HEAD</code> and <code>POST</code>. It looks up the site (404 if unknown) and hands off to <code class="path">apps/web/src/public-pages.ts</code>:</p>
   <ul>
-    <li><code>servePublicGet</code> (<code class="path">apps/web/src/public-pages.ts:86</code>) serves, under the site's mount path: a health check at <code>/__eumon/health</code>, the IndexNow key file, <code>sitemap.xml</code>, <code>robots.txt</code> (only when there is no mount path), the hub page, and each published page. Unpublished or retired pages return 410.</li>
+    <li><code>servePublicGet</code> (<code class="path">apps/web/src/public-pages.ts:87</code>) serves, under the site's mount path: a health check at <code>/__eumon/health</code>, the IndexNow key file, <code>sitemap.xml</code>, <code>robots.txt</code> (only when there is no mount path), the hub page, and each published page. Unpublished or retired pages return 410.</li>
     <li>Responses carry <code>X-Robots-Tag: noindex</code> unless the request came through the customer's proxy (<code>X-Eumon-Proxy: 1</code> or a matching <code>X-Forwarded-Host</code>).</li>
+    <li>HTML responses carry <code>PAGE_HEADERS</code> (<code class="path">apps/web/src/headers.ts:15</code>), not the dashboard's headers, because the customer's site may frame them.</li>
     <li><code>POST</code> is accepted only on the beacon path <code>/__eumon/e</code>: <code>servePublicBeacon</code> records page views and CTA clicks from the rendered page's inline script, with first-touch session attribution through the <code>eumon_sid</code> cookie.</li>
   </ul>
   <p>The full flow from dataset to served page is on <a href="#flow-pages">Landing page flow</a>.</p>
@@ -248,27 +316,114 @@
   </ul>
 
   <h3>Client share link: <code>/r/:token</code></h3>
-  <p><code class="path">apps/web/app/r/[token]/page.tsx</code> renders <code>ClientReport</code>, which loads <code>GET /api/r/:token</code> and shows the Results sections read-only, without site health, AI readiness checks or controls. The token is signed with <code>SESSION_SECRET</code>, carries <code>purpose: "results"</code>, the site ID and the site's share version, and lasts five years (<code class="path">apps/web/src/share.ts</code>). Revoking bumps the share version, which invalidates every earlier token.</p>
+  <p><code class="path">apps/web/app/r/[token]/page.tsx</code> renders <code>ClientReport</code>, which loads <code>GET /api/r/:token</code> and shows the Results sections read-only, without site health, AI readiness checks or controls. The token is signed with <code>SESSION_SECRET</code>, carries <code>purpose: "results"</code>, the site ID and the site's share version, and lasts five years (<code class="path">apps/web/src/share.ts</code>). Revoking bumps the share version, which invalidates every earlier token. Share links need no account; a Client account is the signed-in alternative.</p>
 
   <h3>PWA files</h3>
-  <p><code>apps/web/public/</code> holds <code>manifest.json</code> and the icons, referenced from <code class="path">apps/web/app/layout.tsx</code>, so the dashboard can be installed as a standalone app. <code>public/sw.js</code> is a retired service worker: nothing registers it any more, and its only job is to clear the old offline cache and unregister itself in browsers that installed an earlier version.</p>
+  <p><code>apps/web/public/</code> holds <code>manifest.json</code> and the icons, referenced from <code class="path">apps/web/app/layout.tsx</code>, so the dashboard can be installed as a standalone app. <code>public/sw.js</code> is still a retired service worker: nothing registers it, and its only job is to clear the old offline cache and unregister itself in browsers that installed an earlier version. The gate lists <code>/sw.js</code> as public (<code class="path">apps/web/src/gate.ts:14</code>) so a browser without a session can still fetch it and clean up. The same line lists <code>/sw-register.js</code>, which no longer exists in <code>public/</code>.</p>
 
   <h2 id="access-control">Access control</h2>
-  <p>On <code>main</code> the app has no user accounts, no sign-in and no middleware yet; built-in accounts and roles are on the way and will replace this section. Dashboard routes do not check who is calling. The intended protection is <strong>Cloudflare Access</strong> in front of the hostname, configured in Cloudflare, not in this repo (<code class="path">apps/web/README.md</code>, "Access control").</p>
-  <p>The README lists the paths that must be excluded from Access, or landing pages and tracking stop working:</p>
+  <p>The app has its own accounts, built on Better Auth with its tables in D1 (migration <code>0024_accounts.sql</code>). Every request passes two checks: the gate in the Worker, then a guard in the route. Cloudflare Access is not part of it.</p>
+
+  <h3>The gate</h3>
+  <p><code class="path">apps/web/worker.ts:31</code> wraps vinext's handler. Before any page or route runs:</p>
+  <ol>
+    <li><code>/api/auth/*</code> goes straight to Better Auth. Non-GET calls (sign-in, sign-up, magic link) are first rate limited by the <code>AUTH_RATE_LIMIT</code> binding, 10 a minute per <code>cf-connecting-ip</code>, and answer 429 past that. The endpoints that list a workspace's people (<code>get-full-organization</code>, <code>list-members</code>, <code>list-invitations</code>) answer 403 to a Client of any workspace the request could resolve to (<code class="path">apps/web/src/auth-paths.ts:2</code>), because Better Auth only checks membership there.</li>
+    <li>Everything else goes through <code>gate(request, signedIn)</code> (<code class="path">apps/web/src/gate.ts:21</code>).</li>
+  </ol>
+  <p>The gate's rules:</p>
   <ul>
-    <li><code>/p/*</code>: landing pages, sitemap and the analytics beacon.</li>
-    <li><code>/api/sites/*/events</code>: conversion events from customer sites.</li>
-    <li><code>/r/*</code> and <code>/api/r/*</code>: client Results links (signed, revocable tokens).</li>
+    <li><strong>Public paths pass</strong> (<code>PUBLIC</code>, <code class="path">apps/web/src/gate.ts:7</code>): <code>/p/*</code>; <code>/api/sites/:siteId/events</code>; <code>/r/*</code> and <code>/api/r/*</code>; <code>/api/logs/*</code>; <code>/api/auth/*</code>; <code>/sign-in</code> and <code>/invite/*</code>; and the static files <code>/manifest.json</code>, <code>/sw.js</code>, <code>/sw-register.js</code>, <code>/favicon.ico</code>, <code>/robots.txt</code>, <code>/icon-*.png</code> and <code>/assets/*</code>.</li>
+    <li><strong>A session is required</strong> for everything else. Signed out, <code>/api/*</code> answers 401 <code>{ error: "Sign in to continue." }</code> and a page answers 303 to <code>/sign-in?next=&lt;path&gt;</code>.</li>
+    <li><strong>Writes must come from Eumon's pages.</strong> A signed-in <code>/api/*</code> request with a method other than GET, HEAD or OPTIONS whose <code>Origin</code> header is not the app's own origin answers 403 (public paths are exempt; they never reach this check). The session cookie rides along on cross-site requests, so this is the CSRF check.</li>
   </ul>
-  <p>What the code itself checks today:</p>
+  <p>A route someone forgets to guard is therefore still not public. The gate only proves that someone is signed in; whether they may touch a given site is the guard's job.</p>
+  <p>Responses outside <code>/p/*</code> get <code>APP_HEADERS</code> (<code class="path">apps/web/src/headers.ts:7</code>): <code>X-Content-Type-Options: nosniff</code>, <code>Referrer-Policy: strict-origin-when-cross-origin</code>, <code>X-Frame-Options: DENY</code>, and a CSP of <code>frame-ancestors 'none'; base-uri 'self'; object-src 'none'</code>. Neither header set restricts <code>script-src</code>: vinext writes inline scripts and the landing-page beacon is inline, so a script policy would need per-request nonces. The renderer's escaping is the XSS defence until then.</p>
+
+  <h3>Roles</h3>
+  <p>A workspace is a Better Auth organization; a person's role is their <code>member.role</code> in it. <code>allows(role, need)</code> (<code class="path">apps/web/src/access.ts:6</code>) is the whole rule: Owners pass everything, Members pass <code>read</code> and <code>write</code>, Clients pass <code>read</code> only.</p>
+  <table>
+    <thead><tr><th>Role</th><th>Sees</th><th>Can</th></tr></thead>
+    <tbody>
+      <tr><td>Owner</td><td>Every site in the workspace</td><td>Everything a Member can, plus delete sites (<code>DELETE /api/sites/:siteId</code> is <code>admin</code>), invite people and remove them.</td></tr>
+      <tr><td>Member</td><td>Every site in the workspace</td><td>Read and change every site: add sites (within limits), run analyses, connect GitHub and Google, manage data and landing pages, publish, open pull requests, use Ask, export. Sees the People list but cannot invite.</td></tr>
+      <tr><td>Client</td><td>Only the sites in <code>site_access</code> for them</td><td>Read only: the Results dashboard, landing pages and their results, leads, history. No settings, connections, Ask, publishing, deletes, pull requests or exports, and not the workspace's People list.</td></tr>
+    </tbody>
+  </table>
+  <p>Better Auth's own permissions match: <code>client</code> is defined with no organization, member or invitation permissions (<code class="path">apps/web/src/auth.ts:40</code>).</p>
+
+  <h3>Route guards</h3>
+  <p>Every API handler calls one helper from <code class="path">apps/web/src/guard.ts</code> before doing anything. The session comes from Better Auth's signed cookie cache (five minutes), so most calls read no session row from D1.</p>
+  <table>
+    <thead><tr><th>Guard</th><th>Checks</th><th>Refusals</th></tr></thead>
+    <tbody>
+      <tr><td><code>requireViewer(request)</code></td><td>A session exists.</td><td>401</td></tr>
+      <tr><td><code>requireSite(request, siteId, need)</code></td><td>The user can see the site (<code>siteForUser</code>, <code class="path">packages/db/src/index.ts:1370</code>: Owner or Member of its workspace, or a Client granted it), and their role allows <code>need</code>.</td><td>401 signed out; 404 for a site they can't see, the same as a missing one; 403 when the role is too low.</td></tr>
+      <tr><td><code>requireOwned(request, kind, id, need)</code></td><td>Resolves the row's site, then <code>requireSite</code>.</td><td>404 for an unknown ID, then as above.</td></tr>
+      <tr><td><code>requireWorkspace(request, need)</code></td><td>The session's active workspace, the user's current role in it, and <code>need</code>.</td><td>401; 409 with no active workspace; 403 if no longer a member or the role is too low.</td></tr>
+      <tr><td><code>requirePlatformAdmin(request)</code></td><td>A verified email listed in <code>BOOTSTRAP_OWNER_EMAIL</code>.</td><td>401 signed out; 404 otherwise, so the admin API stays invisible.</td></tr>
+    </tbody>
+  </table>
+  <p>Site guards check membership of the site's own workspace, not the active one, so a site link works whichever workspace is selected. Workspace guards (site list, site creation, GitHub, invitations, demo site) use the active workspace.</p>
+
+  <h3>Workspaces</h3>
+  <ul>
+    <li><strong>New users.</strong> When Better Auth creates a user, <code>setUpNewUser</code> (<code class="path">packages/db/src/workspaces.ts:32</code>) gives them a personal workspace as its Owner, unless an unexpired invitation is waiting for their email. Each new session opens in the user's first workspace (<code>workspaceForNewSession</code>, line 55).</li>
+    <li><strong>One workspace per user.</strong> <code>organizationLimit: 1</code> (<code class="path">apps/web/src/auth.ts:93</code>) stops free limits being multiplied by making more workspaces. Better Auth counts every workspace the user belongs to, in any role, so creating a workspace through the API is refused once a user is in one. The personal workspace made at sign-up is written directly and is not affected.</li>
+    <li><strong>Deletion is disabled.</strong> <code>disableOrganizationDeletion: true</code> (<code class="path">apps/web/src/auth.ts:95</code>). <code>sites.workspace_id</code> also has no cascade, so the database refuses to delete a workspace that still has sites (<code class="path">packages/db/migrations/0024_accounts.sql:27</code>).</li>
+    <li><strong>Invitations and grants.</strong> A Client invitation stores its sites in <code>site_access_invites</code>; accepting copies them to <code>site_access</code>, after first removing any grants the user already had in that workspace. Removing a member deletes their grants (<code class="path">apps/web/src/auth.ts:107</code>).</li>
+    <li><strong>Sign-in methods.</strong> Google is always on, with sign-in tokens kept to sign-in scopes (<code>includeGrantedScopes: false</code>) so it does not pick up the Search Console grant. Magic link and email verification need <code>EMAIL_ENABLED</code>; email and password needs <code>PASSWORD_SIGNIN</code> as well (<code class="path">apps/web/src/auth.ts:26</code>). Sessions last 30 days.</li>
+  </ul>
+  <p>The tables are described on <a href="#data-model--sites-and-ownership">Data model: sites and ownership</a>.</p>
+
+  <h3>Free limits</h3>
+  <p>Every workspace starts on <code>FREE_LIMITS</code> (<code class="path">apps/web/src/limits.ts:18</code>). A row in <code>workspace_limits</code> overrides any of them (a JSON object in <code>limits_json</code>; <code>null</code> means unlimited). Migration <code>0024</code> gives the initial workspace no limits and every feature.</p>
+  <table>
+    <thead><tr><th>Limit</th><th>Free</th><th>Checked at</th><th>When refused</th></tr></thead>
+    <tbody>
+      <tr><td>Sites</td><td>1</td><td><code>POST /api/sites</code>, by counting the workspace's sites</td><td>429</td></tr>
+      <tr><td>Analyses per day</td><td>3</td><td><code>POST /api/sites/:siteId/analyses</code></td><td>429</td></tr>
+      <tr><td>Scrape pages per day</td><td>500</td><td><code>POST /api/datasets/:datasetId/scrape</code>, charged the sum of the chosen sources' <code>maxPages</code></td><td>429</td></tr>
+      <tr><td>Ask questions per day</td><td>20</td><td><code>POST /api/sites/:siteId/assistant</code></td><td>429</td></tr>
+      <tr><td>AI runs per day</td><td>10</td><td>Scope, source preview, dedupe, template design by the model, template generate, snippets, change generation</td><td>429</td></tr>
+      <tr><td>People</td><td>3</td><td>Creating an invitation; members of any role plus pending invitations (<code>memberSlotsUsed</code>)</td><td>400 from <code>/api/workspace/invitations</code></td></tr>
+      <tr><td>DataForSEO</td><td>off</td><td>The Results sync drops the DataForSEO key for the workspace (<code class="path">apps/web/src/sync-steps.ts:93</code>)</td><td>Sources skipped, no error</td></tr>
+      <tr><td>Pull requests</td><td>off</td><td><code>POST /api/changes/:changeId/pull-request</code></td><td>403</td></tr>
+      <tr><td>Google Sheets export</td><td>off</td><td><code>POST /api/sites/:siteId/export/sheets</code></td><td>403</td></tr>
+    </tbody>
+  </table>
+  <p>The four daily limits are metered by <code>charge</code> (<code class="path">apps/web/src/limits.ts:33</code>): one upsert into <code>workspace_usage</code> per action, keyed by workspace, UTC day and metric. It only adds while the total stays within the limit (<code>chargeUsage</code>, <code class="path">packages/db/src/workspaces.ts:98</code>), so two requests at once cannot both slip past the last slot. Refusals are <code>{ error }</code> with a sentence saying what was used up and that it resets at midnight UTC. Features are checked with <code>featureRefusal</code> (line 42).</p>
+  <div class="callout warn"><p>Routes charge straight after the guard, before checking the request. An analysis refused with 409 because one is already running, or an Ask question that then fails, still uses up one of the day's allowance. Nothing is refunded.</p></div>
+
+  <h3>Bootstrap owner and platform admins</h3>
+  <p><code>BOOTSTRAP_OWNER_EMAIL</code> is a comma-separated list. A listed user with a verified email joins the initial workspace <code>ws_initial</code> as Owner instead of getting a personal one, and every new session puts them back in it as Owner if the list grew after they signed up (<code class="path">packages/db/src/workspaces.ts:55</code>). Migration <code>0024</code> creates <code>ws_initial</code> and moves every site that existed before accounts into it. The same people are platform admins: they get <code>platformAdmin: true</code> from <code>/api/me</code> and can use <code>/admin</code>.</p>
+
+  <h3>Per-site log tokens</h3>
+  <p><code>POST /api/logs/:siteId</code> stays public because log shippers cannot sign in. It accepts the token from <code>Authorization: Bearer …</code> or <code>?token=</code>, and gives the same 401 for an unknown site and a wrong token (<code class="path">apps/web/app/api/logs/[siteId]/route.ts:18</code>).</p>
+  <ul>
+    <li>While <code>sites.log_token</code> is null, the expected token is the one derived from <code>SESSION_SECRET</code> (<code>logToken</code>, <code class="path">apps/web/src/crawl-logs.ts:13</code>), so log drains set up before accounts keep working.</li>
+    <li>"Rotate token" in Setup's log card (<code class="path">apps/web/app/components/ConnectorSetup.tsx:237</code>) calls <code>POST /api/sites/:siteId/connectors</code>, which stores 32 random bytes as hex (<code class="path">apps/web/app/api/sites/[siteId]/connectors/route.ts:53</code>). From then on only the stored token is accepted (<code>tokenMatches</code>, <code class="path">apps/web/src/crawl-logs.ts:21</code>); paste it into the log shipper.</li>
+  </ul>
+  <div class="callout trap"><p>The log route refuses every delivery when <code>SESSION_SECRET</code> is unset, even for a site with a rotated token. Setup only shows the log address when <code>SESSION_SECRET</code> is at least 32 characters.</p></div>
+
+  <h3>GitHub installation ownership</h3>
+  <p>An <code>installation_id</code> in the install callback's query string proves nothing, because anyone can type one. <code>/api/github/callback</code> first checks the <code>og_github_state</code> cookie, then needs the <code>code</code> GitHub sends when the App has "Request user authorization (OAuth) during installation" turned on. <code>checkInstallation</code> (<code class="path">apps/web/src/github-install.ts:11</code>) exchanges the code for a user token and accepts the installation only if:</p>
+  <ul>
+    <li>it is in the user's <code>/user/installations</code> (first 100), and</li>
+    <li>it is on the user's own account, or on an organization where the user is an active admin.</li>
+  </ul>
+  <p>An organization whose membership GitHub won't show (403 or 404) is refused as <code>org_permission_missing</code>; the App needs Organization permissions, Members: Read-only. Accepted installations are stored per workspace in <code>workspace_github_installations</code>, which replaces the old <code>og_installation</code> cookie (the callback expires it). Each refusal reason maps to a message in <code class="path">apps/web/app/page.tsx:111</code>.</p>
+
+  <h3>Google connection state</h3>
+  <p>A signed OAuth state only proves Eumon made it. <code>/api/sites/:siteId/gsc/connect</code> signs <code>{ siteId, nonce, userId }</code> into the state and sets the nonce in an HttpOnly cookie scoped to <code>/api/google/callback</code> for ten minutes. The callback (<code class="path">apps/web/app/api/google/callback/route.ts:12</code>) refuses unless <code>googleStateProblem</code> (<code class="path">apps/web/src/google-state.ts:11</code>) finds the state valid, the cookie nonce equal to the state's, and the signed-in user the one who started; then it requires Member+ on that site. So nobody can send someone a link that stores the victim's Google account on the sender's site. Every answer expires the nonce cookie.</p>
+
+  <h3>Pull requests change only robots.txt</h3>
+  <p><code>SAFE_SEO_CONFIG_PATHS</code> is just <code>public/robots.txt</code> (<code class="path">packages/agents/src/change-generator.ts:10</code>). <code>app/robots.ts</code> and <code>app/sitemap.ts</code> were dropped because they are code that runs at build time, including preview builds of a draft pull request. The content must also pass <code>isPlainRobotsTxt</code> (line 13): every line blank, a comment, or a <code>User-agent</code>, <code>Allow</code>, <code>Disallow</code>, <code>Sitemap</code>, <code>Crawl-delay</code> or <code>Host</code> directive with no <code>&lt;</code>, <code>&gt;</code> or backtick. The generator drops anything else, and the pull-request route checks the stored change again before opening anything (422 otherwise).</p>
+
+  <h3>Other checks</h3>
   <ul>
     <li>Event ingestion checks the request <code>Origin</code> against the site (above).</li>
-    <li><code>/api/logs/:siteId</code> checks a per-site token derived from <code>SESSION_SECRET</code> (Bearer header or <code>?token=</code>) and gives the same 401 for an unknown site and a wrong token (<code class="path">apps/web/src/crawl-logs.ts:21</code>).</li>
     <li>Share links are verified by signature, purpose and share version.</li>
-    <li>OAuth and GitHub install flows check signed state or a state cookie.</li>
-    <li><code>/api/dev/demo-site</code> refuses non-local requests in a production build.</li>
+    <li><code>/api/dev/demo-site</code> refuses non-local requests in a production build, then needs Member+ in the active workspace.</li>
   </ul>
-  <div class="callout warn"><p><code>/api/logs/:siteId</code> is called by Cloudflare Logpush, Vercel or the log-forwarding Worker, none of which can pass Cloudflare Access, and it is not in the README's exclusion list. If log delivery is used behind Access, that path needs excluding too; it relies on its own token.</p></div>
-  <p>See <a href="#gotchas">Gotchas</a> for other things that bite during setup, and <a href="#ops">Ops</a> for deploying.</p>
+  <p>Secrets and setup steps for all of this are on <a href="#ops--secrets">Ops: secrets</a> and <a href="#getting-started--dev-vars">Getting started</a>. See <a href="#gotchas">Gotchas</a> for other things that bite during setup.</p>
 </article>

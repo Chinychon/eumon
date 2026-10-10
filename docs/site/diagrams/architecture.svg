@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 576" role="img" aria-labelledby="dg-architecture-title dg-architecture-desc">
   <title id="dg-architecture-title">Eumon system architecture</title>
-  <desc id="dg-architecture-desc">One Cloudflare Worker serves the dashboard, API routes, /p landing pages and /r share links, runs the daily cron and three Workflows, and uses D1 and Browser Rendering; the client's website proxies a path to /p, and the Worker calls Google APIs, third-party connectors and language models.</desc>
+  <desc id="dg-architecture-desc">One Cloudflare Worker checks every request at a sign-in gate, then serves the dashboard and API routes to signed-in users and the public /p landing pages and /r share links to anyone, runs the daily cron and three Workflows, and uses D1 and Browser Rendering; the client's website proxies a path to /p, and the Worker calls Google APIs, third-party connectors and language models.</desc>
   <defs>
     <marker id="dg-architecture-arrow" viewBox="0 0 8 6" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,3 L0,6 Z" class="d-arrowhead"/></marker>
     <marker id="dg-architecture-arrow-accent" viewBox="0 0 8 6" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,3 L0,6 Z" class="d-arrowhead-accent"/></marker>
@@ -65,9 +65,9 @@
   <text x="664" y="99" font-size="10" text-anchor="end" class="d-mono d-muted">apps/web/worker.ts</text>
 
   <rect x="280" y="116" width="384" height="80" rx="0" class="d-node"/>
-  <text x="296" y="139" font-size="13" class="d-name d-ink">vinext app</text>
-  <text x="296" y="159" font-size="10" class="d-mono d-muted">dashboard · API routes (/api/*)</text>
-  <text x="296" y="177" font-size="10" class="d-mono d-muted">/p landing pages · /r share links</text>
+  <text x="296" y="139" font-size="13" class="d-name d-ink">Sign-in gate → vinext app</text>
+  <text x="296" y="159" font-size="10" class="d-mono d-muted">signed in: dashboard · API routes (/api/*)</text>
+  <text x="296" y="177" font-size="10" class="d-mono d-muted">public: /p landing pages · /r share links</text>
 
   <rect x="280" y="208" width="384" height="64" rx="0" class="d-node"/>
   <text x="296" y="231" font-size="13" class="d-name d-ink">scheduled()</text>

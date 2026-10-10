@@ -8,6 +8,7 @@
     <dt>D1 database</dt><dd><code>eumon-prod</code>, bound by ID <code>591e4045-cbff-4ef4-a894-cbe4ece424ec</code> unless <code>CF_D1_DATABASE_ID</code> is set</dd>
     <dt>Workflows</dt><dd><code>site-analysis</code>, <code>dataset-scrape</code>, <code>search-sync</code></dd>
     <dt>Cron</dt><dd><code>15 4 * * *</code> (04:15 UTC daily)</dd>
+    <dt>Sign-in</dt><dd>Better Auth with Google; every path outside a short public list needs a session (<code class="path">apps/web/src/gate.ts</code>)</dd>
     <dt>Plan</dt><dd>Workers Free and D1 Free; see <a href="#gotchas--workers-free-plan-limits">Limits and gotchas</a></dd>
   </dl>
 
@@ -25,14 +26,28 @@
   <div class="callout trap"><p>A Workers Builds deploy runs in strict mode. If someone changed the Worker in the Cloudflare dashboard and its settings now differ from <code>cloudflare.config.ts</code> (a plain-text variable where the config declares a secret, for example), the deploy stops with "Aborting the upload operation because of conflicts". Keep settings in the config and secrets as Secrets, never in the dashboard (<code class="path">apps/web/README.md</code>).</p></div>
   <p>The Worker's name appears three more times in the config: as the <code>worker</code> of each Workflow binding (<code>ANALYSIS_WORKFLOW</code>, <code>SCRAPE_WORKFLOW</code>, <code>SEARCH_SYNC_WORKFLOW</code>). Renaming the Worker means changing all four, or the deploy fails on the name.</p>
 
-  <h3>Builds for Preview branches</h3>
-  <p>A new Worker has <em>Builds for Preview branches</em> switched on under Settings, Builds. With it on, every push to a branch other than <code>main</code> runs the Preview command <code>npx wrangler preview</code>, which stops with "Your Wrangler configuration is missing a <code>previews</code> block". The result is a failing "Workers Builds: eumon" check on every pull request. <code>defineWorker</code> in <code>cf/config</code> has no <code>previews</code> option, and a preview would need its own D1, AI, Browser, Workflow bindings and secrets in any case. Turn the toggle off; builds of <code>main</code> are not affected.</p>
+  <h3>Preview URLs and Builds for Preview branches</h3>
+  <p>The config sets <code>previewUrls: false</code> (<code class="path">apps/web/cloudflare.config.ts:9</code>), so Cloudflare does not serve each uploaded version at its own preview address. The app answers only on <code>workers.dev</code> and any custom domain you add. The <code>workers.dev</code> address stays on: it is the production URL.</p>
+  <p><em>Builds for Preview branches</em> is a different switch, under Settings, Builds, and it is on for a new Worker. With it on, every push to a branch other than <code>main</code> runs the Preview command <code>npx wrangler preview</code>, which stops with "Your Wrangler configuration is missing a <code>previews</code> block". The result is a failing "Workers Builds: eumon" check on every pull request. <code>defineWorker</code> in <code>cf/config</code> has no <code>previews</code> option, and a preview would need its own D1, AI, Browser, Workflow bindings and secrets in any case. Turn the toggle off; builds of <code>main</code> are not affected.</p>
 
   <h3>Deploying by hand</h3>
   <p>From the repository root, after <code>npm exec -w @organic-growth/web -- cf auth login</code> (or with <code>CLOUDFLARE_API_TOKEN</code> exported):</p>
   <pre><code>npm run db:migrate:remote   # only if packages/db/migrations gained a file
 npm run deploy              # builds the packages, then vinext-cloudflare deploy</code></pre>
   <p>To deploy your own copy, set <code>CF_D1_DATABASE_ID</code> to your database and change the ID in the two <code>db:migrate:*</code> scripts in <code class="path">apps/web/package.json</code>.</p>
+
+  <h2 id="accounts-setup">One-off setup for accounts</h2>
+  <p>Sign-in, workspaces and the GitHub ownership check need settings outside the repo. Do these once per Cloudflare account and production origin, before the first deploy that includes migration <code>0024</code>. <code>&lt;origin&gt;</code> below is the production URL, for example <code>https://eumon.chin-gabriel.workers.dev</code>.</p>
+  <ol>
+    <li><strong>Secrets.</strong> Set <code>BETTER_AUTH_SECRET</code> (<code>openssl rand -hex 32</code>, not the same value as <code>SESSION_SECRET</code>), <code>BOOTSTRAP_OWNER_EMAIL</code>, <code>TURNSTILE_SITE_KEY</code>, <code>TURNSTILE_SECRET_KEY</code>, <code>GITHUB_APP_CLIENT_ID</code> and <code>GITHUB_APP_CLIENT_SECRET</code> on the Worker (commands under <a href="#ops--secrets">Secrets</a>). The deploy fails while any declared secret is missing.</li>
+    <li><strong>Google.</strong> In the Google Cloud OAuth client, add the redirect URI <code>&lt;origin&gt;/api/auth/callback/google</code> for sign-in, next to the existing <code>&lt;origin&gt;/api/google/callback</code> for the Search Console connection. Without it, Google refuses sign-in with <code>redirect_uri_mismatch</code>.</li>
+    <li><strong>GitHub App.</strong> Turn on <strong>Request user authorization (OAuth) during installation</strong>; GitHub then returns installers to the App's Callback URL, so set that to <code>&lt;origin&gt;/api/github/callback</code>. Copy the Client ID and a new client secret into <code>GITHUB_APP_CLIENT_ID</code> and <code>GITHUB_APP_CLIENT_SECRET</code>. Under Organization permissions, set Members to Read-only: an install on an organization is accepted only from one of its admins, and the check reads the installer's membership (<code class="path">apps/web/src/github-install.ts:33</code>).</li>
+    <li><strong>Turnstile.</strong> Create a widget for the production hostname in the Cloudflare dashboard and use its site key and secret key. It only shows on the sign-in page once email sign-in is on, but both secrets must exist for the deploy.</li>
+    <li><strong>Rate limit namespace.</strong> <code>AUTH_RATE_LIMIT</code> is declared with <code>namespace: "1001"</code> (<code class="path">apps/web/cloudflare.config.ts:77</code>). The namespace ID must be unique within the Cloudflare account; if another Worker in the account already uses <code>1001</code>, change it here before deploying.</li>
+    <li><strong>Migration <code>0024</code>.</strong> Run <code>npm run db:migrate:remote</code> before (or with) the deploy. It creates the Better Auth tables, the initial workspace <code>ws_initial</code> with no limits, and moves every existing site and GitHub installation into it (<code class="path">packages/db/migrations/0024_accounts.sql</code>).</li>
+    <li><strong>Sign in.</strong> Sign in with Google as an address in <code>BOOTSTRAP_OWNER_EMAIL</code>. You become Owner of the initial workspace and see the existing sites, plus an Admin link.</li>
+  </ol>
+  <div class="callout warn"><p>Existing repository connections keep working, because the migration copies each site's installation into the initial workspace. Connecting a new installation goes through the ownership check, so if step 3 is skipped, Connect GitHub ends with an error naming the missing setting (<code class="path">apps/web/app/page.tsx:112</code>).</p></div>
 
   <h2 id="migrations">Remote migrations</h2>
   <p>Workers Builds does not apply migrations. Whoever merges a pull request that adds a file to <code>packages/db/migrations</code> runs this before (or with) the deploy:</p>
@@ -42,7 +57,7 @@ npm run deploy              # builds the packages, then vinext-cloudflare deploy
   <pre><code>cd apps/web
 npx cf d1 migrations list 591e4045-cbff-4ef4-a894-cbe4ece424ec --dir ../../packages/db/migrations</code></pre>
   <div class="callout warn"><p><code>wrangler d1 migrations list eumon-prod --remote</code> does not work here: wrangler reads the database's <code>migrations_dir</code> from a wrangler config with a <code>d1_databases</code> entry, and the repo has none. Use the <code>cf</code> command above, or query the table directly: <code>npx wrangler d1 execute eumon-prod --remote --command "SELECT name, applied_at FROM d1_migrations ORDER BY id"</code>.</p></div>
-  <div class="callout warn"><p>Some migrations drop tables (<code>0009_drop_unused_tables.sql</code>) or move data (<code>0016_site_snapshots.sql</code>). A dropped production table cannot be restored by re-running anything. Read a migration before applying it remotely.</p></div>
+  <div class="callout warn"><p>Some migrations drop tables (<code>0009_drop_unused_tables.sql</code>) or move data (<code>0016_site_snapshots.sql</code>, <code>0024_accounts.sql</code>). A dropped production table cannot be restored by re-running anything. Read a migration before applying it remotely.</p></div>
   <p>Schema and table descriptions live on <a href="#data-model">Data model</a>.</p>
 
   <h2 id="secrets">Secrets</h2>
@@ -50,10 +65,14 @@ npx cf d1 migrations list 591e4045-cbff-4ef4-a894-cbe4ece424ec --dir ../../packa
   <table>
     <thead><tr><th>Secret</th><th>Used for</th></tr></thead>
     <tbody>
-      <tr><td><code>SESSION_SECRET</code></td><td>Signs the GitHub install cookie and Google OAuth state; derives each site's IndexNow key and server-log token. 32+ characters.</td></tr>
+      <tr><td><code>BETTER_AUTH_SECRET</code></td><td>Signs sign-in sessions. 32+ characters, different from <code>SESSION_SECRET</code>. Changing it signs everyone out.</td></tr>
+      <tr><td><code>BOOTSTRAP_OWNER_EMAIL</code></td><td>Comma-separated addresses that own the initial workspace and can open <code>/admin</code>.</td></tr>
+      <tr><td><code>TURNSTILE_SITE_KEY</code>, <code>TURNSTILE_SECRET_KEY</code></td><td>The bot check on email sign-in, sign-up and password reset.</td></tr>
+      <tr><td><code>SESSION_SECRET</code></td><td>Signs the Google connection's OAuth state and client Results links; derives each site's IndexNow key and original server-log token. 32+ characters. Changing it breaks every IndexNow key file, every unrotated log token and every shared Results link.</td></tr>
       <tr><td><code>OAUTH_ENCRYPTION_KEY</code></td><td>Encrypts stored Google tokens. Base64url of exactly 32 random bytes.</td></tr>
-      <tr><td><code>GOOGLE_CLIENT_ID</code>, <code>GOOGLE_CLIENT_SECRET</code></td><td>Google OAuth client for Search Console and Analytics.</td></tr>
+      <tr><td><code>GOOGLE_CLIENT_ID</code>, <code>GOOGLE_CLIENT_SECRET</code></td><td>Google sign-in, and the Google connection for Search Console and Analytics.</td></tr>
       <tr><td><code>GITHUB_APP_ID</code>, <code>GITHUB_APP_SLUG</code>, <code>GITHUB_APP_PRIVATE_KEY</code></td><td>GitHub App for repository analysis and draft pull requests.</td></tr>
+      <tr><td><code>GITHUB_APP_CLIENT_ID</code>, <code>GITHUB_APP_CLIENT_SECRET</code></td><td>The same App's OAuth client, used to check who installed it.</td></tr>
       <tr><td><code>GOOGLE_API_KEY</code></td><td>CrUX and PageSpeed Insights.</td></tr>
       <tr><td><code>OPEN_PAGERANK_KEY</code></td><td>Authority scores.</td></tr>
       <tr><td><code>DATAFORSEO_LOGIN</code>, <code>DATAFORSEO_PASSWORD</code></td><td>Keyword volume, difficulty, competitor keywords, search results pages, backlinks.</td></tr>
@@ -61,7 +80,8 @@ npx cf d1 migrations list 591e4045-cbff-4ef4-a894-cbe4ece424ec --dir ../../packa
       <tr><td><code>DEEPSEEK_API_KEY</code></td><td>The first language model provider tried.</td></tr>
     </tbody>
   </table>
-  <p><code>ANTHROPIC_API_KEY</code> and <code>LLM_MODEL</code> are deliberately left undeclared so they stay optional; set them on the Worker directly. The provider order (DeepSeek, then Claude, then Workers AI) is described in <a href="#packages">Packages</a>.</p>
+  <p><code>ANTHROPIC_API_KEY</code> and <code>LLM_MODEL</code> are deliberately left undeclared so they stay optional; set them on the Worker directly. The provider order (DeepSeek, then Claude, then Workers AI) is described in <a href="#packages">Packages</a>. The email flags are undeclared for the same reason: <code>EMAIL_ENABLED=true</code> and <code>EMAIL_FROM</code> turn on magic-link sign-in and email verification, and <code>PASSWORD_SIGNIN=true</code> adds passwords on top. Both need Workers Paid: sending email to any address does, and password hashing exceeds the Free plan's CPU limit (<code class="path">apps/web/src/passwords.ts:3</code>).</p>
+  <p>Two bindings need no value but are part of the config: <code>EMAIL</code>, Cloudflare's send-email binding, and <code>AUTH_RATE_LIMIT</code>, 10 attempts a minute per IP address on every non-<code>GET</code> request to <code>/api/auth/*</code> (<code class="path">apps/web/worker.ts:35</code>).</p>
   <pre><code>npx wrangler secret put SESSION_SECRET --name eumon      # prompts for the value
 npx wrangler secret list --name eumon
 # or, with the cf CLI installed in apps/web:
@@ -69,8 +89,18 @@ npx cf workers secrets update SESSION_SECRET --worker eumon --text '...'
 npx cf workers secrets list --worker eumon</code></pre>
   <div class="callout warn"><p>Adding a new <code>bindings.secret()</code> to the config means setting it on the production Worker before the next merge to <code>main</code>, or that deploy fails.</p></div>
 
+  <h2 id="workspace-limits">Workspaces, /admin and limits</h2>
+  <p>Every site belongs to a workspace. A new workspace gets the free limits in <code class="path">apps/web/src/limits.ts:18</code>: one site, 3 analyses, 500 scraped pages, 20 Ask Eumon questions and 10 AI writing runs a day, 3 people (members, clients and pending invitations together), and no DataForSEO, pull requests or Google Sheets export. Daily counters reset at midnight UTC. A refused action answers with a sentence saying what to do: <code>429</code> when a daily allowance or the site limit is used up, <code>403</code> for a feature the workspace does not have, and <code>400</code> from the invitation route when the people limit is reached (<code class="path">apps/web/app/api/workspace/invitations/route.ts:27</code>). The initial workspace has no limits. Roles are described in <a href="#web-app--access-control">Access control</a>.</p>
+  <p><code>/admin</code> lists every workspace with its site count, people and today's usage against each limit, and saves new limits per workspace. Only signed-in users whose verified email is in <code>BOOTSTRAP_OWNER_EMAIL</code> can use it; anyone else gets "Not found." (<code class="path">apps/web/src/guard.ts:59</code>). An empty number field means unlimited.</p>
+  <p>The page calls two routes, which you can also use from a terminal (see <a href="#ops--observability">Observability</a> for the cookie and <code>Origin</code> header):</p>
+  <ul>
+    <li><code>GET /api/admin/workspaces</code>: the free defaults and every workspace with its usage and overrides.</li>
+    <li><code>PUT /api/admin/workspaces/&lt;workspaceId&gt;/limits</code>: the JSON body becomes the workspace's overrides, stored in <code>workspace_limits</code>. Numbers are whole numbers or <code>null</code> (unlimited); features are <code>true</code> or <code>false</code>; unknown keys are dropped.</li>
+  </ul>
+  <div class="callout trap"><p>The <code>PUT</code> replaces the overrides; it does not merge them (<code class="path">apps/web/app/api/admin/workspaces/[workspaceId]/limits/route.ts:24</code>). A body of <code>{"sites": 5}</code> raises the site limit and puts every other limit back to the free default. The <code>/admin</code> form always sends every field; by hand, send them all too.</p></div>
+
   <h2 id="cron-trigger">The cron trigger</h2>
-  <p>The daily Results sync is a Worker Cron Trigger, <code>triggers.scheduled({ schedule: "15 4 * * *" })</code> (<code class="path">apps/web/cloudflare.config.ts:10</code>). At 04:15 UTC Cloudflare calls <code>scheduled</code> in <code class="path">apps/web/worker.ts:14</code>, which runs <code>startDailySyncs</code> (<code class="path">apps/web/src/sync-steps.ts:208</code>): one <code>search-sync</code> Workflow instance per site, with the ID <code>daily-&lt;YYYY-MM-DD&gt;-&lt;siteId&gt;</code>. Because the ID is fixed for the day, a second firing creates nothing. "Sync now" creates <code>manual-&lt;siteId&gt;-&lt;window&gt;</code> instances through <code>POST /api/sites/&lt;siteId&gt;/results/sync</code>; clicks within ten minutes join one run, and a click while that day's daily run is in flight gets a 409.</p>
+  <p>The daily Results sync is a Worker Cron Trigger, <code>triggers.scheduled({ schedule: "15 4 * * *" })</code> (<code class="path">apps/web/cloudflare.config.ts:12</code>). At 04:15 UTC Cloudflare calls <code>scheduled</code> in <code class="path">apps/web/worker.ts:52</code>, which runs <code>startDailySyncs</code> (<code class="path">apps/web/src/sync-steps.ts:212</code>): one <code>search-sync</code> Workflow instance per site, with the ID <code>daily-&lt;YYYY-MM-DD&gt;-&lt;siteId&gt;</code>. Because the ID is fixed for the day, a second firing creates nothing. The cron does not pass through the sign-in gate. "Sync now" creates <code>manual-&lt;siteId&gt;-&lt;window&gt;</code> instances through <code>POST /api/sites/&lt;siteId&gt;/results/sync</code>; clicks within ten minutes join one run, and a click while that day's daily run is in flight gets a 409.</p>
   <p>Workflow <code>schedules</code> are not used because they need the paid plan; cron triggers are accepted on Free. The sync itself is described in <a href="#flow-sync">the sync flow</a>.</p>
 
   <h2 id="observability">Observability</h2>
@@ -78,7 +108,7 @@ npx cf workers secrets list --worker eumon</code></pre>
 
   <h3>Live logs</h3>
   <pre><code>npx wrangler tail eumon --format json</code></pre>
-  <p>Streams every request, cron firing and Workflow step invocation with its <code>console</code> output, exceptions and outcome (for example <code>exceededCpu</code>). Use <code>--format pretty</code> for a quick look; JSON keeps the full exception text.</p>
+  <p>Streams every request, cron firing and Workflow step invocation with its <code>console</code> output, exceptions and outcome (for example <code>exceededCpu</code>). Use <code>--format pretty</code> for a quick look; JSON keeps the full exception text. While email is off, sign-in, verification and invitation emails are written here instead of being sent (<code class="path">apps/web/src/auth.ts:31</code>).</p>
 
   <h3>Workflows</h3>
   <pre><code>npx wrangler workflows list
@@ -88,9 +118,9 @@ npx wrangler workflows instances describe site-analysis &lt;instance-id&gt;</cod
   <table>
     <thead><tr><th>Workflow</th><th>Instance ID</th><th>Created by</th></tr></thead>
     <tbody>
-      <tr><td><code>site-analysis</code></td><td>The analysis ID (<code>analysis_…</code>)</td><td><code class="path">apps/web/app/api/sites/[siteId]/analyses/route.ts:50</code></td></tr>
-      <tr><td><code>dataset-scrape</code></td><td>The scrape job ID</td><td><code class="path">apps/web/app/api/datasets/[datasetId]/scrape/route.ts:24</code></td></tr>
-      <tr><td><code>search-sync</code></td><td><code>daily-&lt;day&gt;-&lt;siteId&gt;</code> or <code>manual-&lt;siteId&gt;-&lt;window&gt;</code></td><td><code class="path">apps/web/src/sync-steps.ts:187</code></td></tr>
+      <tr><td><code>site-analysis</code></td><td>The analysis ID (<code>analysis_…</code>)</td><td><code class="path">apps/web/app/api/sites/[siteId]/analyses/route.ts:57</code></td></tr>
+      <tr><td><code>dataset-scrape</code></td><td>The scrape job ID</td><td><code class="path">apps/web/app/api/datasets/[datasetId]/scrape/route.ts:32</code></td></tr>
+      <tr><td><code>search-sync</code></td><td><code>daily-&lt;day&gt;-&lt;siteId&gt;</code> or <code>manual-&lt;siteId&gt;-&lt;window&gt;</code></td><td><code class="path">apps/web/src/sync-steps.ts:191</code></td></tr>
     </tbody>
   </table>
   <p>Analysis steps are named <code>load-site</code>, <code>enqueue-full-crawl</code>, <code>crawl-batch-&lt;n&gt;</code>, <code>research-&lt;domain&gt;</code>, <code>inventory</code>, <code>analyze-repository-and-site</code> and so on (<code class="path">apps/web/src/analysis-workflow.ts</code>; walkthrough in <a href="#flow-analysis">the analysis flow</a>).</p>
@@ -100,24 +130,31 @@ npx wrangler workflows instances describe site-analysis &lt;instance-id&gt;</cod
 npx wrangler d1 insights eumon-prod --sort-by reads --timePeriod 1d --json</code></pre>
   <p><code>d1 info</code> prints the database size and the rows read and written in the last 24 hours: compare those with the Free plan's daily limits before starting a large crawl. <code>d1 insights</code> lists queries with their total and average rows read, so a query that walks a whole table stands out at the top.</p>
 
+  <h3>Calling the API from a terminal</h3>
+  <p>Every API route outside the public list needs a session: without one the gate answers <code>401</code> (<code class="path">apps/web/src/gate.ts:25</code>), and the route then checks your role on the site. Sign in in a browser, copy the session cookie from the developer tools (<code>__Secure-better-auth.session_token</code> on HTTPS, <code>better-auth.session_token</code> on <code>http://localhost</code>), and pass it with <code>-b</code>. Anything other than <code>GET</code>, <code>HEAD</code> or <code>OPTIONS</code> also needs an <code>Origin</code> header equal to the app's own origin, or it is refused with <code>403</code> (<code class="path">apps/web/src/gate.ts:29</code>).</p>
+  <pre><code>APP=https://eumon.chin-gabriel.workers.dev
+COOKIE='__Secure-better-auth.session_token=&lt;value&gt;'
+curl -s -b "$COOKIE" "$APP/api/analyses/&lt;analysisId&gt;/progress"
+curl -s -b "$COOKIE" -H "Origin: $APP" -X POST "$APP/api/analyses/&lt;analysisId&gt;/cancel"</code></pre>
+  <div class="callout warn"><p>That cookie is a full sign-in for your account for up to 30 days (<code class="path">apps/web/src/auth.ts:74</code>). Keep it out of shell history and shared notes, and sign out in the browser when you are done, which ends the session.</p></div>
+
   <h3>An analysis's own view</h3>
-  <pre><code>curl -s https://eumon.chin-gabriel.workers.dev/api/analyses/&lt;analysisId&gt;/progress</code></pre>
-  <p>Returns <code>status</code>, the stage timeline in <code>progress</code>, <code>error</code>, crawl counts with pace and time left in <code>crawl</code>, and <code>stalled</code> (<code class="path">apps/web/app/api/analyses/[analysisId]/progress/route.ts</code>). <code>stalled</code> becomes true when a queued or running analysis has not updated its progress for 45 minutes (<code class="path">packages/db/src/index.ts:206</code>); the dashboard then lets a new run start. If the hostname is behind Cloudflare Access, add the Access headers or use the browser.</p>
+  <p><code>GET /api/analyses/&lt;analysisId&gt;/progress</code> returns <code>status</code>, the stage timeline in <code>progress</code>, <code>error</code>, crawl counts with pace and time left in <code>crawl</code>, and <code>stalled</code> (<code class="path">apps/web/app/api/analyses/[analysisId]/progress/route.ts</code>). <code>stalled</code> becomes true when a queued or running analysis has not updated its progress for 45 minutes (<code class="path">packages/db/src/index.ts:209</code>); the dashboard then lets a new run start.</p>
   <p>Sync results are recorded per run: <code>GET /api/sites/&lt;siteId&gt;/sync-runs</code> returns the last 20 with each source's notes (Setup, Sync history in the dashboard). <code>GET /api/sites/&lt;siteId&gt;/results/sync?id=&lt;instance-id&gt;</code> returns a sync instance's Workflow status and error.</p>
 
   <h2 id="runbook">Runbook</h2>
 
   <h3>An analysis looks stuck</h3>
   <ol>
-    <li>Read <code>/api/analyses/&lt;id&gt;/progress</code>. Note the last stage, <code>progress.updatedAt</code>, and <code>stalled</code>.</li>
-    <li>Run <code>npx wrangler workflows instances describe site-analysis &lt;id&gt;</code>. If the instance is <em>errored</em> or <em>terminated</em> while the record says <code>running</code>, the Workflow died without closing the record: its catch block writes <code>failed</code> to D1 (<code class="path">apps/web/src/analysis-workflow.ts:207</code>), and that write fails when D1 is unavailable or the invocation has used up its Cloudflare API calls.</li>
+    <li>Read <code>/api/analyses/&lt;id&gt;/progress</code> (in the browser while signed in, or with curl and your session cookie). Note the last stage, <code>progress.updatedAt</code>, and <code>stalled</code>.</li>
+    <li>Run <code>npx wrangler workflows instances describe site-analysis &lt;id&gt;</code>. If the instance is <em>errored</em> or <em>terminated</em> while the record says <code>running</code>, the Workflow died without closing the record: its catch block writes <code>failed</code> to D1 (<code class="path">apps/web/src/analysis-workflow.ts:209</code>), and that write fails when D1 is unavailable or the invocation has used up its Cloudflare API calls.</li>
     <li>If the instance is still running, look at the current <code>crawl-batch-&lt;n&gt;</code> step's retries and error, and at <code>wrangler tail</code> for exceptions.</li>
-    <li>Close the record with Cancel in the dashboard, or <code>POST /api/analyses/&lt;id&gt;/cancel</code>. Cancel terminates the instance if it still exists and marks the analysis <code>cancelled</code>.</li>
+    <li>Close the record with Cancel in the dashboard, or <code>POST /api/analyses/&lt;id&gt;/cancel</code> with your session cookie and the <code>Origin</code> header. Cancel needs Owner or Member rights on the site, terminates the instance if it still exists, and marks the analysis <code>cancelled</code>.</li>
   </ol>
 
   <h3>Every route returns 500</h3>
   <ol>
-    <li>Check whether the routes that fail are the ones that touch D1. Static assets and pages that do not query still load.</li>
+    <li>Check whether the routes that fail are the ones that touch D1. Static assets still load. Sign-in and every signed-in page can fail too: the session lives in D1, and the signed cookie copy that saves the lookup only lasts five minutes (<code class="path">apps/web/src/auth.ts:77</code>).</li>
     <li>Run <code>npx wrangler d1 info eumon-prod</code>. If rows read in the last 24 hours are near 5 million (or rows written near 100,000), the D1 Free daily limit has been hit. Nothing in the app is broken: D1 refuses queries until the limit resets at 00:00 UTC.</li>
     <li>Find what spent the budget with <code>npx wrangler d1 insights eumon-prod --sort-by reads --timePeriod 1d --json</code>, and fix that query before the next large run (see <a href="#gotchas--query-plan-traps">Query-plan traps</a>).</li>
     <li>If D1 is fine, <code>npx wrangler tail eumon --format json</code> and reload a failing page to read the exception.</li>
@@ -127,12 +164,42 @@ npx wrangler d1 insights eumon-prod --sort-by reads --timePeriod 1d --json</code
   <ol>
     <li>Read Setup, Sync history (or <code>GET /api/sites/&lt;siteId&gt;/sync-runs</code>). Each run lists one note per source; a failing source says why.</li>
     <li>If the run never landed there, find the instance: <code>npx wrangler workflows instances list search-sync</code>, then <code>npx wrangler workflows instances describe search-sync daily-&lt;day&gt;-&lt;siteId&gt;</code>. Read the failed step's error; "Too many subrequests" is the Free plan's 50-subrequest cap.</li>
-    <li>A <code>quota:</code> note reports how much of Google's URL Inspection quota (2,000 per property per Pacific day, <code class="path">apps/web/src/sync-steps.ts:37</code>) was already spent that day. When it is spent, inspections wait for the next Pacific day.</li>
+    <li>A <code>quota:</code> note reports how much of Google's URL Inspection quota (2,000 per property per Pacific day, <code class="path">apps/web/src/sync-steps.ts:38</code>) was already spent that day. When it is spent, inspections wait for the next Pacific day.</li>
+    <li>No DataForSEO results while the keys are set means the site's workspace does not have the DataForSEO feature: the sync drops those keys for it (<code class="path">apps/web/src/sync-steps.ts:93</code>). Turn it on in <code>/admin</code>.</li>
     <li>Start a new run with Sync now. A click while that day's daily run is in flight returns 409; wait for it.</li>
   </ol>
 
+  <h3>Someone cannot sign in</h3>
+  <ul>
+    <li><strong>Google shows <code>redirect_uri_mismatch</code>.</strong> The OAuth client is missing <code>&lt;origin&gt;/api/auth/callback/google</code> (<a href="#ops--accounts-setup">One-off setup</a>, step 2).</li>
+    <li><strong>"Too many attempts. Wait a minute, then try again."</strong> The <code>AUTH_RATE_LIMIT</code> binding refused the request: more than 10 sign-in requests from that IP address in a minute. It clears by itself.</li>
+    <li><strong>Signed in, but sees "You don't have a workspace yet".</strong> They signed up while an invitation was pending and it expired before they accepted it, so no workspace was made for them. The button on that page creates one; or send a new invitation.</li>
+    <li><strong>A listed owner does not see the initial workspace.</strong> The address must match <code>BOOTSTRAP_OWNER_EMAIL</code> exactly (case does not matter) and be verified. After changing the secret, they sign out and in again: the new session adds them as Owner (<code class="path">packages/db/src/workspaces.ts:55</code>).</li>
+  </ul>
+
+  <h3>Connect GitHub fails</h3>
+  <p>The callback sends the browser back to the dashboard with a <code>github_error</code> reason, and the dashboard shows a sentence for each (<code class="path">apps/web/app/page.tsx:111</code>):</p>
+  <table>
+    <thead><tr><th>Reason</th><th>Fix</th></tr></thead>
+    <tbody>
+      <tr><td><code>installation_invalid</code></td><td>The state cookie was missing or did not match, or <code>installation_id</code> was not a number. Start Connect GitHub again from the same tab and origin.</td></tr>
+      <tr><td><code>authorization_missing</code></td><td>GitHub sent no <code>code</code>: turn on "Request user authorization (OAuth) during installation".</td></tr>
+      <tr><td><code>installation_not_yours</code></td><td>The installer is not the installation's own account or an admin of its organization.</td></tr>
+      <tr><td><code>org_permission_missing</code></td><td>GitHub refused the organization membership check: grant Organization permissions, Members, Read-only.</td></tr>
+      <tr><td><code>installation_failed</code></td><td>Anything else, usually a wrong <code>GITHUB_APP_CLIENT_ID</code> or <code>GITHUB_APP_CLIENT_SECRET</code>, or D1 being unavailable. Check <code>wrangler tail</code>.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>A site's log token leaked</h3>
+  <p>The log endpoint <code>/api/logs/&lt;siteId&gt;</code> is public and trusts whoever holds the site's token. Until a site rotates it, the token is derived from <code>SESSION_SECRET</code>; after that, only the stored token works (<code class="path">apps/web/src/crawl-logs.ts:23</code>).</p>
+  <ol>
+    <li>In Setup, under Server or CDN logs, press <strong>Rotate token</strong> (Owner or Member). It stores a new random token and the old one stops working at once (<code class="path">apps/web/app/api/sites/[siteId]/connectors/route.ts:53</code>).</li>
+    <li>Copy the new snippet into the log shipper (Logpush job, Vercel drain or forwarding Worker). Deliveries are refused with <code>401</code> until it is updated.</li>
+  </ol>
+  <p>Rotating one site does not touch the others. Changing <code>SESSION_SECRET</code> changes every unrotated site's token at once, so rotate the leaked site instead.</p>
+
   <h3>Cancel a run when D1 is unavailable</h3>
-  <p>The cancel route reads the analysis from D1 before it terminates anything (<code class="path">apps/web/app/api/analyses/[analysisId]/cancel/route.ts</code>), so while D1 is over its limit Cancel returns 500 and the Workflow keeps running and spending. Stop it directly:</p>
+  <p>The cancel route reads D1 before it terminates anything: first to check your access to the analysis's site, then to load the analysis (<code class="path">apps/web/app/api/analyses/[analysisId]/cancel/route.ts:9</code>). So while D1 is over its limit Cancel returns 500 and the Workflow keeps running and spending. Stop it directly:</p>
   <pre><code>npx wrangler workflows instances terminate site-analysis &lt;analysisId&gt;</code></pre>
-  <p>The analysis record still says <code>running</code> afterwards. Once D1 is back, press Cancel (or <code>POST /api/analyses/&lt;id&gt;/cancel</code>): the terminate call inside it fails quietly because the instance is gone, and the record is closed as <code>cancelled</code>. The same works for <code>search-sync</code> and <code>dataset-scrape</code> instances.</p>
+  <p>The analysis record still says <code>running</code> afterwards. Once D1 is back, press Cancel (or <code>POST /api/analyses/&lt;id&gt;/cancel</code> with your session cookie and <code>Origin</code> header): the terminate call inside it fails quietly because the instance is gone, and the record is closed as <code>cancelled</code>. The same works for <code>search-sync</code> and <code>dataset-scrape</code> instances.</p>
 </article>

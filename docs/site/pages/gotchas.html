@@ -1,6 +1,6 @@
 <article id="gotchas" data-title="Limits and gotchas" data-group="Operating it">
   <h1>Limits and gotchas</h1>
-  <p class="lede">The platform limits production runs under, the incident that showed what they mean in practice, and the traps in queries, local development, the monorepo and git that have cost this project time. Read it before changing a Workflow, a crawl query or the dev setup.</p>
+  <p class="lede">The platform limits production runs under, the incident that showed what they mean in practice, and the traps in queries, local development, sign-in and limits, the monorepo and git that have cost this project time. Read it before changing a Workflow, a crawl query, an API route or the dev setup.</p>
 
   <h2 id="workers-free-plan-limits">Workers Free plan limits</h2>
   <p>Production runs on the Workers Free plan with D1 Free, by choice. The figures below are Cloudflare's published Free-plan limits; localhost (Miniflare) enforces none of them, so code that works locally can still fail in production.</p>
@@ -19,8 +19,10 @@
   <h3>What in Eumon is shaped by them</h3>
   <ul>
     <li><strong>Inspection steps of 40.</strong> The Results sync calls Google's URL Inspection API 40 URLs per Workflow step (<code>INSPECTION_STEP</code>, <code class="path">apps/web/src/url-inspection.ts:8</code>), so each step stays under 50 subrequests (<code class="path">apps/web/src/search-sync-workflow.ts</code>). Whether the 50-subrequest limit applies per step or per Workflow instance has not been confirmed in production; watch Sync history for "Too many subrequests".</li>
-    <li><strong>Crawl batches.</strong> The analysis crawls 100 sitemap URLs per step, 6 at a time (<code>CRAWL_BATCH_SIZE</code> and <code>CRAWL_CONCURRENCY</code>, <code class="path">apps/web/src/analysis-workflow.ts:52</code>), and at most 25,000 URLs per analysis. 100 fetches is above the 50-subrequest cap: shrinking the batch is open work (see the incident below). Crawl results are saved 40 rows per D1 batch (<code class="path">packages/db/src/index.ts:611</code>).</li>
-    <li><strong>A cron trigger, not Workflow schedules.</strong> Workflow <code>schedules</code> need the paid plan, so the daily sync is a Worker Cron Trigger at 04:15 UTC that starts one <code>search-sync</code> instance per site (<code class="path">apps/web/cloudflare.config.ts:10</code>, <code class="path">apps/web/worker.ts:14</code>). Each site gets its own instance so each has its own step budget.</li>
+    <li><strong>Crawl batches.</strong> The analysis crawls 100 sitemap URLs per step, 6 at a time (<code>CRAWL_BATCH_SIZE</code> and <code>CRAWL_CONCURRENCY</code>, <code class="path">apps/web/src/analysis-workflow.ts:52</code>), and at most 25,000 URLs per analysis. 100 fetches is above the 50-subrequest cap: shrinking the batch is open work (see the incident below). Crawl results are saved 40 rows per D1 batch (<code class="path">packages/db/src/index.ts:614</code>).</li>
+    <li><strong>A cron trigger, not Workflow schedules.</strong> Workflow <code>schedules</code> need the paid plan, so the daily sync is a Worker Cron Trigger at 04:15 UTC that starts one <code>search-sync</code> instance per site (<code class="path">apps/web/cloudflare.config.ts:12</code>, <code class="path">apps/web/worker.ts:51</code>). Each site gets its own instance so each has its own step budget.</li>
+    <li><strong>Google-only sign-in.</strong> Passwords are hashed with WebCrypto PBKDF2-SHA256 at 100,000 iterations, the most Workers allows, and even that exceeds the 10 ms CPU limit (<code class="path">apps/web/src/passwords.ts:4</code>). Email sending to any address needs Workers Paid (<code class="path">apps/web/cloudflare.config.ts:73</code>). So password sign-in needs both <code>PASSWORD_SIGNIN=true</code> and <code>EMAIL_ENABLED=true</code> (<code class="path">apps/web/src/auth.ts:28</code>), magic links need email, and both ship off: Google is the only way in. With email off, every message (verification, sign-in link, invitation) is written to the Worker log instead (<code class="path">apps/web/src/auth.ts:31</code>).</li>
+    <li><strong>Sessions from a cookie cache.</strong> Better Auth re-reads a session from D1 at most every 5 minutes and extends it at most once a day (<code class="path">apps/web/src/auth.ts:76</code>), so most requests read nothing from D1 to know who is asking.</li>
     <li><strong>Work split into steps.</strong> Competitor research and the data inventory each run in their own Workflow step, so a slow or failing part retries alone and has its own query budget (<a href="#flow-analysis">the analysis flow</a>).</li>
   </ul>
 
@@ -40,7 +42,7 @@
   </ul>
   <p>On a 23,000-URL site that was roughly 100,000 rows read per batch. How a crawl's D1 cost adds up is covered in <a href="#flow-analysis--crawl-cost">the analysis flow</a>.</p>
   <h3>The fix (PR #19)</h3>
-  <p><code>listPendingCrawlUrls</code> lost its <code>ORDER BY</code> and now reads the next pending rows straight off the crawl-state index (<code class="path">packages/db/src/index.ts:527</code>). The subtraction uses <code>+crawl_state</code>, which keeps SQLite on the primary key (<code class="path">packages/db/src/index.ts:616</code>). Measured on a scratch copy of that size, in SQLite VM steps:</p>
+  <p><code>listPendingCrawlUrls</code> lost its <code>ORDER BY</code> and now reads the next pending rows straight off the crawl-state index (<code class="path">packages/db/src/index.ts:530</code>). The subtraction uses <code>+crawl_state</code>, which keeps SQLite on the primary key (<code class="path">packages/db/src/index.ts:619</code>). Measured on a scratch copy of that size, in SQLite VM steps:</p>
   <table>
     <thead><tr><th>Query</th><th>Before</th><th>After</th></tr></thead>
     <tbody>
@@ -50,7 +52,7 @@
   </table>
   <h3>Still open</h3>
   <ul>
-    <li><strong>Why the fetches failed.</strong> The error text of the failed pages has not been read yet. That site is behind Cloudflare, so its bot protection may be refusing Googlebot-agent fetches from Workers; or the 50-subrequest cap is cutting off a 100-URL batch. Re-run the analysis and read the error on the failed rows (<code>crawl_state = 'failed'</code>, message in <code>result_json</code> at <code>$.error</code>, <code class="path">packages/db/src/index.ts:550</code>) before changing anything.</li>
+    <li><strong>Why the fetches failed.</strong> The error text of the failed pages has not been read yet. That site is behind Cloudflare, so its bot protection may be refusing Googlebot-agent fetches from Workers; or the 50-subrequest cap is cutting off a 100-URL batch. Re-run the analysis and read the error on the failed rows (<code>crawl_state = 'failed'</code>, message in <code>result_json</code> at <code>$.error</code>, <code class="path">packages/db/src/index.ts:553</code>) before changing anything.</li>
     <li><strong>Calls per invocation.</strong> A Workflow invocation has to stay under 1,000 calls to Cloudflare services. Each crawl step does D1 reads, the save batches and a progress write that doubles as the cancel check; that total has to be counted against the cap, and batch size brought under 50 fetches.</li>
   </ul>
   <div class="callout trap"><p>A D1 quota outage is not a bug in the app, but it takes the whole app down: every page that queries returns 500 until midnight UTC, and nothing can be cancelled from the dashboard. Before running an analysis on a large site, check <code>npx wrangler d1 info eumon-prod</code> and the per-query reads in <code>d1 insights</code> (<a href="#ops--observability">commands</a>).</p></div>
@@ -73,17 +75,33 @@
     <dt>Workers AI only works remotely</dt>
     <dd><code>remoteBindings: false</code> in <code class="path">apps/web/vite.config.ts:9</code> keeps every binding local, and the AI binding has no local simulation ("Binding AI needs to be run remotely"). Set <code>DEEPSEEK_API_KEY</code> or <code>ANTHROPIC_API_KEY</code> in <code>.dev.vars</code> to use the AI steps locally. Browser Rendering does work locally.</dd>
     <dt>Undeclared <code>.dev.vars</code> entries are ignored</dt>
-    <dd>Only names declared in <code class="path">apps/web/cloudflare.config.ts</code> reach the Worker; anything else in <code>.dev.vars</code> is dropped without a warning (<code class="path">apps/web/cloudflare.config.ts:59</code>). Declare a new secret there before reading it. Restart the dev server after changing either file.</dd>
+    <dd>Only names declared in <code class="path">apps/web/cloudflare.config.ts</code> reach the Worker; anything else in <code>.dev.vars</code> is dropped without a warning (<code class="path">apps/web/cloudflare.config.ts:61</code>). Declare a new secret there before reading it. Restart the dev server after changing either file.</dd>
     <dt>Local D1 runs one query at a time</dt>
     <dd>In Miniflare a slow query blocks every other request, and the running query cannot be cancelled: only a dev-server restart recovers. Time a suspect query first, read-only, against the SQLite file under <code>apps/web/.cloudflare/state</code> with <code>EXPLAIN QUERY PLAN</code>, before sending it through the server.</dd>
     <dt>The dev server blocks foreign origins</dt>
-    <dd>vinext's dev-origin check rejects requests whose <code>Origin</code> is not localhost, a <code>.localhost</code> subdomain, the request's own host, or listed in <code>allowedDevOrigins</code> (<code>vinext/dist/server/dev-origin-check.js</code>). So CORS endpoints such as <code>/api/sites/*/events</code> cannot be tested with a foreign <code>Origin</code> against the dev server. Requests with no <code>Origin</code> (plain curl) pass.</dd>
+    <dd>vinext's dev-origin check rejects requests whose <code>Origin</code> is not localhost, a <code>.localhost</code> subdomain, the request's own host, or listed in <code>allowedDevOrigins</code> (<code>vinext/dist/server/dev-origin-check.js</code>). So CORS endpoints such as <code>/api/sites/*/events</code> cannot be tested with a foreign <code>Origin</code> against the dev server. Requests with no <code>Origin</code> (plain curl) pass this check; the gate then wants a session, and an <code>Origin</code> on writes (<a href="#gotchas--accounts-traps">below</a>).</dd>
     <dt>zsh <code>echo</code> rewrites JSON</dt>
     <dd>zsh's <code>echo</code> turns <code>\n</code> inside a JSON string into a real newline, which breaks the JSON. Write responses to a file, or use <code>printf '%s'</code>, before piping them to a parser.</dd>
     <dt>"Network connection lost." on Google Analytics calls</dt>
     <dd>A DNS blocker on the dev machine (a Pi-hole, for example) that answers <code>0.0.0.0</code> for <code>analyticsadmin.googleapis.com</code> or <code>analyticsdata.googleapis.com</code> shows up inside workerd as "Network connection lost.". Run <code>getent ahosts analyticsdata.googleapis.com</code> before debugging the code.</dd>
   </dl>
   <p>Setup itself is on <a href="#getting-started">Getting started</a>.</p>
+
+  <h2 id="accounts-traps">Accounts, limits and headers</h2>
+  <dl>
+    <dt>curl needs a session</dt>
+    <dd>Every path outside the public list needs a signed-in session: <code>/api/…</code> answers 401, a page redirects to <code>/sign-in</code> (<code class="path">apps/web/src/gate.ts:21</code>). To call the API by hand, copy the session cookie from a signed-in browser (<code>better-auth.session_token</code>, with a <code>__Secure-</code> prefix on HTTPS) and send it with <code>-H "Cookie: …"</code>. A write (any method but GET, HEAD and OPTIONS) also needs <code>-H "Origin: http://localhost:5174"</code>, the app's own origin, or the gate answers 403 (<code class="path">apps/web/src/gate.ts:29</code>).</dd>
+    <dt>Limits answer 429, and charge first</dt>
+    <dd>A metered route charges the workspace before it does the work, so a request that is then refused for another reason still counts. Pressing Run analysis while one is running answers 409, after spending one of the day's three analyses (<code class="path">apps/web/app/api/sites/[siteId]/analyses/route.ts:36</code>). A collection run is charged the sum of its sources' page budgets (<code>maxPages</code>), not the pages it fetches. Daily limits and the sites limit answer 429; the members limit (Better Auth) and missing features (pull requests, Sheets export) answer 403. The initial workspace has no limits, so test a limit from another workspace.</dd>
+    <dt>The sign-in rate limit</dt>
+    <dd>Every non-GET request to <code>/api/auth/…</code> counts against <code>AUTH_RATE_LIMIT</code>, 10 a minute per <code>cf-connecting-ip</code> (<code class="path">apps/web/worker.ts:36</code>). A request without that header, which only Cloudflare's edge guarantees, falls back to the key <code>local</code>, so every such request shares one budget of ten a minute. The binding's <code>namespace</code> (<code>"1001"</code>, <code class="path">apps/web/cloudflare.config.ts:77</code>) must be unique in the Cloudflare account; Workers that share a namespace share its counters.</dd>
+    <dt>The CSP has no script rules</dt>
+    <dd><code class="path">apps/web/src/headers.ts</code> sets <code>nosniff</code>, a referrer policy, and a <code>Content-Security-Policy</code> without <code>script-src</code>. The dashboard gets <code>frame-ancestors 'none'; base-uri 'self'; object-src 'none'</code> and <code>X-Frame-Options: DENY</code>; landing pages under <code>/p/</code> get <code>base-uri 'none'; object-src 'none'</code> and no frame rules, because a customer's site may frame them. There is no script policy because vinext writes inline RSC payload scripts and the landing-page beacon is an inline script with per-page settings: a script policy needs per-request nonces threaded through both renderers. Until then, escaping is the only defence against injected scripts: never put unescaped text into HTML (<code>escapeHtml</code> in <code class="path">packages/pages/src/render.ts</code>).</dd>
+    <dt>Preview URLs are off, workers.dev is not</dt>
+    <dd><code>previewUrls: false</code> (<code class="path">apps/web/cloudflare.config.ts:9</code>) stops preview hostnames from serving the app. The <code>workers.dev</code> hostname stays on and may be the production address. The app's protection is the sign-in gate in the Worker, which applies on every hostname, not Cloudflare Access.</dd>
+    <dt>The sitemap cap is 25 MB</dt>
+    <dd><code>collectSitemapUrls</code> fetches each sitemap file with <code>maxBytes: 25_000_000</code> (<code class="path">packages/crawler/src/index.ts:574</code>); page fetches keep the normal cap. Google accepts sitemaps up to 50 MB, so a lower cap cuts real sitemaps short. The comment above it said 10 MB until the merge; the cap itself did not change.</dd>
+  </dl>
 
   <h2 id="monorepo-traps">Monorepo traps</h2>
   <ul>

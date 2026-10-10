@@ -26,7 +26,7 @@
   <table>
     <thead><tr><th>Module</th><th>What it does</th></tr></thead>
     <tbody>
-      <tr><td><code>types.ts</code></td><td>Domain types shared by every workspace: JSON values, findings and severities, crawl results, sites, datasets, templates, generated pages, page settings, conversion event names</td></tr>
+      <tr><td><code>types.ts</code></td><td>Domain types shared by every workspace: JSON values, findings and severities, crawl results, sites (with the owning <code>workspaceId</code>, <code class="path">packages/core/src/types.ts:91</code>), datasets, templates, generated pages, page settings, conversion event names</td></tr>
       <tr><td><code>results.ts</code></td><td>Results math over ledger series: <code>addDays</code>, <code>weekly</code>, comparisons, the <code>METRICS</code> list grouped by source, and <code>resultsView</code></td></tr>
       <tr><td><code>ai-agents.ts</code></td><td>The one table of AI engines, crawlers and assistants: <code>classifyUserAgent</code>, <code>aiAssistantFrom</code>, <code>landingSource</code>, robots.txt tokens</td></tr>
       <tr><td><code>keywords.ts</code>, <code>links.ts</code>, <code>serp.ts</code></td><td>DataForSEO keyword lists and gaps, backlink profiles and the link gap, search results pages and suggested competitors, as pure views</td></tr>
@@ -66,7 +66,7 @@
   <table>
     <thead><tr><th>Module</th><th>What it does</th></tr></thead>
     <tbody>
-      <tr><td><code>index.ts</code></td><td>Sites, analyses, crawl queue and batches, crawl counters and coverage, link graph, retention (<code>pruneCrawlResults</code>), OAuth credentials, markets and competitor domains, changes, Search Console rows, conversion events; re-exports the modules below</td></tr>
+      <tr><td><code>index.ts</code></td><td>Sites, analyses, crawl queue and batches, crawl counters and coverage, link graph, retention (<code>pruneCrawlResults</code>), OAuth credentials, markets and competitor domains, changes, Search Console rows, conversion events; which sites a user may see (<code>siteForUser</code>, <code>listSitesForUser</code>, <code>WorkspaceRole</code>), <code>countWorkspaceSites</code>, <code>setSiteWorkspace</code>, the site log token (<code>getSiteLogToken</code>, <code>setSiteLogToken</code>); re-exports the modules below</td></tr>
       <tr><td><code>d1.ts</code></td><td><code>D1Like</code>, <code>runStatements</code> (uses <code>batch</code> when the binding has it), <code>chunks</code>, <code>nowIso</code></td></tr>
       <tr><td><code>page-engine.ts</code></td><td>Datasets, sources, records, jobs and the scrape queue, templates, generated pages and revisions, page settings, CTA variants, landing sessions, page counters and performance</td></tr>
       <tr><td><code>metrics.ts</code></td><td>The <code>metric_points</code> ledger and the syncs that fill it from first-party data, lead outcomes and AI signals; page index status</td></tr>
@@ -78,12 +78,13 @@
       <tr><td><code>leads.ts</code></td><td>Leads: record a click, create, update status, daily outcomes, outcomes by page type</td></tr>
       <tr><td><code>activity.ts</code></td><td>Sync runs and the recent-events feed</td></tr>
       <tr><td><code>assistant.ts</code></td><td>Ask Eumon threads and messages</td></tr>
+      <tr><td><code>workspaces.ts</code></td><td>Eumon's side of accounts: setting up a new user (<code>setUpNewUser</code>, <code>workspaceForNewSession</code>), <code>memberRole</code>, client site grants, <code>memberSlotsUsed</code>, daily usage (<code>chargeUsage</code>), limit overrides, the <code>/admin</code> list, GitHub installations per workspace; <code>INITIAL_WORKSPACE_ID</code></td></tr>
       <tr><td><code>sqlite.ts</code></td><td><code>openSqliteD1</code>: in-memory SQLite with every migration applied</td></tr>
     </tbody>
   </table>
-  <p><strong>Tests</strong> (<code>npm test -w @organic-growth/db</code>, needs Node 22 for <code>node:sqlite</code>): <code>activity</code>, <code>assistant</code>, <code>coverage</code>, <code>crawl</code>, <code>history</code>, <code>inventory</code>, <code>leads</code>, <code>links</code>, <code>metrics</code>, <code>page-engine</code>, <code>search-console</code>, <code>server-logs</code>, <code>snapshots</code> (<code>*.test.ts</code> in <code class="path">packages/db/src/</code>). They run against the real migrations.</p>
+  <p><strong>Tests</strong> (<code>npm test -w @organic-growth/db</code>, needs Node 22 for <code>node:sqlite</code>): <code>activity</code>, <code>assistant</code>, <code>coverage</code>, <code>crawl</code>, <code>history</code>, <code>inventory</code>, <code>leads</code>, <code>links</code>, <code>metrics</code>, <code>page-engine</code>, <code>search-console</code>, <code>server-logs</code>, <code>snapshots</code>, <code>workspaces</code> (<code>*.test.ts</code> in <code class="path">packages/db/src/</code>). They run against the real migrations.</p>
   <ul>
-    <li>Keep SQL in this package. The only other place that writes SQL is the demo seeder in <code class="path">packages/agents/src/demo.ts</code>.</li>
+    <li>Keep SQL in this package. The exceptions are the demo seeder in <code class="path">packages/agents/src/demo.ts</code>, Better Auth (which writes its own tables through the D1 binding), and two lookups in the web app (<a href="#data-model--where-the-schema-lives">Data model</a>).</li>
     <li>A request on the Workers Free plan may make 50 D1 queries: write functions that do a fixed number of queries (batch over <code>json_each</code>), never one per item.</li>
     <li>A new table or column needs a new migration file; see <a href="#data-model--table-rebuild">the table rebuild rule</a> before rebuilding one.</li>
   </ul>
@@ -109,6 +110,7 @@
     </tbody>
   </table>
   <p><strong>Tests</strong> (<code>npm test -w @organic-growth/crawler</code>): <code>competitors.test.ts</code>, <code>crawler.test.ts</code>, <code>rendering.test.ts</code>.</p>
+  <p><code>isSafePublicUrl</code> (<code class="path">packages/crawler/src/index.ts:26</code>) is the check every user-supplied URL passes: http or https, no credentials, no IP literals, no local or internal names, port 80 or 443. It strips trailing dots first, since <code>localhost.</code> names the same host as <code>localhost</code>. A sitemap file may be up to 25 MB, larger than the cap on a page (<a href="#gotchas--accounts-traps">Gotchas</a>).</p>
   <p>Fetching goes through a <code>Fetcher</code> parameter (default <code>defaultFetcher</code>), so tests and the demo site pass their own. Competitor research identifies itself as <code>RESEARCH_USER_AGENT</code> and never impersonates a search engine.</p>
 
   <h2 id="scraper">scraper</h2>
@@ -178,11 +180,12 @@
       <tr><td><code>results-points.ts</code></td><td>Search Console rows as ledger points, ranking buckets, top queries</td></tr>
       <tr><td><code>log-coverage.ts</code>, <code>trend-signals.ts</code>, <code>inventory-data.ts</code></td><td>Database reads that feed an analysis: crawl-log coverage, ledger trends, dataset inventories</td></tr>
       <tr><td><code>not-found-probe.ts</code></td><td>Soft-404 finding from the crawler's <code>probeNotFound</code></td></tr>
-      <tr><td><code>change-generator.ts</code>, <code>github-pr.ts</code></td><td>Proposed changes limited to <code>SAFE_SEO_CONFIG_PATHS</code>, and opening a GitHub pull request</td></tr>
+      <tr><td><code>change-generator.ts</code>, <code>github-pr.ts</code></td><td>Proposed changes limited to <code>SAFE_SEO_CONFIG_PATHS</code>, which is <code>public/robots.txt</code> only, with content that passes <code>isPlainRobotsTxt</code>; and opening a GitHub pull request</td></tr>
       <tr><td><code>demo.ts</code>, <code>demo-connectors.ts</code></td><td>The fictional demo clinic: <code>seedDemoSite</code>, simulated runs, demo connector data</td></tr>
     </tbody>
   </table>
-  <p><strong>Tests</strong> (<code>npm test -w @organic-growth/agents</code>): <code>assistant</code>, <code>code-findings</code>, <code>competition</code>, <code>connector-findings</code>, <code>connectors</code>, <code>conversion</code>, <code>dataforseo</code>, <code>demand</code>, <code>demo</code>, <code>google-clients</code>, <code>inventory-data</code>, <code>not-found-probe</code>, <code>opportunities</code>, <code>pipeline</code>, <code>results-points</code>, <code>search</code>, <code>site-signals</code>, <code>trend-signals</code> (<code>*.test.ts</code> in <code class="path">packages/agents/src/</code>). The pipeline, assistant, inventory and trend tests use <code>openSqliteD1</code>.</p>
+  <p><strong>Tests</strong> (<code>npm test -w @organic-growth/agents</code>): <code>assistant</code>, <code>change-generator</code>, <code>code-findings</code>, <code>competition</code>, <code>connector-findings</code>, <code>connectors</code>, <code>conversion</code>, <code>dataforseo</code>, <code>demand</code>, <code>demo</code>, <code>google-clients</code>, <code>inventory-data</code>, <code>not-found-probe</code>, <code>opportunities</code>, <code>pipeline</code>, <code>results-points</code>, <code>search</code>, <code>site-signals</code>, <code>trend-signals</code> (<code>*.test.ts</code> in <code class="path">packages/agents/src/</code>). The pipeline, assistant, inventory and trend tests use <code>openSqliteD1</code>.</p>
+  <p>Eumon may only propose a change to <code>public/robots.txt</code> (<code class="path">packages/agents/src/change-generator.ts:10</code>). <code>app/robots.ts</code> and <code>app/sitemap.ts</code> were allowed once, but they are code that runs at build time, including preview builds of a draft pull request, so model-written content must never reach them. <code>isPlainRobotsTxt</code> accepts only blank lines, comments and robots.txt directives without <code>&lt;</code>, <code>&gt;</code> or backticks; the generator and the pull-request route both check it.</p>
   <p>This package sits at the top of the package graph, so its tests run against the built <code>dist/</code> of six other packages: rebuild them after changing any of those.</p>
 
   <h2 id="repo-analyzer">repo-analyzer</h2>
@@ -213,7 +216,8 @@
   <h2 id="web">web (apps/web)</h2>
   <p><code>@organic-growth/web</code> is the deployed app: a vinext (React Server Components on Vite) app running as a Cloudflare Worker, with the dashboard UI, the API routes, the public landing pages, and the Workflows that run analyses, scrapes and search syncs. It depends on every package except <code>sdk</code>. It is not built to <code>dist/</code> for other workspaces; it is the consumer. Details are on <a href="#web-app">Web app</a>.</p>
   <dl class="facts">
-    <dt>Worker entry</dt><dd><code class="path">apps/web/worker.ts</code> (exports the Workflow classes <code>SiteAnalysisWorkflow</code>, <code>ScrapeWorkflow</code>, <code>SearchSyncWorkflow</code>)</dd>
+    <dt>Worker entry</dt><dd><code class="path">apps/web/worker.ts</code>: hands <code>/api/auth/*</code> to Better Auth, runs the sign-in gate before every other request, sets the security headers, and exports the Workflow classes <code>SiteAnalysisWorkflow</code>, <code>ScrapeWorkflow</code>, <code>SearchSyncWorkflow</code></dd>
+    <dt>Accounts</dt><dd><code>better-auth</code> 1.7.7 (<code class="path">apps/web/src/auth.ts</code>); the tables are on <a href="#data-model--accounts-and-workspaces">Data model</a></dd>
     <dt>Dev</dt><dd><code>npm run dev</code>, port 5174, after <code>predev.mjs</code> builds the packages and applies local migrations</dd>
     <dt>Tests</dt><dd><code>npm test -w @organic-growth/web</code>: <code>node --test</code> over <code>app/**/*.test.ts</code> and <code>src/**/*.test.ts</code></dd>
   </dl>

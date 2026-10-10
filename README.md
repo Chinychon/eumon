@@ -22,7 +22,7 @@ Eumon also compares the site with the competitors you name — which kinds of pa
 6. **Measure.** Page views, CTA clicks, Googlebot fetches, Search Console impressions and clicks per page, and conversions on the main site attributed to the landing page a visitor arrived on. WhatsApp links get a short code in the visitor's message, so staff can match each chat to the visit and mark what it became (a customer, and its value). Optional sources add Bing, Google's results pages for your searches, backlinks, and what crawlers request in your own server or CDN logs; new pages are announced through IndexNow.
 7. **Optimize.** Ranked suggestions (titles that under-perform their ranking, near-miss queries, pages Google ignores, weak CTAs), AI title rewrites, automatic CTA testing, and a before/after record of every change.
 
-Once a site is connected, a daily sync (04:15 UTC, or **Sync now**) pulls Search Console, Google Analytics, URL inspection and the optional sources into one ledger. The Dashboard reads it one tab per question (Overview, Technical, Search, Enquiries, Keywords, Competitors, AI visibility), **History** lists the problems that went away and what fixed them, and **Ask Eumon** answers questions about the site from the same data. A signed, revocable link (`/r/<token>`) shows a client their results without an account.
+Once a site is connected, a daily sync (04:15 UTC, or **Sync now**) pulls Search Console, Google Analytics, URL inspection and the optional sources into one ledger. The Dashboard reads it one tab per question (Overview, Technical, Search, Enquiries, Keywords, Competitors, AI visibility), **History** lists the problems that went away and what fixed them, and **Ask Eumon** answers questions about the site from the same data. Everyone signs in (Google by default) into a workspace that holds its sites, as an Owner, a Member or a read-only Client; a signed, revocable link (`/r/<token>`) also shows a client their results without an account.
 
 ## Quick start
 
@@ -40,15 +40,15 @@ What each setting in `.dev.vars` unlocks (details in [apps/web/README.md](apps/w
 
 | Setting | Unlocks |
 |---|---|
-| nothing | Site analysis, CSV import, page generation, publishing, analytics |
+| `BETTER_AUTH_SECRET`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Signing in, which every page but the public ones needs; Google is the only sign-in method by default. Then site analysis, CSV import, page generation, publishing and analytics work with nothing else |
 | `DEEPSEEK_API_KEY` | AI scoping, data extraction from web pages, page copy, title suggestions. `ANTHROPIC_API_KEY` and `LLM_MODEL` also work once declared in `apps/web/cloudflare.config.ts` (see the note there); without a key, Workers AI is used in production |
 | `DATAFORSEO_LOGIN`, `DATAFORSEO_PASSWORD` | Keyword volumes and gaps, Google results pages for your searches, the domains that win them, backlinks and the link gap |
 | `BING_WEBMASTER_API_KEY` | Bing clicks, impressions and crawl counts |
 | `SESSION_SECRET` (32+ characters) | Also derives each site's IndexNow key and server-log token |
 | `SESSION_SECRET`, `OAUTH_ENCRYPTION_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Google Search Console data |
-| `GITHUB_APP_*` (plus `SESSION_SECRET`) | Repository analysis and draft pull requests |
-| `BETTER_AUTH_SECRET`, `BOOTSTRAP_OWNER_EMAIL` | Required in production: sign-in sessions, and the emails that own the initial workspace and `/admin` |
-| `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | Bot check on sign-in |
+| `GITHUB_APP_*` | Repository analysis and draft pull requests (which only ever change `public/robots.txt`) |
+| `BOOTSTRAP_OWNER_EMAIL` | The emails that own the initial workspace and can open `/admin`. Required in production, along with `BETTER_AUTH_SECRET` |
+| `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | Bot check on the email sign-in methods (off by default; Google sign-in doesn't use it) |
 | `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET` | Verifying who installs the GitHub App ("Request user authorization during installation" must be on) |
 
 ## Repository layout

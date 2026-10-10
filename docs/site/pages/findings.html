@@ -3,7 +3,7 @@
   <p class="lede">How an analysis turns crawl, code, search and connector data into ranked findings, how History tracks a finding across runs, and how to add a new one. For where findings are produced in the run, see <a href="#flow-analysis">Site analysis</a>.</p>
 
   <h2 id="the-finding-type">The Finding type</h2>
-  <p>Defined in <code class="path">packages/core/src/types.ts:94</code>:</p>
+  <p>Defined in <code class="path">packages/core/src/types.ts:96</code>:</p>
   <pre><code>interface Finding {
   id: string;                 // createId("finding"), new every run
   siteId: string;
@@ -22,7 +22,7 @@
     <dt><code>Severity</code></dt><dd><code>CRITICAL</code>, <code>HIGH</code>, <code>MEDIUM</code>, <code>LOW</code>, <code>INFORMATIONAL</code></dd>
     <dt><code>FindingCategory</code></dt><dd><code>rendering</code>, <code>sitemap</code>, <code>indexing</code>, <code>metadata</code>, <code>structured_data</code>, <code>internal_links</code>, <code>content</code>, <code>conversion</code>, <code>competitors</code>, <code>search</code>, <code>repository</code>, <code>ai_visibility</code></dd>
   </dl>
-  <p>Findings are not stored in their own table. They live in the report, <code>analyses.report_json</code> under <code>findings</code>. When a report is too big for a D1 row, <code>compactReport</code> drops evidence beyond the top 10 findings first, then all evidence (<code class="path">packages/db/src/index.ts:330</code>). Because <code>id</code> changes every run, anything that needs "the same finding" across runs uses <code>findingKey</code> instead (see <a href="#findings--history">History</a>).</p>
+  <p>Findings are not stored in their own table. They live in the report, <code>analyses.report_json</code> under <code>findings</code>. When a report is too big for a D1 row, <code>compactReport</code> drops evidence beyond the top 10 findings first, then all evidence (<code class="path">packages/db/src/index.ts:333</code>). Because <code>id</code> changes every run, anything that needs "the same finding" across runs uses <code>findingKey</code> instead (see <a href="#findings--history">History</a>).</p>
   <p>The category decides which dashboard area explains the finding: <code>findingArea</code> in <code class="path">apps/web/app/components/report-model.ts:104</code> sends <code>search</code> to Search, <code>competitors</code> to Competitors, <code>conversion</code> to Leads, <code>ai_visibility</code> to AI, and everything else to Technical.</p>
 
   <h2 id="severity-and-impact">Severity and organic impact</h2>
@@ -40,7 +40,7 @@
   <p><code>organicImpactScore(input)</code> builds a score from facts about the problem. It starts at 10 and adds: 55 for empty shells at scale, 40 for blocking the crawl, 20 for commercial intent, 25 if more than half the traffic is affected (15 if more than a fifth), and pages affected divided by 100, capped at 20. <code>rendering</code> and <code>indexing</code> get 10 more. A <code>metadata</code> problem on fewer than 5 pages is capped at 25. The result is rounded and clamped to 0 to 100.</p>
   <p>Not every producer uses that formula. The crawler's checks do, and the code findings do for client-rendered templates the crawl confirms (other code findings use fixed scores); the connector findings and conversion findings set impact directly with their own capped expressions (for example <code>Math.min(90, 50 + Math.round(share * 0.4))</code> for an impressions fall). A few override severity outright: "robots.txt blocks Googlebot from the entire site" is always <code>CRITICAL</code>, and the AI crawler finding is always <code>INFORMATIONAL</code> with score 10, because blocking AI crawlers is a legitimate choice.</p>
   <h3 id="ranking">Ranking</h3>
-  <p><code>rankSeverityByOrganicImpact</code> (<code class="path">packages/core/src/types.ts:344</code>) sorts by <code>organicImpactScore</code> descending, then by severity order for ties. The pipeline calls it once on all findings. The ranked list then feeds:</p>
+  <p><code>rankSeverityByOrganicImpact</code> (<code class="path">packages/core/src/types.ts:346</code>) sorts by <code>organicImpactScore</code> descending, then by severity order for ties. The pipeline calls it once on all findings. The ranked list then feeds:</p>
   <ul>
     <li><code>buildOpportunities</code> (<code class="path">packages/agents/src/index.ts:69</code>): every finding becomes a <code>technical_enabler</code> opportunity titled <code>Resolve: &lt;finding title&gt;</code>, with priority <code>impact² / (50 × effort)</code> (effort 4 for <code>rendering</code>, 2 otherwise). Squaring makes severity dominate.</li>
     <li><code>synthesizeGrowthPlan</code>: the titles of the top three findings scoring 40 or more become the plan's constraints, and any <code>CRITICAL</code> or <code>HIGH</code> finding puts "Fix the critical and high-impact technical findings" first in the strategy sequence.</li>
@@ -66,7 +66,7 @@
     <thead><tr><th>Producer</th><th>Input data</th><th>Example titles (from the code)</th></tr></thead>
     <tbody>
       <tr>
-        <td><code>findingsFromCrawl</code><br><code class="path">packages/crawler/src/index.ts:626</code></td>
+        <td><code>findingsFromCrawl</code><br><code class="path">packages/crawler/src/index.ts:627</code></td>
         <td>The sampled pages (up to 25) fetched as Googlebot, and the sitemap audit</td>
         <td>"Entity pages return empty or thin HTML shells to crawlers"; "Soft-200 responses risk indexing junk URLs"; "Large sitemap with weak render coverage"; "Detail pages missing JSON-LD in crawler HTML"</td>
       </tr>
@@ -155,7 +155,7 @@
   <p><code>resolutions(runs)</code> (<code class="path">packages/core/src/history.ts:52</code>) walks the runs oldest to newest. A key that was open and is absent from a run becomes a <code>Resolution</code> with <code>firstSeen</code> (the earliest consecutive run that reported it), <code>resolvedAt</code> and <code>resolvedBy</code> (the first run without it), and <code>vanished</code> if that run carries a vanished row for the key. If a later run reports the key again, the earlier resolution gets <code>reopenedAt</code> and a new open stretch starts. It also returns how many keys are still open.</p>
   <p><code>assembleHistory</code> (<code class="path">apps/web/src/history.ts:23</code>) labels each resolution:</p>
   <ul>
-    <li><code>fixed</code>: a change with status <code>merged</code> or <code>pr_opened</code>, whose <code>findingId</code> maps (through the key lists) to this key, was created between <code>firstSeen</code> and <code>resolvedAt</code>. Changes record the finding id they were generated from (<code class="path">apps/web/app/api/analyses/[analysisId]/changes/route.ts</code>).</li>
+    <li><code>fixed</code>: a change with status <code>merged</code> or <code>pr_opened</code>, whose <code>findingId</code> maps (through the key lists) to this key, was created between <code>firstSeen</code> and <code>resolvedAt</code>. Changes record the finding id they were generated from (<code class="path">apps/web/app/api/analyses/[analysisId]/changes/route.ts</code>). Only <code>sitemap</code> and <code>indexing</code> findings can get one, the change may only edit <code>public/robots.txt</code>, generating it costs an AI run, and opening its pull request needs the workspace's <code>pullRequests</code> feature (<code class="path">apps/web/app/api/changes/[changeId]/pull-request/route.ts:24</code>), which the free limits leave off.</li>
     <li><code>vanished</code>: "Every page it pointed at is gone or erroring, so it no longer applies."</li>
     <li><code>resolved</code>: "The analysis stopped reporting it."</li>
   </ul>

@@ -23,6 +23,7 @@ export const CONTENT_GRADE = {
   WEIGHT_COVERAGE: 0.7, // topics are what searchers and AI answers look for
   WEIGHT_LENGTH: 0.15, // length matters less than substance
   WEIGHT_STRUCTURE: 0.15, // lists, questions and FAQ help skimming and answer extraction
+  LABEL_MAX: 80, // a longer label, or one with a URL, is not a topic name (and may be injected text)
   MIN_TOPICS: 3, // below this a coverage share says little, so no grade is given
   GRADE_A: 85, // matches or beats the top results on nearly everything
   GRADE_B: 70, // covers most topics, small gaps
@@ -90,7 +91,7 @@ export function verifyTopics(proposals: TopicProposal[], input: { page: GradedPa
 
   for (const p of proposals) {
     const key = norm(p?.label);
-    if (!key || GENERIC.has(key)) continue;
+    if (!key || GENERIC.has(key) || String(p.label).trim().length > C.LABEL_MAX || /https?:\/\/|www\./i.test(String(p.label))) continue;
     const topic = topics.get(key) ?? { label: String(p.label).trim(), domains: new Set<string>(), words: new Set(content(key)), quotes: [] };
     topics.set(key, topic);
     for (const cite of Array.isArray(p.headings) ? p.headings : []) {

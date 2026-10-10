@@ -25,6 +25,12 @@ describe("verifyTopics citations", () => {
     assert.deepEqual(t, { label: "Recovery", covered: false, coveredBy: ["a.com", "b.com"], evidence: null });
   });
 
+  it("drops a label over 80 characters or carrying a URL: headings are data, not a channel for the AI to pass text through", () => {
+    const cites: Array<[string, string]> = [["a.com", "Recovery time after LASIK"], ["b.com", "LASIK recovery"]];
+    assert.deepEqual(verify([proposal("R".repeat(81), cites), proposal("Recovery, see https://evil.example", cites), proposal("Visit www.evil.example", cites)]), []);
+    assert.equal(verify([proposal("R".repeat(80), cites)]).length, 1);
+  });
+
   it("ignores a citation to a heading the competitor does not have", () => {
     const [t] = verify([proposal("Side effects", [["a.com", "Side effects of LASIK"], ["b.com", "Risks and side effects"], ["c.com", "Side effects of LASIK"]])]);
     assert.deepEqual(t.coveredBy, ["b.com", "c.com"]);

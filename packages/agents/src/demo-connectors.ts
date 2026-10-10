@@ -1,4 +1,5 @@
 import { addDays, type BacklinkSummary, type CompetitorSuggestion, type LinkGap, type LinksInput, type SerpCompetitor, type SerpFeature, type SerpResult } from "@organic-growth/core";
+import { demoContentGrades } from "./demo-content.js";
 import { classifyUrlType } from "@organic-growth/crawler";
 import { recordCrawlLog, saveSnapshot, upsertMetricPoints, type D1Like, type MetricPoint } from "@organic-growth/db";
 
@@ -119,6 +120,7 @@ export async function seedDemoConnectors(db: D1Like, demo: Demo, now: number): P
   const today = new Date(now).toISOString().slice(0, 10);
   for (const list of demoSerpLists(demo, today)) await saveSnapshot(db, demo.siteId, { kind: "serp", scope: list.market, periodEnd: list.periodEnd, rows: list.rows });
   for (const [market, rows] of Object.entries(SERP_COMPETITORS)) await saveSnapshot(db, demo.siteId, { kind: "serp_competitors", scope: market, periodEnd: addDays(today, -9), rows });
+  await saveSnapshot(db, demo.siteId, { kind: "content_grades", scope: demo.own, periodEnd: today, rows: demoContentGrades(demo.origin, `${today}T06:00:00.000Z`) });
   const links = demoLinks(demo, today);
   for (const entry of links.summaries) await saveSnapshot(db, demo.siteId, { kind: "backlinks", scope: entry.row.domain, periodEnd: entry.periodEnd, rows: [entry.row] });
   await saveSnapshot(db, demo.siteId, { kind: "link_gap", scope: demo.competitors.slice(0, 3).sort().join(","), periodEnd: links.gap!.periodEnd, rows: links.gap!.rows });

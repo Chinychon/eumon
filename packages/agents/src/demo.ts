@@ -1,8 +1,8 @@
-import type { DataRecord, Dataset, Finding, KeywordsInput, PageTemplate, RankCheck, RankedKeyword, SearchMetricRow } from "@organic-growth/core";
+import type { ContentGradeRow, DataRecord, Dataset, Finding, KeywordsInput, PageTemplate, RankCheck, RankedKeyword, SearchMetricRow } from "@organic-growth/core";
 import { addDays, keyOf, REF_ALPHABET, REF_LENGTH, slugify, suggestRedirect } from "@organic-growth/core";
 import { crawlGooglebotBatch, probeAiCrawlers, probeHost, probeNotFound, researchSite, type Fetcher, type SiteResearch } from "@organic-growth/crawler";
 import {
-  chunks, createAnalysis, createLead, recordLeadClick, updateLead, defaultPageSettings, recordSyncRun, recountCrawl, upsertPageSettings, datasetCoverage, deleteSite, getAnalysisJob, getCrawlCoverage, getCrawlProgress, importSearchConsoleUrls, insertChange, insertConversionEvent, listAllRecords,
+  chunks, getSnapshot, createAnalysis, createLead, recordLeadClick, updateLead, defaultPageSettings, recordSyncRun, recountCrawl, upsertPageSettings, datasetCoverage, deleteSite, getAnalysisJob, getCrawlCoverage, getCrawlProgress, importSearchConsoleUrls, insertChange, insertConversionEvent, listAllRecords,
   listCrawlLogDays, listCrawlPageResults, listPendingCrawlUrls, probePages, recordLandingSession, replaceCurrentSearchMetrics, replacePageSearchMetrics, runStatements, saveAnalysisReport, saveCrawlBatch,
   saveIndexStatus, saveRankChecks, setTrackedKeywords, saveSearchConsoleChart, saveSearchConsoleChecks, saveSearchConsoleSummary, saveSiteScope, saveSnapshot, searchConsoleReconciliation, saveTopQueriesSnapshot, saveUrlIndexStatus, listSiteCompetitorDomains, setSiteCompetitorDomains, syncFirstPartyResults, updateSiteGa4Property, upsertMetricPoints, type MetricPoint, setSiteMarkets, setTemplatePublication, syncTemplatePages, updateAnalysisProgress,
   updateAnalysisStatus, upsertDataset, upsertRecords, upsertSite, upsertTemplate, type D1Like,
@@ -502,6 +502,7 @@ async function analyzeDemo(db: D1Like, input: { analysisId: string; version: num
       trends: await loadTrendSignals(db, DEMO_SITE_ID, await listCrawlLogDays(db, DEMO_SITE_ID, addDays(new Date(input.now).toISOString().slice(0, 10), -182)), new Date(input.now).toISOString().slice(0, 10)),
       inventory: await loadInventories(db, DEMO_SITE_ID, { analysisId: input.analysisId }),
       ranks: await loadRankSignals(db, DEMO_SITE_ID, new Date(input.now).toISOString().slice(0, 10)),
+      contentGrades: (await getSnapshot<ContentGradeRow>(db, DEMO_SITE_ID, "content_grades", "demo-clinic.example"))?.rows ?? [],
     },
     crawlCoverage: { coverage, examples },
     renderPages: (urls) => renderDemo(urls, input.version),

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { addDays, RESULT_METRICS, resultsView } from "@organic-growth/core";
-import { listSnapshots } from "@organic-growth/db";
+import { getSnapshot, listSnapshots } from "@organic-growth/db";
 import { deleteSite, getAnalysisJob, getCrawlProgress, getLinkGraph, getSite, getTopQueriesSnapshot, indexStatusCounts, listMetricSeries, publishedPages } from "@organic-growth/db";
 import { openSqliteD1 } from "@organic-growth/db/sqlite";
 import { advanceDemoRun, DEMO_SITE_ID, isLocalHost, seedDemoSite, startDemoRun } from "./demo.js";
@@ -124,6 +124,19 @@ describe("demo site", () => {
     assert.ok(!titles.includes("The site answers 200 for pages that don't exist"), "the demo's unknown URLs are real 404s");
     const report = (await getAnalysisJob(db, "analysis_demo_2"))!.report as { notFoundProbe?: { status: number } };
     assert.equal(report.notFoundProbe?.status, 404, "the probe's answer is kept on the report");
+  });
+});
+
+describe("demo site content grades", () => {
+  it("grades five searches, two of which trail the top results", async () => {
+    const db = openSqliteD1();
+    await seedDemoSite(db, Date.now());
+    const snapshot = await getSnapshot<{ grade: string; page: string }>(db, DEMO_SITE_ID, "content_grades", "demo-clinic.example");
+    assert.deepEqual(snapshot?.rows.map((row) => row.grade).sort(), ["A", "B", "B", "D", "F"]);
+    assert.ok(snapshot!.rows.every((row) => row.page.startsWith("https://demo-clinic.example/")), "rows belong to the demo site");
+    const report = (await getAnalysisJob(db, "analysis_demo_2"))!.report as { findings: Array<{ title: string }>; opportunities: Array<{ title: string }> };
+    assert.ok(report.findings.some((f) => f.title === "2 pages cover less than half of what the top results cover"), report.findings.map((f) => f.title).join(" | "));
+    assert.equal(report.opportunities.filter((o) => o.title.startsWith("Cover what the top results cover for \u201c")).length, 2, report.opportunities.map((o) => o.title).join(" | "));
   });
 });
 

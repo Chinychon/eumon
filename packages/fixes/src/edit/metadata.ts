@@ -18,10 +18,10 @@ function entriesOf(plan: MetadataPlan): { top: Array<[string, string]>; alternat
 
 const objectCode = (entries: Array<[string, string]>) => `{ ${entries.map(([n, c]) => `${n}: ${c}`).join(", ")} }`;
 
-function edit(source: string, entries: { top: Array<[string, string]>; alternates: Array<[string, string]> }, dynamic: boolean, snippet: string, summary: string): EditResult {
+function edit(source: string, entries: { top: Array<[string, string]>; alternates: Array<[string, string]> }, dynamic: boolean, snippet: string, summary: string, parsed?: AstNode): EditResult {
   if (!entries.top.length && !entries.alternates.length) return { ok: false, reason: "there's nothing to change", snippet };
   let program: AstNode;
-  try { program = parseModule(source); } catch { return { ok: false, reason: "the file doesn't parse", snippet }; }
+  try { program = parsed ?? parseModule(source); } catch { return { ok: false, reason: "the file doesn't parse", snippet }; }
   const site = findMetadata(program);
   if (site.kind === "unsupported") return { ok: false, reason: site.reason, snippet };
   if (site.kind === "none") {
@@ -47,9 +47,10 @@ function edit(source: string, entries: { top: Array<[string, string]>; alternate
   return { ok: true, edits, allowedRanges: [{ start: object.start, end: object.end }], roots: site.names, files: {}, summary };
 }
 
-export function editMetadata(source: string, plan: MetadataPlan, dynamic: boolean): EditResult {
+/** `program` is `source` already parsed, to save parsing it again. */
+export function editMetadata(source: string, plan: MetadataPlan, dynamic: boolean, program?: AstNode): EditResult {
   const changed = [plan.title && "title", plan.description && "description", plan.canonical && "canonical", plan.languages && "hreflang"].filter(Boolean).join(", ");
-  return edit(source, entriesOf(plan), dynamic, metadataSnippet(plan, dynamic), `Sets ${changed} in the route's metadata.`);
+  return edit(source, entriesOf(plan), dynamic, metadataSnippet(plan, dynamic), `Sets ${changed} in the route's metadata.`, program);
 }
 
 export function editMetadataBase(source: string, origin: string): EditResult {

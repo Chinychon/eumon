@@ -10,7 +10,8 @@ import { featureRefusal } from "./limits.ts";
 import { settingsFor } from "./server.ts";
 
 export const FIX_AI_CALLS = 30;
-const PER_STEP = 3;
+// One candidate per step keeps each step's CPU (parsing, validation) and subrequests small.
+const PER_STEP = 1;
 
 export type FixStep = { do<T>(name: string, fn: () => Promise<T>): Promise<T> };
 

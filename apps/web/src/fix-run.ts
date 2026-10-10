@@ -2,7 +2,7 @@ import { FIX_PROMPT_VERSION, writeFixText, type FixSample } from "@organic-growt
 import type { JsonLlm } from "@organic-growth/ai";
 import { createId } from "@organic-growth/core";
 import { parseHtmlSignals, visibleText } from "@organic-growth/crawler";
-import { countOpenFixes, hasLiveFix, listFixes, stageFix, transitionFix, updateFix, type D1Like, type FixRecord, type FixSettings } from "@organic-growth/db";
+import { clearSkipped, countOpenFixes, hasLiveFix, listFixes, stageFix, transitionFix, updateFix, type D1Like, type FixRecord, type FixSettings } from "@organic-growth/db";
 import {
   blockedAiSearchAgents, buildLlmsTxt, componentPath, editAiRobots, editJsonLd, editLlmsTxt, editMetadata, editMetadataBase, findMetadata, findPage,
   JSON_LD_COMPONENT, jsonLdCode, jsonLdSnippet, memberPaths, metadataSnippet, parseModule, pathOf, propertyNamed, routeForPath, stripLocale, urlTemplate, validateEdit, validateFile,
@@ -139,7 +139,8 @@ async function stageHead(ctx: Ctx): Promise<Outcome> {
 
   let aiReason: string | null = null, warnings: string[] = [], promptSha: string | undefined;
   if (wantsTitle || wantsDescription) {
-    if (!deps.llm) aiReason = "No AI is set up to write the title and description, so they're offered as a snippet instead.";
+    if (route.dynamic && !paths.length) aiReason = "The route's metadata has no page data in scope to write per-page titles and descriptions from, so they're offered as a snippet instead.";
+    else if (!deps.llm) aiReason = "No AI is set up to write the title and description, so they're offered as a snippet instead.";
     else if (deps.budget.calls <= 0) aiReason = "The AI budget for this analysis is used up, so the title and description are offered as a snippet instead.";
     else {
       const samples = await samplesFor(deps, c.urls);
@@ -162,7 +163,7 @@ async function stageHead(ctx: Ctx): Promise<Outcome> {
   // Only what the edit sets is checked on the preview and after merging.
   const fixed = c.problems.filter((p) => (p.startsWith("title-") && plan.title) || (p.startsWith("description-") && plan.description)
     || (p === "canonical-missing" && plan.canonical) || (p === "hreflang-missing" && plan.languages));
-  const out = staged(ctx, headTitle(Object.keys(plan).map((k) => (k === "languages" ? "hreflang" : k)), route.pathPattern), { path: c.file, ...file }, editMetadata(file.content, plan, route.dynamic), rootsOf(paths));
+  const out = staged(ctx, headTitle(Object.keys(plan).map((k) => (k === "languages" ? "hreflang" : k)), route.pathPattern), { path: c.file, ...file }, editMetadata(file.content, plan, route.dynamic, program), rootsOf(paths));
   return out.status === "staged" ? { ...out, problems: fixed, warnings, ...(promptSha ? { promptSha } : {}) } : out;
 }
 
@@ -196,12 +197,13 @@ async function stageJsonLd(ctx: Ctx): Promise<Outcome> {
   const url = urlTemplate(route.pathPattern, page.names, file.content);
   if (url === null) return skip(title, "a route parameter isn't available inside the page component");
   const manual = jsonLdSnippet(jsonLdCode({ schemaType, fields: [{ field: "name", path: "page.name" }], url, origin: input.origin }));
+  if (!paths.length) return skip(title, "the page component has no data in scope to fill structured data from", manual);
   if (!deps.llm) return skip(title, "No AI is set up to map the page's data to structured data, so the markup is offered as a snippet instead.", manual);
   if (deps.budget.calls <= 0) return skip(title, "The AI budget for this analysis is used up, so the markup is offered as a snippet instead.", manual);
   const samples = await samplesFor(deps, c.urls);
   const written = await writeFixText(deps.llm, { kind: "jsonld", siteName: input.siteName, language: input.language, problems: c.problems, paths, dynamic: route.dynamic, schemaType, samples, queries: input.queries }, deps.budget);
   if (!written.ok) return skip(title, written.reason, manual);
-  const out = staged(ctx, title, { path: c.file, ...file }, editJsonLd(c.file, file.content, { schemaType, fields: written.text.schema, url, origin: input.origin }, tree), rootsOf(paths));
+  const out = staged(ctx, title, { path: c.file, ...file }, editJsonLd(c.file, file.content, { schemaType, fields: written.text.schema, url, origin: input.origin }, tree, program), rootsOf(paths));
   return out.status === "staged" ? { ...out, warnings: written.warnings, promptSha: FIX_PROMPT_VERSION } : out;
 }
 
@@ -245,6 +247,7 @@ export async function stageCandidates(deps: FixDeps, input: StageInput): Promise
         outcome = { title: `Fix ${c.kind} on ${route}`, reason: `Fix ${c.kind} on ${route}`, status: "skipped", result: `Eumon couldn't prepare this fix: ${messageOf(error)}. It will try again on the next run.` };
       }
       const at = deps.now().toISOString();
+      await clearSkipped(deps.db, input.siteId, route, c.kind);
       await stageFix(deps.db, {
         id: createId("fix"), siteId: input.siteId, analysisId: input.analysisId, kind: c.kind, route, filePath: c.file,
         files: {}, original: {}, warnings: [], status: "skipped", problems: c.problems, ...outcome, urls: c.urls, score: c.score, createdAt: at, updatedAt: at,

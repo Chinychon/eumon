@@ -117,6 +117,11 @@ export async function hasLiveFix(db: D1Like, siteId: string, route: string, kind
   return Boolean(row);
 }
 
+/** Removes earlier snippet-only rows for a route and kind, so each analysis replaces them instead of piling up. */
+export async function clearSkipped(db: D1Like, siteId: string, route: string, kind: string): Promise<void> {
+  await db.prepare("DELETE FROM changes WHERE site_id = ? AND route = ? AND fix_kind = ? AND status = 'skipped'").bind(siteId, route, kind).run();
+}
+
 export async function countOpenFixes(db: D1Like, siteId: string): Promise<number> {
   const row = await db.prepare(`SELECT COUNT(*) AS n FROM changes WHERE site_id = ? AND fix_kind IS NOT NULL AND ${OPEN_PR}`).bind(siteId).first<{ n: number }>();
   return Number(row?.n ?? 0);

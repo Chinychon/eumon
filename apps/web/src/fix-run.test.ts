@@ -434,3 +434,27 @@ describe("claim-first open (I5)", () => {
     assert.deepEqual([(await getFix(db, fix!.id))?.status, (await getFix(db, fix!.id))?.result], ["draft", undefined]);
   });
 });
+
+describe("skipped rows and AI calls (I7)", () => {
+  it("keeps one skipped row per route and kind across analyses", async () => {
+    const { db, deps } = await setup();
+    const titleFix = { ...head, problems: ["title-missing" as const] };
+    await stageCandidates(deps, { ...input, candidates: [titleFix] });
+    await stageCandidates(deps, { ...input, analysisId: "a", candidates: [titleFix] });
+    const rows = await listFixes(db, "s");
+    assert.deepEqual(rows.map((r) => r.status), ["skipped"]);
+  });
+
+  it("makes no AI call when the page has no data in scope", async () => {
+    const { db, deps, files } = await setup();
+    files["app/procedures/[slug]/page.tsx"] = { content: `export default function Page() {\n  return (\n    <main />\n  );\n}\n`, sha: "s0" };
+    deps.repo.treePaths = ["app/procedures/[slug]/page.tsx", "tsconfig.json"];
+    let calls = 0;
+    deps.llm = { model: "fake", async json<T>() { calls++; return {} as T; } };
+    let fetched = 0;
+    deps.fetchPage = async () => { fetched++; return null; };
+    await stageCandidates(deps, { ...input, candidates: [jsonld, { ...head, problems: ["title-missing"] }] });
+    assert.deepEqual([calls, fetched], [0, 0]);
+    assert.deepEqual((await listFixes(db, "s")).map((f) => f.status), ["skipped", "skipped"]);
+  });
+});

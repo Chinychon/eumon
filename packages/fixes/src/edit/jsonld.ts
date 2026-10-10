@@ -41,12 +41,13 @@ export function jsonLdCode(plan: JsonLdPlan): string {
   return `[${main}, ${crumb}]`;
 }
 
-export function editJsonLd(file: string, source: string, plan: JsonLdPlan, treePaths: string[]): EditResult {
+/** `parsed` is `source` already parsed, to save parsing it again. */
+export function editJsonLd(file: string, source: string, plan: JsonLdPlan, treePaths: string[], parsed?: AstNode): EditResult {
   const dataCode = jsonLdCode(plan);
   const snippet = jsonLdSnippet(dataCode);
   if (/EumonJsonLd/.test(source)) return { ok: false, reason: "the page already renders Eumon's structured data", snippet };
   let program: AstNode;
-  try { program = parseModule(source); } catch { return { ok: false, reason: "the file doesn't parse", snippet }; }
+  try { program = parsed ?? parseModule(source); } catch { return { ok: false, reason: "the file doesn't parse", snippet }; }
   const page = findPage(program);
   if (page.kind === "unsupported") return { ok: false, reason: page.reason, snippet };
 

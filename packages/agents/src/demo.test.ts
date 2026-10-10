@@ -139,6 +139,6 @@ describe("demo site audit", () => {
     }
     assert.ok(typeof report.audit.seo.value === "number" && report.audit.seo.value > 0 && report.audit.seo.value < 100, `SEO ${report.audit.seo.value}`);
     assert.ok(typeof report.audit.ai.value === "number" && report.audit.ai.value > 0, `AI ${report.audit.ai.value} ${report.audit.ai.reason ?? ""}`);
-    assert.equal(report.audit.checks.length, 94);
+    assert.equal(report.audit.checks.length, 95);
   });
 });

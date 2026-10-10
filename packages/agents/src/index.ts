@@ -18,6 +18,7 @@ import type { RepoAnalysisResult } from "@organic-growth/repo-analyzer";
 import { competitionOpportunities, counted, type CompetitionReport } from "./competition.js";
 import { linkGapOpportunity, withSerpContext, type ConnectorSignals } from "./connector-findings.js";
 import { estimateDemand } from "./demand.js";
+import { contentOpportunities } from "./content-findings.js";
 import { rankOpportunities } from "./rank-findings.js";
 import { analyzeSearch, searchOpportunities, type SearchInsights } from "./search.js";
 
@@ -125,7 +126,9 @@ export function buildOpportunities(bundle: AnalysisBundle): Opportunity[] {
   const links = linkGapOpportunity(bundle.connectors?.links, bundle.siteId, bundle.analysisId);
   const base = [...technical, ...fromSearch, ...contentGaps, ...unpublishedData, ...gaps, ...(links ? [links] : [])];
   const tracked = rankOpportunities({ siteId: bundle.siteId, analysisId: bundle.analysisId, ranks: bundle.connectors?.ranks, searchMetrics: bundle.searchMetrics, existing: base, demand });
-  return withSerpContext([...base, ...tracked], bundle.connectors?.serp)
+  const withTracked = [...base, ...tracked];
+  const graded = contentOpportunities({ siteId: bundle.siteId, analysisId: bundle.analysisId, grades: bundle.connectors?.contentGrades, existing: withTracked, demand });
+  return withSerpContext([...graded.existing, ...graded.made], bundle.connectors?.serp)
     .sort((a, b) => b.priorityScore - a.priorityScore);
 }
 

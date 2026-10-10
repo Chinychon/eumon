@@ -1,10 +1,10 @@
-import type { DataRecord, Dataset, Finding, KeywordsInput, PageTemplate, RankedKeyword, SearchMetricRow } from "@organic-growth/core";
+import type { DataRecord, Dataset, Finding, KeywordsInput, PageTemplate, RankCheck, RankedKeyword, SearchMetricRow } from "@organic-growth/core";
 import { addDays, keyOf, REF_ALPHABET, REF_LENGTH, slugify, suggestRedirect } from "@organic-growth/core";
 import { crawlGooglebotBatch, probeAiCrawlers, probeHost, probeNotFound, researchSite, type Fetcher, type SiteResearch } from "@organic-growth/crawler";
 import {
   chunks, createAnalysis, createLead, recordLeadClick, updateLead, defaultPageSettings, recordSyncRun, recountCrawl, upsertPageSettings, datasetCoverage, deleteSite, getAnalysisJob, getCrawlCoverage, getCrawlProgress, importSearchConsoleUrls, insertChange, insertConversionEvent, listAllRecords,
   listCrawlLogDays, listCrawlPageResults, listPendingCrawlUrls, probePages, recordLandingSession, replaceCurrentSearchMetrics, replacePageSearchMetrics, runStatements, saveAnalysisReport, saveCrawlBatch,
-  saveIndexStatus, saveSearchConsoleChart, saveSearchConsoleChecks, saveSearchConsoleSummary, saveSiteScope, saveSnapshot, searchConsoleReconciliation, saveTopQueriesSnapshot, saveUrlIndexStatus, listSiteCompetitorDomains, setSiteCompetitorDomains, syncFirstPartyResults, updateSiteGa4Property, upsertMetricPoints, type MetricPoint, setSiteMarkets, setTemplatePublication, syncTemplatePages, updateAnalysisProgress,
+  saveIndexStatus, saveRankChecks, setTrackedKeywords, saveSearchConsoleChart, saveSearchConsoleChecks, saveSearchConsoleSummary, saveSiteScope, saveSnapshot, searchConsoleReconciliation, saveTopQueriesSnapshot, saveUrlIndexStatus, listSiteCompetitorDomains, setSiteCompetitorDomains, syncFirstPartyResults, updateSiteGa4Property, upsertMetricPoints, type MetricPoint, setSiteMarkets, setTemplatePublication, syncTemplatePages, updateAnalysisProgress,
   updateAnalysisStatus, upsertDataset, upsertRecords, upsertSite, upsertTemplate, type D1Like,
 } from "@organic-growth/db";
 import { generatePages } from "@organic-growth/pages";
@@ -12,6 +12,7 @@ import { demoLinks, demoSerpLists, demoSuggestions, seedDemoConnectors } from ".
 import { crawlLogCoverage } from "./log-coverage.js";
 import { queueFullCrawl, runFullAnalysis } from "./pipeline.js";
 import { probeTitleForCoverage } from "./not-found-probe.js";
+import { loadRankSignals } from "./rank-findings.js";
 import { loadTrendSignals } from "./trend-signals.js";
 import { loadInventories } from "./inventory-data.js";
 
@@ -373,6 +374,41 @@ const estimatedTraffic = (volume: number, position: number) => Math.round(volume
 /** What the demo's connector data is built from. */
 const demoConnectorInput = () => ({ siteId: DEMO_SITE_ID, origin: ORIGIN, own, competitors: COMPETITORS, ranked: DEMO_RANKED, paths: demoPages() });
 
+/**
+ * Rank tracking: seven of the clinic's own searches, checked daily for 60 days
+ * in both markets, plus one search the clinic has never had in the ten but
+ * Search Console sees past position 15 (the growth plan's opportunity). The
+ * first tracked search slips from 4 to out of the ten over the last two weeks
+ * (the growth plan's finding).
+ */
+async function seedDemoRanks(db: D1Like, now: number): Promise<void> {
+  const today = new Date(now).toISOString().slice(0, 10);
+  const demo = demoConnectorInput();
+  const ownRows = (market: string) => demo.ranked[demo.own]?.[market] ?? [];
+  const tracked = ownRows("mys").filter((row) => row[3] !== "navigational").slice(0, 7).map((row) => row[0]);
+  const slipped = tracked[0]!;
+  // demoSearchRows adds `${words} cost kuala lumpur` for every treatment at position 11 + i; the last sits past 15,
+  // outside the 4-15 striking-distance range Search Console opportunities already cover, so the tracked kind isn't deduped away.
+  const unranked = `${TREATMENTS.at(-1)!.replace(/-/g, " ")} cost kuala lumpur`;
+  await setTrackedKeywords(db, DEMO_SITE_ID, [...tracked, unranked]);
+  const checks: RankCheck[] = [];
+  for (let back = 60; back >= 0; back--) {
+    const day = addDays(today, -back);
+    for (const market of ["mys", "sgp"]) {
+      tracked.forEach((keyword, index) => {
+        const row = ownRows(market).find((entry) => entry[0] === keyword);
+        const base = row?.[4] ?? 6 + index;
+        // The slipping search: 4 until two weeks ago, then one place a day until it leaves the ten.
+        const raw = keyword === slipped ? (back > 14 ? 4 : 4 + (14 - back)) : Math.max(1, base - Math.round((60 - back) / 30) + (back % 9 === 0 ? 1 : 0));
+        const position = raw <= 10 ? raw : null;
+        checks.push({ keyword, market, day, position, url: position ? `${ORIGIN}${row?.[5] ?? "/"}` : null, features: index % 2 ? ["people_also_ask"] : [] });
+      });
+      checks.push({ keyword: unranked, market, day, position: null, url: null, features: ["ai_overview"] });
+    }
+  }
+  await saveRankChecks(db, DEMO_SITE_ID, checks);
+}
+
 /** The demo's keyword lists, as the analysis and the view read them. */
 export function demoKeywords(today: string): KeywordsInput {
   return {
@@ -465,6 +501,7 @@ async function analyzeDemo(db: D1Like, input: { analysisId: string; version: num
       searchConsole: await searchConsoleReconciliation(db, DEMO_SITE_ID, input.analysisId),
       trends: await loadTrendSignals(db, DEMO_SITE_ID, await listCrawlLogDays(db, DEMO_SITE_ID, addDays(new Date(input.now).toISOString().slice(0, 10), -182)), new Date(input.now).toISOString().slice(0, 10)),
       inventory: await loadInventories(db, DEMO_SITE_ID, { analysisId: input.analysisId }),
+      ranks: await loadRankSignals(db, DEMO_SITE_ID, new Date(input.now).toISOString().slice(0, 10)),
     },
     crawlCoverage: { coverage, examples },
     renderPages: (urls) => renderDemo(urls, input.version),
@@ -748,6 +785,7 @@ export async function seedDemoSite(db: D1Like, now = Date.now()): Promise<{ site
   await seedPageEngine(db, now);
   // Before the analyses, which read the crawl log.
   await seedDemoConnectors(db, demoConnectorInput(), now);
+  await seedDemoRanks(db, now);
   await completedAnalysis(db, "analysis_demo_1", 1, now - 30 * DAY);
   await seedDemoSearchConsole(db, now);
   await completedAnalysis(db, "analysis_demo_2", 2, now - 2 * DAY);

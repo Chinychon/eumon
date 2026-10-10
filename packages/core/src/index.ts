@@ -12,6 +12,7 @@ export * from "./sheet-titles.js";
 export * from "./sync-notes.js";
 export * from "./whatsapp.js";
 export * from "./serp.js";
+export * from "./ranks.js";
 export * from "./links.js";
 export * from "./server-logs.js";
 export * from "./history.js";

@@ -33,6 +33,8 @@ export type TrendSignals = {
   today: string;
 };
 
+import type { RankSignals } from "./rank-findings.js";
+
 export type ConnectorSignals = {
   serp?: SerpResult[];
   suggestions?: CompetitorSuggestion[];
@@ -41,6 +43,7 @@ export type ConnectorSignals = {
   searchConsole?: SearchConsoleSignal | null;
   trends?: TrendSignals | null;
   inventory?: InventorySignal[];
+  ranks?: RankSignals | null;
 };
 
 /** Fewer days of logs than this say nothing about what Googlebot skips. */

@@ -21,6 +21,8 @@ export type AuditContext = {
   rendered: boolean;
   languages: number;
   hasDataForSeo: boolean;
+  /** The site tracks keywords (rank tracking). */
+  hasRanks?: boolean;
   robotsReadable: boolean;
   /** The AI crawler and host probe ran. */
   probed: boolean;
@@ -63,6 +65,7 @@ export function auditTable(ctx: AuditContext): AuditRow[] {
     if (/dataset/.test(needs) && !ctx.hasDataset) return skip(needs);
     if (/languages/.test(needs) && ctx.languages < 2) return skip(needs);
     if (/DataForSEO/.test(needs) && !ctx.hasDataForSeo) return skip(needs);
+    if (/tracked keywords/.test(needs) && !ctx.hasRanks) return skip(needs);
     if (/browser render/.test(needs) && !ctx.rendered) return skip(needs);
     if (check.sources.includes("crawl") && !check.sources.includes("sample") && !ctx.coverage?.completedUrls) return skip("a full crawl");
     if (NEEDS_NEW_FIELDS.has(check.id) && ctx.coverage && !ctx.coverage.health?.checked) return skip(RECRAWL);

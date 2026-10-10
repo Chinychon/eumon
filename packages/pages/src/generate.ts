@@ -245,14 +245,32 @@ function fillFaq(faq: FaqPattern[], resolve: Resolver): FaqPattern[] {
   });
 }
 
+/** Number fields that hold an amount of money, by their key or label. */
+const MONEY = /cost|price|fee|rate|amount|budget|harga|biaya/i;
+
+/** "RM 450" (a non-breaking space, so the amount never wraps away from its currency) for an ISO code Intl knows, else the record's own currency text before the amount. */
+function money(amount: number, currency: string): string {
+  try {
+    return new Intl.NumberFormat("en", { style: "currency", currency, currencyDisplay: "narrowSymbol", minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(amount);
+  } catch {
+    return `${currency}\u00a0${formatValue(amount)}`;
+  }
+}
+
 function toItem(record: DataRecord, template: PageTemplate, fields: Map<string, DatasetField>, links?: Map<string, PageLink>): PageItem {
   const titleField = template.itemTitleField || [...fields.keys()][0]!;
+  // A record's own currency (a "Currency" field) is shown on its amounts, not as a row of its own.
+  const currencyKey = [...fields.values()].find((field) => /^currency$/i.test(field.key) || /^currency$/i.test(field.label))?.key;
+  const currency = currencyKey ? formatValue(record.data[currencyKey] ?? null) : "";
   return {
     title: formatValue(record.data[titleField] ?? null) || record.key,
     fields: template.itemFields.flatMap((key) => {
       const field = fields.get(key);
-      if (!field || key === titleField) return [];
-      const value = formatValue(record.data[key] ?? null);
+      if (!field || key === titleField || (currency && key === currencyKey)) return [];
+      const raw = record.data[key] ?? null;
+      const value = currency && field.type === "number" && typeof raw === "number" && (MONEY.test(field.key) || MONEY.test(field.label))
+        ? money(raw, currency)
+        : formatValue(raw);
       if (!value) return [];
       const linked = field.type === "url" ? value : links?.get(slugify(value))?.path;
       return [{ label: field.label, value: truncateAtWord(value, 600), ...(linked ? { href: linked } : {}) }];

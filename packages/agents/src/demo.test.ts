@@ -108,6 +108,10 @@ describe("demo site", () => {
     const report = (await getAnalysisJob(db, "analysis_demo_2"))!.report as { findings: Array<{ title: string }> };
     const pace = report.findings.find((finding) => finding.title.startsWith("At Googlebot's pace"));
     assert.ok(pace, report.findings.map((finding) => finding.title).join(" | "));
+    const drop = report.findings.find((finding) => finding.title.includes("dropped out of the top 10"));
+    assert.ok(drop, report.findings.map((finding) => finding.title).join(" | "));
+    const { opportunities } = (await getAnalysisJob(db, "analysis_demo_2"))!.report as unknown as { opportunities: Array<{ title: string }> };
+    assert.ok(opportunities.some((opportunity) => opportunity.title.includes("\u201c" + "fillings cost kuala lumpur" + "\u201d")), opportunities.map((opportunity) => opportunity.title).join(" | "));
     assert.ok(!report.findings.some((finding) => /^Search impressions fell|^Google's indexed count fell/.test(finding.title)), "the demo's numbers rise");
   });
 
@@ -135,6 +139,6 @@ describe("demo site audit", () => {
     }
     assert.ok(typeof report.audit.seo.value === "number" && report.audit.seo.value > 0 && report.audit.seo.value < 100, `SEO ${report.audit.seo.value}`);
     assert.ok(typeof report.audit.ai.value === "number" && report.audit.ai.value > 0, `AI ${report.audit.ai.value} ${report.audit.ai.reason ?? ""}`);
-    assert.equal(report.audit.checks.length, 92);
+    assert.equal(report.audit.checks.length, 94);
   });
 });

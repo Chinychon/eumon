@@ -358,6 +358,22 @@ export const CATALOG: Check[] = [
       severity: "30 plus 12 per tenfold of URLs, capped at 70.",
     } }),
 
+  // Rank tracking
+  c({ id: "rank.fell", name: "Tracked keyword fell", pillars: ["seo"], category: "search", class: "warning", scope: "site", sources: ["connector"], fix: "content", requires: "tracked keywords",
+    docs: {
+      what: "A keyword the site tracks has fallen five or more places, in one target market, from its best position of the last 30 days (a best of 20 or better), and is still down.",
+      why: "A fall on a search the business chose to watch is lost traffic it already had; the date, the page then and now, and new result types (an AI Overview, a map pack) point at the cause.",
+      how: "Compare the page with the top three on today's results page (the Keywords tab shows them), check that it still answers the search and loads quickly, and strengthen its title and the internal links to it. History records the recovery.",
+      severity: "35 plus 2 per place lost, plus 15 when the best was in the top 3, capped at 80. At most five rank findings, biggest first.",
+    } }),
+  c({ id: "rank.dropped_out", name: "Tracked keyword left the top 10", pillars: ["seo"], category: "search", class: "warning", scope: "site", sources: ["connector"], fix: "content", requires: "tracked keywords",
+    docs: {
+      what: "A keyword the site tracks held a first-page position for seven days or more and is no longer in the top 10 in that market.",
+      why: "Off the first page a search brings almost no clicks; a drop after a stable hold usually has a cause on the page or on the results page.",
+      how: "Compare the page with the top three on today's results page (the Keywords tab shows them), check that it still answers the search and loads quickly, and strengthen its title and the internal links to it. History records the recovery.",
+      severity: "35 plus 2 per place between the best and 11, plus 15 when the best was in the top 3, capped at 80.",
+    } }),
+
   // Trends and logs
   c({ id: "trend.impressions_fell", name: "Impressions fell", pillars: ["seo"], category: "search", class: "notice", scope: "site", sources: ["connector"], fix: "none", requires: "Search Console",
     docs: {

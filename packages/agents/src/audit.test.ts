@@ -56,6 +56,11 @@ describe("auditTable", () => {
     assert.equal(auditTable(ctx({ coverage: { ...ctx().coverage!, linkGraph: undefined } })).find((row) => row.id === "links.orphan")!.status, "skipped");
   });
 
+  it("skips the rank checks for a site that tracks no keywords", () => {
+    assert.deepEqual(auditTable(ctx()).find((row) => row.id === "rank.fell"), { id: "rank.fell", status: "skipped", reason: "tracked keywords" });
+    assert.equal(auditTable(ctx({ hasRanks: true })).find((row) => row.id === "rank.fell")!.status, "passed");
+  });
+
   it("skips the crawler probe when robots.txt was unreadable", () => {
     assert.deepEqual(auditTable(ctx({ robotsReadable: false })).find((row) => row.id === "ai.crawler_refused"), { id: "ai.crawler_refused", status: "skipped", reason: "robots.txt could not be read" });
   });

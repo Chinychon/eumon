@@ -128,6 +128,11 @@
         <td>Dataset inventories (<code>loadInventories</code>): fill per field, duplicates, thin record pages</td>
         <td>"N of M &lt;entities&gt; have no &lt;field&gt;"; "N &lt;entities&gt; are listed more than once"; "N &lt;type&gt; pages have almost no content"</td>
       </tr>
+      <tr>
+        <td><code>findingsFromContentGrades</code><br><code class="path">packages/agents/src/content-findings.ts</code></td>
+        <td>Content grades (snapshot <code>content_grades</code>): the AI-verified topics the top results cover that the site's page does not</td>
+        <td>"N pages cover less than half of what the top results cover"; opportunity "Cover what the top results cover for “&lt;query&gt;”: &lt;topics&gt;" (grade C or worse)</td>
+      </tr>
     </tbody>
   </table>
   <p>Angle-bracketed parts and N/M/P are filled at run time; the rest is the literal title.</p>

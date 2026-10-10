@@ -58,4 +58,30 @@ describe("scope", () => {
     assert.equal(urlTemplate("/procedures/:slug", ["params"], "const { slug } = await params;"), null, "awaited params without a slug binding");
     assert.equal(urlTemplate("/about", [], ""), "/about");
   });
+
+  it("treats indirect metadata exports as unsupported", () => {
+    for (const src of [
+      `const metadata = {}; export { metadata };`,
+      `function generateMetadata() {} export { generateMetadata };`,
+      `export { metadata } from "./m";`,
+      `const x = {}; export { x as metadata };`,
+      `export const { metadata } = m;`,
+      `export * from "./m";`,
+    ]) assert.equal(findMetadata(parseModule(src)).kind, "unsupported", src);
+    assert.equal(findMetadata(parseModule(`const a = 1; export { a };`)).kind, "none");
+  });
+
+  it("limits scope to params and top-level declarations before the return", () => {
+    const meta = (body: string) => {
+      const site = findMetadata(parseModule(`export function generateMetadata(p, { q }) { ${body} }`));
+      assert.equal(site.kind, "function");
+      return site.kind === "function" ? site.names.sort() : [];
+    };
+    assert.deepEqual(meta(`const a = 1; return { t: a }; const b = 2;`), ["a", "p", "q"]);
+    assert.deepEqual(meta(`if (x) { const inner = 1; } { const blk = 2; } const a = 1; return { t: a };`), ["a", "p", "q"]);
+    assert.deepEqual(meta(`const f = () => { const local = 1; }; function g() { const l2 = 2; } return { t: f };`), ["f", "p", "q"]);
+    const page = findPage(parseModule(`export default function P({ r }) { const a = 1; if (x) { const z = 1; } return <div></div>; const late = 1; }`));
+    if (page.kind === "page") assert.deepEqual(page.names.sort(), ["a", "r"]);
+    else assert.fail(page.reason);
+  });
 });

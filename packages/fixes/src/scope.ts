@@ -48,6 +48,8 @@ export function afterImports(program: AstNode): number {
   return directives.length ? directives[directives.length - 1]!.end : 0;
 }
 
+const META_NAMES = new Set(["metadata", "generateMetadata"]);
+
 export function findMetadata(program: AstNode): MetadataSite {
   if (hasDirective(program, "use client")) return { kind: "unsupported", reason: "the file is a client component, where Next.js can't export metadata" };
   for (const statement of program.body as AstNode[]) {
@@ -56,7 +58,10 @@ export function findMetadata(program: AstNode): MetadataSite {
     if (declaration.type === "VariableDeclaration") {
       for (const d of declaration.declarations as AstNode[]) {
         const id = d.id as AstNode;
-        if (id.type !== "Identifier") continue;
+        if (id.type !== "Identifier") {
+          if (bindingNames(id).some((n) => META_NAMES.has(n))) return { kind: "unsupported", reason: "metadata is exported indirectly" };
+          continue;
+        }
         if (id.name === "metadata") {
           const init = d.init ? unwrap(d.init as AstNode) : null;
           return init?.type === "ObjectExpression" ? { kind: "object", object: init, names: [] } : { kind: "unsupported", reason: "`metadata` isn't a plain object" };
@@ -69,6 +74,14 @@ export function findMetadata(program: AstNode): MetadataSite {
       const value = returns.length === 1 && returns[0]!.argument ? unwrap(returns[0]!.argument as AstNode) : null;
       if (value?.type !== "ObjectExpression") return { kind: "unsupported", reason: "`generateMetadata` doesn't end in a single `return { … }`" };
       return { kind: "function", object: value, names: functionScope(declaration, returns[0]!.start) };
+    }
+  }
+  for (const statement of program.body as AstNode[]) {
+    if (statement.type === "ExportAllDeclaration") return { kind: "unsupported", reason: "metadata may be re-exported with `export *`" };
+    if (statement.type !== "ExportNamedDeclaration") continue;
+    for (const spec of (statement.specifiers as AstNode[]) ?? []) {
+      const exported = spec.exported as AstNode;
+      if (META_NAMES.has((exported.name ?? exported.value) as string)) return { kind: "unsupported", reason: "metadata is exported indirectly" };
     }
   }
   return { kind: "none", insertAt: afterImports(program) };

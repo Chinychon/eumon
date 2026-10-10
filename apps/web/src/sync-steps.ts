@@ -3,7 +3,7 @@ import { addDays, createId, type SiteRecord } from "@organic-growth/core";
 import {
   countInspectionsSince, getSite, indexStatusCounts, listSitesForResults, publishedPages, recordSyncRun, upsertMetricPoints, urlsToInspect, type D1Like, type SyncTrigger,
 } from "@organic-growth/db";
-import { keysForLimits, limitsFor } from "./limits.ts";
+import { FREE_LIMITS, keysForLimits, limitsFor } from "./limits.ts";
 import { syncResults, type GoogleAccess, type SignalKeys } from "./results-sync.ts";
 import { COVERAGE_URLS_PER_DAY, inspectEumonPages, inspectQueuedUrls, INSPECTION_STEP, PAGE_INSPECTIONS_PER_DAY } from "./url-inspection.ts";
 
@@ -90,7 +90,7 @@ export async function syncSite(deps: SyncDeps, step: StepLike, siteId: string, t
       notes.push("ok" in pages ? pages.ok : `pages failed: ${pages.error}`);
     }
     const sources = await safe("sources", async () => {
-      const keys = site.workspaceId ? keysForLimits(deps.keys, await limitsFor(deps.db, site.workspaceId)) : deps.keys;
+      const keys = site.workspaceId ? keysForLimits(deps.keys, await limitsFor(deps.db, site.workspaceId)) : keysForLimits(deps.keys, FREE_LIMITS);
       return syncResults(deps.db, site, deps.now(), deps.google(siteId), keys).catch((error) => [`results failed: ${message(error)}`]);
     }, { retries: { limit: 1, delay: 60_000 } });
     notes.push(...("ok" in sources ? sources.ok : [`results failed: ${sources.error}`]));

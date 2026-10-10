@@ -471,7 +471,7 @@ describe("coverage findings for soft 404s, near-duplicates and languages", () =>
 
 describe("isSafePublicUrl", () => {
   it("refuses local names written with a trailing dot, and still accepts public ones", () => {
-    for (const url of ["http://localhost./", "http://foo.localhost./", "http://metadata.google.internal./", "http://printer.local./"]) {
+    for (const url of ["http://localhost./", "http://foo.localhost./", "http://metadata.google.internal./", "http://printer.local./", "http://localhost../"]) {
       assert.equal(isSafePublicUrl(url), false, url);
     }
     assert.equal(isSafePublicUrl("https://example.com./"), true);

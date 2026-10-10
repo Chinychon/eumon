@@ -27,7 +27,7 @@ export function isSafePublicUrl(value: string, expectedOrigin?: string): boolean
   try {
     const url = new URL(value);
     // "localhost." and "x.internal." name the same hosts as without the dot.
-    const host = url.hostname.toLowerCase().replace(/\.$/, "");
+    const host = url.hostname.toLowerCase().replace(/\.+$/, "");
     if (!(["http:", "https:"].includes(url.protocol)) || url.username || url.password) return false;
     if (!host.includes(".") || host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local") || host.endsWith(".internal")) return false;
     if (host.startsWith("[") || host.includes(":")) return false;

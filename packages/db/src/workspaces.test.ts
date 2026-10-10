@@ -51,6 +51,16 @@ describe("site roles", () => {
   });
 });
 
+describe("workspace deletion", () => {
+  it("refuses to delete a workspace that still has sites", async () => {
+    const db = openSqliteD1();
+    await workspace(db, "w1");
+    await site(db, "a", "w1");
+    await assert.rejects(db.prepare("DELETE FROM organization WHERE id = ?").bind("w1").run(), /FOREIGN KEY/i);
+    assert.ok(await getSite(db, "a"));
+  });
+});
+
 describe("new users", () => {
   it("gives a new user a workspace of their own, unless an invitation waits for them", async () => {
     const db = openSqliteD1();

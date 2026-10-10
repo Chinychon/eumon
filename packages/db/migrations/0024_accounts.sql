@@ -23,7 +23,8 @@ create index "invitation_email_idx" on "invitation" ("email");
 -- The workspace that holds every site from before accounts; BOOTSTRAP_OWNER_EMAIL users own it.
 INSERT INTO "organization" ("id", "name", "slug", "createdAt") VALUES ('ws_initial', 'Eumon', 'eumon', '2026-10-10T00:00:00.000Z');
 
-ALTER TABLE sites ADD COLUMN workspace_id TEXT REFERENCES "organization" ("id") ON DELETE CASCADE;
+-- No ON DELETE CASCADE here: deleting a workspace that still has sites must fail, not wipe their data (0019 cascades from sites).
+ALTER TABLE sites ADD COLUMN workspace_id TEXT REFERENCES "organization" ("id");
 UPDATE sites SET workspace_id = 'ws_initial';
 CREATE INDEX idx_sites_workspace ON sites (workspace_id);
 

@@ -76,8 +76,11 @@ async function github<T>(token: string, path: string, init: RequestInit = {}, fe
 }
 
 export async function getFileWithSha(token: string, owner: string, repo: string, path: string, ref: string, fetchFn: typeof fetch = fetch): Promise<{ content: string; sha: string } | null> {
-  const file = await github<{ content?: string; sha: string; encoding?: string }>(token, `/repos/${owner}/${repo}/contents/${path.split("/").map(encodeURIComponent).join("/")}?ref=${encodeURIComponent(ref)}`, {}, fetchFn);
-  if (!file?.content) return null;
+  const file = await github<{ content?: string; sha: string; encoding?: string; size?: number } | unknown[]>(token, `/repos/${owner}/${repo}/contents/${path.split("/").map(encodeURIComponent).join("/")}?ref=${encodeURIComponent(ref)}`, {}, fetchFn);
+  if (!file) return null;
+  if (Array.isArray(file)) throw new Error(`${path} is a directory.`);
+  if (file.encoding === "none") throw new Error(`${path} is too large to edit safely.`);
+  if (!file.content) return { content: "", sha: file.sha };
   const bytes = Uint8Array.from(atob(file.content.replace(/\n/g, "")), (c) => c.charCodeAt(0));
   return { content: new TextDecoder().decode(bytes), sha: file.sha };
 }
@@ -97,17 +100,23 @@ export function checkStateOf(checkRuns: Array<{ status: string; conclusion: stri
 }
 
 export async function combinedCheckState(token: string, owner: string, repo: string, sha: string, fetchFn: typeof fetch = fetch): Promise<"success" | "failure" | "pending"> {
-  const runs = await github<{ check_runs: Array<{ status: string; conclusion: string | null }> }>(token, `/repos/${owner}/${repo}/commits/${sha}/check-runs?per_page=100`, {}, fetchFn);
+  const runs = await github<{ total_count: number; check_runs: Array<{ status: string; conclusion: string | null }> }>(token, `/repos/${owner}/${repo}/commits/${sha}/check-runs?per_page=100`, {}, fetchFn);
+  if (!runs) throw new Error("GitHub didn't return check runs for this commit.");
+  if (runs.total_count > runs.check_runs.length) return "pending";
   const status = await github<{ state: string; total_count: number }>(token, `/repos/${owner}/${repo}/commits/${sha}/status`, {}, fetchFn);
-  return checkStateOf(runs?.check_runs ?? [], status ?? { state: "pending", total_count: 0 });
+  return checkStateOf(runs.check_runs, status ?? { state: "pending", total_count: 0 });
 }
 
 export async function latestPreviewUrl(token: string, owner: string, repo: string, sha: string, fetchFn: typeof fetch = fetch): Promise<string | null> {
-  const deployments = await github<Array<{ id: number }>>(token, `/repos/${owner}/${repo}/deployments?sha=${sha}&per_page=5`, {}, fetchFn);
+  const deployments = await github<Array<{ id: number; environment?: string }>>(token, `/repos/${owner}/${repo}/deployments?sha=${sha}&per_page=5`, {}, fetchFn);
   for (const deployment of deployments ?? []) {
+    if (/prod/i.test(deployment.environment ?? "")) continue;
     const statuses = await github<Array<{ state: string; environment_url?: string }>>(token, `/repos/${owner}/${repo}/deployments/${deployment.id}/statuses?per_page=5`, {}, fetchFn);
-    const success = statuses?.find((s) => s.state === "success" && s.environment_url);
-    if (success?.environment_url) return success.environment_url;
+    const settled = statuses?.find((s) => !["queued", "in_progress", "pending"].includes(s.state));
+    if (settled?.state !== "success" || !settled.environment_url) continue;
+    try {
+      if (new URL(settled.environment_url).protocol === "https:") return settled.environment_url;
+    } catch { /* not a URL */ }
   }
   return null;
 }
@@ -122,9 +131,9 @@ export async function markReadyForReview(token: string, nodeId: string, fetchFn:
 }
 
 export async function commentOnPullRequest(token: string, owner: string, repo: string, number: number, body: string, fetchFn: typeof fetch = fetch): Promise<void> {
-  await github(token, `/repos/${owner}/${repo}/issues/${number}/comments`, { method: "POST", body: JSON.stringify({ body }) }, fetchFn);
+  if ((await github(token, `/repos/${owner}/${repo}/issues/${number}/comments`, { method: "POST", body: JSON.stringify({ body }) }, fetchFn)) === null) throw new Error(`Pull request #${number} wasn't found.`);
 }
 
 export async function closePullRequest(token: string, owner: string, repo: string, number: number, fetchFn: typeof fetch = fetch): Promise<void> {
-  await github(token, `/repos/${owner}/${repo}/pulls/${number}`, { method: "PATCH", body: JSON.stringify({ state: "closed" }) }, fetchFn);
+  if ((await github(token, `/repos/${owner}/${repo}/pulls/${number}`, { method: "PATCH", body: JSON.stringify({ state: "closed" }) }, fetchFn)) === null) throw new Error(`Pull request #${number} wasn't found.`);
 }

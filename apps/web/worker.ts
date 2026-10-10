@@ -1,5 +1,7 @@
+import { memberRole } from "@organic-growth/db";
 import handler from "vinext/server/fetch-handler";
 import type { AppEnv } from "./cloudflare.config";
+import { isRosterPath } from "./src/auth-paths.js";
 import { authFor } from "./src/auth.js";
 import { gate, isPublicPath } from "./src/gate.js";
 import { APP_HEADERS, withHeaders } from "./src/headers.js";
@@ -12,6 +14,17 @@ export { SearchSyncWorkflow } from "./src/search-sync-workflow.js";
 
 const app = (typeof handler === "function" ? { fetch: handler } : handler) as ExportedHandler<AppEnv>;
 
+/** Better Auth's roster endpoints only check membership; a Client must not see who else is in the workspace. */
+async function isClientOfRequested(env: AppEnv, request: Request, url: URL): Promise<boolean> {
+  const session = await authFor(env).api.getSession({ headers: request.headers });
+  if (!session) return false;
+  const slug = url.searchParams.get("organizationSlug");
+  const workspaceId = slug
+    ? (await env.DB.prepare("SELECT id FROM organization WHERE slug = ?").bind(slug).first<{ id: string }>())?.id
+    : url.searchParams.get("organizationId") ?? (session.session as { activeOrganizationId?: string | null }).activeOrganizationId;
+  return Boolean(workspaceId) && (await memberRole(env.DB as never, workspaceId!, session.user.id)) === "client";
+}
+
 export default {
   ...app,
   async fetch(request: Request, env: AppEnv, ctx: ExecutionContext): Promise<Response> {
@@ -21,6 +34,9 @@ export default {
       if (request.method !== "GET") {
         const { success } = await env.AUTH_RATE_LIMIT.limit({ key: request.headers.get("cf-connecting-ip") ?? "local" });
         if (!success) return Response.json({ error: "Too many attempts. Wait a minute, then try again." }, { status: 429 });
+      }
+      if (isRosterPath(url.pathname) && (await isClientOfRequested(env, request, url))) {
+        return withHeaders(Response.json({ error: "Your role can't see this workspace's people." }, { status: 403 }), APP_HEADERS);
       }
       return withHeaders(await authFor(env).handler(request), APP_HEADERS);
     }

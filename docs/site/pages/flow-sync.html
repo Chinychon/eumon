@@ -1,0 +1,116 @@
+<article id="flow-sync" data-title="Daily sync" data-group="How it works">
+  <h1>The daily Results sync</h1>
+  <p class="lede">How Eumon refreshes every site's Results numbers once a day, or on demand from "Sync now": the cron trigger, the per-site workflow, each data source and what it writes, the URL Inspection budget, and how a run is recorded and reported back to the dashboard.</p>
+
+  <dl class="facts">
+    <dt>Trigger</dt><dd>Cron <code>15 4 * * *</code> (04:15 UTC), or <code>POST /api/sites/:siteId/results/sync</code></dd>
+    <dt>Workflow</dt><dd><code>SearchSyncWorkflow</code>, binding <code>SEARCH_SYNC_WORKFLOW</code>, name <code>search-sync</code></dd>
+    <dt>Unit of work</dt><dd>One workflow instance per site</dd>
+    <dt>Main code</dt><dd><code class="path">apps/web/src/sync-steps.ts</code>, <code class="path">apps/web/src/results-sync.ts</code>, <code class="path">apps/web/src/results-sources.ts</code>, <code class="path">apps/web/src/connector-sources.ts</code>, <code class="path">apps/web/src/url-inspection.ts</code></dd>
+    <dt>Record</dt><dd>One row in <code>sync_runs</code> per run, with every note</dd>
+  </dl>
+
+  <figure data-diagram="sync-flow"><figcaption>The cron (or Sync now) starts one SearchSyncWorkflow instance per site, which runs the sources, then URL inspections in steps of 40, then records the run.</figcaption></figure>
+
+  <h2 id="trigger">From cron to one instance per site</h2>
+  <p>The Worker declares one Cron Trigger in <code class="path">apps/web/cloudflare.config.ts</code>: <code>triggers.scheduled({ schedule: "15 4 * * *" })</code>. The comment there explains the choice: a Cron Trigger is available on the Workers Free plan, while Workflow <code>schedules</code> would need the paid plan.</p>
+  <p>The cron runs the <code>scheduled</code> handler in <code class="path">apps/web/worker.ts</code>, which calls <code>startDailySyncs(env, new Date(controller.scheduledTime))</code> inside <code>ctx.waitUntil</code>. <code>startDailySyncs</code> (<code class="path">apps/web/src/sync-steps.ts:208</code>) lists every site with <code>listSitesForResults</code> (all rows of <code>sites</code>, since speed and authority need no connection) and calls <code>startSync</code> for each with <code>trigger: "daily"</code>.</p>
+  <p>Instance ids are deterministic (<code class="path">apps/web/src/sync-steps.ts:169</code>):</p>
+  <ul>
+    <li>Daily: <code>daily-&lt;YYYY-MM-DD&gt;-&lt;siteId&gt;</code>, the UTC day of the scheduled time. A second firing on the same day tries to create the same id, Cloudflare refuses, and <code>startSync</code> treats an instance it can fetch as "already exists". So a repeated cron creates nothing.</li>
+    <li>Manual: <code>manual-&lt;siteId&gt;-&lt;window&gt;</code>, where <code>window</code> is the current time rounded down to a 10-minute boundary in epoch milliseconds (<code>MANUAL_WINDOW_MS</code>). Clicks of Sync now within the same 10 minutes join one run.</li>
+  </ul>
+  <p>Each site gets its own instance so each has its own budget of 1,024 workflow steps (comment at the top of <code>sync-steps.ts</code>).</p>
+
+  <h2 id="sync-now">"Sync now" and the 409</h2>
+  <p><code class="path">apps/web/app/api/sites/[siteId]/results/sync/route.ts</code> has two handlers:</p>
+  <dl>
+    <dt><code>POST</code></dt>
+    <dd>Calls <code>startSync(env, { siteId, trigger: "manual" })</code> and answers <code>202</code> with <code>{ id, startedAt, joined }</code>. <code>startedAt</code> is the start of the 10-minute window, and the run record uses the same value. <code>joined</code> is true when the click landed in a window whose instance already exists. If the site's <code>daily-…</code> instance for today is still in flight (status <code>queued</code>, <code>running</code>, <code>paused</code>, <code>waiting</code> or <code>waitingForPause</code>), no manual instance is created and the route answers <code>409</code>. This stops the two runs spending the day's inspection quota twice. A failure to create the instance answers <code>503</code>.</dd>
+    <dt><code>GET ?id=…</code></dt>
+    <dd>Returns <code>{ status, error }</code> for one instance. The id must start with <code>manual-&lt;siteId&gt;-</code> or end with <code>-&lt;siteId&gt;</code>, otherwise <code>404</code>. An instance that can't be fetched comes back as <code>status: "unknown"</code>.</dd>
+  </dl>
+  <p>A separate route, <code class="path">apps/web/app/api/sites/[siteId]/search-sync/route.ts</code>, runs only the generated pages' Search Console import (<code>syncGeneratedPageSearch</code>) directly in the request, without a workflow. The Page results view calls it. It answers <code>409</code> when the site has no Search Console property.</p>
+
+  <h2 id="workflow">Inside one instance</h2>
+  <p><code>SearchSyncWorkflow.run</code> (<code class="path">apps/web/src/search-sync-workflow.ts</code>) builds the dependencies (D1, Google access for the site, API keys from the environment, the page-search import) and hands them to <code>syncSite</code> (<code class="path">apps/web/src/sync-steps.ts:59</code>). Every step is named <code>&lt;siteId&gt;/&lt;name&gt;</code>. Each step is wrapped so that a step that still fails after its retries adds a note and the run continues.</p>
+  <ol>
+    <li><strong><code>start</code></strong>: loads the site. If the site is gone the run notes <code>skipped: site removed</code>. For a site with a Search Console property (and not the demo site) it also counts the inspections already spent since midnight Pacific and the number of published Eumon pages.</li>
+    <li><strong><code>page-search</code></strong> (only with a property and at least one published page): <code>syncGeneratedPageSearch</code> imports the last 28 days of Search Console data for pages under Eumon's mount path. See <a href="#flow-sync--sources">Sources</a>.</li>
+    <li><strong><code>sources</code></strong>: <code>syncResults</code> runs every source in order, in one step, with one retry after 60 seconds.</li>
+    <li><strong><code>pages-1</code>, <code>pages-2</code>, …</strong>, <strong><code>index-counts</code></strong>, <strong><code>coverage-queue</code></strong>, <strong><code>coverage-1</code>, …</strong>: URL inspections, skipped when the notes already contain <code>google failed</code>. See <a href="#flow-sync--url-inspection">URL Inspection</a>.</li>
+    <li><strong><code>record</code></strong>: writes the run to <code>sync_runs</code>. A failure here doesn't fail the sync.</li>
+  </ol>
+  <p>The workflow returns <code>{ [siteId]: notes.join("; ") }</code>.</p>
+
+  <h2 id="sources">Sources</h2>
+  <p><code>syncResults</code> (<code class="path">apps/web/src/results-sync.ts:53</code>) walks the <code>SOURCES</code> array (<code class="path">apps/web/src/results-sources.ts:307</code>, which ends with <code>CONNECTOR_SOURCES</code> from <code class="path">apps/web/src/connector-sources.ts:295</code>). For each source the runner:</p>
+  <ul>
+    <li>skips it silently when <code>applies</code> is false (no property, no key);</li>
+    <li>for Google sources, connects to Google once per sync. If connecting fails it notes <code>google failed: …</code> once and skips every later Google source;</li>
+    <li>adds the source's <code>skip</code> note if it has one (for example <code>speed: no Google API key</code>);</li>
+    <li>works out whether this is a first run: a source with a <code>marker</code> metric that has no point yet is on its first run, which backfills;</li>
+    <li>runs weekly sources only on Mondays (UTC), unless it is their first run;</li>
+    <li>writes the returned points to <code>metric_points</code>, plus a marker point (value = points written) when the source has a marker;</li>
+    <li>turns a throw into a <code>&lt;name&gt; failed: …</code> note.</li>
+  </ul>
+  <p><code>metric_points</code> is the Results ledger: one value per site, metric and day, upserted on <code>(site_id, metric, day)</code> so re-runs and Search Console revisions overwrite rather than double count (<code class="path">packages/db/src/metrics.ts:13</code>). Lists that replace themselves (keyword lists, results pages, link profiles) go to <code>site_snapshots</code>, one row per site, kind and scope (<code class="path">packages/db/src/snapshots.ts</code>).</p>
+  <p>On the demo site only the <code>first-party</code> source runs, because its data is seeded and the domains are fictional.</p>
+
+  <p>The sources, in the order they run:</p>
+  <table>
+    <thead>
+      <tr><th>Source (note prefix)</th><th>Cadence, marker</th><th>Fetches</th><th>Writes</th><th>Needs</th><th>Budget</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>speed</code></td><td>weekly, <code>sync.crux</code></td><td>CrUX History API for the site origin, phone and desktop (<code class="path">packages/agents/src/site-signals.ts</code>)</td><td><code>crux_lcp_p75.*</code>, <code>crux_inp_p75.*</code>, <code>crux_cls_p75.*</code></td><td><code>GOOGLE_API_KEY</code></td><td>40 weeks the first time, then 2. An origin with too few Chrome visits returns no points.</td></tr>
+      <tr><td><code>lab</code></td><td>weekly, <code>sync.lab</code></td><td>PageSpeed Insights performance score for the homepage and the Eumon page with the most clicks, mobile and desktop</td><td><code>lab_score_home.*</code>, <code>lab_score_eumon.*</code></td><td><code>GOOGLE_API_KEY</code></td><td>Up to 4 calls. A run with no scores is a failure, retried next sync.</td></tr>
+      <tr><td><code>authority</code></td><td>weekly, <code>sync.authority</code></td><td>Open PageRank for the site's domain and each competitor domain</td><td><code>authority</code>, <code>authority:&lt;domain&gt;</code></td><td><code>OPEN_PAGERANK_KEY</code></td><td>One request, up to 100 domains</td></tr>
+      <tr><td><code>first-party</code></td><td>daily</td><td>Nothing external: reads <code>conversion_events</code>, <code>page_metrics_daily</code>, leads and published pages (<code>syncFirstPartyResults</code>, <code class="path">packages/db/src/metrics.ts:92</code>)</td><td><code>leads</code>, <code>leads_eumon*</code>, <code>googlebot_fetches</code>, <code>eumon_page_views</code>, <code>eumon_cta_clicks</code>, <code>published_pages</code>, plus lead outcome and AI points</td><td>none</td><td>All history the first time, then the last 7 days</td></tr>
+      <tr><td><code>search</code></td><td>daily, <code>sync.search</code></td><td>Search Console daily totals: whole property, pages under Eumon's mount path, and per target market</td><td>daily search points, the same with an <code>eumon_</code> prefix, and <code>@markets</code> series</td><td>Google OAuth, <code>gsc_property</code></td><td>486 days the first time, then 7. Markets set later backfill on their own marker <code>sync.search@markets</code>.</td></tr>
+      <tr><td><code>rankings</code></td><td>weekly, <code>sync.rankings</code></td><td>Query positions for the last finalized week and the week before, also per market</td><td>top-N bucket counts</td><td>Google OAuth, property</td><td>2 queries, plus 2 per market</td></tr>
+      <tr><td><code>top queries</code></td><td>daily</td><td>Queries over the last 28 finalized days and the 28 before</td><td><code>site_snapshots</code> kind <code>top_queries</code>; question-search points in the ledger</td><td>Google OAuth, property</td><td>2 queries, or 2 per market</td></tr>
+      <tr><td><code>analytics</code></td><td>daily, <code>sync.ga4</code></td><td>GA4 Data API daily report and AI-assistant referrals (<code class="path">packages/agents/src/google-analytics.ts</code>)</td><td><code>ga4_sessions</code>, <code>ga4_organic_sessions</code>, <code>ga4_organic_engaged_sessions</code>, <code>ga4_organic_key_events</code>, <code>ga4_ai_*</code></td><td>Google OAuth with the Analytics scope, <code>ga4_property</code></td><td>486 days the first time, then 7. Without the scope it notes <code>analytics: reconnect Google</code>.</td></tr>
+      <tr><td><code>competitor keywords</code></td><td>daily, <code>sync.competitor_keywords</code></td><td>DataForSEO Labs ranked keywords for the site and each competitor, per covered market</td><td><code>site_snapshots</code> kind <code>competitor_keywords</code>; <code>kw_top10*</code>, <code>kw_traffic*</code></td><td><code>DATAFORSEO_LOGIN</code> + <code>DATAFORSEO_PASSWORD</code>, target markets</td><td>One call per list missing or 28 days old (<code>FRESH_DAYS</code>); up to (competitors + 1) × markets in one sync</td></tr>
+      <tr><td><code>keyword volumes</code></td><td>daily, <code>sync.keyword_volumes</code></td><td>The site's Search Console queries per market (up to 700 by impressions), priced by DataForSEO keyword overview</td><td><code>site_snapshots</code> kind <code>keywords</code></td><td>DataForSEO, Google OAuth, property, markets</td><td>One list per market, refreshed at 28 days</td></tr>
+      <tr><td><code>search competitors</code></td><td>daily, <code>sync.serp_competitors</code></td><td>DataForSEO <code>serp_competitors</code> over the site's 200 biggest priced queries</td><td><code>site_snapshots</code> kind <code>serp_competitors</code></td><td>DataForSEO, markets</td><td>One call per market, refreshed at 28 days</td></tr>
+      <tr><td><code>search results</code></td><td>daily, <code>sync.serp</code></td><td>DataForSEO SERP for the site's biggest priced queries on the first three pages (20) and the biggest keyword gaps (10), per market</td><td><code>site_snapshots</code> kind <code>serp</code>; <code>serp_ai_overviews</code>, <code>serp_ai_cited</code></td><td>DataForSEO, markets</td><td>10 results pages per sync across markets (<code>SERPS_PER_SYNC</code>), oldest first, each rechecked after 28 days</td></tr>
+      <tr><td><code>backlinks</code></td><td>daily, <code>sync.backlinks</code></td><td>DataForSEO Backlinks summary for the site and each competitor, and the link gap against up to three competitors</td><td><code>site_snapshots</code> kinds <code>backlinks</code>, <code>link_gap</code>; <code>backlinks*</code>, <code>ref_domains*</code>, <code>backlink_rank*</code></td><td>DataForSEO with the Backlinks API active</td><td>Each list refreshed at 28 days</td></tr>
+      <tr><td><code>bing</code></td><td>daily, <code>sync.bing</code></td><td>Bing Webmaster Tools <code>GetRankAndTrafficStats</code> and <code>GetCrawlStats</code> (<code class="path">packages/agents/src/bing.ts</code>)</td><td><code>bing_clicks</code>, <code>bing_impressions</code>, <code>bing_crawled_pages</code>, <code>bing_crawl_errors</code>, <code>bing_in_index</code></td><td><code>BING_WEBMASTER_API_KEY</code></td><td>2 calls. Everything Bing keeps the first time, then the last 14 days.</td></tr>
+      <tr><td><code>indexnow</code></td><td>daily, <code>sync.indexnow</code></td><td>Posts Eumon pages published, changed or taken down since the last submission to <code>api.indexnow.org</code></td><td><code>indexnow_submitted</code>; the submission time as a <code>site_snapshots</code> row of kind <code>indexnow</code></td><td><code>SESSION_SECRET</code> of at least 32 characters (the per-site key is derived from it), and a verified proxy</td><td>Up to 10,000 URLs in one request</td></tr>
+      <tr><td><code>crawl log</code></td><td>daily</td><td>Nothing external: reads the crawl log the site's servers send</td><td>A note with yesterday's Googlebot and Bingbot requests; prunes day rows older than 486 days and paths not seen for 120</td><td>none</td><td>Runs only once the site has crawl-log rows</td></tr>
+    </tbody>
+  </table>
+  <p>Every key above is read in <code>signalKeys</code> (<code class="path">apps/web/src/results-access.ts:9</code>); a blank secret counts as no key. Google OAuth uses the site's stored credential, refreshed with <code>GOOGLE_CLIENT_ID</code>, <code>GOOGLE_CLIENT_SECRET</code> and <code>OAUTH_ENCRYPTION_KEY</code> (<code>googleAccess</code>, same file).</p>
+  <p>The <code>page-search</code> step before the sources writes to two tables, not the ledger: page × query totals replace the site's rows in <code>page_search_metrics</code>, and page × day clicks and impressions are upserted into the <code>search_clicks</code> and <code>search_impressions</code> columns of <code>page_metrics_daily</code> (<code class="path">apps/web/src/search-sync.ts</code>).</p>
+  <div class="callout note"><p>The older <code>search_metrics</code> table is not written by this sync. It is replaced by the analysis workflow and by choosing a Search Console property (<code>replaceCurrentSearchMetrics</code>).</p></div>
+  <div class="callout warn"><p>Cloudflare has no optional secrets: every secret declared in <code>cloudflare.config.ts</code>, including the optional source keys, must be set before a deploy (comment in that file). A keyed source runs only when <code>signalKeys</code> finds a non-blank value for its key.</p></div>
+
+  <h2 id="url-inspection">URL Inspection</h2>
+  <p>Google allows 2,000 URL inspections per property per day (<code>DAILY_QUOTA</code>, <code class="path">apps/web/src/sync-steps.ts:37</code>), and the quota day starts at midnight in Los Angeles. <code>pacificDayStart</code> computes that instant, and the <code>start</code> step counts what is already spent with <code>countInspectionsSince</code> (<code class="path">packages/db/src/coverage.ts:95</code>): rows of <code>url_index_status</code> plus rows of <code>page_index_status</code> whose <code>checked_at</code> is on or after it. The stored inspections are the quota ledger, so a manual run after the daily one sees what the daily run spent.</p>
+  <p>Only sites with a Search Console property inspect, and never the demo site. The work is split into steps of 40 inspections (<code>INSPECTION_STEP</code>, <code class="path">apps/web/src/url-inspection.ts:8</code>) so a step, with its token refresh, stays under the Free plan's 50 subrequests per step. Inside a step, URLs are asked 10 at a time. Each inspection step gets one retry after 30 seconds and a 3-minute timeout.</p>
+  <ol>
+    <li><strong>Eumon pages</strong>: up to 100 published pages a day (<code>PAGE_INSPECTIONS_PER_DAY</code>), never-checked first, then the oldest check, skipping pages already checked today. Results go to <code>page_index_status</code>. A page Google fails on is still saved, with verdict <code>VERDICT_UNSPECIFIED</code> and the error text as its coverage state, so it counts as "not checked yet" and is not asked again until the next day.</li>
+    <li><strong>Index counts</strong>: if any page was inspected, <code>pages_indexed</code> and <code>pages_not_indexed</code> are written to the ledger for today.</li>
+    <li><strong>Coverage queue</strong>: read once, in its own step, by <code>urlsToInspect</code> (<code class="path">packages/db/src/coverage.ts:19</code>). It takes the latest completed crawl's served URLs: never-checked ones first, taken in turn from each page type, then URLs last checked more than 30 days ago. Its size is the smaller of 1,880 (<code>COVERAGE_URLS_PER_DAY</code>) and what is left of the quota after the pages.</li>
+    <li><strong>Coverage steps</strong>: the queue is inspected 40 per step into <code>url_index_status</code>. A URL Google won't inspect (for example one outside the property) is saved with verdict <code>ERROR</code>, so it waits 30 days like a checked URL.</li>
+  </ol>
+  <p>A refusal that holds for the day stops inspection: <code>429</code> (quota), <code>401</code> (revoked token), or a whole batch of 10 answering <code>403</code>. Nothing is saved for a refused batch, and the run notes <code>inspection stopped: Google answered …</code> or <code>coverage stopped: …</code>.</p>
+  <div class="callout note"><p>Two different "days" are in play. The quota count starts at Pacific midnight; the "already checked today" filter for Eumon pages and the ledger day for index counts use the UTC date of the run's start.</p></div>
+
+  <h2 id="sync-runs">Sync runs and notes</h2>
+  <p>The last step writes one row to <code>sync_runs</code> (<code>recordSyncRun</code>, <code class="path">packages/db/src/activity.ts:14</code>): id, site, trigger (<code>daily</code> or <code>manual</code>), <code>started_at</code>, <code>finished_at</code> and <code>notes_json</code>. Each site keeps its latest 30 runs; older rows are deleted in the same batch.</p>
+  <p>Notes are plain strings, one per thing that ran or didn't: <code>search: 7 days</code>, <code>speed: no Google API key</code>, <code>quota: 1,200 inspections already today, 800 left</code>, <code>coverage: inspected 400 in 10 steps</code>, <code>bing failed: …</code>. A note is a problem when it contains the word <code>failed</code>, <code>stopped</code> or <code>refused</code> (<code>isProblemNote</code>, <code class="path">packages/core/src/sync-notes.ts:2</code>).</p>
+  <p><code>GET /api/sites/:siteId/sync-runs</code> (<code class="path">apps/web/app/api/sites/[siteId]/sync-runs/route.ts</code>) returns <code>listSyncRuns</code>: the latest 20, newest first, with <code>Cache-Control: no-store</code>. Setup → Sync history shows them.</p>
+
+  <h2 id="dashboard">How the dashboard knows a sync finished</h2>
+  <p>The Sync now button in <code class="path">apps/web/app/components/OverviewView.tsx</code> posts to the sync route, then runs <code>waitForSyncRun</code>: every 4 seconds, for up to 15 minutes, while the view is open, it:</p>
+  <ol>
+    <li>fetches <code>/sync-runs</code> and looks for a <code>manual</code> run whose <code>startedAt</code> is at or after the <code>startedAt</code> the POST returned. Found means finished: the view reloads Results and, if any notes are problem notes, shows them as "Sync finished, but N sources didn't update";</li>
+    <li>otherwise asks <code>GET /results/sync?id=…</code> for the instance status. <code>errored</code> or <code>terminated</code> ends the wait with "Sync failed".</li>
+  </ol>
+  <p>A failed poll is ignored and retried on the next tick. After 15 minutes the view says the sync is still running and points to Sync history.</p>
+  <div class="callout warn"><p>A POST that returns <code>409</code> (today's daily run is still in flight) surfaces as an error in the view. Its result appears in Sync history as a <code>daily</code> run, which <code>waitForSyncRun</code> does not count.</p></div>
+
+  <p>Related: <a href="#data-model">Data model</a> for the tables, <a href="#ops">Operating it</a> for secrets and deploys, <a href="#gotchas">Gotchas</a>.</p>
+</article>

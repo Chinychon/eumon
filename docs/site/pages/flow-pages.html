@@ -1,0 +1,130 @@
+<article id="flow-pages" data-title="Landing pages" data-group="How it works">
+  <h1>The landing-page engine</h1>
+  <p class="lede">How Eumon turns a business into many specific landing pages on the customer's own domain: scoping the datasets, collecting records, deduping, generating pages from templates, serving them through the customer's proxy, measuring visits and leads, and improving the pages afterwards.</p>
+
+  <dl class="facts">
+    <dt>Packages</dt><dd><code class="path">packages/scraper</code> (scope, discovery, fetching, extraction, dedupe), <code class="path">packages/pages</code> (templates, generation, rendering, potential, insights, bandit)</dd>
+    <dt>App glue</dt><dd><code class="path">apps/web/src/page-engine.ts</code>, <code class="path">apps/web/src/scrape-workflow.ts</code>, <code class="path">apps/web/src/public-pages.ts</code>, <code class="path">apps/web/src/dedupe.ts</code></dd>
+    <dt>Workflow</dt><dd><code>ScrapeWorkflow</code>, binding <code>SCRAPE_WORKFLOW</code>, name <code>dataset-scrape</code></dd>
+    <dt>Public route</dt><dd><code>/p/:siteId/*</code>, reached through the customer's proxy</dd>
+    <dt>Tables</dt><dd><code>site_scopes</code>, <code>datasets</code>, <code>data_sources</code>, <code>data_records</code>, <code>jobs</code>, <code>scrape_queue</code>, <code>page_templates</code>, <code>generated_pages</code>, <code>page_revisions</code>, <code>page_settings</code>, <code>cta_variants</code>, <code>page_metrics_daily</code>, <code>page_sessions</code>, <code>page_search_metrics</code>, <code>conversion_events</code>, <code>leads</code></dd>
+  </dl>
+
+  <figure data-diagram="pages-flow"><figcaption>Scope proposes datasets and sources, collection fills records, templates generate pages, the proxy serves them on the customer's domain, and measurement feeds the optimisation loop.</figcaption></figure>
+
+  <h2 id="scope">Scope</h2>
+  <p><code>POST /api/sites/:siteId/scope</code> (<code class="path">apps/web/app/api/sites/[siteId]/scope/route.ts</code>) breaks the business into the granular things people search for. It takes an optional <code>goal</code> (up to 600 characters) and needs a language model.</p>
+  <ol>
+    <li><code>gatherSiteEvidence</code> (<code class="path">apps/web/src/page-engine.ts:26</code>) collects the evidence: route groups summarised from the sitemap, the homepage, one example page from each of the top four route groups, shallow links from the homepage, the site's top Search Console queries (from <code>search_metrics</code>), and the detected framework. If the homepage can't be read the route answers <code>422</code>.</li>
+    <li><code>proposeScope</code> (<code class="path">packages/scraper/src/scope.ts:93</code>) asks the model for the business name, a summary, the conversion goal, and 2 to 4 datasets. Each dataset has typed fields (<code>text</code>, <code>number</code>, <code>list</code>, <code>url</code>, <code>boolean</code>), a key field, page ideas (one page per record, or grouped by one or two fields) and candidate sources.</li>
+    <li><code>validateProposal</code> enforces the invariants whatever the model returned: at most 4 datasets and 25 fields each, snake_case keys, a key field that exists, at least 2 fields, and only the key field required (a record missing other details still becomes a thinner page).</li>
+    <li>The route deletes unused proposed datasets, saves the scope to <code>site_scopes</code>, and inserts each dataset with status <code>proposed</code> and its sources with status <code>proposed</code>. Default page budgets: 50 for <code>page</code> sources, 2,000 for <code>own_site</code>, 300 otherwise. If the site has no <code>page_settings</code> yet, the business name the model found becomes the site name.</li>
+  </ol>
+  <p>Proposals stay proposals until the owner approves sources and collects data. <code>POST /api/sites/:siteId/datasets</code> creates a dataset by hand instead.</p>
+
+  <h2 id="sources">Datasets and sources</h2>
+  <p>A source is one place records can be collected from. Its kind is one of <code>own_site</code>, <code>listing</code>, <code>sitemap</code>, <code>page</code> or <code>supabase</code> (<code class="path">apps/web/src/datasets.ts:4</code>). <code>expandSource</code> (<code class="path">packages/scraper/src/discover.ts:26</code>) turns a source into the detail-page URLs to read:</p>
+  <table>
+    <thead><tr><th>Kind</th><th>What is read</th></tr></thead>
+    <tbody>
+      <tr><td><code>page</code></td><td>The URL itself, then its pager (<code>rel=next</code>), up to <code>maxPages</code> and at most 50 pages. For a table or list of many records on one page.</td></tr>
+      <tr><td><code>sitemap</code>, <code>own_site</code></td><td>Sitemap URLs filtered by <code>urlPattern</code> (for example <code>/doctors/*</code>). <code>own_site</code> always uses the site's own origin. A pattern is required.</td></tr>
+      <tr><td><code>listing</code></td><td>Links on a listing page that match <code>urlPattern</code>, following <code>rel=next</code> for up to 50 list pages. Without a pattern every same-site link is included, with a note.</td></tr>
+      <tr><td><code>supabase</code></td><td>A table or view in a Supabase project, read with a read-only key that is sealed at once and never returned (<code class="path">apps/web/src/supabase-source.ts</code>).</td></tr>
+    </tbody>
+  </table>
+  <p>The source routes:</p>
+  <ul>
+    <li><code>POST /api/datasets/:datasetId/sources</code> adds a source as <code>approved</code>. It checks the URL is public, validates the pattern, and clamps <code>maxPages</code> to 1–50 for <code>page</code> and 1–5,000 otherwise.</li>
+    <li><code>PATCH /api/sources/:sourceId</code> approves, rejects, or edits the pattern and page budget. <code>DELETE</code> removes it (and a Supabase key).</li>
+    <li><code>POST /api/sources/:sourceId/preview</code> (<code class="path">apps/web/app/api/sources/[sourceId]/preview/route.ts</code>) is a dry run: how many URLs match, how many robots.txt blocks, the first 10, and what the extractor pulls from the first page (up to 20 records). It stores <code>robotsAllowed</code> and any error on the source.</li>
+  </ul>
+
+  <h2 id="collection">Collection</h2>
+  <p><code>POST /api/datasets/:datasetId/scrape</code> creates a <code>jobs</code> row and a <code>ScrapeWorkflow</code> instance whose id is the job id, then answers <code>202</code>. It refuses with <code>409</code> when a run for the dataset is queued or running and less than 6 hours old, or when no requested source is approved. <code>GET /api/jobs/:jobId</code> returns the job, queue counts and recent failures for the progress view.</p>
+  <p><code>ScrapeWorkflow</code> (<code class="path">apps/web/src/scrape-workflow.ts</code>) runs these steps:</p>
+  <ol>
+    <li><strong><code>load</code></strong>: marks the job running and turns a <code>proposed</code> dataset <code>active</code>.</li>
+    <li><strong>Supabase pulls</strong>: each <code>supabase</code> source is read a page per step by <code>runSupabasePull</code>.</li>
+    <li><strong><code>expand-&lt;sourceId&gt;</code></strong>: <code>expandSource</code> for each other source, writing the URLs into <code>scrape_queue</code> (<code>INSERT OR IGNORE</code> on job, source and URL) and the source's robots status and error.</li>
+    <li><strong><code>queued</code></strong>: fails the job if no source produced pages and there were no tables.</li>
+    <li><strong><code>scrape-batch-N</code></strong>: 8 queued URLs per step, up to 900 steps. Each URL is fetched, its records extracted and upserted, and its queue row marked <code>done</code>, <code>failed</code> or <code>skipped</code> (blocked by robots.txt). Requests to the same host are spaced at least 1.5 seconds apart for third-party hosts, 300 ms for own-site sources, or the robots.txt <code>Crawl-delay</code> if longer, capped at 20 seconds.</li>
+    <li><strong><code>merge-duplicates</code></strong>: merges records that name the same thing (skipped when every source is a table). A failure here doesn't fail the run.</li>
+    <li><strong><code>finish</code></strong>: refreshes each source's record count and writes the summary message.</li>
+  </ol>
+  <p><code>PoliteFetcher</code> (<code class="path">packages/scraper/src/fetch.ts:10</code>) fetches as EumonBot with robots.txt enforced per origin. It fetches each origin's robots.txt once per instance: a 5xx or network error means disallow everything, a 4xx means allow everything. A disallowed URL throws <code>RobotsBlockedError</code>.</p>
+  <p><code>extractRecordsFromHtml</code> (<code class="path">packages/scraper/src/extract.ts:101</code>) sends the page's JSON-LD, meta and cleaned text to the model with the dataset's fields and asks for records using only facts on the page. A page with under 80 characters of text and no JSON-LD is skipped without a model call. <code>normalizeRecords</code> coerces each field to its type, slugifies the key field into the record key, drops rows without a key, removes a record from its own list fields, and merges repeats of the same key on one page.</p>
+  <p>An <code>LlmError</code> (a truncated, refused, empty or malformed answer, or no model configured) fails only that page. Any other error, such as the model provider being unavailable, fails the step so Workflows retries it (up to 2 retries, exponential backoff from 15 seconds).</p>
+  <p><strong>CSV import.</strong> <code>POST /api/datasets/:datasetId/records/import</code> takes a CSV body of up to 5 MB. <code>parseCsv</code> handles RFC 4180 quoting; <code>mapCsvRows</code> matches headers to fields by key or label, case-insensitively, then runs the same normalisation. Rows are saved with <code>source_url = "csv-import"</code>, and a proposed dataset becomes active.</p>
+  <p>Every path writes records with <code>upsertRecords</code> (<code class="path">packages/db/src/page-engine.ts:222</code>), which merges into an existing record with the same key: new single values win, gaps are filled, list values accumulate, and the first source URL is kept.</p>
+
+  <h2 id="dedupe-potential">Dedupe and potential</h2>
+  <p>Pages often name the same entity in different ways ("Gurney Paragon" and "Gurney Paragon Mall"). <code>findDuplicateRecords</code> (<code class="path">packages/scraper/src/resolve.ts:32</code>) sorts the distinct names and sends them to the model in windows of 400 that overlap by 40. Every member it returns must be an existing name, and a name joins at most one cluster. <code>mergeDuplicateRecords</code> (<code class="path">apps/web/src/dedupe.ts:10</code>) then merges each cluster's data into the canonical record. It runs at the end of a collection and on demand from <code>POST /api/datasets/:datasetId/dedupe</code>.</p>
+  <p><code>GET /api/datasets/:datasetId/potential</code> returns <code>estimatePagePotential</code> (<code class="path">packages/pages/src/potential.ts:112</code>) over up to 20,000 records: for each page idea, how many pages would pass the quality gate, how many are thin, and how many grouped pages would duplicate another. It also suggests groupings nobody proposed when the data supports at least 2 pages. It uses the same thresholds as generation, so the estimate matches what will be published.</p>
+  <p>Records are browsed with <code>GET /api/datasets/:datasetId/records</code> (search with <code>q</code>, up to 200 per page) and removed with <code>DELETE /api/records/:recordId</code>. <code>GET /api/datasets/:datasetId/inventory</code> reports field fill, duplicates, thin and missing pages.</p>
+
+  <h2 id="generation">Templates and generation</h2>
+  <p><code>POST /api/datasets/:datasetId/templates</code> designs a template for one page idea (by <code>ideaIndex</code>, by <code>groupBy</code>, or the entity idea by default) and generates its pages as drafts. It needs at least one record.</p>
+  <p>The AI writes copy <em>patterns</em> once per template, never per page. <code>proposeTemplate</code> (<code class="path">packages/pages/src/templates.ts:147</code>) shows the model the 5 most complete records and field coverage, and asks for a path pattern, title, description, H1, intro, item fields, sort, minimum records and FAQ, all written with placeholders such as <code>{field_key}</code>, <code>{count}</code>, <code>{min:field}</code>, <code>{site}</code> and <code>{year}</code>. Unknown placeholders and fields fall back to the data-only <code>defaultTemplate</code>, which is also used when no model is configured, when <code>useAi</code> is false, or when the model call fails.</p>
+  <p><code>regenerateTemplate</code> (<code class="path">apps/web/src/page-engine.ts:73</code>) loads up to 20,000 records (more is an error), links to entity pages of other templates, and calls <code>generatePages</code> (<code class="path">packages/pages/src/generate.ts:58</code>). Generation is deterministic: the same data and template give the same paths and copy.</p>
+  <ul>
+    <li><strong>Grouping</strong>: one page per record for an entity template, or one per combination of the <code>groupBy</code> values. A page lists at most 100 records.</li>
+    <li><strong>Paths</strong>: built from the path pattern under the mount path. Paths of pages that are or were live are kept as-is; a new path that collides gets <code>-2</code>, <code>-3</code> and so on.</li>
+    <li><strong>Quality gate</strong> (<code>assessQuality</code>, <code class="path">packages/pages/src/generate.ts:273</code>): a page needs a title. An entity page must fill at least 40% of the fields at least 20% of records have, and have at least 250 characters of intro, item and FAQ text. A grouped page needs the template's <code>minRecords</code>. A failing page gets status <code>thin</code> and a quality score of 0, with its issues listed. A title over 65 characters adds a warning but doesn't fail.</li>
+    <li><strong>Duplicates</strong>: a grouped page listing exactly the same records as an earlier one becomes <code>duplicate</code>.</li>
+    <li><strong>Facts</strong> (<code>buildFacts</code>): the record count and, for each number field, its min and max.</li>
+    <li><strong>Related links</strong> (<code>attachRelatedLinks</code>): up to 6 sibling pages that share the most group values (or, for entity pages, short text and list values). Values shared by more than 20 pages and more than half of all pages are ignored.</li>
+  </ul>
+  <p><code>syncTemplatePages</code> (<code class="path">packages/db/src/page-engine.ts:515</code>) writes the result to <code>generated_pages</code>. A page that was published or unpublished keeps that status and its path. A page that no longer exists in the output is marked <code>retired</code> if it was ever live (so it answers 410), and deleted otherwise. <code>POST /api/templates/:templateId/generate</code> runs regeneration again after the data changes.</p>
+
+  <h2 id="publishing">Publishing and serving</h2>
+  <p><code>POST /api/templates/:templateId/publish</code> publishes every <code>draft</code> or <code>unpublished</code> page with a quality score above 0 and sets the template <code>active</code>; <code>{ publish: false }</code> unpublishes. Thin and duplicate pages never go live, and <code>PATCH /api/pages/:pageId</code> refuses to publish them with <code>409</code>.</p>
+  <p>The customer's site proxies a path (by default <code>/guides</code>, the <code>mountPath</code> in <code>page_settings</code>) to <code>/p/:siteId/…</code> on Eumon. <code class="path">apps/web/app/p/[siteId]/[[...path]]/route.ts</code> resolves the site and hands off to <code>servePublicGet</code> (<code class="path">apps/web/src/public-pages.ts:86</code>):</p>
+  <table>
+    <thead><tr><th>Path under the mount</th><th>Response</th></tr></thead>
+    <tbody>
+      <tr><td><code>/__eumon/health</code></td><td>JSON <code>{ ok, siteId, proxied }</code>, used by the setup check</td></tr>
+      <tr><td><code>/&lt;32 hex&gt;.txt</code></td><td>The site's IndexNow key file, when <code>SESSION_SECRET</code> is at least 32 characters</td></tr>
+      <tr><td><code>/sitemap.xml</code></td><td><code>renderSitemap</code>: the hub plus every published page, with <code>lastmod</code></td></tr>
+      <tr><td><code>/robots.txt</code> (empty mount path only)</td><td>Allow all, pointing at the sitemap</td></tr>
+      <tr><td>The mount path itself</td><td>The hub page: published pages grouped by template</td></tr>
+      <tr><td>Anything else</td><td>The page by path. <code>unpublished</code> and <code>retired</code> answer 410; other non-published pages 404 unless <code>?preview=1</code>.</td></tr>
+    </tbody>
+  </table>
+  <p>A request counts as <em>proxied</em> when it carries <code>X-Eumon-Proxy: 1</code>, or an <code>X-Forwarded-Host</code> equal to the public origin's host. Only a published page served through the proxy, without <code>?preview=1</code>, is indexable. Everything else gets <code>X-Robots-Tag: noindex</code> and a <code>noindex, nofollow</code> robots meta, so the copy on Eumon's own host never competes with the customer's URL.</p>
+  <p><code>renderLandingPage</code> (<code class="path">packages/pages/src/render.ts:152</code>) returns complete HTML with no JavaScript needed for content: a canonical link to the public URL, Open Graph tags, and JSON-LD (<code>structuredData</code>, line 60) with a <code>BreadcrumbList</code>, then a <code>WebPage</code> about the entity for single-record pages or an <code>ItemList</code> of up to 50 items for grouped pages, and an <code>FAQPage</code> when the page has FAQs. Before rendering, related links and item links to pages that are not live are dropped. Indexable pages are cached for 300 seconds; others are <code>no-store</code>. A published page fetched by Googlebot increments <code>googlebot_hits</code>; a fetch by a known AI agent is recorded in <code>ai_page_daily</code>.</p>
+  <p><code>GET /api/sites/:siteId/integration</code> (<code class="path">apps/web/app/api/sites/[siteId]/integration/route.ts</code>) returns the proxy snippets, a guess at the hosting provider and CMS from the homepage's headers, and the tracking snippet. The snippets are:</p>
+  <ul>
+    <li><strong>Cloudflare Worker</strong>: forwards the request and sets <code>X-Eumon-Proxy: 1</code> and <code>X-Forwarded-Host</code>.</li>
+    <li><strong>Vercel</strong>: <code>rewrites</code> in <code>vercel.json</code>.</li>
+    <li><strong>Next.js</strong>: <code>beforeFiles</code> rewrites in <code>next.config.js</code>.</li>
+    <li><strong>Netlify</strong>: a <code>200</code> redirect in <code>netlify.toml</code> with <code>X-Eumon-Proxy = "1"</code>.</li>
+    <li><strong>nginx</strong>: a <code>location</code> block with <code>proxy_pass</code>, <code>X-Forwarded-Host</code> and <code>X-Eumon-Proxy</code>.</li>
+    <li><strong>Apache</strong>: <code>ProxyPass</code> with <code>RequestHeader set X-Eumon-Proxy "1"</code>.</li>
+  </ul>
+  <div class="callout warn"><p>The Vercel and Next.js snippets set no header themselves. If a proxy sends neither header, pages are served with <code>noindex</code>. The setup check catches this as "Proxy identifies itself".</p></div>
+  <p><code>POST /api/sites/:siteId/integration</code> verifies the setup from outside as Googlebot: the health path answers through the proxy with the right site id and <code>proxied: true</code>, a published page returns 200 with Eumon's generator meta and isn't an empty shell, it has no noindex, and its canonical equals its URL. When every check passes it stores <code>verifiedAt</code> in <code>page_settings</code>, which the IndexNow source of the <a href="#flow-sync">daily sync</a> waits for. Changing the public origin or mount path clears it.</p>
+
+  <h2 id="measurement">Measurement</h2>
+  <p><strong>On landing pages.</strong> <code>trackingScript</code> (<code class="path">packages/pages/src/render.ts:134</code>) sets a first-party <code>eumon_sid</code> cookie for 30 days and posts beacons to <code>&lt;mount&gt;/__eumon/e</code> on the same origin. <code>servePublicBeacon</code> ignores bots and unpublished pages, then:</p>
+  <ul>
+    <li>a <code>view</code> increments <code>views</code> in <code>page_metrics_daily</code> (and the CTA variant's impressions), records the first landing in <code>page_sessions</code> with its source (search engine or AI assistant, from the referrer host and <code>utm_source</code>), and an AI referral in <code>ai_page_daily</code> once per session;</li>
+    <li>a <code>cta</code> click increments <code>cta_clicks</code> (and the variant's clicks) and inserts a <code>conversion_events</code> row typed from the CTA's URL: <code>whatsapp_click</code>, <code>phone_click</code>, <code>email_click</code> or <code>cta_click</code>.</li>
+  </ul>
+  <p><strong>On the main site.</strong> The tracking snippet from the integration route posts to <code>POST /api/sites/:siteId/events</code> (<code class="path">apps/web/app/api/sites/[siteId]/events/route.ts</code>). It reuses the <code>eumon_sid</code> cookie when the landing pages share the domain, so a conversion is credited to the page the visitor first landed on. It tracks WhatsApp, phone and email links and form submissions, never form contents, and exposes <code>window.eumonTrack</code>. The endpoint:</p>
+  <ul>
+    <li>answers CORS preflight and posts only for an <code>Origin</code> on the same site as the site's base URL or its public origin (www and apex count as the same), echoing that exact origin, otherwise <code>403</code>;</li>
+    <li>rejects bodies over 4,096 bytes (<code>413</code>), unknown event names, and a <code>pageUrl</code> from another origin;</li>
+    <li>stores the event in <code>conversion_events</code> and answers <code>202</code>.</li>
+  </ul>
+  <p><strong>WhatsApp reference codes.</strong> Both scripts share <code>WHATSAPP_REF_JS</code> (<code class="path">packages/core/src/whatsapp.ts</code>). On a click of a <code>wa.me</code> or <code>api.whatsapp.com</code> link they append a 5-character code to the pre-filled message, for example "… (ref K7M2Q)", using letters and digits that can't be misread. The click carries the code, and the server records a <code>leads</code> row with status <code>clicked</code>. Staff match the code in the chat, then move the lead through <code>chat</code>, <code>qualified</code>, <code>won</code> or <code>lost</code> with <code>PATCH /api/sites/:siteId/leads/:leadId</code>, which updates the Results ledger at once.</p>
+  <p>The page-search step of the <a href="#flow-sync">daily sync</a> adds Search Console data for the pages: page × query rows in <code>page_search_metrics</code>, and daily clicks and impressions in <code>page_metrics_daily</code>.</p>
+
+  <h2 id="optimisation">Optimisation</h2>
+  <p><strong>CTA variants.</strong> <code>POST /api/sites/:siteId/cta-variants</code> adds a variant; the first one also enrols the current default CTA as the control. <code>PATCH …/cta-variants/:variantId</code> turns a variant on or off. On each page render, <code>chooseArm</code> (<code class="path">packages/pages/src/bandit.ts:12</code>) picks among active variants by Thompson sampling: each variant's click-through rate has a Beta posterior, and the variant with the highest draw is shown. The prior is centred on the pooled rate across variants and worth 10 views, so a new variant starts "about average, very uncertain". With no active variants the page uses the CTA from <code>page_settings</code>.</p>
+  <p><strong>Performance report.</strong> <code>GET /api/sites/:siteId/performance?days=28</code> runs <code>buildPerformanceReport</code> (<code class="path">packages/pages/src/insights.ts</code>) over page performance, page queries and variants. It returns totals, per-template stats, top pages and a ranked list of suggestions: <code>rewrite_snippet</code> (click-through rate under half of what the position usually gets), <code>target_queries</code>, <code>not_crawled</code>, <code>no_visibility</code>, <code>weak_cta</code>, <code>expand_template</code>, <code>start_cta_test</code> and <code>cta_winner</code>. Each suggestion carries its evidence and a rough impact used for ranking.</p>
+  <p><strong>Title suggestions.</strong> <code>POST /api/pages/:pageId/snippets</code> calls <code>suggestSnippets</code> (<code class="path">packages/pages/src/snippets.ts</code>), which asks the model for three different title and description options grounded in the page's facts and its real queries from <code>page_search_metrics</code>, in the page's language.</p>
+  <p><strong>Revisions.</strong> <code>PATCH /api/pages/:pageId</code> edits a title (10–90 characters), description (30–200) or status. <code>updatePageFields</code> (<code class="path">packages/db/src/page-engine.ts:670</code>) stores edited copy as an override that survives regeneration and writes one <code>page_revisions</code> row per changed field with before, after, reason and author. The performance route returns the latest 30 revisions with equal windows of views, CTA clicks and search clicks before and after each change (up to 14 days a side). <code>{ resetOverrides: true }</code> drops the overrides and regenerates the template.</p>
+
+  <p>Related: <a href="#data-model">Data model</a>, <a href="#packages">Packages</a>, <a href="#web-app">Web app</a>, <a href="#glossary">Glossary</a>.</p>
+</article>

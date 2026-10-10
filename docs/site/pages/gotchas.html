@@ -1,0 +1,100 @@
+<article id="gotchas" data-title="Limits and gotchas" data-group="Operating it">
+  <h1>Limits and gotchas</h1>
+  <p class="lede">The platform limits production runs under, the incident that showed what they mean in practice, and the traps in queries, local development, the monorepo and git that have cost this project time. Read it before changing a Workflow, a crawl query or the dev setup.</p>
+
+  <h2 id="workers-free-plan-limits">Workers Free plan limits</h2>
+  <p>Production runs on the Workers Free plan with D1 Free, by choice. The figures below are Cloudflare's published Free-plan limits; localhost (Miniflare) enforces none of them, so code that works locally can still fail in production.</p>
+  <table>
+    <thead><tr><th>Limit</th><th>Free plan</th><th>What happens when it is hit</th></tr></thead>
+    <tbody>
+      <tr><td>Subrequests to the internet (<code>fetch</code> to other hosts)</td><td>50 per invocation</td><td>The next <code>fetch</code> throws "Too many subrequests".</td></tr>
+      <tr><td>Calls to Cloudflare services (D1, Workflows, AI, Browser and so on)</td><td>1,000 per invocation</td><td>The next call throws "Too many API requests by single Worker invocation".</td></tr>
+      <tr><td>CPU time</td><td>10 ms per invocation</td><td>The invocation is ended with an exceeded-CPU outcome.</td></tr>
+      <tr><td>D1 rows read</td><td>5,000,000 per day</td><td>Every query fails until 00:00 UTC.</td></tr>
+      <tr><td>D1 rows written</td><td>100,000 per day</td><td>Every write fails until 00:00 UTC.</td></tr>
+    </tbody>
+  </table>
+  <p>Rows read counts rows SQLite scans, not rows returned. A query that walks an index past 20,000 rows to return 100 costs 20,000 reads.</p>
+
+  <h3>What in Eumon is shaped by them</h3>
+  <ul>
+    <li><strong>Inspection steps of 40.</strong> The Results sync calls Google's URL Inspection API 40 URLs per Workflow step (<code>INSPECTION_STEP</code>, <code class="path">apps/web/src/url-inspection.ts:8</code>), so each step stays under 50 subrequests (<code class="path">apps/web/src/search-sync-workflow.ts</code>). Whether the 50-subrequest limit applies per step or per Workflow instance has not been confirmed in production; watch Sync history for "Too many subrequests".</li>
+    <li><strong>Crawl batches.</strong> The analysis crawls 100 sitemap URLs per step, 6 at a time (<code>CRAWL_BATCH_SIZE</code> and <code>CRAWL_CONCURRENCY</code>, <code class="path">apps/web/src/analysis-workflow.ts:52</code>), and at most 25,000 URLs per analysis. 100 fetches is above the 50-subrequest cap: shrinking the batch is open work (see the incident below). Crawl results are saved 40 rows per D1 batch (<code class="path">packages/db/src/index.ts:611</code>).</li>
+    <li><strong>A cron trigger, not Workflow schedules.</strong> Workflow <code>schedules</code> need the paid plan, so the daily sync is a Worker Cron Trigger at 04:15 UTC that starts one <code>search-sync</code> instance per site (<code class="path">apps/web/cloudflare.config.ts:10</code>, <code class="path">apps/web/worker.ts:14</code>). Each site gets its own instance so each has its own step budget.</li>
+    <li><strong>Work split into steps.</strong> Competitor research and the data inventory each run in their own Workflow step, so a slow or failing part retries alone and has its own query budget (<a href="#flow-analysis">the analysis flow</a>).</li>
+  </ul>
+
+  <h2 id="medbay-incident">Case study: the 2026-10-10 MedBay incident</h2>
+  <p>The first real production analysis ran against medbaycare.com, a site with 22,913 URLs in its sitemap. It took production down for the rest of the UTC day and showed three limits at once.</p>
+  <h3>What happened</h3>
+  <ol>
+    <li>The crawl queued every sitemap URL and ran 108 <code>crawl-batch-&lt;n&gt;</code> steps of 100 URLs. They finished in about 15 seconds in total, because almost every fetch failed fast: D1 recorded 14,730 "mark failed" updates and no successful page saves.</li>
+    <li>Batch 108 died on "Too many API requests by single Worker invocation", the 1,000-calls-to-Cloudflare-services cap. The Workflow instance errored.</li>
+    <li>Meanwhile D1 hit the 5,000,000 rows-read daily limit. From then on every route that queries D1 returned 500 until 00:00 UTC. The analysis record stayed <code>running</code>, because the Workflow's attempt to mark it failed was itself a D1 write, and Cancel could not run because it reads D1 first (see <a href="#ops--runbook">the runbook</a>).</li>
+  </ol>
+  <h3>Why D1 ran out</h3>
+  <p>Two crawl-queue queries read every row of the analysis on every batch, so the cost of a batch grew with the size of the site instead of the size of the batch:</p>
+  <ul>
+    <li><code>listPendingCrawlUrls</code> had <code>ORDER BY url</code>. To return rows in URL order SQLite walked the primary key <code>(analysis_id, url)</code> and stepped past every already-crawled row to find pending ones.</li>
+    <li>The counter subtraction in <code>saveCrawlBatch</code> (<code>crawl_state = 'pending' AND url IN (…)</code>) made SQLite choose the <code>idx_pages_analysis_crawl_state</code> index and scan every pending row, instead of seeking the 40 URLs by primary key.</li>
+  </ul>
+  <p>On a 23,000-URL site that was roughly 100,000 rows read per batch. How a crawl's D1 cost adds up is covered in <a href="#flow-analysis--crawl-cost">the analysis flow</a>.</p>
+  <h3>The fix (PR #19)</h3>
+  <p><code>listPendingCrawlUrls</code> lost its <code>ORDER BY</code> and now reads the next pending rows straight off the crawl-state index (<code class="path">packages/db/src/index.ts:527</code>). The subtraction uses <code>+crawl_state</code>, which keeps SQLite on the primary key (<code class="path">packages/db/src/index.ts:616</code>). Measured on a scratch copy of that size, in SQLite VM steps:</p>
+  <table>
+    <thead><tr><th>Query</th><th>Before</th><th>After</th></tr></thead>
+    <tbody>
+      <tr><td>Next pending URLs</td><td>55,809</td><td>608</td></tr>
+      <tr><td>Counter subtraction</td><td>120,638</td><td>1,081</td></tr>
+    </tbody>
+  </table>
+  <h3>Still open</h3>
+  <ul>
+    <li><strong>Why the fetches failed.</strong> The error text of the failed pages has not been read yet. medbaycare.com is behind Cloudflare, so its bot protection may be refusing Googlebot-agent fetches from Workers; or the 50-subrequest cap is cutting off a 100-URL batch. Re-run the analysis and read the error on the failed rows (<code>crawl_state = 'failed'</code>, message in <code>result_json</code> at <code>$.error</code>, <code class="path">packages/db/src/index.ts:550</code>) before changing anything.</li>
+    <li><strong>Calls per invocation.</strong> A Workflow invocation has to stay under 1,000 calls to Cloudflare services. Each crawl step does D1 reads, the save batches and a progress write that doubles as the cancel check; that total has to be counted against the cap, and batch size brought under 50 fetches.</li>
+  </ul>
+  <div class="callout trap"><p>A D1 quota outage is not a bug in the app, but it takes the whole app down: every page that queries returns 500 until midnight UTC, and nothing can be cancelled from the dashboard. Before running an analysis on a large site, check <code>npx wrangler d1 info eumon-prod</code> and the per-query reads in <code>d1 insights</code> (<a href="#ops--observability">commands</a>).</p></div>
+
+  <h2 id="query-plan-traps">Query-plan traps</h2>
+  <p>D1 is SQLite, and SQLite chooses an index without table statistics unless <code>ANALYZE</code> has run. With an equality on <code>analysis_id</code> in both the primary key and a secondary index, it often picks the one that reads more rows. The query is correct either way, so nothing fails; the rows-read bill is the only symptom.</p>
+  <ul>
+    <li><strong>Check the plan.</strong> Run <code>EXPLAIN QUERY PLAN &lt;query&gt;</code> against a local copy. <code>SEARCH pages USING PRIMARY KEY (analysis_id=? AND url=?)</code> is a seek; <code>USING INDEX idx_… (analysis_id=? AND crawl_state=?)</code> followed by row checks is a scan of every row the index matches. <code>USE TEMP B-TREE FOR ORDER BY</code> means a sort over every matched row.</li>
+    <li><strong>The <code>+column</code> trick.</strong> Writing <code>+crawl_state = 'pending'</code> makes the column an expression, so SQLite cannot use an index on it and falls back to the other candidate. The result is unchanged.</li>
+    <li><strong><code>ORDER BY</code> on a large set.</strong> Leave it out when the order does not matter; it can force a walk of the whole key range.</li>
+    <li><strong>Pin the plan in a test.</strong> <code class="path">packages/db/src/crawl.test.ts:342</code> ("crawl queue query plans") runs <code>EXPLAIN QUERY PLAN</code> on both crawl-queue queries and asserts the index each uses. Add a case there when you change a query that runs once per batch or per page.</li>
+  </ul>
+  <div class="callout warn"><p>Local timing hides this. A scan of 20,000 rows takes milliseconds in Miniflare and costs 20,000 reads in production, per call. Measure rows or VM steps, not time.</p></div>
+  <p>The tables and indexes are listed on <a href="#data-model">Data model</a>.</p>
+
+  <h2 id="local-dev-traps">Local dev traps</h2>
+  <dl>
+    <dt>One dev server per directory</dt>
+    <dd>vinext takes a lockfile when its dev server starts and refuses a second one in the same project root. Setting <code>VINEXT_NO_DEV_LOCK=1</code> skips the lock (<code>vinext/dist/cli-dev-config.js</code> in <code>apps/web/node_modules</code>). For an isolated second server, use a separate Vite config with its own <code>persistState</code> path and <code>cacheDir</code> so it does not share the first server's D1 state or dependency cache. The dev server runs on port 5174 with <code>--strictPort</code>, so a taken port is an error, not a new port (<code class="path">apps/web/package.json</code>).</dd>
+    <dt>Workers AI only works remotely</dt>
+    <dd><code>remoteBindings: false</code> in <code class="path">apps/web/vite.config.ts:9</code> keeps every binding local, and the AI binding has no local simulation ("Binding AI needs to be run remotely"). Set <code>DEEPSEEK_API_KEY</code> or <code>ANTHROPIC_API_KEY</code> in <code>.dev.vars</code> to use the AI steps locally. Browser Rendering does work locally.</dd>
+    <dt>Undeclared <code>.dev.vars</code> entries are ignored</dt>
+    <dd>Only names declared in <code class="path">apps/web/cloudflare.config.ts</code> reach the Worker; anything else in <code>.dev.vars</code> is dropped without a warning (<code class="path">apps/web/cloudflare.config.ts:59</code>). Declare a new secret there before reading it. Restart the dev server after changing either file.</dd>
+    <dt>Local D1 runs one query at a time</dt>
+    <dd>In Miniflare a slow query blocks every other request, and the running query cannot be cancelled: only a dev-server restart recovers. Time a suspect query first, read-only, against the SQLite file under <code>apps/web/.cloudflare/state</code> with <code>EXPLAIN QUERY PLAN</code>, before sending it through the server.</dd>
+    <dt>The dev server blocks foreign origins</dt>
+    <dd>vinext's dev-origin check rejects requests whose <code>Origin</code> is not localhost, a <code>.localhost</code> subdomain, the request's own host, or listed in <code>allowedDevOrigins</code> (<code>vinext/dist/server/dev-origin-check.js</code>). So CORS endpoints such as <code>/api/sites/*/events</code> cannot be tested with a foreign <code>Origin</code> against the dev server. Requests with no <code>Origin</code> (plain curl) pass.</dd>
+    <dt>zsh <code>echo</code> rewrites JSON</dt>
+    <dd>zsh's <code>echo</code> turns <code>\n</code> inside a JSON string into a real newline, which breaks the JSON. Write responses to a file, or use <code>printf '%s'</code>, before piping them to a parser.</dd>
+    <dt>"Network connection lost." on Google Analytics calls</dt>
+    <dd>A DNS blocker on the dev machine (a Pi-hole, for example) that answers <code>0.0.0.0</code> for <code>analyticsadmin.googleapis.com</code> or <code>analyticsdata.googleapis.com</code> shows up inside workerd as "Network connection lost.". Run <code>getent ahosts analyticsdata.googleapis.com</code> before debugging the code.</dd>
+  </dl>
+  <p>Setup itself is on <a href="#getting-started">Getting started</a>.</p>
+
+  <h2 id="monorepo-traps">Monorepo traps</h2>
+  <ul>
+    <li><strong>Packages import each other's built <code>dist/</code>.</strong> Every package's <code>main</code> and <code>types</code> point at <code>./dist</code> (for example <code class="path">packages/core/package.json:6</code>), and the web app imports the packages the same way. An edit to <code>packages/*/src</code> is invisible to the web app and to other packages until <code>npm run build:packages</code> runs. <code>npm run dev</code> rebuilds them first (<code class="path">apps/web/scripts/predev.mjs</code>), but a running dev server does not; rebuild and reload after changing a package.</li>
+    <li><strong>Tests run against compiled code.</strong> Each package's <code>test</code> script compiles with <code>tsconfig.test.json</code> into <code>dist-test/</code> and runs <code>node --test</code> on that. A test in one package exercises the other packages' <code>dist/</code>, not their source. The root <code>npm test</code> runs <code>build:packages</code> first; running one workspace's tests does not.</li>
+    <li><strong>Build order matters.</strong> <code>build:packages</code> in the root <code class="path">package.json</code> builds core, ai, db, repo-analyzer, crawler, scraper, pages, agents, sdk in that order. A new package or a new dependency between packages needs a place in that list.</li>
+  </ul>
+  <p>What each package does is on <a href="#packages">Packages</a>.</p>
+
+  <h2 id="git-and-worktree-traps">Git and worktree traps</h2>
+  <div class="callout trap"><p>Never run two shell commands in parallel that each <code>cd</code> into a different worktree under <code>.worktrees/</code>. When the shell's working directory is shared, one command's <code>cd</code> can land the other's edits in the wrong worktree; this has happened once. Run them one after the other, or use absolute paths with no <code>cd</code>.</p></div>
+  <div class="callout trap"><p>A "keep both sides" conflict resolution, when both branches added a block at the same place, drops the closing lines the two blocks shared (a <code>});</code>, for example) and can duplicate a shared import. Run <code>npm run build</code> after resolving a conflict that way, before committing.</p></div>
+  <div class="callout warn"><p>Stacked pull requests have to merge in order. When one branch was cut from another unmerged branch, merge the base first, or the second PR carries the first one's changes with it.</p></div>
+</article>

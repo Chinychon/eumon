@@ -1,0 +1,177 @@
+<article id="findings" data-title="Findings" data-group="Reference">
+  <h1>Findings</h1>
+  <p class="lede">How an analysis turns crawl, code, search and connector data into ranked findings, how History tracks a finding across runs, and how to add a new one. For where findings are produced in the run, see <a href="#flow-analysis">Site analysis</a>.</p>
+
+  <h2 id="the-finding-type">The Finding type</h2>
+  <p>Defined in <code class="path">packages/core/src/types.ts:94</code>:</p>
+  <pre><code>interface Finding {
+  id: string;                 // createId("finding"), new every run
+  siteId: string;
+  analysisId: string;
+  category: FindingCategory;
+  severity: Severity;
+  title: string;
+  summary: string;
+  evidence: JsonObject;
+  organicImpactScore: number; // 0-100
+  recommendation?: string;
+  pagesAffected?: string[];
+  createdAt: string;
+}</code></pre>
+  <dl class="facts">
+    <dt><code>Severity</code></dt><dd><code>CRITICAL</code>, <code>HIGH</code>, <code>MEDIUM</code>, <code>LOW</code>, <code>INFORMATIONAL</code></dd>
+    <dt><code>FindingCategory</code></dt><dd><code>rendering</code>, <code>sitemap</code>, <code>indexing</code>, <code>metadata</code>, <code>structured_data</code>, <code>internal_links</code>, <code>content</code>, <code>conversion</code>, <code>competitors</code>, <code>search</code>, <code>repository</code>, <code>ai_visibility</code></dd>
+  </dl>
+  <p>Findings are not stored in their own table. They live in the report, <code>analyses.report_json</code> under <code>findings</code>. When a report is too big for a D1 row, <code>compactReport</code> drops evidence beyond the top 10 findings first, then all evidence (<code class="path">packages/db/src/index.ts:330</code>). Because <code>id</code> changes every run, anything that needs "the same finding" across runs uses <code>findingKey</code> instead (see <a href="#findings--history">History</a>).</p>
+  <p>The category decides which dashboard area explains the finding: <code>findingArea</code> in <code class="path">apps/web/app/components/report-model.ts:104</code> sends <code>search</code> to Search, <code>competitors</code> to Competitors, <code>conversion</code> to Leads, <code>ai_visibility</code> to AI, and everything else to Technical.</p>
+
+  <h2 id="severity-and-impact">Severity and organic impact</h2>
+  <p>The rule in <code class="path">packages/core/src/severity.ts</code> is that severity reflects expected organic business impact, not lint rules. Most producers compute an <code>organicImpactScore</code> and derive severity from it with <code>severityFromImpact</code>:</p>
+  <table>
+    <thead><tr><th>Score</th><th>Severity</th></tr></thead>
+    <tbody>
+      <tr><td>90 and up</td><td><code>CRITICAL</code></td></tr>
+      <tr><td>70 to 89</td><td><code>HIGH</code></td></tr>
+      <tr><td>40 to 69</td><td><code>MEDIUM</code></td></tr>
+      <tr><td>15 to 39</td><td><code>LOW</code></td></tr>
+      <tr><td>under 15</td><td><code>INFORMATIONAL</code></td></tr>
+    </tbody>
+  </table>
+  <p><code>organicImpactScore(input)</code> builds a score from facts about the problem. It starts at 10 and adds: 55 for empty shells at scale, 40 for blocking the crawl, 20 for commercial intent, 25 if more than half the traffic is affected (15 if more than a fifth), and pages affected divided by 100, capped at 20. <code>rendering</code> and <code>indexing</code> get 10 more. A <code>metadata</code> problem on fewer than 5 pages is capped at 25. The result is rounded and clamped to 0 to 100.</p>
+  <p>Not every producer uses that formula. The crawler's checks do, and the code findings do for client-rendered templates the crawl confirms (other code findings use fixed scores); the connector findings and conversion findings set impact directly with their own capped expressions (for example <code>Math.min(90, 50 + Math.round(share * 0.4))</code> for an impressions fall). A few override severity outright: "robots.txt blocks Googlebot from the entire site" is always <code>CRITICAL</code>, and the AI crawler finding is always <code>INFORMATIONAL</code> with score 10, because blocking AI crawlers is a legitimate choice.</p>
+  <h3 id="ranking">Ranking</h3>
+  <p><code>rankSeverityByOrganicImpact</code> (<code class="path">packages/core/src/types.ts:344</code>) sorts by <code>organicImpactScore</code> descending, then by severity order for ties. The pipeline calls it once on all findings. The ranked list then feeds:</p>
+  <ul>
+    <li><code>buildOpportunities</code> (<code class="path">packages/agents/src/index.ts:69</code>): every finding becomes a <code>technical_enabler</code> opportunity titled <code>Resolve: &lt;finding title&gt;</code>, with priority <code>impact² / (50 × effort)</code> (effort 4 for <code>rendering</code>, 2 otherwise). Squaring makes severity dominate.</li>
+    <li><code>synthesizeGrowthPlan</code>: the titles of the top three findings scoring 40 or more become the plan's constraints, and any <code>CRITICAL</code> or <code>HIGH</code> finding puts "Fix the critical and high-impact technical findings" first in the strategy sequence.</li>
+  </ul>
+
+  <h2 id="how-they-are-combined">How they are combined</h2>
+  <p>All producers are pure functions that return <code>Finding[]</code>. <code>runFullAnalysis</code> in <code class="path">packages/agents/src/pipeline.ts:169</code> calls them in this order and pushes everything into one array:</p>
+  <ol>
+    <li>A <code>rendering</code> finding "Failed to fetch &lt;url&gt;" (<code>MEDIUM</code>, score 30) for any sampled page that could not be fetched.</li>
+    <li>Crawl findings. <code>findingsFromCrawl</code> always runs on the sample. When a full crawl completed, its <code>rendering</code> and <code>sitemap</code> findings (and <code>structured_data</code>, when the crawl has per-issue counts) are dropped and <code>findingsFromCrawlCoverage</code> adds findings from every sitemap URL instead: evidence from the whole site supersedes extrapolation from a sample.</li>
+    <li><code>findingsFromConversion</code>.</li>
+    <li><code>findingsFromCode</code>, only when a repository was analysed.</li>
+    <li><code>findingsFromRendering</code>.</li>
+    <li><code>runTechnicalSeoAudit</code>, with <code>fullCrawl</code> set when the full crawl has per-issue counts, so it skips the per-page checks the crawl already covers (canonical mismatches, weak titles, thin descriptions).</li>
+    <li><code>findingsFromSearch</code>, only when there are Search Console rows.</li>
+    <li>Connector findings: <code>findingsFromCrawlLog</code> (only with log coverage), <code>findingsFromSearchConsoleImport</code>, <code>findingsFromTrends</code>, then <code>notFoundProbeFinding</code>, then <code>findingsFromInventory</code>.</li>
+    <li><code>rankSeverityByOrganicImpact(findings)</code> at <code class="path">packages/agents/src/pipeline.ts:364</code>.</li>
+  </ol>
+  <p>Connector producers return <code>[]</code> when their input is null, so a site without that connector simply has none of those findings.</p>
+
+  <h2 id="producers">Producers</h2>
+  <table>
+    <thead><tr><th>Producer</th><th>Input data</th><th>Example titles (from the code)</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><code>findingsFromCrawl</code><br><code class="path">packages/crawler/src/index.ts:626</code></td>
+        <td>The sampled pages (up to 25) fetched as Googlebot, and the sitemap audit</td>
+        <td>"Entity pages return empty or thin HTML shells to crawlers"; "Soft-200 responses risk indexing junk URLs"; "Large sitemap with weak render coverage"; "Detail pages missing JSON-LD in crawler HTML"</td>
+      </tr>
+      <tr>
+        <td><code>findingsFromCrawlCoverage</code><br><code class="path">packages/crawler/src/coverage-findings.ts:44</code></td>
+        <td>Aggregates over every crawled sitemap URL (<code>getCrawlCoverage</code>) and 50 example rows</td>
+        <td>"Googlebot receives empty or thin HTML on sitemap URLs"; "Sitemap lists pages that are marked noindex"; "Sitemap lists URLs that robots.txt blocks for Googlebot"; "Your firewall refuses unverified Googlebot requests"; "Pages that are the same page twice"</td>
+      </tr>
+      <tr>
+        <td><code>findingsFromRendering</code><br><code class="path">packages/crawler/src/rendering.ts:113</code></td>
+        <td>Raw HTML vs browser-rendered DOM (one page per template), browser vs Googlebot fetches, repeated fetches</td>
+        <td>"Page content only appears after JavaScript runs"; "Titles and meta tags are set by JavaScript"; "Googlebot receives less content than browsers"; "Crawlers get pre-rendered HTML that browsers don't"; "Slow responses on /&lt;family&gt;/ pages"</td>
+      </tr>
+      <tr>
+        <td><code>runTechnicalSeoAudit</code><br><code class="path">packages/crawler/src/tech-seo.ts:9</code></td>
+        <td>Sampled pages, sitemap audit, robots.txt body</td>
+        <td>"robots.txt blocks Googlebot from the entire site"; "robots.txt blocks AI assistants from reading the site" (<code>ai_visibility</code>); "robots.txt points search engines to a sitemap on another domain"; "Multilingual pages missing hreflang in HTML"</td>
+      </tr>
+      <tr>
+        <td><code>findingsFromCode</code><br><code class="path">packages/agents/src/code-findings.ts:24</code></td>
+        <td>Repository analysis (route inspections, fingerprint), crawl coverage, render comparisons, repeatability</td>
+        <td>"&lt;Pages&gt; fetch their content in the browser"; "&lt;Pages&gt; wait for N data requests in sequence"; "The sitemap is built from one query with no paging"; "List queries without a range return at most 1,000 rows"</td>
+      </tr>
+      <tr>
+        <td><code>findingsFromConversion</code><br><code class="path">packages/agents/src/conversion.ts:51</code></td>
+        <td>One inspected page per template, trackers found in its bundled scripts, analytics found in the repository</td>
+        <td>"Visitors have no obvious way to get in touch"; "No call to action on &lt;family&gt;"; "No analytics or conversion tracking found"</td>
+      </tr>
+      <tr>
+        <td><code>findingsFromSearch</code><br><code class="path">packages/agents/src/search.ts:212</code></td>
+        <td>Search Console rows, analysed by <code>analyzeSearch</code> with target markets, brand terms and record keys</td>
+        <td>"Most search visibility comes from outside your target market"; "Pages on page one that searchers skip"; "Several pages compete for the same searches"</td>
+      </tr>
+      <tr>
+        <td><code>notFoundProbeFinding</code><br><code class="path">packages/agents/src/not-found-probe.ts:19</code></td>
+        <td>One fetch of a URL that cannot exist (<code>probeNotFound</code>)</td>
+        <td>"The site answers 200 for pages that don't exist"</td>
+      </tr>
+      <tr>
+        <td><code>findingsFromCrawlLog</code><br><code class="path">packages/agents/src/connector-findings.ts:58</code></td>
+        <td>Server crawl log vs sitemap URLs (<code>crawlLogCoverage</code>); page-type findings need 14 days of logs</td>
+        <td>"Googlebot hasn't requested N% of the /&lt;family&gt;/ pages in N days"; "N% of Googlebot's requests hit redirects or errors"; "N% of Googlebot's requests are for URLs with query strings"</td>
+      </tr>
+      <tr>
+        <td><code>findingsFromSearchConsoleImport</code><br><code class="path">packages/agents/src/connector-findings.ts:149</code></td>
+        <td>An imported Search Console Page-indexing export, reconciled with today (<code>searchConsoleReconciliation</code>)</td>
+        <td>"Google has indexed N of the M URLs it knows (P%)"; "N URLs Google excluded as noindex are indexable now"; "N old URLs Google still crawls return 404; M match a live page"</td>
+      </tr>
+      <tr>
+        <td><code>findingsFromTrends</code><br><code class="path">packages/agents/src/connector-findings.ts:224</code></td>
+        <td>Daily series from <code>metric_points</code> and the crawl log (<code>loadTrendSignals</code>)</td>
+        <td>"Search impressions fell N% since &lt;day&gt;"; "Google's indexed count fell from N to M since &lt;day&gt;"; "At Googlebot's pace the sitemap takes N days to crawl once"</td>
+      </tr>
+      <tr>
+        <td><code>findingsFromInventory</code><br><code class="path">packages/agents/src/connector-findings.ts:288</code></td>
+        <td>Dataset inventories (<code>loadInventories</code>): fill per field, duplicates, thin record pages</td>
+        <td>"N of M &lt;entities&gt; have no &lt;field&gt;"; "N &lt;entities&gt; are listed more than once"; "N &lt;type&gt; pages have almost no content"</td>
+      </tr>
+    </tbody>
+  </table>
+  <p>Angle-bracketed parts and N/M/P are filled at run time; the rest is the literal title.</p>
+
+  <h3 id="not-findings">Related outputs that are not findings</h3>
+  <ul>
+    <li><strong>Robots and AI readiness.</strong> <code class="path">packages/crawler/src/robots.ts</code> is the robots.txt parser the producers use; it produces no findings itself. <code>aiReadiness</code> (<code class="path">packages/crawler/src/ai-readiness.ts:38</code>) builds the report's <code>aiReadiness</code> section (per AI crawler allowed or not, <code>llms.txt</code>, FAQ markup) and the Results points; the <code>ai_visibility</code> finding comes from <code>runTechnicalSeoAudit</code>.</li>
+    <li><strong>Competition and opportunities.</strong> <code class="path">packages/agents/src/competition.ts</code> produces <code>Opportunity</code> objects, not findings: <code>competitionOpportunities</code> (line 265) turns content gaps into "Publish your &lt;dataset&gt; data as &lt;label&gt;" or "Build &lt;label&gt;: competitors have ~N, you have ...". <code>buildOpportunities</code> combines them with the <code>Resolve:</code> opportunities from findings, <code>searchOpportunities</code> (<code class="path">packages/agents/src/search.ts:273</code>), unpublished-data opportunities, <code>gapOpportunities</code> from keyword lists, and <code>linkGapOpportunity</code> (<code class="path">packages/agents/src/connector-findings.ts:107</code>), sorted by <code>priorityScore</code>.</li>
+  </ul>
+
+  <h2 id="history">History</h2>
+  <p>The Dashboard's History tab shows which problems the analysis once reported are gone, and when. Three files split the work: pure logic in <code class="path">packages/core/src/history.ts</code>, storage in <code class="path">packages/db/src/history.ts</code>, and assembly for the tab in <code class="path">apps/web/src/history.ts</code>.</p>
+
+  <h3 id="finding-key">findingKey</h3>
+  <pre><code>findingKey = `${category}|${title with every number run replaced by "#", trimmed, lowercased}`</code></pre>
+  <p>Numbers (thousands separators included) are blanked so "waits for 3 requests" and "waits for 4 requests" are the same problem across runs (<code class="path">packages/core/src/history.ts:31</code>).</p>
+  <div class="callout warn"><p>The key is built from the title. Rewording a finding's title, or moving it to another category, makes every earlier occurrence look resolved and the new one look new in History. Changing only the numbers in a title is safe.</p></div>
+
+  <h3 id="key-lists">Key lists in site_snapshots</h3>
+  <p>When an analysis completes, <code>saveAnalysisReport</code> calls <code>saveFindingKeys</code> (<code class="path">packages/db/src/history.ts:39</code>). It writes one <code>site_snapshots</code> row with kind <code>finding_keys</code>, scope the analysis id, and rows from <code>runKeys</code>: one <code>KeyRow</code> per finding (<code>id</code>, <code>key</code>, <code>title</code>, <code>category</code>, <code>severity</code>, up to 50 <code>pages</code>). A list is a few KB, so History can diff runs without parsing reports.</p>
+  <p>Runs completed before key lists existed get theirs from their report on the next History open: <code>historyRuns</code> backfills up to <code>BACKFILL_RUNS</code> (12) missing lists per open, newest first, with an insert that never replaces a list a finishing run just saved. Their crawls are long pruned, so backfilled lists have no vanished rows.</p>
+
+  <h3 id="vanished">Vanished</h3>
+  <p>A finding can stop being reported because it was fixed, or because the pages it pointed at no longer exist. <code>runKeys</code> adds a <code>vanished: true</code> row for each previous-run finding that this run does not report, that had at least one page, and whose pages are all in <code>vanishedPages</code>. <code>vanishedPages</code> (<code class="path">packages/db/src/history.ts:28</code>) returns, of up to 500 URLs, those that were live in the previous crawl (fetched, status under 400) and are missing or erroring (400 or more) in this one. A page the previous crawl never fetched is unknown, never vanished.</p>
+  <p>This is decided at save time, not when History is opened, because <code>pruneCrawlResults</code> keeps crawl rows for only the latest two completed runs. That is why <code>saveAnalysisReport</code> saves the key list before it prunes.</p>
+
+  <h3 id="resolutions">Resolutions</h3>
+  <p><code>resolutions(runs)</code> (<code class="path">packages/core/src/history.ts:52</code>) walks the runs oldest to newest. A key that was open and is absent from a run becomes a <code>Resolution</code> with <code>firstSeen</code> (the earliest consecutive run that reported it), <code>resolvedAt</code> and <code>resolvedBy</code> (the first run without it), and <code>vanished</code> if that run carries a vanished row for the key. If a later run reports the key again, the earlier resolution gets <code>reopenedAt</code> and a new open stretch starts. It also returns how many keys are still open.</p>
+  <p><code>assembleHistory</code> (<code class="path">apps/web/src/history.ts:23</code>) labels each resolution:</p>
+  <ul>
+    <li><code>fixed</code>: a change with status <code>merged</code> or <code>pr_opened</code>, whose <code>findingId</code> maps (through the key lists) to this key, was created between <code>firstSeen</code> and <code>resolvedAt</code>. Changes record the finding id they were generated from (<code class="path">apps/web/app/api/analyses/[analysisId]/changes/route.ts</code>).</li>
+    <li><code>vanished</code>: "Every page it pointed at is gone or erroring, so it no longer applies."</li>
+    <li><code>resolved</code>: "The analysis stopped reporting it."</li>
+  </ul>
+  <p>Those rows are merged with Eumon's actions (changes, page edits, CTA tests, publications), sorted newest first and capped at 200.</p>
+
+  <h2 id="adding-a-finding">Adding a new finding</h2>
+  <p>The most recent producers, the trend findings (commit <code>2369710</code>) and the inventory findings (commit <code>d79d900</code>), were added this way.</p>
+  <ol>
+    <li><strong>Pick the home.</strong> A check on crawl data goes in <code class="path">packages/crawler/src</code> next to the existing crawl producers; a check on connector data goes in <code class="path">packages/agents/src/connector-findings.ts</code>. If an existing producer already reads the data you need, add a draft to it rather than writing a new function.</li>
+    <li><strong>Load the input, if it is new.</strong> Write a loader that reads D1 and returns a plain signal type, for example <code>loadTrendSignals</code> in <code class="path">packages/agents/src/trend-signals.ts</code> or <code>loadInventories</code> in <code class="path">packages/agents/src/inventory-data.ts</code>. Add the signal as an optional field on <code>ConnectorSignals</code> (<code class="path">packages/agents/src/connector-findings.ts</code>).</li>
+    <li><strong>Write a pure producer.</strong> <code>findingsFromX(input): Finding[]</code> that returns <code>[]</code> when the input is null. Follow the file's pattern: collect <code>Draft</code>s (category, impact, title, summary, evidence, recommendation, pages), keep thresholds in a named constant with the reason for each (see <code>TREND</code> and <code>INVENTORY</code>), cap impact with <code>Math.min</code>, then map drafts to findings with <code>createId("finding")</code> and <code>severityFromImpact(impact)</code>.</li>
+    <li><strong>Choose the category.</strong> It decides the dashboard area (<code>findingArea</code>) and is part of the History key. A new category means adding it to <code>FindingCategory</code> in <code class="path">packages/core/src/types.ts</code> and to <code>findingArea</code> if it belongs outside Technical.</li>
+    <li><strong>Write the title for History.</strong> Put counts in the title freely (they are blanked in the key), but keep the wording fixed: a title whose words change with the data becomes a different key every run.</li>
+    <li><strong>Test it.</strong> Add cases to the sibling test file (for example <code class="path">packages/agents/src/connector-findings.test.ts</code>, <code>node:test</code> with <code>assert/strict</code>): the finding fires above the threshold and stays quiet below it.</li>
+    <li><strong>Call it in the pipeline.</strong> Push its findings in <code>runFullAnalysis</code> before <code>rankSeverityByOrganicImpact</code> (<code class="path">packages/agents/src/pipeline.ts:364</code>), reading its input from <code>input.connectors</code> or another <code>RunAnalysisInput</code> field.</li>
+    <li><strong>Feed it from the Workflow.</strong> In the <code>analyze-repository-and-site</code> step of <code class="path">apps/web/src/analysis-workflow.ts</code>, load the signal and pass it through <code>connectorSignals</code> (<code class="path">apps/web/src/connectors-data.ts:44</code>). Wrap the load in <code>.catch</code>: connector data is an enrichment and must never fail an analysis. If the load is heavy, give it its own step, as the inventory has.</li>
+    <li><strong>Feed the demo.</strong> <code>analyzeDemo</code> in <code class="path">packages/agents/src/demo.ts</code> builds its own <code>connectors</code> object instead of calling <code>connectorSignals</code>, so add the signal there too. The inventory commit also seeded demo data that triggers its finding, and the trend findings got a follow-up commit (<code>ee74395</code>) to make the demo slow enough for the crawl-pace finding.</li>
+  </ol>
+</article>

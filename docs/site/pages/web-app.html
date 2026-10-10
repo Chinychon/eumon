@@ -1,0 +1,274 @@
+<article id="web-app" data-title="Web app" data-group="Reference">
+  <h1>Web app</h1>
+  <p class="lede">Reference for <code>apps/web</code>: the dashboard's views and the components behind them, every API route, the shared server helpers, the public routes, and how access is controlled today. Use it to find where a screen or an endpoint lives.</p>
+
+  <div class="callout note"><p>An accounts and security-hardening branch is in progress and will change access control, route guards and sign-in. This page describes <code>main</code> as of 2026-10-10.</p></div>
+
+  <h2 id="dashboard">The dashboard</h2>
+  <p>The whole operator console is one client component, <code class="path">apps/web/app/page.tsx</code>, rendered at <code>/</code>. It loads the site list from <code>GET /api/sites</code>, keeps the selected site, view, tab and Ask thread in the query string (<code>?site=…&amp;view=…&amp;tab=…&amp;thread=…</code>) so a refresh or shared link lands on the same place, and switches views in place without route changes. The left rail is the <code>NAV</code> array at the top of the file.</p>
+  <table>
+    <thead><tr><th>Rail item</th><th>View key</th><th>Component</th></tr></thead>
+    <tbody>
+      <tr><td>Home</td><td><code>ask</code></td><td><code>AskView</code> in <code class="path">apps/web/app/components/Ask.tsx</code>: the Ask Eumon conversation and thread list. The same file has <code>AskDrawer</code>, the side panel opened by "Ask Eumon" on every other view.</td></tr>
+      <tr><td>Dashboard</td><td><code>overview</code></td><td><code>OverviewView</code> in <code class="path">apps/web/app/components/OverviewView.tsx</code>: run controls, analysis progress and the report tabs below.</td></tr>
+      <tr><td>Data</td><td><code>data</code></td><td><code>DataView</code> in <code class="path">apps/web/app/components/DataView.tsx</code>: scope, datasets, sources, collection jobs, CSV import, records (landing page engine steps 1 to 3).</td></tr>
+      <tr><td>Landing pages</td><td><code>pages</code></td><td><code>PagesView</code> in <code class="path">apps/web/app/components/PagesView.tsx</code>: templates, generation, publishing, per-page status (steps 4 and 5).</td></tr>
+      <tr><td>Page results</td><td><code>performance</code></td><td><code>PageResultsView</code> in <code class="path">apps/web/app/components/PageResultsView.tsx</code>: how generated pages perform and what to change (steps 6 and 7).</td></tr>
+      <tr><td>Setup</td><td><code>setup</code></td><td><code>ConnectionsView</code> (<code class="path">apps/web/app/components/ConnectionsView.tsx</code>: website, GitHub, Search Console, GA4, markets, competitors, plus <code>ConnectorSetup</code> from <code class="path">apps/web/app/components/ConnectorSetup.tsx</code> for the optional sources), then <code>SetupView</code> (<code class="path">apps/web/app/components/SetupView.tsx</code>: proxy rule, verification, conversion tracking snippet, sync history).</td></tr>
+    </tbody>
+  </table>
+  <p>With no site yet, or after "Add website", the page shows the <code>AddSite</code> form defined in <code>page.tsx</code> itself. Old view keys (<code>results</code>, <code>keywords</code>, <code>competitors</code>, <code>connections</code>) still resolve through <code>resolveLink</code> in <code class="path">apps/web/app/components/report-model.ts</code>, so saved links keep working.</p>
+
+  <h3>Dashboard tabs</h3>
+  <p>The Dashboard view has one tab per question, listed in <code>OVERVIEW_TABS</code> (<code class="path">apps/web/app/components/OverviewView.tsx:22</code>).</p>
+  <table>
+    <thead><tr><th>Tab</th><th>Component</th></tr></thead>
+    <tbody>
+      <tr><td>Overview</td><td>Inline in <code>OverviewView.tsx</code> (<code>ProofHeadline</code> and <code>KeyNumbers</code> from <code class="path">apps/web/app/components/results/sections.tsx</code>, a connections strip, and the briefing).</td></tr>
+      <tr><td>Technical</td><td><code>TechnicalTab</code> in <code class="path">apps/web/app/components/ReportTabs.tsx:51</code>, which includes the link graph from <code class="path">apps/web/app/components/SiteGraph.tsx</code> and the findings with "generate change" and "open pull request" actions.</td></tr>
+      <tr><td>Search</td><td><code>SearchPanel</code> in <code class="path">apps/web/app/components/SitePanels.tsx</code></td></tr>
+      <tr><td>Enquiries</td><td><code>EnquiriesPanel</code> in <code>SitePanels.tsx</code> (leads desk from <code class="path">apps/web/app/components/results/LeadsCards.tsx</code>)</td></tr>
+      <tr><td>Keywords</td><td><code>KeywordsPanel</code> in <code>SitePanels.tsx</code> (<code class="path">apps/web/app/components/results/KeywordsCard.tsx</code>)</td></tr>
+      <tr><td>Competitors</td><td><code>CompetitorsPanel</code> in <code>SitePanels.tsx</code></td></tr>
+      <tr><td>AI visibility</td><td><code>AiPanel</code> in <code>SitePanels.tsx</code></td></tr>
+      <tr><td>History</td><td><code>HistoryPanel</code> in <code class="path">apps/web/app/components/HistoryPanel.tsx</code></td></tr>
+    </tbody>
+  </table>
+  <p>The panels in <code>SitePanels.tsx</code> receive data that <code>OverviewView</code> loads once (<code>useResults</code> in <code class="path">apps/web/app/components/site-data.ts</code>, from <code>GET /api/sites/:siteId/results</code>). Report cards are built from <code>ReportTabs.tsx</code>, <code>results/*.tsx</code> and the chart primitives in <code class="path">apps/web/app/components/charts.tsx</code>. Card exports (CSV, Excel, clipboard, Google Sheets) live in <code>apps/web/app/components/export/</code>. What each finding means is on <a href="#findings">Findings</a>.</p>
+
+  <h2 id="client-api">The client API helper</h2>
+  <p>Every dashboard call goes through <code>api()</code> in <code class="path">apps/web/app/components/api.ts:10</code>:</p>
+  <ul>
+    <li><code>api&lt;T&gt;(path, init)</code> calls <code>fetch</code> with <code>cache: "no-store"</code>. Passing <code>json</code> in <code>init</code> serialises it and sets <code>Content-Type: application/json</code>.</li>
+    <li>On a non-2xx response it throws <code>ApiError</code>, carrying the server's <code>{ error }</code> message (or <code>Request failed (status)</code>) and the <code>status</code>.</li>
+    <li><code>errorMessage(error)</code> turns anything caught into a display string.</li>
+  </ul>
+  <p>The same file has the formatting helpers <code>formatNumber</code>, <code>formatDay</code> and <code>percent</code>. The one call that does not use <code>api()</code> is the Ask stream (<code>POST /api/sites/:siteId/assistant</code>), which reads server-sent events with a raw <code>fetch</code> in <code>Ask.tsx</code>.</p>
+
+  <h2 id="progress-polling">How analysis progress is polled</h2>
+  <p><code class="path">apps/web/app/components/AnalysisProgress.tsx</code> polls <code>GET /api/analyses/:analysisId/progress</code> outside React, in a module-level <code>watches</code> map, so polling continues when the user leaves the Dashboard.</p>
+  <ol>
+    <li><code>watch()</code> starts a loop for one analysis and drops any older watch for the same site.</li>
+    <li>Each tick fetches the progress route and notifies subscribers; components read it with <code>useRun</code> or <code>useSiteRun</code> (both <code>useSyncExternalStore</code>).</li>
+    <li>The next tick is 2.5 seconds later, or 15 seconds when the run is reported <code>stalled</code>. A 404 ends the loop.</li>
+    <li>When the status is <code>completed</code>, <code>failed</code> or <code>cancelled</code>, the loop stops, the tab title changes, and a browser notification fires if the user allowed them.</li>
+    <li>While polling, the tab title shows the stage or crawl percentage, and the top bar shows a run chip on other views.</li>
+  </ol>
+  <p>The progress route (<code class="path">apps/web/app/api/analyses/[analysisId]/progress/route.ts</code>) returns the job's status, stored progress and stage history, whether it is stalled, and crawl counts with pace and time left. For the demo site it advances the simulated run on each poll. How the workflow writes that progress is on <a href="#flow-analysis">Analysis flow</a>.</p>
+  <p>"Sync now" is polled separately: <code>OverviewView.tsx</code> checks the sync record every four seconds for up to fifteen minutes and asks <code>GET /api/sites/:siteId/results/sync?id=…</code> for the Workflow instance status. See <a href="#flow-sync">Results sync flow</a>.</p>
+
+  <h2 id="api-routes">API routes</h2>
+  <p>Each path is a <code>route.ts</code> under <code>apps/web/app/api/</code>; <code>:name</code> is a <code>[name]</code> folder. All are operator routes unless the table says otherwise (see <a href="#web-app--access-control">Access control</a>).</p>
+
+  <h3>Sites and settings</h3>
+  <table>
+    <thead><tr><th>Method</th><th>Path</th><th>Purpose</th></tr></thead>
+    <tbody>
+      <tr><td>GET</td><td><code>/api/sites</code></td><td>List sites.</td></tr>
+      <tr><td>POST</td><td><code>/api/sites</code></td><td>Add a site from a website URL, optionally with a GitHub repository.</td></tr>
+      <tr><td>DELETE</td><td><code>/api/sites/:siteId</code></td><td>Delete a site.</td></tr>
+      <tr><td>GET, PUT</td><td><code>/api/sites/:siteId/settings</code></td><td>Landing-page settings (mount path, public origin and the rest of <code>PageSettings</code>).</td></tr>
+      <tr><td>GET, PUT</td><td><code>/api/sites/:siteId/competitors</code></td><td>Owner-supplied competitor domains.</td></tr>
+      <tr><td>GET, PUT</td><td><code>/api/sites/:siteId/markets</code></td><td>Countries the business sells to (ISO 3166-1 alpha-3).</td></tr>
+      <tr><td>GET</td><td><code>/api/sites/:siteId/graph</code></td><td>How page types link to each other and to Eumon pages; <code>?family=</code> opens one type.</td></tr>
+      <tr><td>GET</td><td><code>/api/sites/:siteId/integration</code></td><td>Detected hosting, proxy snippets, hub and sitemap URLs, and the conversion tracking snippet.</td></tr>
+      <tr><td>POST</td><td><code>/api/sites/:siteId/integration</code></td><td>Verify the live proxy setup as Googlebot on the customer's domain.</td></tr>
+      <tr><td>GET</td><td><code>/api/sites/:siteId/connectors</code></td><td>Which optional keys are set, the log address and token, the IndexNow key file, last deliveries.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Analyses and code changes</h3>
+  <table>
+    <thead><tr><th>Method</th><th>Path</th><th>Purpose</th></tr></thead>
+    <tbody>
+      <tr><td>GET</td><td><code>/api/sites/:siteId/analyses</code></td><td>Latest analysis, the previous completed report while a new one runs, and crawl pace.</td></tr>
+      <tr><td>POST</td><td><code>/api/sites/:siteId/analyses</code></td><td>Start an analysis (<code>{ full: true }</code> re-crawls everything); creates a <code>SiteAnalysisWorkflow</code> instance. 409 if one is already running.</td></tr>
+      <tr><td>GET</td><td><code>/api/analyses/:analysisId</code></td><td>One analysis job.</td></tr>
+      <tr><td>GET</td><td><code>/api/analyses/:analysisId/progress</code></td><td>Live stage, crawl counts, pace and time left (polled, see above).</td></tr>
+      <tr><td>POST</td><td><code>/api/analyses/:analysisId/cancel</code></td><td>Terminate the Workflow and record the analysis as cancelled.</td></tr>
+      <tr><td>GET</td><td><code>/api/analyses/:analysisId/changes</code></td><td>Proposed code changes for this analysis.</td></tr>
+      <tr><td>POST</td><td><code>/api/analyses/:analysisId/changes</code></td><td>Generate a safe config change for a sitemap or indexing finding (needs the GitHub repo and a model).</td></tr>
+      <tr><td>POST</td><td><code>/api/changes/:changeId/pull-request</code></td><td>Open a proposed change as a draft GitHub pull request.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Datasets, sources, records, templates and pages</h3>
+  <table>
+    <thead><tr><th>Method</th><th>Path</th><th>Purpose</th></tr></thead>
+    <tbody>
+      <tr><td>GET</td><td><code>/api/sites/:siteId/scope</code></td><td>The saved scope proposal.</td></tr>
+      <tr><td>POST</td><td><code>/api/sites/:siteId/scope</code></td><td>Propose datasets (fields, page ideas, sources) from the site and its search data. Uses the model.</td></tr>
+      <tr><td>GET</td><td><code>/api/sites/:siteId/datasets</code></td><td>Datasets with details, and the scope.</td></tr>
+      <tr><td>POST</td><td><code>/api/sites/:siteId/datasets</code></td><td>Create a dataset by hand.</td></tr>
+      <tr><td>PATCH, DELETE</td><td><code>/api/datasets/:datasetId</code></td><td>Edit fields, key field and status; or delete the dataset with its records and pages.</td></tr>
+      <tr><td>GET</td><td><code>/api/datasets/:datasetId/records</code></td><td>Records, paged, with <code>?q=</code> search.</td></tr>
+      <tr><td>POST</td><td><code>/api/datasets/:datasetId/records/import</code></td><td>Import records from CSV.</td></tr>
+      <tr><td>POST</td><td><code>/api/datasets/:datasetId/dedupe</code></td><td>Merge records that name the same entity.</td></tr>
+      <tr><td>GET</td><td><code>/api/datasets/:datasetId/inventory</code></td><td>Field fill rates, duplicates, thin and missing pages.</td></tr>
+      <tr><td>GET</td><td><code>/api/datasets/:datasetId/potential</code></td><td>How many pages the records support per page idea and grouping.</td></tr>
+      <tr><td>POST</td><td><code>/api/datasets/:datasetId/sources</code></td><td>Add a source to a dataset.</td></tr>
+      <tr><td>POST</td><td><code>/api/datasets/:datasetId/scrape</code></td><td>Start collection; creates a <code>ScrapeWorkflow</code> instance and returns its job ID.</td></tr>
+      <tr><td>GET</td><td><code>/api/jobs/:jobId</code></td><td>A collection job with queue counts and recent failures.</td></tr>
+      <tr><td>PATCH, DELETE</td><td><code>/api/sources/:sourceId</code></td><td>Approve or reject a source; or remove it.</td></tr>
+      <tr><td>POST</td><td><code>/api/sources/:sourceId/preview</code></td><td>Preview matches, robots.txt status and a sample extraction before collecting.</td></tr>
+      <tr><td>DELETE</td><td><code>/api/records/:recordId</code></td><td>Delete one record.</td></tr>
+      <tr><td>POST</td><td><code>/api/datasets/:datasetId/templates</code></td><td>Create a template for a page idea or grouping and generate its pages as drafts.</td></tr>
+      <tr><td>GET</td><td><code>/api/sites/:siteId/templates</code></td><td>Templates with page counts.</td></tr>
+      <tr><td>GET, PATCH, DELETE</td><td><code>/api/templates/:templateId</code></td><td>Read, edit copy patterns and display settings, or delete a template.</td></tr>
+      <tr><td>POST</td><td><code>/api/templates/:templateId/generate</code></td><td>Regenerate the template's pages.</td></tr>
+      <tr><td>GET</td><td><code>/api/templates/:templateId/pages</code></td><td>The template's pages, paged and filterable by status.</td></tr>
+      <tr><td>POST</td><td><code>/api/templates/:templateId/publish</code></td><td>Publish every quality-passing page, or unpublish with <code>{ publish: false }</code>.</td></tr>
+      <tr><td>PATCH</td><td><code>/api/pages/:pageId</code></td><td>Edit one page or change its status; each change is logged for measurement.</td></tr>
+      <tr><td>POST</td><td><code>/api/pages/:pageId/snippets</code></td><td>Three alternative titles and descriptions from the page's facts and real queries. Uses the model.</td></tr>
+      <tr><td>GET, POST</td><td><code>/api/sites/:siteId/cta-variants</code></td><td>List CTA variants; add one (the first also enrols the current CTA as control).</td></tr>
+      <tr><td>PATCH</td><td><code>/api/sites/:siteId/cta-variants/:variantId</code></td><td>Turn a variant on or off (<code>{ active }</code>).</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Results and sync</h3>
+  <table>
+    <thead><tr><th>Method</th><th>Path</th><th>Purpose</th></tr></thead>
+    <tbody>
+      <tr><td>GET</td><td><code>/api/sites/:siteId/results</code></td><td>The full Results payload the Dashboard tabs read.</td></tr>
+      <tr><td>POST</td><td><code>/api/sites/:siteId/results/sync</code></td><td>"Sync now": start (or join) a manual <code>SearchSyncWorkflow</code> run. 202, or 409 while the daily run is going.</td></tr>
+      <tr><td>GET</td><td><code>/api/sites/:siteId/results/sync</code></td><td>Status of one of the site's sync instances.</td></tr>
+      <tr><td>GET</td><td><code>/api/sites/:siteId/sync-runs</code></td><td>Latest syncs and what each source said (Setup, Sync history).</td></tr>
+      <tr><td>POST</td><td><code>/api/sites/:siteId/search-sync</code></td><td>Import the last 28 days of Search Console data for generated pages, inline (no Workflow).</td></tr>
+      <tr><td>GET</td><td><code>/api/sites/:siteId/performance</code></td><td>Which generated pages perform, suggestions, and whether past changes worked.</td></tr>
+      <tr><td>GET</td><td><code>/api/sites/:siteId/index-coverage</code></td><td>What Google did with the sitemap URLs (URL Inspection results).</td></tr>
+      <tr><td>GET, POST</td><td><code>/api/sites/:siteId/ga4/properties</code></td><td>List GA4 properties the Google connection can read; choose one.</td></tr>
+      <tr><td>POST</td><td><code>/api/sites/:siteId/share</code></td><td>Issue a client share link (<code>/r/&lt;token&gt;</code>).</td></tr>
+      <tr><td>DELETE</td><td><code>/api/sites/:siteId/share</code></td><td>Revoke every link issued so far (bumps the site's share version).</td></tr>
+      <tr><td>GET</td><td><code>/api/r/:token</code></td><td><strong>Public.</strong> The client's read-only Results for a valid token; 404 when expired or revoked.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Search Console</h3>
+  <table>
+    <thead><tr><th>Method</th><th>Path</th><th>Purpose</th></tr></thead>
+    <tbody>
+      <tr><td>GET</td><td><code>/api/sites/:siteId/gsc/connect</code></td><td>Redirect to Google OAuth with signed state (Search Console, Analytics, Drive file scopes).</td></tr>
+      <tr><td>GET, POST</td><td><code>/api/sites/:siteId/gsc/properties</code></td><td>List Search Console properties; choose one (must be accessible to the account).</td></tr>
+      <tr><td>GET</td><td><code>/api/sites/:siteId/search-console</code></td><td>Imported URL lists reconciled with today, totals, redirect suggestions, indexed counts over time.</td></tr>
+      <tr><td>POST</td><td><code>/api/sites/:siteId/search-console/import</code></td><td>Import one Search Console CSV export.</td></tr>
+      <tr><td>POST</td><td><code>/api/sites/:siteId/search-console/check</code></td><td>Fetch the next few imported URLs the crawl doesn't know; called until none remain.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>History</h3>
+  <table>
+    <thead><tr><th>Method</th><th>Path</th><th>Purpose</th></tr></thead>
+    <tbody>
+      <tr><td>GET</td><td><code>/api/sites/:siteId/history</code></td><td>Problems that went away, what fixed them, and every action taken through Eumon.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Leads, events and logs</h3>
+  <table>
+    <thead><tr><th>Method</th><th>Path</th><th>Purpose</th></tr></thead>
+    <tbody>
+      <tr><td>OPTIONS, POST</td><td><code>/api/sites/:siteId/events</code></td><td><strong>Public, CORS.</strong> Conversion events from the customer's site (see below).</td></tr>
+      <tr><td>GET</td><td><code>/api/sites/:siteId/events/recent</code></td><td>Latest events received, to check the tracker is installed.</td></tr>
+      <tr><td>GET</td><td><code>/api/sites/:siteId/events/summary</code></td><td>Conversion totals.</td></tr>
+      <tr><td>GET</td><td><code>/api/sites/:siteId/leads</code></td><td>Latest 50 leads (<code>?open=1</code> for unresolved), or one lead by <code>?find=</code> code or pasted message.</td></tr>
+      <tr><td>POST</td><td><code>/api/sites/:siteId/leads</code></td><td>Enter an enquiry by hand.</td></tr>
+      <tr><td>PATCH</td><td><code>/api/sites/:siteId/leads/:leadId</code></td><td>Move a lead on (chat, qualified, customer, lost), set value or note.</td></tr>
+      <tr><td>POST</td><td><code>/api/logs/:siteId</code></td><td><strong>Token-checked.</strong> Access-log deliveries (Cloudflare Logpush, Vercel log drain, the forwarding Worker, or an uploaded nginx/Apache log). Up to 24 MB; only crawler requests are kept.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Ask Eumon</h3>
+  <table>
+    <thead><tr><th>Method</th><th>Path</th><th>Purpose</th></tr></thead>
+    <tbody>
+      <tr><td>POST</td><td><code>/api/sites/:siteId/assistant</code></td><td>Answer one question as server-sent events (<code>thread</code>, <code>status</code>, <code>text</code>, <code>block</code>, <code>error</code>, <code>done</code>); saved to the thread even if the browser leaves.</td></tr>
+      <tr><td>GET</td><td><code>/api/sites/:siteId/assistant/threads</code></td><td>The site's conversations, most recent first.</td></tr>
+      <tr><td>GET, DELETE</td><td><code>/api/sites/:siteId/assistant/threads/:threadId</code></td><td>One conversation's messages; delete it.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>GitHub and Google</h3>
+  <table>
+    <thead><tr><th>Method</th><th>Path</th><th>Purpose</th></tr></thead>
+    <tbody>
+      <tr><td>GET</td><td><code>/api/github/install</code></td><td>Redirect to the GitHub App install page with a state cookie (<code>og_github_state</code>).</td></tr>
+      <tr><td>GET</td><td><code>/api/github/callback</code></td><td>Check the state, store the installation ID in a signed <code>og_installation</code> cookie, redirect to the dashboard.</td></tr>
+      <tr><td>GET</td><td><code>/api/github/repositories</code></td><td>Repositories the installation in the cookie can see.</td></tr>
+      <tr><td>GET</td><td><code>/api/google/callback</code></td><td>Google OAuth callback: verify state, save the encrypted refresh token, redirect to the dashboard.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Export and dev</h3>
+  <table>
+    <thead><tr><th>Method</th><th>Path</th><th>Purpose</th></tr></thead>
+    <tbody>
+      <tr><td>POST</td><td><code>/api/sites/:siteId/export/sheets</code></td><td>Create a Google Sheet from a report export using the site's Google connection.</td></tr>
+      <tr><td>POST</td><td><code>/api/dev/demo-site</code></td><td>Build or rebuild the fictional demo site. Returns 404 in a production build unless the request is addressed to localhost.</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="server-helpers">Shared server helpers</h2>
+  <p><code class="path">apps/web/src/server.ts</code> holds the helpers most routes use:</p>
+  <dl class="facts">
+    <dt><code>json(data, status = 200)</code></dt>
+    <dd>JSON response with <code>Cache-Control: no-store</code>.</dd>
+    <dt><code>fail(message, status = 400)</code></dt>
+    <dd><code>{ error: message }</code> with <code>no-store</code>. This is the shape <code>api()</code> reads on the client.</dd>
+    <dt><code>readText(request, maxBytes)</code>, <code>readJson(request, maxBytes = 64 KB)</code></dt>
+    <dd>Read a body without trusting <code>Content-Length</code>; return <code>null</code> when it is too large or not a JSON object.</dd>
+    <dt><code>appLlm()</code></dt>
+    <dd>The configured model from <code>createLlm</code>, or a 503 response explaining how to configure one.</dd>
+    <dt><code>llmFailure(error)</code></dt>
+    <dd>Turns a model error into a 502 or 503 with an actionable message.</dd>
+    <dt><code>settingsFor(site)</code>, <code>prettySiteName(site)</code></dt>
+    <dd>The site's page settings, or defaults built from its name and URL.</dd>
+    <dt><code>isPublicHttpUrl(value)</code></dt>
+    <dd>A URL string of at most 2048 characters that passes the crawler's <code>isSafePublicUrl</code>.</dd>
+  </dl>
+  <p>Some older routes call <code>Response.json</code> directly with the same <code>{ error }</code> shape. Other server-side modules in <code>apps/web/src/</code> back specific routes: <code>public-pages.ts</code> (landing pages), <code>share.ts</code> (share tokens), <code>crawl-logs.ts</code> (log ingest), <code>gsc-auth.ts</code> (Google tokens), <code>results-data.ts</code> and <code>results-access.ts</code> (Results payload and keys), and the three Workflow files.</p>
+
+  <h2 id="public-routes">Public routes</h2>
+
+  <h3>Landing pages: <code>/p/:siteId/…</code></h3>
+  <p><code class="path">apps/web/app/p/[siteId]/[[...path]]/route.ts</code> exports <code>GET</code>, <code>HEAD</code> and <code>POST</code>. It looks up the site (404 if unknown) and hands off to <code class="path">apps/web/src/public-pages.ts</code>:</p>
+  <ul>
+    <li><code>servePublicGet</code> (<code class="path">apps/web/src/public-pages.ts:86</code>) serves, under the site's mount path: a health check at <code>/__eumon/health</code>, the IndexNow key file, <code>sitemap.xml</code>, <code>robots.txt</code> (only when there is no mount path), the hub page, and each published page. Unpublished or retired pages return 410.</li>
+    <li>Responses carry <code>X-Robots-Tag: noindex</code> unless the request came through the customer's proxy (<code>X-Eumon-Proxy: 1</code> or a matching <code>X-Forwarded-Host</code>).</li>
+    <li><code>POST</code> is accepted only on the beacon path <code>/__eumon/e</code>: <code>servePublicBeacon</code> records page views and CTA clicks from the rendered page's inline script, with first-touch session attribution through the <code>eumon_sid</code> cookie.</li>
+  </ul>
+  <p>The full flow from dataset to served page is on <a href="#flow-pages">Landing page flow</a>.</p>
+
+  <h3>Conversion events with CORS</h3>
+  <p><code class="path">apps/web/app/api/sites/[siteId]/events/route.ts</code> receives events from the tracking snippet (from <code>GET /api/sites/:siteId/integration</code>) or from <code>@organic-growth/sdk</code>.</p>
+  <ul>
+    <li><code>OPTIONS</code> and <code>POST</code> accept a request only when its <code>Origin</code> is the same site as the site's <code>baseUrl</code> or its landing-page <code>publicOrigin</code> (www and apex count as one). Otherwise 403.</li>
+    <li>The allowed origin is echoed in <code>Access-Control-Allow-Origin</code> with <code>Vary: Origin</code>; preflight allows <code>POST, OPTIONS</code> and <code>Content-Type</code>, cached for a day.</li>
+    <li>The body is capped at 4096 bytes, the event name must be one of a fixed list (<code>page_view</code>, <code>cta_click</code>, <code>whatsapp_click</code>, <code>form_submit</code> and others), and <code>pageUrl</code> must be on the allowed origin. A <code>whatsapp_click</code> with a reference code also records a lead click.</li>
+    <li>It answers 202 <code>{ accepted: true }</code>.</li>
+  </ul>
+
+  <h3>Client share link: <code>/r/:token</code></h3>
+  <p><code class="path">apps/web/app/r/[token]/page.tsx</code> renders <code>ClientReport</code>, which loads <code>GET /api/r/:token</code> and shows the Results sections read-only, without site health, AI readiness checks or controls. The token is signed with <code>SESSION_SECRET</code>, carries <code>purpose: "results"</code>, the site ID and the site's share version, and lasts five years (<code class="path">apps/web/src/share.ts</code>). Revoking bumps the share version, which invalidates every earlier token.</p>
+
+  <h3>PWA files</h3>
+  <p><code>apps/web/public/</code> holds <code>manifest.json</code> and the icons, referenced from <code class="path">apps/web/app/layout.tsx</code>, so the dashboard can be installed as a standalone app. <code>public/sw.js</code> is a retired service worker: nothing registers it any more, and its only job is to clear the old offline cache and unregister itself in browsers that installed an earlier version.</p>
+
+  <h2 id="access-control">Access control</h2>
+  <p>On <code>main</code> the app has no user accounts, no sign-in and no middleware. Operator routes do not check who is calling. The intended protection is <strong>Cloudflare Access</strong> in front of the hostname, configured in Cloudflare, not in this repo (<code class="path">apps/web/README.md</code>, "Access control").</p>
+  <p>The README lists the paths that must be excluded from Access, or landing pages and tracking stop working:</p>
+  <ul>
+    <li><code>/p/*</code>: landing pages, sitemap and the analytics beacon.</li>
+    <li><code>/api/sites/*/events</code>: conversion events from customer sites.</li>
+    <li><code>/r/*</code> and <code>/api/r/*</code>: client Results links (signed, revocable tokens).</li>
+  </ul>
+  <p>What the code itself checks today:</p>
+  <ul>
+    <li>Event ingestion checks the request <code>Origin</code> against the site (above).</li>
+    <li><code>/api/logs/:siteId</code> checks a per-site token derived from <code>SESSION_SECRET</code> (Bearer header or <code>?token=</code>) and gives the same 401 for an unknown site and a wrong token (<code class="path">apps/web/src/crawl-logs.ts:21</code>).</li>
+    <li>Share links are verified by signature, purpose and share version.</li>
+    <li>OAuth and GitHub install flows check signed state or a state cookie.</li>
+    <li><code>/api/dev/demo-site</code> refuses non-local requests in a production build.</li>
+  </ul>
+  <div class="callout warn"><p><code>/api/logs/:siteId</code> is called by Cloudflare Logpush, Vercel or the log-forwarding Worker, none of which can pass Cloudflare Access, and it is not in the README's exclusion list. If log delivery is used behind Access, that path needs excluding too; it relies on its own token.</p></div>
+  <p>See <a href="#gotchas">Gotchas</a> for other things that bite during setup, and <a href="#ops">Ops</a> for deploying.</p>
+</article>

@@ -1,0 +1,359 @@
+<title>Eumon Developer Docs</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: the product's ruled workbench. A fixed rail (brand, search, grouped nav) beside one
+   centred work column bounded by full-height hairlines, + marks where the top-bar rule crosses them.
+   Tokens mirror apps/web/DESIGN.md: square corners, warm green paper by day, forest night by dark. */
+:root {
+  --paper: #f4f5ee; --rail: #ecefe5; --surface: #fbfcf7; --surface-2: #eef0e7; --surface-3: #e3e7dc;
+  --ink: #132015; --ink-2: #2c3a2e; --muted: #566358; --soft: #5e6a60;
+  --line: rgba(19, 32, 21, .1); --line-strong: rgba(19, 32, 21, .17); --control-line: rgba(19, 32, 21, .5);
+  --primary: #1e3d1f; --on-primary: #f4f5ee;
+  --green: #239a63; --green-ink: #1c6b44; --green-soft: rgba(35, 154, 99, .14);
+  --amber: #96600f; --amber-tint: rgba(227, 167, 58, .16); --red: #b23c2b; --red-tint: rgba(196, 72, 52, .1);
+  --sky: #4f8bbf;
+  --sans: Geist, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --ease: cubic-bezier(.16, 1, .3, 1);
+  --rail-w: 252px; --bar-h: 59px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #0f1411; --rail: #0c100e; --surface: #151b17; --surface-2: #1b231e; --surface-3: #232d26;
+    --ink: #edf2ea; --ink-2: #c9d3c8; --muted: #9aa59b; --soft: #808b82;
+    --line: rgba(224, 238, 226, .09); --line-strong: rgba(224, 238, 226, .15); --control-line: rgba(224, 238, 226, .4);
+    --primary: #4fd394; --on-primary: #08160d;
+    --green: #45c886; --green-ink: #7fdcaa; --green-soft: rgba(69, 200, 134, .15);
+    --amber: #f0b45a; --amber-tint: rgba(240, 180, 90, .14); --red: #f08470; --red-tint: rgba(240, 132, 112, .13);
+    --sky: #7fb4e2;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #0f1411; --rail: #0c100e; --surface: #151b17; --surface-2: #1b231e; --surface-3: #232d26;
+  --ink: #edf2ea; --ink-2: #c9d3c8; --muted: #9aa59b; --soft: #808b82;
+  --line: rgba(224, 238, 226, .09); --line-strong: rgba(224, 238, 226, .15); --control-line: rgba(224, 238, 226, .4);
+  --primary: #4fd394; --on-primary: #08160d;
+  --green: #45c886; --green-ink: #7fdcaa; --green-soft: rgba(69, 200, 134, .15);
+  --amber: #f0b45a; --amber-tint: rgba(240, 180, 90, .14); --red: #f08470; --red-tint: rgba(240, 132, 112, .13);
+  --sky: #7fb4e2;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body { background: var(--paper); color: var(--ink-2); font: 400 14.5px/1.6 var(--sans); -webkit-font-smoothing: antialiased; }
+::selection { background: var(--green-soft); }
+:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+a { color: var(--green-ink); text-decoration: underline; text-decoration-color: var(--line-strong); text-underline-offset: 3px; }
+a:hover { text-decoration-color: var(--green); }
+
+/* Shell */
+.shell { display: grid; grid-template-columns: var(--rail-w) minmax(0, 1fr); min-height: 100vh; }
+.rail { position: sticky; top: env(safe-area-inset-top, 0px); height: 100vh; overflow-y: auto; background: var(--rail); border-right: 1px solid var(--line); display: flex; flex-direction: column; }
+.brand { height: var(--bar-h); flex: none; display: flex; align-items: center; gap: 10px; padding-inline: 18px; border-bottom: 1px solid var(--line); text-decoration: none; color: var(--ink); }
+.brand svg { width: 26px; height: 26px; flex: none; }
+.brand .mark-bg { fill: var(--primary); }
+.brand .mark-px { fill: var(--on-primary); }
+.wordmark { font: 500 13px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; }
+.wordmark small { display: block; margin-top: 5px; font-size: 11px; font-weight: 400; letter-spacing: .1em; color: var(--soft); }
+.search { padding: 14px 14px 6px; position: relative; }
+.search input { width: 100%; height: 34px; padding: 0 10px; border: 1px solid var(--control-line); border-radius: 0; background: var(--surface); color: var(--ink); font: 400 13px var(--sans); }
+.search input:focus { outline: none; border-color: var(--green); box-shadow: 0 0 0 3px var(--green-soft); }
+.search kbd { position: absolute; right: 22px; top: 22px; font: 400 11px var(--mono); color: var(--soft); border: 1px solid var(--line-strong); padding: 2px 6px; pointer-events: none; }
+nav.toc { padding: 8px 0 24px; }
+.group-label { font: 400 11px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--soft); padding: 18px 18px 8px; }
+nav.toc a { display: flex; align-items: center; gap: 10px; padding: 7px 18px; color: var(--ink-2); text-decoration: none; font-size: 13.5px; border-left: 2px solid transparent; }
+nav.toc a::before { content: ""; width: 6px; height: 6px; flex: none; border: 1px solid var(--line-strong); }
+nav.toc a:hover { background: var(--surface-2); color: var(--ink); }
+nav.toc a[aria-current="page"] { background: var(--surface-2); color: var(--ink); font-weight: 500; }
+nav.toc a[aria-current="page"]::before { background: var(--green); border-color: var(--green); transform: rotate(45deg); }
+.rail-foot { margin-top: auto; padding: 14px 18px; border-top: 1px solid var(--line); font: 400 11px/1.5 var(--mono); color: var(--soft); letter-spacing: .02em; }
+
+.results { margin: 6px 14px 0; border: 1px solid var(--line-strong); background: var(--surface); max-height: 60vh; overflow-y: auto; }
+.results a { display: block; padding: 9px 11px; border-bottom: 1px solid var(--line); text-decoration: none; color: var(--ink-2); }
+.results a:last-child { border-bottom: 0; }
+.results a:hover, .results a.on { background: var(--green-soft); }
+.results b { display: block; font: 500 12.5px/1.35 var(--sans); color: var(--ink); }
+.results span { display: block; font: 400 11px/1.4 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--soft); margin-top: 2px; }
+.results p { margin: 4px 0 0; font-size: 12px; line-height: 1.45; color: var(--muted); }
+.results mark { background: var(--green-soft); color: var(--ink); }
+.results .none { padding: 10px 11px; font-size: 12.5px; color: var(--muted); }
+
+.main { min-width: 0; display: flex; flex-direction: column; }
+.bar { height: var(--bar-h); display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-inline: 24px; border-bottom: 1px solid var(--line); position: sticky; top: env(safe-area-inset-top, 0px); background: var(--paper); z-index: 5; }
+.crumb { font: 400 12px/1 var(--mono); letter-spacing: .04em; color: var(--soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.crumb b { font-weight: 400; color: var(--ink); }
+.bar-tools { display: flex; align-items: center; gap: 8px; }
+.menu-btn { display: none; }
+.btn { height: 30px; padding: 0 10px; border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink); font: 400 11px var(--mono); letter-spacing: .08em; text-transform: uppercase; border-radius: 0; cursor: pointer; transition: transform .12s var(--ease); }
+.btn:hover { background: var(--surface-2); border-color: var(--control-line); }
+.btn:active { transform: scale(.97); }
+.theme { display: flex; border: 1px solid var(--line-strong); }
+.theme button { height: 28px; padding: 0 9px; border: 0; background: transparent; color: var(--soft); font: 400 11px var(--mono); letter-spacing: .08em; text-transform: uppercase; cursor: pointer; }
+.theme button + button { border-left: 1px solid var(--line-strong); }
+.theme button[aria-pressed="true"] { background: var(--surface-2); color: var(--ink); box-shadow: inset 0 -2px 0 var(--green); }
+
+/* Work column, ruled left and right, + marks where the bar's rule crosses */
+.frame { position: relative; flex: 1; width: calc(100% - 64px); max-width: 1180px; margin-inline: auto; border-inline: 1px solid var(--line); }
+.frame::before, .frame::after { content: ""; position: absolute; top: -5px; width: 9px; height: 9px; background: linear-gradient(var(--muted), var(--muted)) center/9px 1px no-repeat, linear-gradient(var(--muted), var(--muted)) center/1px 9px no-repeat; }
+.frame::before { left: -5px; } .frame::after { right: -5px; }
+.page { display: grid; grid-template-columns: minmax(0, 1fr) 210px; gap: 0; }
+article { padding: 44px 44px 40px; min-width: 0; max-width: 820px; }
+.onpage { border-left: 1px solid var(--line); padding: 44px 18px 24px; }
+.onpage-in { position: sticky; top: calc(var(--bar-h) + 24px); }
+.onpage h4 { margin: 0 0 10px; font: 400 11px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--soft); }
+.onpage a { display: block; padding: 4px 0 4px 10px; border-left: 1px solid var(--line); color: var(--muted); text-decoration: none; font-size: 12.5px; line-height: 1.4; }
+.onpage a:hover { color: var(--ink); border-left-color: var(--green); }
+.onpage a.on { color: var(--ink); border-left-color: var(--green); }
+
+/* Prose */
+article h1 { margin: 0 0 10px; font: 400 36px/1.1 var(--sans); letter-spacing: -.025em; color: var(--ink); text-wrap: balance; }
+.lede { margin: 0 0 30px; max-width: 640px; font-size: 15px; line-height: 1.6; color: var(--muted); }
+article h2 { margin: 44px 0 12px; padding-top: 18px; border-top: 1px solid var(--line); font: 500 21px/1.25 var(--sans); letter-spacing: -.015em; color: var(--ink); text-wrap: balance; scroll-margin-top: calc(var(--bar-h) + 16px); }
+article h3 { margin: 26px 0 8px; font: 500 15.5px/1.35 var(--sans); color: var(--ink); scroll-margin-top: calc(var(--bar-h) + 16px); }
+article p, article li, article dd { max-width: 68ch; }
+article p { margin: 0 0 14px; }
+article ul, article ol { margin: 0 0 16px; padding-left: 20px; }
+article li { margin: 4px 0; }
+article ul li::marker { color: var(--green); }
+article ol li::marker { font: 400 12px var(--mono); color: var(--soft); }
+article strong { font-weight: 500; color: var(--ink); }
+code { font: 400 12.5px/1.5 var(--mono); background: var(--surface-2); padding: 1px 5px; color: var(--ink); overflow-wrap: anywhere; }
+code.path { background: transparent; padding: 0; color: var(--green-ink); border-bottom: 1px dotted var(--line-strong); }
+pre { margin: 0 0 18px; padding: 14px 16px; background: var(--surface); border: 1px solid var(--line); overflow-x: auto; }
+pre code { background: none; padding: 0; font-size: 12.5px; line-height: 1.65; overflow-wrap: normal; white-space: pre; }
+.table-wrap { overflow-x: auto; margin: 0 0 20px; border: 1px solid var(--line); background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 13px; line-height: 1.5; }
+th { text-align: left; font: 400 11px/1.3 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--soft); background: var(--surface-2); padding: 9px 12px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+td { padding: 9px 12px; border-bottom: 1px solid var(--line); vertical-align: top; font-variant-numeric: tabular-nums; }
+tr:last-child td { border-bottom: 0; }
+td code { font-size: 12px; }
+dl { margin: 0 0 18px; }
+dt { margin-top: 14px; font-weight: 500; color: var(--ink); }
+dd { margin: 3px 0 0; color: var(--ink-2); }
+dl.facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); border: 1px solid var(--line); background: var(--surface); }
+dl.facts dt, dl.facts dd { margin: 0; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+dl.facts dt { font: 400 11px/1.6 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--soft); border-right: 1px solid var(--line); }
+dl.facts dt:last-of-type, dl.facts dd:last-of-type { border-bottom: 0; }
+.callout { margin: 0 0 18px; padding: 12px 14px 12px 16px; border: 1px solid var(--line); border-left-width: 3px; background: var(--surface); }
+.callout p:last-child, .callout ul:last-child { margin-bottom: 0; }
+.callout::before { display: block; margin-bottom: 5px; font: 400 11px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; }
+.callout.note { border-left-color: var(--sky); }
+.callout.note::before { content: "Note"; color: var(--sky); }
+.callout.warn { border-left-color: var(--amber); background: linear-gradient(var(--amber-tint), var(--amber-tint)), var(--surface); }
+.callout.warn::before { content: "Careful"; color: var(--amber); }
+.callout.trap { border-left-color: var(--red); background: linear-gradient(var(--red-tint), var(--red-tint)), var(--surface); }
+.callout.trap::before { content: "Has bitten us"; color: var(--red); }
+
+/* Diagrams: inline SVG coloured by these classes, so they follow the theme */
+figure.diagram { margin: 6px 0 28px; border: 1px solid var(--line); background: var(--surface); }
+.diagram-scroll { overflow-x: auto; padding: 14px; }
+.diagram-scroll svg { display: block; width: 100%; height: auto; min-width: 640px; }
+figure.diagram figcaption { padding: 9px 14px; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--muted); }
+figure.diagram.missing .diagram-scroll { font: 400 12px var(--mono); color: var(--soft); }
+.d-paper { fill: var(--surface); }
+.d-node { fill: var(--surface); stroke: var(--line-strong); stroke-width: 1; }
+.d-node-focal { fill: var(--green-soft); stroke: var(--green); stroke-width: 1.25; }
+.d-store { fill: var(--surface-2); stroke: var(--line-strong); stroke-width: 1; }
+.d-ext { fill: var(--paper); stroke: var(--line-strong); stroke-width: 1; stroke-dasharray: 4 3; }
+.d-zone { fill: none; stroke: var(--line-strong); stroke-width: 1; stroke-dasharray: 2 3; }
+.d-mask { fill: var(--surface); }
+.d-ink { fill: var(--ink); } .d-muted { fill: var(--muted); } .d-soft { fill: var(--soft); }
+.d-accent { fill: var(--green-ink); } .d-link { fill: var(--sky); }
+.d-name { font-family: var(--sans); font-weight: 600; }
+.d-mono { font-family: var(--mono); }
+.d-arrow, .d-arrow-accent, .d-arrow-link, .d-arrow-dashed { fill: none; stroke-width: 1.25; }
+.d-arrow { stroke: var(--muted); }
+.d-arrow-accent { stroke: var(--green); stroke-width: 1.5; }
+.d-arrow-link { stroke: var(--sky); }
+.d-arrow-dashed { stroke: var(--muted); stroke-dasharray: 5 4; }
+.d-arrowhead { fill: var(--muted); } .d-arrowhead-accent { fill: var(--green); } .d-arrowhead-link { fill: var(--sky); }
+
+.pager { display: grid; grid-template-columns: 1fr 1fr; margin-top: 48px; border: 1px solid var(--line); }
+.pager a { padding: 14px 16px; text-decoration: none; color: var(--ink); background: var(--surface); }
+.pager a + a, .pager span + a { border-left: 1px solid var(--line); text-align: right; }
+.pager a:hover { background: var(--surface-2); }
+.pager small { display: block; font: 400 11px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--soft); margin-bottom: 6px; }
+.stamp { margin-top: 18px; font: 400 11px/1.5 var(--mono); color: var(--soft); }
+
+@media (max-width: 1180px) { .page { grid-template-columns: minmax(0, 1fr); } .onpage { display: none; } }
+@media (max-width: 860px) {
+  .shell { grid-template-columns: minmax(0, 1fr); }
+  .rail { position: fixed; z-index: 20; inset: 0 auto 0 0; width: min(300px, 86vw); transform: translateX(-100%); transition: transform .25s var(--ease); padding-top: env(safe-area-inset-top, 0px); }
+  .rail.open { transform: none; box-shadow: 0 24px 60px -24px rgba(19, 32, 21, .38); }
+  .menu-btn { display: inline-block; }
+  .bar { padding-inline: 16px; height: 48px; }
+  .frame { width: 100%; border-inline: 0; }
+  .frame::before, .frame::after { display: none; }
+  article { padding: 28px 16px 32px; }
+  article h1 { font-size: 28px; }
+  .pager { grid-template-columns: 1fr; }
+  .pager a + a, .pager span + a { border-left: 0; border-top: 1px solid var(--line); }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+
+<div class="shell">
+  <aside class="rail" id="rail">
+    <a class="brand" href="#overview" aria-label="Eumon developer docs, overview">
+      <svg viewBox="0 0 8 8" aria-hidden="true" shape-rendering="crispEdges"><rect class="mark-bg" x="-1.5" y="-1.5" width="11" height="11"/><g class="mark-px" transform="translate(.6 .6) scale(.85)"><rect x="6" y="0" width="2" height="1"/><rect x="5" y="1" width="3" height="1"/><rect x="1" y="2" width="2" height="1"/><rect x="4" y="2" width="4" height="1"/><rect x="0" y="3" width="6" height="1"/><rect x="1" y="4" width="4" height="1"/><rect x="4" y="5" width="1" height="2"/><rect x="2" y="7" width="5" height="1"/></g></svg>
+      <span class="wordmark">Eumon<small>Developer docs</small></span>
+    </a>
+    <div class="search" role="search">
+      <input id="q" type="search" placeholder="Search the docs" aria-label="Search the docs" autocomplete="off" aria-controls="results">
+      <kbd>/</kbd>
+      <div class="results" id="results" hidden></div>
+    </div>
+    <nav class="toc" id="toc" aria-label="Pages"></nav>
+    <div class="rail-foot" id="rail-foot"></div>
+  </aside>
+  <div class="main">
+    <header class="bar">
+      <button class="btn menu-btn" id="menu" aria-controls="rail" aria-expanded="false">Menu</button>
+      <div class="crumb" id="crumb"></div>
+      <div class="bar-tools">
+        <div class="theme" role="group" aria-label="Theme">
+          <button type="button" data-set="system" aria-pressed="true">Auto</button><button type="button" data-set="light" aria-pressed="false">Day</button><button type="button" data-set="dark" aria-pressed="false">Night</button>
+        </div>
+      </div>
+    </header>
+    <div class="frame">
+      <div class="page">
+        <div id="pages"><!--PAGES--></div>
+        <aside class="onpage" aria-label="On this page"><div class="onpage-in" id="onpage"></div></aside>
+      </div>
+    </div>
+  </div>
+</div>
+<script id="build-meta" type="application/json"><!--META--></script>
+<script>
+(() => {
+  const $ = (s, el = document) => el.querySelector(s);
+  const $$ = (s, el = document) => [...el.querySelectorAll(s)];
+  const meta = JSON.parse($("#build-meta").textContent || "{}");
+  const articles = $$("#pages > article");
+  const GROUPS = ["Start here", "How it works", "Reference", "Operating it"];
+
+  // Theme: Auto follows the device; Day/Night pin it. Saved per browser when storage works.
+  const root = document.documentElement;
+  const applyTheme = (t) => {
+    if (t === "system") root.removeAttribute("data-theme"); else root.setAttribute("data-theme", t);
+    $$(".theme button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.set === t)));
+  };
+  let saved = "system";
+  try { saved = localStorage.getItem("eumon-docs-theme") || "system"; } catch {}
+  applyTheme(saved);
+  $$(".theme button").forEach((b) => b.addEventListener("click", () => {
+    applyTheme(b.dataset.set);
+    try { localStorage.setItem("eumon-docs-theme", b.dataset.set); } catch {}
+  }));
+
+  // Nav, grouped in reading order.
+  const toc = $("#toc");
+  for (const g of GROUPS) {
+    const items = articles.filter((a) => a.dataset.group === g);
+    if (!items.length) continue;
+    toc.insertAdjacentHTML("beforeend", `<div class="group-label">${g}</div>`);
+    for (const a of items) toc.insertAdjacentHTML("beforeend", `<a href="#${a.id}" data-page="${a.id}">${a.dataset.title}</a>`);
+  }
+  const order = $$("a[data-page]", toc).map((a) => a.dataset.page);
+  $("#rail-foot").textContent = meta.commit ? `main @ ${meta.commit} · built ${meta.built}` : "";
+
+  // Pager and build stamp on each page.
+  articles.forEach((a) => {
+    const i = order.indexOf(a.id);
+    const prev = articles.find((x) => x.id === order[i - 1]);
+    const next = articles.find((x) => x.id === order[i + 1]);
+    const cell = (x, label) => x ? `<a href="#${x.id}"><small>${label}</small>${x.dataset.title}</a>` : "<span></span>";
+    a.insertAdjacentHTML("beforeend", `<nav class="pager" aria-label="Previous and next">${cell(prev, "Previous")}${cell(next, "Next")}</nav>`);
+    if (meta.commit) a.insertAdjacentHTML("beforeend", `<p class="stamp">Describes main at ${meta.commit}, built ${meta.built}. Source: docs/site/pages/${a.id}.html</p>`);
+  });
+
+  // Routing: #page or #page--section. Only plain anchors reach location.hash in the viewer.
+  const onpage = $("#onpage");
+  let spy;
+  const show = (hash, push) => {
+    const [pageId, section] = (hash || "").replace(/^#/, "").split("--");
+    const page = articles.find((a) => a.id === pageId) || articles.find((a) => a.id === order[0]);
+    articles.forEach((a) => { a.hidden = a !== page; });
+    $$("a[data-page]", toc).forEach((a) => { if (a.dataset.page === page.id) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current"); });
+    $("#crumb").innerHTML = `${page.dataset.group} / <b>${page.dataset.title}</b>`;
+    document.title = `${page.dataset.title} · Eumon Developer Docs`;
+    const h2s = $$("h2[id]", page);
+    onpage.innerHTML = h2s.length ? `<h4>On this page</h4>${h2s.map((h) => `<a href="#${h.id}">${h.textContent}</a>`).join("")}` : "";
+    const target = section ? document.getElementById(`${page.id}--${section}`) : null;
+    if (target) target.scrollIntoView(); else window.scrollTo(0, 0);
+    if (push) { try { history.replaceState(null, "", `#${section ? `${page.id}--${section}` : page.id}`); } catch {} }
+    $("#rail").classList.remove("open"); $("#menu").setAttribute("aria-expanded", "false");
+    spy?.disconnect();
+    if ("IntersectionObserver" in window && h2s.length) {
+      spy = new IntersectionObserver((entries) => {
+        for (const e of entries) if (e.isIntersecting) $$("a", onpage).forEach((l) => l.classList.toggle("on", l.getAttribute("href") === `#${e.target.id}`));
+      }, { rootMargin: "-70px 0px -70% 0px" });
+      h2s.forEach((h) => spy.observe(h));
+    }
+  };
+  window.addEventListener("hashchange", () => show(location.hash));
+  document.addEventListener("click", (e) => {
+    const a = e.target.closest("a[href^='#']");
+    if (!a) return;
+    e.preventDefault();
+    show(a.getAttribute("href"), true);
+  });
+  show(location.hash);
+
+  $("#menu").addEventListener("click", () => {
+    const open = $("#rail").classList.toggle("open");
+    $("#menu").setAttribute("aria-expanded", String(open));
+  });
+
+  // Search: every page split into sections (the lede plus each h2), all query words must match.
+  const index = articles.flatMap((a) => {
+    const out = [];
+    let cur = { page: a, id: a.id, title: a.dataset.title, text: "" };
+    for (const el of a.children) {
+      if (el.tagName === "H2") { out.push(cur); cur = { page: a, id: el.id, title: `${a.dataset.title} › ${el.textContent}`, text: "" }; }
+      else if (!el.classList.contains("pager") && !el.classList.contains("stamp")) cur.text += " " + el.textContent;
+    }
+    out.push(cur);
+    return out.map((s) => ({ ...s, text: s.text.replace(/\s+/g, " ").trim(), hay: (s.title + " " + s.text).toLowerCase() }));
+  });
+  const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const q = $("#q"), results = $("#results");
+  let picked = 0;
+  const render = () => {
+    const words = q.value.toLowerCase().split(/\s+/).filter(Boolean);
+    if (!words.length) { results.hidden = true; return; }
+    const hits = index.filter((s) => words.every((w) => s.hay.includes(w)))
+      .map((s) => ({ s, score: words.reduce((n, w) => n + (s.title.toLowerCase().includes(w) ? 5 : 0) + (s.hay.split(w).length - 1), 0) }))
+      .sort((x, y) => y.score - x.score).slice(0, 12);
+    picked = 0;
+    results.hidden = false;
+    if (!hits.length) { results.innerHTML = `<div class="none">Nothing matches “${esc(q.value)}”.</div>`; return; }
+    results.innerHTML = hits.map(({ s }, i) => {
+      const at = s.text.toLowerCase().indexOf(words[0]);
+      const from = Math.max(0, at - 50);
+      let snip = esc(s.text.slice(from, from + 150));
+      for (const w of words) snip = snip.replace(new RegExp(w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"), (m) => `<mark>${m}</mark>`);
+      const [page, ...rest] = s.title.split(" › ");
+      return `<a href="#${s.id}" class="${i ? "" : "on"}"><span>${esc(page)}</span><b>${esc(rest.join(" › ") || page)}</b>${at >= 0 ? `<p>${from ? "…" : ""}${snip}…</p>` : ""}</a>`;
+    }).join("");
+  };
+  q.addEventListener("input", render);
+  q.addEventListener("keydown", (e) => {
+    const links = $$("a", results);
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      picked = (picked + (e.key === "ArrowDown" ? 1 : -1) + links.length) % links.length;
+      links.forEach((l, i) => l.classList.toggle("on", i === picked));
+    } else if (e.key === "Enter" && links[picked]) { show(links[picked].getAttribute("href"), true); q.value = ""; results.hidden = true; }
+    else if (e.key === "Escape") { q.value = ""; results.hidden = true; }
+  });
+  results.addEventListener("click", () => { q.value = ""; results.hidden = true; });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "/" && document.activeElement !== q && !e.metaKey && !e.ctrlKey) { e.preventDefault(); q.focus(); }
+  });
+})();
+</script>

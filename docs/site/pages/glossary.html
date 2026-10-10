@@ -1,0 +1,129 @@
+<article id="glossary" data-title="Glossary" data-group="Reference">
+  <h1>Glossary</h1>
+  <p class="lede">The words this codebase uses, rendered from <code class="path">CONTEXT.md</code> at the repository root. Short definitions of the domain terms that name modules and seams. Architecture reviews read this first; keep it to terms that would otherwise be ambiguous.</p>
+  <p>The design system is <code class="path">apps/web/DESIGN.md</code>; the reasoning behind individual features is in <code class="path">docs/superpowers/specs/</code>.</p>
+
+  <h2 id="performance">Performance</h2>
+  <dl>
+    <dt>Results</dt>
+    <dd>the synced numbers (Search Console, GA4, speed, authority, keywords). Their sections (<code class="path">results/sections.tsx</code>) sit in the Dashboard's tabs: the proof (clicks since go-live, the key numbers) on Overview, then Search, Enquiries, Technical (speed), Keywords and Competitors (authority). The page once called <em>Performance</em> (view key <code>results</code>, still used in file and route names) is now those tabs; old links redirect. The read-only <strong>client link</strong> (<code>/r/&lt;token&gt;</code>) stacks every section into one report, without site health.</dd>
+    <dt>Page results (view <code>performance</code>)</dt>
+    <dd>the landing page engine's steps 6–7, how each generated page performs. Formerly <em>Page performance</em>.</dd>
+    <dt>Ledger</dt>
+    <dd><code>metric_points</code>, one value per site, metric and day. Numbers over time live here, and every ratio is derived by the reader. Upserts overwrite, so re-runs and Google's revised days never double count.</dd>
+    <dt>Metric group (<code>METRICS</code> in <code class="path">packages/core/src/results.ts</code>)</dt>
+    <dd>the ledger metrics one upstream connection writes. A group is what its sync may write, what the view reads, and what a changed property clears.</dd>
+    <dt>Marker</dt>
+    <dd>a <code>sync.*</code> metric a source writes after each run. Its absence means a first run, which backfills history.</dd>
+    <dt>Snapshot (<code>site_snapshots</code>, <code class="path">packages/db/src/snapshots.ts</code>)</dt>
+    <dd>a "latest list" that replaces itself, keyed by kind and scope: <code>top_queries</code> (property|markets), <code>keywords</code> (property|market: the site's Search Console queries priced by DataForSEO), <code>competitor_keywords</code> (domain|market: a domain's ranked keywords). The scope names what made the list, so a changed property, market or competitor hides the old list until the next sync. Counts derived from a list (<code>kw_top10</code>, <code>kw_traffic</code>) go in the ledger so they trend.</dd>
+    <dt>Keyword gap</dt>
+    <dd>a competitor's ranked keyword the site appears for in none of its lists; the best-placed competitor stands for it. The Keywords card shows the 25 biggest; the growth plan turns the reachable ones (volume ≥ 100, difficulty ≤ 40) into <code>keyword_gap</code> opportunities.</dd>
+  </dl>
+
+  <h2 id="ai-visibility">AI visibility</h2>
+  <dl>
+    <dt>AI agent (<code class="path">packages/core/src/ai-agents.ts</code>)</dt>
+    <dd>a user agent that reads pages for an AI company, mapped to an <strong>engine</strong> (the radar's axes: OpenAI, Anthropic, Perplexity, Meta, Common Crawl, others). A <strong>crawler</strong> collects pages ahead of time (training or an AI search index); a <strong>live fetch</strong> is an assistant opening a page to answer someone. Google has no AI user agent: its AI answers fetch as Googlebot, and <code>Google-Extended</code> is a robots.txt token only.</dd>
+    <dt>AI fetch</dt>
+    <dd>an AI agent's request for a published Eumon page, counted per page, day and agent in <code>ai_page_daily</code> (signal <code>fetch</code>) and rolled into <code>ai_crawler_fetches.&lt;engine&gt;</code> / <code>ai_live_fetches.&lt;engine&gt;</code>. Only Eumon's pages are seen; the rest of the client's site isn't.</dd>
+    <dt>AI referral</dt>
+    <dd>a visit an AI assistant sent, from the referrer host or <code>utm_source</code> (signal <code>referral</code>, <code>ai_referral_visits.&lt;assistant&gt;</code>). The whole site's AI-referred sessions come from GA4 (<code>ga4_ai_sessions</code>); the two are never added.</dd>
+    <dt>Landing source</dt>
+    <dd>where a session first landed from (<code>search</code>, <code>ai:&lt;assistant&gt;</code>, <code>other</code>), kept on <code>page_sessions.source</code>; it splits Eumon-page leads (<code>leads_eumon.&lt;source&gt;</code>).</dd>
+    <dt>Question search</dt>
+    <dd>a query phrased as a question (<code>QUESTION_QUERY_PATTERN</code>), counted from the 28-day query list the sync already fetches.</dd>
+    <dt>AI readiness</dt>
+    <dd>an analysis's robots.txt verdict per AI token (exact token match), llms.txt, and FAQ markup. Blocking is reported (<code>ai_visibility</code> findings), never auto-fixed.</dd>
+  </dl>
+
+  <h2 id="sync">Sync</h2>
+  <dl>
+    <dt>Source (<code class="path">apps/web/src/results-sources.ts</code>)</dt>
+    <dd>one thing the sync collects: Search Console daily series, rankings, top queries, URL inspection, GA4, CrUX, PageSpeed, Open PageRank, the site's own numbers. Each knows its upstream, its cadence and its points. Adding a feed means adding a source, not editing the runner.</dd>
+    <dt>Sync runner (<code>syncResults</code> in <code class="path">apps/web/src/results-sync.ts</code>)</dt>
+    <dd>runs every source for one site, connecting Google once, writing points and markers, turning a throw into a <code>&lt;name&gt; failed</code> note. The workflow calls it in each site's <code>sources</code> step; URL inspection is not a source but the steps after it.</dd>
+    <dt>Sync run (<code>sync_runs</code>, <code class="path">packages/db/src/activity.ts</code>)</dt>
+    <dd>one sync and every note its sources wrote, kept 30 per site and shown in Setup → Sync history. A note with "failed", "stopped" or "refused" is a problem; Sync now on the Dashboard repeats those.</dd>
+    <dt>Inspection step (<code class="path">apps/web/src/sync-steps.ts</code>, <code>url-inspection.ts</code>)</dt>
+    <dd>URL inspections run as Workflow steps of 40, ten asked at a time, under the Free plan's 50 subrequests a step: up to 100 Eumon pages in three steps (<code>pages-n</code>; a page Google fails on is recorded as checked with no verdict, so it is not asked again that day), the day's <code>pages_indexed</code> counts, then the day's sitemap queue read once (<code>coverage-queue</code>, up to 1,880 URLs) and inspected 40 a step (<code>coverage-n</code>). <strong>Quota ledger:</strong> the <code>start</code> step counts inspections already made since midnight Pacific (Google's quota day) and the run spends only what is left of 2,000. A refusal ends the site's steps for the day; a step that dies after its retries costs its note, never the run.</dd>
+    <dt>Daily trigger</dt>
+    <dd>a Worker Cron Trigger (<code>triggers.scheduled</code> in <code class="path">apps/web/cloudflare.config.ts</code>, 04:15 UTC; Cron Triggers are on the Free plan, Workflow <code>schedules</code> are not) runs <code>scheduled</code> in <code>worker.ts</code>, which creates one instance per site, <code>daily-&lt;day&gt;-&lt;site&gt;</code> (so each has its own 1,024 steps, and a second firing creates none). "Sync now" creates <code>manual-&lt;site&gt;-&lt;ten-minute window&gt;</code>: clicks within the window join one run, and a manual sync is refused (409) while the site's daily run is going. The dashboard waits, up to fifteen minutes, for a manual run recorded after the window's start, and stops early when the instance errored.</dd>
+    <dt>Refusal</dt>
+    <dd>a URL Inspection answer that holds for the rest of the day: quota (429), a revoked token (401), or a whole batch of 403. A lone failure is one URL Google won't inspect; the queue moves past it.</dd>
+    <dt>Fresh list</dt>
+    <dd>a keyword list (snapshot) is refreshed when it is missing or 28 or more days old; a sync whose lists are all fresh spends nothing at DataForSEO. Budget: up to (competitors + 1) × markets calls per sync, in sequence, against the Workers Free plan's 50 subrequests per invocation.</dd>
+  </dl>
+
+  <h2 id="growth-plan">Growth plan</h2>
+  <dl>
+    <dt>Opportunity</dt>
+    <dd>a prioritised thing to do, from search data, competitor content, collected datasets or a technical finding. Its <code>searchDemand</code> and <code>estimatedDifficulty</code> come from one <strong>demand estimate</strong> (<code class="path">packages/agents/src/demand.ts</code>); until keyword data is synced they are heuristics, and the rationales say so.</dd>
+    <dt>Finding key</dt>
+    <dd>the same problem across analyses: a finding's category and title with numbers blanked (<code>findingKey</code>). Each finished analysis saves its <strong>key list</strong> (kind <code>finding_keys</code> in the snapshot store, scope = the analysis id); a <code>vanished</code> row in a list says a previous finding is gone because every page it pointed at was missing or erroring in that crawl, decided on save because crawl rows are pruned later.</dd>
+    <dt>Resolution</dt>
+    <dd>a finding key present in one analysis and absent from the next (<code>resolutions</code>). The History tab labels it <strong>Fixed with Eumon</strong> when a merged change or opened PR names a finding with that key, <strong>No longer applies</strong> when its row vanished, and <strong>Resolved</strong> otherwise. Eumon's <strong>actions</strong> (pull requests, page edits, CTA tests, publications) are listed beside them.</dd>
+    <dt>Search Console import</dt>
+    <dd>Google's Page indexing report has no API, so its exports are imported in Setup (a reason's URL list, the overview table, the chart). Imported URLs live in <code>search_console_urls</code> with the reason Google gave; the overview is the <code>search_console_summary</code> snapshot; the chart is the <code>gsc_indexed</code> / <code>gsc_not_indexed</code> metrics.</dd>
+    <dt>Today status</dt>
+    <dd>what an imported URL is now — <code>indexable</code>, <code>noindex</code>, <code>redirect</code>, <code>gone</code>, <code>error</code> or <code>unchecked</code> — from the latest crawl's row when it has one, otherwise a <strong>live check</strong> (fetched as Googlebot from the console, twenty per request). <code>todayStatus</code> is the rule; <code>searchConsoleReconciliation</code> applies it in SQL so a 20,000-URL list costs counts, not rows.</dd>
+    <dt>Redirect suggestion</dt>
+    <dd>for a gone URL, the live URL of the same page type whose slug contains every word of the dead slug (<code>suggestRedirect</code>); one word alone must be six characters or more.</dd>
+    <dt>Trend finding</dt>
+    <dd>a fall in a daily series the ledger holds, reported as a finding with a date and a size (<code>findingsFromTrends</code>): Search Console impressions against their peak week, Google's indexed count against its 90-day maximum, and Googlebot's pace (requests a day from the crawl log) against the sitemap's size. Thresholds live in <code>TREND</code> beside their reasons; the math is <code class="path">packages/core/src/trends.ts</code>.</dd>
+    <dt>Soft 404</dt>
+    <dd>a page that answers under 400 but says it is missing (its title or first heading, in the languages the sites use), with little else on it; also any page carrying the title the site gives a URL that cannot exist (the analysis fetches one such URL first: the <strong>404 probe</strong>). Google crawls them, indexes nothing, and comes back.</dd>
+    <dt>Near-duplicate</dt>
+    <dd>two indexable pages with the same title whose text fingerprints (<code>simhash</code> of the main content — <code>&lt;main&gt;</code>/<code>&lt;article&gt;</code>, or the body without nav, header, footer, aside and forms — 64 bits kept in <code>result_json.textHash</code>) are within 6 bits; <code>suffixed</code> when their URLs differ only by a trailing code with a digit in it — the same record listed twice. Reused crawl results from before these fields existed carry none of them: run a full crawl once after deploying them.</dd>
+    <dt>Locale split</dt>
+    <dd>the full-crawl findings end their summary with the count per language version (the URL's locale prefix, <code>default</code> for none) when the crawl has more than one; titles stay the same, so History keys do.</dd>
+  </dl>
+
+  <h2 id="data">Data</h2>
+  <dl>
+    <dt>Ownership</dt>
+    <dd>every table with a <code>site_id</code> cascades from <code>sites</code>, so deleting a site is <code>DELETE FROM sites</code> (<code>deleteSite</code> clears the two largest tables first). Crawl results (<code>pages</code>) and changes cascade from their analysis; daily page counters (<code>page_metrics_daily</code>, <code>ai_page_daily</code>) from their generated page. A new table that belongs to a site takes <code>REFERENCES sites(id) ON DELETE CASCADE</code>; the demo test checks nothing survives a delete.</dd>
+    <dt>Crawl result (<code>pages</code>)</dt>
+    <dd>one row per analysis and URL (<code>PRIMARY KEY (analysis_id, url)</code>). The page type (<code>route_family</code>) and reuse (<code>reused_from</code>, the earlier analysis a result was copied from) are columns; the rest of what the crawler saw is <code>result_json</code>.</dd>
+    <dt>Google connection</dt>
+    <dd>one <code>oauth_credentials</code> row per site with provider <code>google</code>, covering Search Console, Analytics and Sheets (its <code>scopes</code> say which were granted).</dd>
+    <dt>Inventory (<code class="path">packages/pages/src/inventory.ts</code>; <code>datasetInventoryRows</code> in db)</dt>
+    <dd>what a dataset's records say about the site's content: fill per field (grouped by language for variants like <code>bio_en</code>/<code>bio_ms</code> or <code>Bio (EN)</code>; a lone <code>_id</code> key is a foreign key, not Indonesian), records listed more than once (the same name once honorifics, case and punctuation are dropped: a suspicion to review, since two people can share a name), and the records' own pages in a crawl (<strong>thin</strong>: an empty shell or under 250 characters of text; <strong>gone</strong>: 404 or 410; <strong>unreached</strong>: not crawled, or another error). URLs match across scheme, <code>www.</code>, fragments and trailing slashes. Four queries per dataset; an analysis reads the three largest datasets against its own crawl, in its own workflow step, and <code>findingsFromInventory</code> makes content findings of them (50 records or more; 50 missing a field; 4 duplicate records; 10 thin pages and a twentieth of the linked ones). The card reads the latest finished crawl.</dd>
+    <dt>Supabase source (<code>kind: supabase</code>, <code class="path">apps/web/src/supabase-source.ts</code>)</dt>
+    <dd>a table or view read through PostgREST with a read-only key the operator pastes once (never the service-role key: it is refused), sealed in <code>oauth_credentials</code> under <code>supabase:&lt;source id&gt;</code> like the Google refresh token and never returned or echoed. <code>url</code> is the project URL, <code>urlPattern</code> the table. The collection workflow (Collect, or Pull now on the row) reads it a page of 1,000 rows a step, writes each page in bulk (<code>replaceRecords</code>: the table is the authority, a blank erases), then removes records the source gave before that a complete pull no longer has; 40 pages at most, after which the source says the table is larger. Namesakes stay apart (<code>dr-tan-mei-2</code>) for the inventory to show, and a table-only run skips the by-name merge.</dd>
+    <dt>Table rebuild</dt>
+    <dd>SQLite can't add a foreign key to an existing table, so a migration that changes one creates the new table, copies the rows, drops the old one and renames. A parent is replaced only after its old children are dropped: dropping a table deletes its rows, and that delete cascades into any table already pointing at it (<code>0019_ownership_and_indexes.sql</code>).</dd>
+    <dt>Crawl counters (<code>crawl_counts</code>)</dt>
+    <dd>per analysis and page type, the counts the progress view shows (pending, fetched, reused, errors, empty, …) and the first and last fetch. Each saved batch takes its rows' old counts off and puts their new counts on in the same batch; queueing recounts once (<code>recountCrawl</code>). Anything that edits crawl rows outside <code>saveCrawlBatch</code> must call <code>recountCrawl</code>. The latest batch's URLs are <code>analyses.crawl_recent</code>.</dd>
+    <dt>Crawl retention</dt>
+    <dd>when an analysis finishes, crawl rows are deleted for all but the latest two finished analyses and any run newer than the latest one (<code>pruneCrawlResults</code>). Every report and crawl counter stays, so history and pace are unaffected; drill-downs read only the latest crawl.</dd>
+    <dt>Query budget</dt>
+    <dd>the Workers Free plan allows 50 D1 queries per request and 5M rows read a day. A request does a fixed number of queries (never one per item; batch over <code>json_each</code> instead), and anything polled reads counters, not whole tables.</dd>
+  </dl>
+
+  <h2 id="leads">Leads</h2>
+  <dl>
+    <dt>Reference code (<code class="path">packages/core/src/whatsapp.ts</code>)</dt>
+    <dd>five letters and digits (no 0/O/1/I) the browser writes into a WhatsApp link's message when it is clicked ("… (ref K7M2Q)"), on Eumon's pages (the CTA) and on the main site (the tracking snippet). The click's beacon or event carries the same code, so the chat that arrives can be matched to the visit.</dd>
+    <dt>Lead (<code>leads</code>, <code class="path">packages/db/src/leads.ts</code>)</dt>
+    <dd>one per code (or entered by hand without one). Its <strong>status</strong> moves <code>clicked</code> → <code>chat</code> → <code>qualified</code> → <code>won</code> (with a value in the site's <strong>currency</strong>, <code>page_settings.currency</code>), or <code>lost</code>. Each stage keeps when it was reached; reaching a stage fills the earlier ones, moving back clears the later ones. No phone number or message is stored.</dd>
+    <dt>Outcomes (<code>wa_clicks</code>, <code>lead_chats</code>, <code>leads_qualified</code>, <code>customers</code>, <code>revenue</code>)</dt>
+    <dd>leads in the ledger on the day each stage was reached, rewritten in full by every sync and every change to a lead. <strong>By page type</strong>: leads of the last 90 days by the template of the Eumon page the visitor first landed on ("Rest of the site" when they never landed on one).</dd>
+  </dl>
+
+  <h2 id="connectors-beyond-google">Connectors beyond Google</h2>
+  <dl>
+    <dt>Search results page (snapshot kind <code>serp</code>, scope <code>&lt;market&gt;</code>)</dt>
+    <dd>Google's first page for one search (DataForSEO SERP API): result types (<strong>features</strong>: AI Overview, map pack, featured snippet…), the first ten organic results, the site's place, and whether the AI Overview <strong>cites</strong> the site. The searches are the site's biggest priced queries on the first three pages, then the biggest keyword gaps; ten pages per sync, each refreshed after 28 days.</dd>
+    <dt>Search competitor (snapshot kind <code>serp_competitors</code>, scope <code>&lt;market&gt;</code>)</dt>
+    <dd>a domain that ranks for the site's searches (Labs <code>serp_competitors</code>). A <strong>suggestion</strong> is one not on the competitor list, ranking for two or more of the searches; its <strong>kind</strong> is <code>competitor</code>, <code>directory</code> (lists businesses like the site's) or <code>platform</code> (social, video, encyclopedias: never suggested).</dd>
+    <dt>Link profile (snapshot kind <code>backlinks</code>, scope <code>&lt;domain&gt;</code>)</dt>
+    <dd>a domain's live backlinks and referring domains (Backlinks API <code>summary</code>); <code>ref_domains</code> counts referring main domains. The <strong>link gap</strong> (kind <code>link_gap</code>, scope the first three competitors, sorted) is the sites linking to every one of them and not to the site.</dd>
+    <dt>Bing (<code>bing_*</code> metrics)</dt>
+    <dd>Bing Webmaster Tools' daily clicks and impressions and crawl counts, for the site's origin as verified in the key's Bing account.</dd>
+    <dt>IndexNow</dt>
+    <dd>Eumon's pages published, changed or taken down since the last submission (snapshot kind <code>indexnow</code> holds its moment), sent once the proxy is verified. The <strong>key</strong> is derived from <code>SESSION_SECRET</code> and served at <code>&lt;mount&gt;/&lt;key&gt;.txt</code>, so it vouches only for Eumon's pages.</dd>
+    <dt>Crawl log (<code>crawl_log_daily</code>, <code>crawl_log_paths</code>)</dt>
+    <dd>crawler requests from the site's own server or CDN logs, posted to <code>/api/logs/&lt;siteId&gt;</code> with the site's <strong>log token</strong> (also derived from <code>SESSION_SECRET</code>). Per day, crawler (<code>googlebot</code>, <code>bingbot</code>, an AI agent's token, or <code>other</code>), page type, status class and query string; plus the latest Googlebot and Bingbot request per path. A person's request is never stored. <strong>Log coverage</strong> compares an analysis's sitemap URLs with the paths Googlebot requested in 30 days.</dd>
+  </dl>
+</article>

@@ -1,0 +1,112 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 608" role="img" aria-labelledby="dg-sync-flow-title dg-sync-flow-desc">
+  <title id="dg-sync-flow-title">Daily Results sync</title>
+  <desc id="dg-sync-flow-desc">The 04:15 UTC cron or Sync now starts one search-sync Workflow per site, which pulls its sources into metric_points, then inspects URLs with Google 40 a step within what is left of the 2,000-a-day quota, writing index status and index counts, and finally records the run in sync_runs, all of which the dashboard reads.</desc>
+  <defs>
+    <marker id="dg-sync-flow-arrow" viewBox="0 0 8 6" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,3 L0,6 Z" class="d-arrowhead"/></marker>
+    <marker id="dg-sync-flow-arrow-accent" viewBox="0 0 8 6" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,3 L0,6 Z" class="d-arrowhead-accent"/></marker>
+    <marker id="dg-sync-flow-arrow-link" viewBox="0 0 8 6" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,3 L0,6 Z" class="d-arrowhead-link"/></marker>
+  </defs>
+
+  <rect x="0" y="0" width="960" height="608" class="d-paper"/>
+
+  <!-- Zone: one Workflow instance per site -->
+  <rect x="232" y="120" width="288" height="328" rx="0" class="d-zone"/>
+  <rect x="244" y="114" width="168" height="12" rx="0" class="d-mask"/>
+  <text x="250" y="123" font-size="9" letter-spacing="0.14em" class="d-mono d-soft">SEARCH-SYNC, PER SITE</text>
+
+  <!-- Connectors -->
+  <line x1="152" y1="272" x2="232" y2="272" class="d-arrow" marker-end="url(#dg-sync-flow-arrow)"/>
+  <line x1="440" y1="160" x2="440" y2="88" class="d-arrow-link" marker-end="url(#dg-sync-flow-arrow-link)"/>
+  <line x1="376" y1="232" x2="376" y2="288" class="d-arrow" marker-end="url(#dg-sync-flow-arrow)"/>
+  <line x1="440" y1="392" x2="440" y2="488" class="d-arrow-accent" marker-end="url(#dg-sync-flow-arrow-accent)"/>
+  <line x1="488" y1="196" x2="584" y2="196" class="d-arrow" marker-end="url(#dg-sync-flow-arrow)"/>
+  <path d="M488,320 H632 Q640,320 640,312 V228" class="d-arrow" marker-end="url(#dg-sync-flow-arrow)"/>
+  <line x1="488" y1="364" x2="584" y2="364" class="d-arrow" marker-end="url(#dg-sync-flow-arrow)"/>
+  <line x1="520" y1="440" x2="584" y2="440" class="d-arrow" marker-end="url(#dg-sync-flow-arrow)"/>
+  <path d="M760,196 H864 Q872,196 872,204 V300" class="d-arrow-dashed" marker-end="url(#dg-sync-flow-arrow)"/>
+  <line x1="760" y1="364" x2="808" y2="364" class="d-arrow-dashed" marker-end="url(#dg-sync-flow-arrow)"/>
+  <path d="M760,456 H864 Q872,456 872,448 V388" class="d-arrow-dashed" marker-end="url(#dg-sync-flow-arrow)"/>
+
+  <!-- Labels -->
+  <rect x="164" y="252" width="56" height="12" rx="0" class="d-mask"/>
+  <text x="192" y="261" font-size="9" letter-spacing="0.06em" text-anchor="middle" class="d-mono d-soft">PER SITE</text>
+  <rect x="448" y="98" width="40" height="12" rx="0" class="d-mask"/>
+  <text x="468" y="107" font-size="9" letter-spacing="0.06em" text-anchor="middle" class="d-mono d-link">FETCH</text>
+  <rect x="384" y="254" width="36" height="12" rx="0" class="d-mask"/>
+  <text x="402" y="263" font-size="9" letter-spacing="0.06em" text-anchor="middle" class="d-mono d-soft">THEN</text>
+  <rect x="448" y="424" width="56" height="12" rx="0" class="d-mask"/>
+  <text x="476" y="433" font-size="9" letter-spacing="0.06em" text-anchor="middle" class="d-mono d-accent">INSPECT</text>
+  <rect x="514" y="176" width="44" height="12" rx="0" class="d-mask"/>
+  <text x="536" y="185" font-size="9" letter-spacing="0.06em" text-anchor="middle" class="d-mono d-soft">UPSERT</text>
+  <rect x="648" y="268" width="84" height="12" rx="0" class="d-mask"/>
+  <text x="690" y="277" font-size="9" letter-spacing="0.06em" text-anchor="middle" class="d-mono d-soft">INDEX COUNTS</text>
+  <rect x="506" y="344" width="60" height="12" rx="0" class="d-mask"/>
+  <text x="536" y="353" font-size="9" letter-spacing="0.06em" text-anchor="middle" class="d-mono d-soft">VERDICTS</text>
+  <rect x="530" y="420" width="44" height="12" rx="0" class="d-mask"/>
+  <text x="552" y="429" font-size="9" letter-spacing="0.06em" text-anchor="middle" class="d-mono d-soft">RECORD</text>
+
+  <!-- Trigger -->
+  <rect x="16" y="240" width="136" height="64" rx="0" class="d-node"/>
+  <text x="84" y="265" font-size="13" text-anchor="middle" class="d-name d-ink">Cron 04:15 UTC</text>
+  <text x="84" y="283" font-size="10" text-anchor="middle" class="d-mono d-muted">or Sync now</text>
+
+  <!-- Outside -->
+  <rect x="264" y="24" width="224" height="64" rx="0" class="d-ext"/>
+  <text x="376" y="46" font-size="13" text-anchor="middle" class="d-name d-ink">Source APIs</text>
+  <text x="376" y="63" font-size="10" text-anchor="middle" class="d-mono d-muted">Search Console, GA4, Bing,</text>
+  <text x="376" y="78" font-size="10" text-anchor="middle" class="d-mono d-muted">DataForSEO, CrUX, PageRank</text>
+
+  <rect x="264" y="488" width="224" height="64" rx="0" class="d-ext"/>
+  <text x="376" y="512" font-size="13" text-anchor="middle" class="d-name d-ink">URL Inspection API</text>
+  <text x="376" y="530" font-size="10" text-anchor="middle" class="d-mono d-muted">Google, 2,000 a day per property</text>
+
+  <!-- Workflow steps -->
+  <rect x="264" y="160" width="224" height="72" rx="0" class="d-node"/>
+  <text x="280" y="184" font-size="13" class="d-name d-ink">sources step</text>
+  <text x="280" y="203" font-size="10" class="d-mono d-muted">16 sources, each on its cadence</text>
+  <text x="280" y="219" font-size="10" class="d-mono d-muted">a failure costs a note</text>
+
+  <rect x="264" y="288" width="224" height="104" rx="0" class="d-paper"/>
+  <rect x="264" y="288" width="224" height="104" rx="0" class="d-node-focal"/>
+  <text x="280" y="312" font-size="13" class="d-name d-accent">inspection steps</text>
+  <text x="280" y="331" font-size="10" class="d-mono d-muted">40 URLs a step</text>
+  <text x="280" y="347" font-size="10" class="d-mono d-muted">pages-n: ≤100 Eumon pages</text>
+  <text x="280" y="363" font-size="10" class="d-mono d-muted">coverage-n: ≤1,880 sitemap URLs</text>
+  <text x="280" y="379" font-size="10" class="d-mono d-muted">only what the quota has left</text>
+
+  <!-- D1 tables -->
+  <rect x="584" y="164" width="176" height="64" rx="0" class="d-store"/>
+  <text x="600" y="190" font-size="13" class="d-name d-ink">metric_points</text>
+  <text x="600" y="208" font-size="10" class="d-mono d-muted">metric × day ledger</text>
+
+  <rect x="584" y="332" width="176" height="64" rx="0" class="d-store"/>
+  <text x="600" y="358" font-size="13" class="d-name d-ink">url_index_status</text>
+  <text x="600" y="376" font-size="10" class="d-mono d-muted">+ page_index_status</text>
+
+  <rect x="584" y="424" width="176" height="64" rx="0" class="d-store"/>
+  <text x="600" y="450" font-size="13" class="d-name d-ink">sync_runs</text>
+  <text x="600" y="468" font-size="10" class="d-mono d-muted">trigger, notes per run</text>
+
+  <!-- Reader -->
+  <rect x="808" y="300" width="128" height="88" rx="0" class="d-node"/>
+  <text x="824" y="324" font-size="13" class="d-name d-ink">Dashboard</text>
+  <text x="824" y="343" font-size="10" class="d-mono d-muted">Results</text>
+  <text x="824" y="359" font-size="10" class="d-mono d-muted">index coverage</text>
+  <text x="824" y="375" font-size="10" class="d-mono d-muted">last-sync notes</text>
+
+  <!-- Legend -->
+  <line x1="24" y1="568" x2="936" y2="568" class="d-zone"/>
+  <text x="24" y="591" font-size="9" letter-spacing="0.14em" class="d-mono d-soft">LEGEND</text>
+  <rect x="96" y="582" width="16" height="10" rx="0" class="d-node-focal"/>
+  <text x="120" y="591" font-size="9" class="d-mono d-muted">focal step</text>
+  <rect x="212" y="582" width="16" height="10" rx="0" class="d-store"/>
+  <text x="236" y="591" font-size="9" class="d-mono d-muted">D1 table</text>
+  <rect x="316" y="582" width="16" height="10" rx="0" class="d-ext"/>
+  <text x="340" y="591" font-size="9" class="d-mono d-muted">outside API</text>
+  <line x1="436" y1="587" x2="464" y2="587" class="d-arrow" marker-end="url(#dg-sync-flow-arrow)"/>
+  <text x="472" y="591" font-size="9" class="d-mono d-muted">start / write</text>
+  <line x1="584" y1="587" x2="612" y2="587" class="d-arrow-link" marker-end="url(#dg-sync-flow-arrow-link)"/>
+  <text x="620" y="591" font-size="9" class="d-mono d-muted">HTTP</text>
+  <line x1="672" y1="587" x2="700" y2="587" class="d-arrow-dashed" marker-end="url(#dg-sync-flow-arrow)"/>
+  <text x="708" y="591" font-size="9" class="d-mono d-muted">read</text>
+</svg>

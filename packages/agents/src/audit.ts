@@ -40,9 +40,17 @@ export function auditTable(ctx: AuditContext): AuditRow[] {
   const failed = new Map<string, number>();
   for (const found of ctx.findings) if (found.checkId) failed.set(found.checkId, (failed.get(found.checkId) ?? 0) + (found.pagesAffected?.length ?? 0));
   const issues = (ctx.coverage?.issues ?? {}) as Record<string, number | undefined>;
+  const graph = ctx.coverage?.linkGraph;
+  // Coverage counts every page; pagesAffected holds examples only. These checks are counted by their own coverage fields.
+  const counted: Record<string, number | undefined> = {
+    "http.error": ctx.coverage?.httpErrorUrls, "render.empty_shell": ctx.coverage?.emptyShellUrls, "title.weak": ctx.coverage?.missingTitleUrls,
+    "links.broken_internal": graph?.brokenLinks?.sources, "links.orphan": graph?.orphans?.count, "links.single_inbound": graph?.singleInbound?.count, "links.depth": graph?.depth?.deep,
+  };
   return checkList().map((check): AuditRow => {
-    // Coverage counts every page; pagesAffected holds examples only.
-    if (failed.has(check.id)) return { id: check.id, status: "failed", pages: (check.issue && issues[check.issue]) || failed.get(check.id)! };
+    if (failed.has(check.id)) {
+      const pages = (check.issue ? issues[check.issue] : undefined) || counted[check.id] || failed.get(check.id);
+      return pages ? { id: check.id, status: "failed", pages } : { id: check.id, status: "failed" };
+    }
     const skip = (reason: string): AuditRow => ({ id: check.id, status: "skipped", reason });
     const needs = check.requires ?? "";
     if (/repository/.test(needs) && !ctx.hasRepo) return skip(needs);

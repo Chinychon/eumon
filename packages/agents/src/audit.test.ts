@@ -24,6 +24,17 @@ describe("auditTable", () => {
     assert.deepEqual(by["search.low_ctr"], { id: "search.low_ctr", status: "skipped", reason: "Search Console" });
   });
 
+  it("counts pages from coverage counters for checks without per-issue counts, and never shows a failed check as 0 pages", () => {
+    const coverage = { ...ctx().coverage!, httpErrorUrls: 14, emptyShellUrls: 9, linkGraph: { orphans: { count: 8, examples: [] }, singleInbound: null, brokenLinks: { links: 30, sources: 6, targets: [] }, depth: null } };
+    const rows = auditTable(ctx({ coverage, findings: [finding(CHECKS["http.error"]!, base), finding(CHECKS["render.empty_shell"]!, base), finding(CHECKS["links.broken_internal"]!, base), finding(CHECKS["links.orphan"]!, base), finding(CHECKS["robots.googlebot_blocked"]!, base)] }));
+    const by = Object.fromEntries(rows.map((row) => [row.id, row]));
+    assert.equal(by["http.error"]!.pages, 14);
+    assert.equal(by["render.empty_shell"]!.pages, 9);
+    assert.equal(by["links.broken_internal"]!.pages, 6, "the pages carrying broken links");
+    assert.equal(by["links.orphan"]!.pages, 8);
+    assert.deepEqual(by["robots.googlebot_blocked"], { id: "robots.googlebot_blocked", status: "failed" }, "a site-wide check has no page count");
+  });
+
   it("marks the new crawl checks skipped when the crawl predates the new fields", () => {
     const old = ctx({ coverage: { ...ctx().coverage!, health: { indexable: 10, unhealthySeo: 0, unhealthyAi: 0, checked: false } } });
     const rows = auditTable(old);

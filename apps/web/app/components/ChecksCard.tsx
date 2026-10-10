@@ -34,7 +34,8 @@ export function ChecksCard({ report, pillar }: { report: Report | null; pillar: 
                 <tbody>{rows.map(({ check, row, finding }) => (
                   <tr key={check.id}>
                     <td title={check.docs.what}>{check.name}{check.docs.unscored && <span className="small muted"> · never scored</span>}</td>
-                    <td><Badge tone={STATUS[row.status].tone}>{STATUS[row.status].label}</Badge>{row.status === "skipped" && row.reason && <span className="small muted"> needs {row.reason}</span>}</td>
+                    {/* A never-scored check (llms.txt) that fires is reported, not failed. */}
+                    <td>{check.docs.unscored && row.status === "failed" ? <Badge tone="gray">Reported</Badge> : <Badge tone={STATUS[row.status].tone}>{STATUS[row.status].label}</Badge>}{row.status === "skipped" && row.reason && <span className="small muted"> needs {row.reason}</span>}</td>
                     <td className="num">{row.status === "failed" ? (finding ? <a href={`#finding-${finding.id}`}>{row.pages ?? "—"}</a> : row.pages ?? "—") : "—"}</td>
                   </tr>
                 ))}</tbody>

@@ -16,6 +16,7 @@ tmp
 dist-test
 .codex
 .cursor
+.agents/skills/
 
 # Impeccable review captures (regenerated on every review)
 **/.impeccable/review/

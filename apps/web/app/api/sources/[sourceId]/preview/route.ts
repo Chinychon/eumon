@@ -1,19 +1,25 @@
 import { env } from "cloudflare:workers";
 import { getDataset, getSource, upsertSource } from "@organic-growth/db";
 import { expandSource, extractRecordsFromHtml, PoliteFetcher, RobotsBlockedError } from "@organic-growth/scraper";
+import { charge } from "../../../../../src/limits";
 import { appLlm, fail, json, llmFailure } from "../../../../../src/server";
+import { requireOwned } from "../../../../../src/guard";
 
 /**
  * Dry run for one source: how many pages match, whether robots.txt allows
  * them, and what the extractor pulls from the first page — before any
  * bulk collection is started.
  */
-export async function POST(_request: Request, context: { params: Promise<{ sourceId: string }> }) {
+export async function POST(request: Request, context: { params: Promise<{ sourceId: string }> }) {
   const { sourceId } = await context.params;
+  const access = await requireOwned(request, "source", sourceId, "write");
+  if (access instanceof Response) return access;
   const source = await getSource(env.DB, sourceId);
   if (!source) return fail("Source not found.", 404);
   const dataset = await getDataset(env.DB, source.datasetId);
   if (!dataset) return fail("Dataset not found.", 404);
+  const refusal = await charge(env.DB, access.site.workspaceId!, "aiRunsPerDay");
+  if (refusal) return fail(refusal, 429);
 
   const fetcher = new PoliteFetcher();
   let expanded;

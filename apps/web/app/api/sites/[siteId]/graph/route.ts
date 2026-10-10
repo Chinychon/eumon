@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
-import { getLinkFamily, getLinkGraph, getSite } from "@organic-growth/db";
+import { getLinkFamily, getLinkGraph } from "@organic-growth/db";
+import { requireSite } from "../../../../../src/guard";
 import { fail, json } from "../../../../../src/server";
 
 /**
@@ -8,7 +9,8 @@ import { fail, json } from "../../../../../src/server";
  */
 export async function GET(request: Request, context: { params: Promise<{ siteId: string }> }) {
   const { siteId } = await context.params;
-  if (!(await getSite(env.DB, siteId))) return fail("Site not found.", 404);
+  const access = await requireSite(request, siteId, "read");
+  if (access instanceof Response) return access;
   const family = new URL(request.url).searchParams.get("family");
   if (family === null) return json(await getLinkGraph(env.DB, siteId));
   const opened = await getLinkFamily(env.DB, siteId, family.slice(0, 200));

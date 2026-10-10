@@ -12,8 +12,8 @@ export type Sheet = { name: string; columns: string[]; rows: Cell[][] };
 
 const text = (cell: Cell) => (cell === null ? "" : String(cell));
 
-/** Text a spreadsheet would run as a formula (starting =, +, - or @) gets a leading apostrophe, which Excel and Sheets show as text. Numbers stay numbers. */
-const safeText = (cell: Cell) => (typeof cell === "string" && /^[=+\-@]/.test(cell) ? `'${cell}` : text(cell));
+/** Text a spreadsheet would run as a formula (starting =, +, -, @, tab or carriage return) gets a leading apostrophe, which Excel and Sheets show as text. Numbers stay numbers. */
+const safeText = (cell: Cell) => (typeof cell === "string" && /^[=+\-@\t\r]/.test(cell) ? `'${cell}` : text(cell));
 
 /** RFC 4180 CSV: fields with a comma, quote or line break are quoted, quotes doubled; CRLF line ends. */
 export function toCsv(sheet: Sheet): string {

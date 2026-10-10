@@ -24,6 +24,7 @@ export * from "./leads.js";
 export * from "./server-logs.js";
 export * from "./history.js";
 export * from "./search-console.js";
+export * from "./workspaces.js";
 import { saveFindingKeys } from "./history.js";
 import { analysisHealthPoints, upsertMetricPoints } from "./metrics.js";
 
@@ -35,8 +36,8 @@ export async function upsertSite(
     .prepare(
       `INSERT INTO sites (
         id, name, base_url, github_owner, github_repo, github_installation_id,
-        default_branch, fingerprint_json, gsc_property, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        default_branch, fingerprint_json, gsc_property, created_at, updated_at, workspace_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         name=excluded.name,
         base_url=excluded.base_url,
@@ -60,6 +61,7 @@ export async function upsertSite(
       site.gscProperty ?? null,
       site.createdAt,
       site.updatedAt,
+      site.workspaceId ?? null,
     )
     .run();
 }
@@ -134,6 +136,7 @@ function mapSite(row: Record<string, unknown>): SiteRecord {
     gscProperty: row.gsc_property ? String(row.gsc_property) : undefined,
     ga4Property: row.ga4_property ? String(row.ga4_property) : undefined,
     reportShareVersion: row.report_share_version === undefined || row.report_share_version === null ? undefined : Number(row.report_share_version),
+    workspaceId: row.workspace_id ? String(row.workspace_id) : undefined,
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
   };
@@ -1359,3 +1362,50 @@ export async function getConversionSummary(db: D1Like, siteId: string): Promise<
   return { totalEvents: Number(row?.total_events ?? 0), leads: Number(row?.leads ?? 0), last28Days: Number(row?.last_28_days ?? 0) };
 }
 
+
+
+export type WorkspaceRole = "owner" | "member" | "client";
+
+/** The site and the user's role on it: owners and members see their workspace's sites; clients only the ones granted to them. */
+export async function siteForUser(db: D1Like, userId: string, siteId: string): Promise<{ site: SiteRecord; role: WorkspaceRole } | null> {
+  const row = await db.prepare(
+    `SELECT s.*, m.role AS member_role,
+       EXISTS (SELECT 1 FROM site_access a WHERE a.user_id = m.userId AND a.site_id = s.id) AS granted
+     FROM sites s JOIN member m ON m.organizationId = s.workspace_id AND m.userId = ?
+     WHERE s.id = ?`,
+  ).bind(userId, siteId).first<Record<string, unknown>>();
+  if (!row) return null;
+  const role = String(row.member_role);
+  if (role === "owner" || role === "member") return { site: mapSite(row), role };
+  if (role === "client" && Number(row.granted) === 1) return { site: mapSite(row), role: "client" };
+  return null;
+}
+
+export async function listSitesForUser(db: D1Like, userId: string, workspaceId: string): Promise<SiteRecord[]> {
+  const { results } = await db.prepare(
+    `SELECT s.* FROM sites s JOIN member m ON m.organizationId = s.workspace_id AND m.userId = ?
+     WHERE s.workspace_id = ?
+       AND (m.role IN ('owner', 'member') OR EXISTS (SELECT 1 FROM site_access a WHERE a.user_id = m.userId AND a.site_id = s.id))
+     ORDER BY s.updated_at DESC`,
+  ).bind(userId, workspaceId).all<Record<string, unknown>>();
+  return results.map(mapSite);
+}
+
+export async function countWorkspaceSites(db: D1Like, workspaceId: string): Promise<number> {
+  const row = await db.prepare("SELECT COUNT(*) AS n FROM sites WHERE workspace_id = ?").bind(workspaceId).first<{ n: number }>();
+  return Number(row?.n ?? 0);
+}
+
+export async function setSiteWorkspace(db: D1Like, siteId: string, workspaceId: string): Promise<void> {
+  await db.prepare("UPDATE sites SET workspace_id = ? WHERE id = ?").bind(workspaceId, siteId).run();
+}
+
+/** The site's own log token, once rotated; null while the derived token is still the one in use. Never part of SiteRecord, so it never reaches site lists. */
+export async function getSiteLogToken(db: D1Like, siteId: string): Promise<string | null> {
+  const row = await db.prepare("SELECT log_token FROM sites WHERE id = ?").bind(siteId).first<{ log_token: string | null }>();
+  return row?.log_token ?? null;
+}
+
+export async function setSiteLogToken(db: D1Like, siteId: string, token: string): Promise<void> {
+  await db.prepare("UPDATE sites SET log_token = ? WHERE id = ?").bind(token, siteId).run();
+}

@@ -91,10 +91,13 @@ describe("demo site", () => {
     await seedDemoSite(db, Date.now());
     await deleteSite(db, DEMO_SITE_ID);
     const { results: tables } = await db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").all<{ name: string }>();
+    // Migrations seed some rows (the initial workspace); only rows beyond a fresh database are left behind.
+    const fresh = openSqliteD1();
     const left: string[] = [];
     for (const { name } of tables) {
-      const row = await db.prepare(`SELECT COUNT(*) AS n FROM ${name}`).first<{ n: number }>();
-      if (Number(row?.n)) left.push(`${name}: ${row?.n}`);
+      const count = async (d: typeof db) => Number((await d.prepare(`SELECT COUNT(*) AS n FROM ${name}`).first<{ n: number }>())?.n);
+      const [now, base] = [await count(db), await count(fresh)];
+      if (now !== base) left.push(`${name}: ${now} (fresh: ${base})`);
     }
     assert.deepEqual(left, []);
   });

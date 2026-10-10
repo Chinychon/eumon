@@ -1,11 +1,15 @@
 import { env } from "cloudflare:workers";
 import { DEMO_SITE_ID, startDemoRun } from "@organic-growth/agents";
 import { createId } from "@organic-growth/core";
-import { analysisStalled, crawlPace, createAnalysis, getAnalysisJob, getLatestAnalysisForSite, getPreviousCompletedAnalysis, getSite, updateAnalysisStatus } from "@organic-growth/db";
-import { readJson } from "../../../../../src/server";
+import { analysisStalled, crawlPace, createAnalysis, getAnalysisJob, getLatestAnalysisForSite, getPreviousCompletedAnalysis, updateAnalysisStatus } from "@organic-growth/db";
+import { requireSite } from "../../../../../src/guard";
+import { charge } from "../../../../../src/limits";
+import { fail, readJson } from "../../../../../src/server";
 
-export async function GET(_request: Request, context: { params: Promise<{ siteId: string }> }) {
+export async function GET(request: Request, context: { params: Promise<{ siteId: string }> }) {
   const { siteId } = await context.params;
+  const access = await requireSite(request, siteId, "read");
+  if (access instanceof Response) return access;
   const job = await getLatestAnalysisForSite(env.DB, siteId);
   if (!job) return Response.json({ analysis: null }, { headers: { "Cache-Control": "no-store" } });
   // While a re-run is in progress, or after one was cancelled or failed, the last finished report stays readable.
@@ -26,10 +30,13 @@ export async function GET(_request: Request, context: { params: Promise<{ siteId
 
 export async function POST(request: Request, context: { params: Promise<{ siteId: string }> }) {
   const { siteId } = await context.params;
+  const access = await requireSite(request, siteId, "write");
+  if (access instanceof Response) return access;
+  const { site } = access;
+  const refusal = await charge(env.DB, site.workspaceId!, "analysesPerDay");
+  if (refusal) return fail(refusal, 429);
   // `full` re-crawls every page; otherwise unchanged results from the last crawl are reused.
   const full = (await readJson<{ full?: unknown }>(request))?.full === true;
-  const site = await getSite(env.DB, siteId);
-  if (!site) return Response.json({ error: "Site not found." }, { status: 404 });
   const latest = await getLatestAnalysisForSite(env.DB, siteId);
   if (latest && (latest.status === "queued" || latest.status === "running")) {
     if (!analysisStalled(latest)) return Response.json({ error: "An analysis is already running for this site." }, { status: 409 });

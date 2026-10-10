@@ -1,10 +1,12 @@
 import { env } from "cloudflare:workers";
 import { createId, type PageIdea, type PageTemplate } from "@organic-growth/core";
-import { getDataset, getSite, getSiteScope, listAllRecords, listRecords, upsertTemplate } from "@organic-growth/db";
+import { getDataset, getSiteScope, listAllRecords, listRecords, upsertTemplate } from "@organic-growth/db";
 import { defaultTemplate, proposeTemplate } from "@organic-growth/pages";
 import { regenerateTemplate } from "../../../../../src/page-engine";
 import { describeModelError } from "@organic-growth/ai";
+import { charge } from "../../../../../src/limits";
 import { appLlm, fail, json, readJson, settingsFor } from "../../../../../src/server";
+import { requireOwned } from "../../../../../src/guard";
 
 /**
  * Designs a page template for one of the dataset's page ideas (AI-written
@@ -13,10 +15,11 @@ import { appLlm, fail, json, readJson, settingsFor } from "../../../../../src/se
  */
 export async function POST(request: Request, context: { params: Promise<{ datasetId: string }> }) {
   const { datasetId } = await context.params;
+  const access = await requireOwned(request, "dataset", datasetId, "write");
+  if (access instanceof Response) return access;
   const dataset = await getDataset(env.DB, datasetId);
   if (!dataset) return fail("Dataset not found.", 404);
-  const site = await getSite(env.DB, dataset.siteId);
-  if (!site) return fail("Site not found.", 404);
+  const { site } = access;
   const body = (await readJson<{ ideaIndex?: unknown; groupBy?: unknown; useAi?: unknown }>(request)) ?? {};
   const keys = new Set(dataset.fields.map((field) => field.key));
   const idea: PageIdea | undefined = typeof body.ideaIndex === "number"
@@ -40,6 +43,8 @@ export async function POST(request: Request, context: { params: Promise<{ datase
     if (llm instanceof Response) {
       aiError = "No language model is configured.";
     } else {
+      const refusal = await charge(env.DB, site.workspaceId!, "aiRunsPerDay");
+      if (refusal) return fail(refusal, 429);
       try {
         const scope = await getSiteScope(env.DB, site.id);
         draft = await proposeTemplate({

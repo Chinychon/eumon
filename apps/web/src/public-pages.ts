@@ -18,6 +18,7 @@ import {
 import { chooseArm, escapeHtml, htmlLang, labelsFor, renderHubPage, renderLandingPage, renderSitemap, type RenderCta } from "@organic-growth/pages";
 import { classifyUserAgent, createId, isRef, isWhatsAppChatUrl, landingSource } from "@organic-growth/core";
 import { indexNowKey } from "@organic-growth/agents";
+import { PAGE_HEADERS } from "./headers";
 import { readJson, settingsFor } from "./server";
 
 const BEACON = "/__eumon/e";
@@ -43,7 +44,7 @@ function countCrawl(siteId: string, pageId: string, userAgent: string): Promise<
 }
 
 function html(body: string, status: number, headers: Record<string, string>): Response {
-  return new Response(body, { status, headers: { "Content-Type": "text/html; charset=utf-8", ...headers } });
+  return new Response(body, { status, headers: { ...PAGE_HEADERS, "Content-Type": "text/html; charset=utf-8", ...headers } });
 }
 
 function notFound(settings: PageSettings, status = 404): Response {

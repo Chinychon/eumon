@@ -1,6 +1,9 @@
 import { env } from "cloudflare:workers";
+import { requireWorkspace } from "../../../../src/guard";
 
 export async function GET(request: Request) {
+  const access = await requireWorkspace(request, "write");
+  if (access instanceof Response) return access;
   const state = crypto.randomUUID();
   const redirect = new URL(
     `https://github.com/apps/${encodeURIComponent(env.GITHUB_APP_SLUG)}/installations/new`,

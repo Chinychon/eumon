@@ -1,12 +1,15 @@
 import { env } from "cloudflare:workers";
 import type { GeneratedPage } from "@organic-growth/core";
-import { clearPageOverrides, getPage, getSite, getTemplate, updatePageFields } from "@organic-growth/db";
+import { clearPageOverrides, getPage, getTemplate, updatePageFields } from "@organic-growth/db";
 import { regenerateTemplate } from "../../../../src/page-engine";
 import { fail, json, readJson } from "../../../../src/server";
+import { requireOwned } from "../../../../src/guard";
 
 /** Edits one page; each change is recorded so its effect on search and conversions can be measured. */
 export async function PATCH(request: Request, context: { params: Promise<{ pageId: string }> }) {
   const { pageId } = await context.params;
+  const access = await requireOwned(request, "page", pageId, "write");
+  if (access instanceof Response) return access;
   const page = await getPage(env.DB, pageId);
   if (!page) return fail("Page not found.", 404);
   const body = await readJson<{ title?: unknown; description?: unknown; status?: unknown; reason?: unknown; resetOverrides?: unknown }>(request);
@@ -14,8 +17,8 @@ export async function PATCH(request: Request, context: { params: Promise<{ pageI
   if (body.resetOverrides === true) {
     // Return the page to its template copy by regenerating from current data.
     await clearPageOverrides(env.DB, page);
-    const [site, template] = await Promise.all([getSite(env.DB, page.siteId), getTemplate(env.DB, page.templateId)]);
-    if (site && template) await regenerateTemplate(site, template);
+    const template = await getTemplate(env.DB, page.templateId);
+    if (template) await regenerateTemplate(access.site, template);
     const fresh = await getPage(env.DB, page.id);
     return json({ page: fresh && { id: fresh.id, path: fresh.path, title: fresh.title, description: fresh.description, status: fresh.status } });
   }

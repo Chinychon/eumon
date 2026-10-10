@@ -3,9 +3,12 @@ import type { DataSource } from "@organic-growth/core";
 import { deleteOAuthCredential, deleteSource, getSource, upsertSource } from "@organic-growth/db";
 import { validateUrlPattern } from "../../../../src/datasets";
 import { fail, json, readJson } from "../../../../src/server";
+import { requireOwned } from "../../../../src/guard";
 
 export async function PATCH(request: Request, context: { params: Promise<{ sourceId: string }> }) {
   const { sourceId } = await context.params;
+  const access = await requireOwned(request, "source", sourceId, "write");
+  if (access instanceof Response) return access;
   const source = await getSource(env.DB, sourceId);
   if (!source) return fail("Source not found.", 404);
   const body = await readJson<{ status?: unknown; urlPattern?: unknown; maxPages?: unknown }>(request);
@@ -27,8 +30,10 @@ export async function PATCH(request: Request, context: { params: Promise<{ sourc
   return json({ source: next });
 }
 
-export async function DELETE(_request: Request, context: { params: Promise<{ sourceId: string }> }) {
+export async function DELETE(request: Request, context: { params: Promise<{ sourceId: string }> }) {
   const { sourceId } = await context.params;
+  const access = await requireOwned(request, "source", sourceId, "write");
+  if (access instanceof Response) return access;
   const source = await getSource(env.DB, sourceId);
   if (!source) return fail("Source not found.", 404);
   await deleteSource(env.DB, sourceId);

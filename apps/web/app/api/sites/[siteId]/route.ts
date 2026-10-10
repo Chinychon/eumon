@@ -1,10 +1,12 @@
 import { env } from "cloudflare:workers";
-import { deleteSite, getSite } from "@organic-growth/db";
+import { deleteSite } from "@organic-growth/db";
+import { requireSite } from "../../../../src/guard";
 import { fail, json } from "../../../../src/server";
 
-export async function DELETE(_request: Request, context: { params: Promise<{ siteId: string }> }) {
+export async function DELETE(request: Request, context: { params: Promise<{ siteId: string }> }) {
   const { siteId } = await context.params;
-  if (!(await getSite(env.DB, siteId))) return fail("Site not found.", 404);
+  const access = await requireSite(request, siteId, "admin");
+  if (access instanceof Response) return access;
   await deleteSite(env.DB, siteId);
   return json({ deleted: true });
 }

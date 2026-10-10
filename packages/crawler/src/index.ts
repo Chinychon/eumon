@@ -26,7 +26,8 @@ export type Fetcher = (
 export function isSafePublicUrl(value: string, expectedOrigin?: string): boolean {
   try {
     const url = new URL(value);
-    const host = url.hostname.toLowerCase();
+    // "localhost." and "x.internal." name the same hosts as without the dot.
+    const host = url.hostname.toLowerCase().replace(/\.+$/, "");
     if (!(["http:", "https:"].includes(url.protocol)) || url.username || url.password) return false;
     if (!host.includes(".") || host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local") || host.endsWith(".internal")) return false;
     if (host.startsWith("[") || host.includes(":")) return false;
@@ -569,7 +570,7 @@ export async function collectSitemapUrls(
     return [];
   }
   // Sitemaps can be much larger than ordinary HTML pages. Keep the normal
-  // page-response cap, while allowing a bounded 10 MB for XML sitemap files.
+  // page-response cap, while allowing a bounded 25 MB for XML sitemap files.
   const res = await fetcher(sitemapUrl, { maxBytes: 25_000_000 });
   if (res.status >= 400) {
     errors.push(`${sitemapUrl} returned ${res.status}`);

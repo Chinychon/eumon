@@ -1,24 +1,15 @@
 import { env } from "cloudflare:workers";
-import { verifyToken } from "@organic-growth/core";
-import { createInstallationToken, listInstallationRepositories } from "@organic-growth/repo-analyzer";
-
-function getCookie(request: Request): string | null {
-  return request.headers.get("Cookie")?.split(";").map((part) => part.trim())
-    .find((part) => part.startsWith("og_installation="))?.slice("og_installation=".length) ?? null;
-}
+import { listGithubInstallations } from "@organic-growth/db";
+import { requireWorkspace } from "../../../../src/guard";
+import { workspaceRepositories } from "../../../../src/github-install";
 
 export async function GET(request: Request) {
-  const installationCookie = getCookie(request);
-  if (!installationCookie) {
-    return Response.json({ error: "No GitHub installation cookie reached Eumon. The GitHub Setup URL must point to this app's callback, then the install flow must finish in this same browser." }, { status: 401, headers: { "Cache-Control": "no-store" } });
-  }
-  const installationId = (await verifyToken<{ id: string }>(installationCookie, env.SESSION_SECRET))?.id;
-  if (!installationId) {
-    return Response.json({ error: "Eumon received the installation cookie but could not verify it. Restart the dev server after changing SESSION_SECRET, and use one consistent SESSION_SECRET for the callback and app." }, { status: 401, headers: { "Cache-Control": "no-store" } });
-  }
+  const access = await requireWorkspace(request, "write");
+  if (access instanceof Response) return access;
+  const installations = await listGithubInstallations(env.DB, access.viewer.workspaceId);
+  if (!installations.length) return Response.json({ error: "Install the GitHub App for this workspace first." }, { status: 401, headers: { "Cache-Control": "no-store" } });
   try {
-    const token = await createInstallationToken(env.GITHUB_APP_ID, env.GITHUB_APP_PRIVATE_KEY, installationId);
-    const repositories = await listInstallationRepositories(token);
+    const repositories = await workspaceRepositories(env.GITHUB_APP_ID, env.GITHUB_APP_PRIVATE_KEY, installations);
     return Response.json({ repositories: repositories.map(({ id, name, full_name, default_branch, owner, private: isPrivate }) => ({
       id, name, fullName: full_name, defaultBranch: default_branch, owner: owner.login, isPrivate,
     })) }, { headers: { "Cache-Control": "no-store" } });

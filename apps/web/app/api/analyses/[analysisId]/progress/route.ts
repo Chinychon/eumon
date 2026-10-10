@@ -1,10 +1,13 @@
 import { env } from "cloudflare:workers";
 import { advanceDemoRun, DEMO_SITE_ID } from "@organic-growth/agents";
 import { analysisStalled, estimateCrawl, getAnalysisJob, getCrawlProgress } from "@organic-growth/db";
+import { requireOwned } from "../../../../../src/guard";
 
 /** Live state of a running analysis: stage timeline, crawl counts, pace, and time left. */
-export async function GET(_request: Request, context: { params: Promise<{ analysisId: string }> }) {
+export async function GET(request: Request, context: { params: Promise<{ analysisId: string }> }) {
   const { analysisId } = await context.params;
+  const access = await requireOwned(request, "analysis", analysisId, "read");
+  if (access instanceof Response) return access;
   let job = await getAnalysisJob(env.DB, analysisId);
   if (job?.siteId === DEMO_SITE_ID && job.status === "running") {
     await advanceDemoRun(env.DB, analysisId);

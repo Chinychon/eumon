@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
-import { getSite, listSiteCompetitorDomains, setSiteCompetitorDomains } from "@organic-growth/db";
+import { listSiteCompetitorDomains, setSiteCompetitorDomains } from "@organic-growth/db";
+import { requireSite } from "../../../../../src/guard";
 
 function normalizeDomain(value: unknown): string | null {
   if (typeof value !== "string" || value.length > 253) return null;
@@ -12,15 +13,17 @@ function normalizeDomain(value: unknown): string | null {
   } catch { return null; }
 }
 
-export async function GET(_request: Request, context: { params: Promise<{ siteId: string }> }) {
+export async function GET(request: Request, context: { params: Promise<{ siteId: string }> }) {
   const { siteId } = await context.params;
-  if (!(await getSite(env.DB, siteId))) return Response.json({ error: "Site not found." }, { status: 404 });
+  const access = await requireSite(request, siteId, "read");
+  if (access instanceof Response) return access;
   return Response.json({ domains: await listSiteCompetitorDomains(env.DB, siteId) }, { headers: { "Cache-Control": "no-store" } });
 }
 
 export async function PUT(request: Request, context: { params: Promise<{ siteId: string }> }) {
   const { siteId } = await context.params;
-  if (!(await getSite(env.DB, siteId))) return Response.json({ error: "Site not found." }, { status: 404 });
+  const access = await requireSite(request, siteId, "write");
+  if (access instanceof Response) return access;
   let domains: unknown;
   try { domains = (await request.json() as { domains?: unknown }).domains; } catch { return Response.json({ error: "Send a list of competitor domains." }, { status: 400 }); }
   if (!Array.isArray(domains) || domains.length > 10) return Response.json({ error: "Enter up to 10 competitor domains." }, { status: 400 });

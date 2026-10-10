@@ -1,6 +1,7 @@
 import { createId, slugify, type DataSource, type Dataset, type JsonObject } from "@organic-growth/core";
 import { deleteStaleRecords, getOAuthCredential, refreshSourceRecordCount, replaceRecords, updateJob, upsertOAuthCredential, type D1Like } from "@organic-growth/db";
 import { normalizeRecords } from "@organic-growth/scraper";
+import { readText } from "./body.ts";
 import { decryptSecret, encryptSecret } from "./gsc-auth.ts";
 
 /*
@@ -10,6 +11,20 @@ import { decryptSecret, encryptSecret } from "./gsc-auth.ts";
  * collection-workflow steps, a page of rows each, so every step fits the
  * Free plan's budgets; the table is the authority for what it said before.
  */
+
+/** One page of rows at most this large; a table that sends more is refused rather than read into memory. */
+export const MAX_PULL_BYTES = 5_000_000;
+export const PULL_TIMEOUT_MS = 15_000;
+
+/** `https://<project>.supabase.co` and nothing else: the key is only ever sent to Supabase. */
+export function isSupabaseProjectUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && !url.port && /^[a-z0-9-]+\.supabase\.co$/i.test(url.hostname);
+  } catch {
+    return false;
+  }
+}
 
 /** Rows asked for per page (the project may answer fewer), and pages per pull: 40,000 rows at most. */
 export const PULL_PAGE = 1000;
@@ -90,15 +105,23 @@ type Page = { rows: number; records: number; total: number | null; columns: stri
 
 /** One page of the table: fetched, mapped and written. Throws, without the key, when the table refuses or no column matches the key field. */
 async function pullPage(deps: PullDeps, source: DataSource, dataset: Dataset, key: string, offset: number): Promise<Page> {
+  if (!isSupabaseProjectUrl(source.url)) throw new Error("A Supabase source must be a https://<project>.supabase.co address. Remove it and add it again.");
   const url = `${new URL(source.url).origin}/rest/v1/${encodeURIComponent(source.urlPattern!)}?select=*&offset=${offset}&limit=${PULL_PAGE}`;
   let response: Response;
   try {
-    response = await (deps.fetchFn ?? fetch)(url, { headers: { apikey: key, Authorization: `Bearer ${key}`, Accept: "application/json", Prefer: "count=exact" }, redirect: "error" });
+    response = await (deps.fetchFn ?? fetch)(url, { headers: { apikey: key, Authorization: `Bearer ${key}`, Accept: "application/json", Prefer: "count=exact" }, redirect: "error", signal: AbortSignal.timeout(PULL_TIMEOUT_MS) });
   } catch (error) {
     throw new Error(`Could not reach the project URL: ${withoutKey(error instanceof Error ? error.message : String(error), key)}`);
   }
   if (!response.ok) throw new Error(`The table answered ${response.status}: ${withoutKey((await response.text()).slice(0, 200), key)}`);
-  const rows = (await response.json()) as unknown;
+  const text = await readText(response, MAX_PULL_BYTES);
+  if (text === null) throw new Error(`The table sent more than ${MAX_PULL_BYTES / 1_000_000} MB in one page. Pull a narrower view of it.`);
+  let rows: unknown;
+  try {
+    rows = JSON.parse(text);
+  } catch {
+    throw new Error("The table answered with something other than rows.");
+  }
   if (!Array.isArray(rows)) throw new Error("The table answered with something other than rows.");
   const range = response.headers.get("content-range")?.match(/\/(\d+)$/);
   const total = range ? Number(range[1]) : null;

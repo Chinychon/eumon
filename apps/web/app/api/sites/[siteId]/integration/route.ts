@@ -1,8 +1,9 @@
 import { env } from "cloudflare:workers";
 import { GOOGLEBOT_UA, defaultFetcher, headerNoindex, isEmptyShell, parseHtmlSignals } from "@organic-growth/crawler";
 import { WHATSAPP_REF_JS } from "@organic-growth/core";
-import { getSite, listPublishedPaths, upsertPageSettings } from "@organic-growth/db";
+import { listPublishedPaths, upsertPageSettings } from "@organic-growth/db";
 import { labelsFor } from "@organic-growth/pages";
+import { requireSite } from "../../../../../src/guard";
 import { fail, json, settingsFor } from "../../../../../src/server";
 
 type Snippet = { id: string; label: string; when: string; language: string; code: string };
@@ -23,6 +24,9 @@ export default {
   async fetch(request) {
     const url = new URL(request.url);
     const headers = new Headers(request.headers);
+    // The visitor's own cookies and credentials stay on your site.
+    headers.delete("cookie");
+    headers.delete("authorization");
     headers.set("X-Eumon-Proxy", "1");
     headers.set("X-Forwarded-Host", url.host);
     return fetch(TARGET + url.pathname + url.search, {
@@ -87,6 +91,8 @@ module.exports = {
     proxy_set_header Host ${new URL(target).host};
     proxy_set_header X-Forwarded-Host $host;
     proxy_set_header X-Eumon-Proxy 1;
+    proxy_set_header Cookie "";
+    proxy_set_header Authorization "";
     proxy_ssl_server_name on;
 }`,
     },
@@ -97,6 +103,8 @@ module.exports = {
       language: "apache",
       code: `SSLProxyEngine on
 RequestHeader set X-Eumon-Proxy "1"
+RequestHeader unset Cookie
+RequestHeader unset Authorization
 ProxyPass "${prefix || "/"}" "${target}${prefix}"
 ProxyPassReverse "${prefix || "/"}" "${target}${prefix}"`,
     },
@@ -174,8 +182,9 @@ async function detectHosting(baseUrl: string): Promise<{ provider: string | null
 
 export async function GET(request: Request, context: { params: Promise<{ siteId: string }> }) {
   const { siteId } = await context.params;
-  const site = await getSite(env.DB, siteId);
-  if (!site) return fail("Site not found.", 404);
+  const access = await requireSite(request, siteId, "write");
+  if (access instanceof Response) return access;
+  const { site } = access;
   const settings = await settingsFor(site);
   const target = `${new URL(request.url).origin}/p/${site.id}`;
   const publicHost = new URL(settings.publicOrigin).host;
@@ -198,10 +207,11 @@ export async function GET(request: Request, context: { params: Promise<{ siteId:
  * reaches Eumon, a published page returns complete HTML as Googlebot on the
  * customer's domain, it is indexable, and its canonical points to itself.
  */
-export async function POST(_request: Request, context: { params: Promise<{ siteId: string }> }) {
+export async function POST(request: Request, context: { params: Promise<{ siteId: string }> }) {
   const { siteId } = await context.params;
-  const site = await getSite(env.DB, siteId);
-  if (!site) return fail("Site not found.", 404);
+  const access = await requireSite(request, siteId, "write");
+  if (access instanceof Response) return access;
+  const { site } = access;
   const settings = await settingsFor(site);
   const origin = settings.publicOrigin.replace(/\/$/, "");
   const checks: Array<{ name: string; ok: boolean; detail: string }> = [];

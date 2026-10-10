@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { getDataset, getSource, listAllRecords, upsertDataset, upsertRecords, upsertSite, upsertSource } from "@organic-growth/db";
 import { openSqliteD1 } from "@organic-growth/db/sqlite";
-import { runSupabasePull, saveSupabaseKey, supabaseKey, validateSupabaseKey, type PullStep } from "./supabase-source.ts";
+import { isSupabaseProjectUrl, MAX_PULL_BYTES, runSupabasePull, saveSupabaseKey, supabaseKey, validateSupabaseKey, type PullStep } from "./supabase-source.ts";
 
 const KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"; // 32 zero bytes, base64url
 const AT = "2026-10-01T00:00:00.000Z";
@@ -108,5 +108,32 @@ describe("Supabase table source", () => {
     const refused = (async () => new Response(JSON.stringify({ message: `JWT expired ${SECRET}` }), { status: 401 })) as unknown as typeof fetch;
     await assert.rejects(async () => runSupabasePull({ db, encryptionKey: KEY, fetchFn: refused }, steps().step, (await getSource(db, "src"))!, (await getDataset(db, "d"))!, "job1"), (error: Error) => /401/.test(error.message) && /JWT expired/.test(error.message) && !error.message.includes(SECRET));
     assert.ok(!(await getSource(db, "src"))!.error?.includes(SECRET), "the stored error never carries the key");
+  });
+  it("only pulls from a Supabase project address", async () => {
+    assert.equal(isSupabaseProjectUrl("https://abc.supabase.co"), true);
+    for (const url of ["http://abc.supabase.co", "https://attacker.tld", "https://abc.supabase.co.evil.tld", "https://abc.supabase.co:8443"]) assert.equal(isSupabaseProjectUrl(url), false, url);
+    const db = await site();
+    const source = (await getSource(db, "src"))!;
+    const { fetchFn, calls } = table(3);
+    await assert.rejects(
+      runSupabasePull({ db, encryptionKey: KEY, fetchFn }, steps().step, { ...source, url: "https://attacker.tld" }, (await getDataset(db, "d"))!, "job"),
+      /supabase\.co/,
+    );
+    assert.equal(calls.length, 0, "nothing was fetched");
+  });
+
+  it("gives up on a page larger than the cap, and asks with a timeout", async () => {
+    const db = await site();
+    let signal: AbortSignal | undefined;
+    const huge = "[" + `{"Name":"${"x".repeat(1000)}"},`.repeat(Math.ceil(MAX_PULL_BYTES / 1000)) + `{"Name":"y"}]`;
+    const fetchFn = (async (_url: string, init?: RequestInit) => {
+      signal = init?.signal ?? undefined;
+      return new Response(huge, { status: 200 });
+    }) as unknown as typeof fetch;
+    await assert.rejects(
+      runSupabasePull({ db, encryptionKey: KEY, fetchFn }, steps().step, (await getSource(db, "src"))!, (await getDataset(db, "d"))!, "job"),
+      /more than 5 MB/,
+    );
+    assert.ok(signal, "the request carried an abort signal");
   });
 });

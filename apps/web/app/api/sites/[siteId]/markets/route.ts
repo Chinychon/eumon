@@ -1,18 +1,21 @@
 import { env } from "cloudflare:workers";
 import { RESULT_METRICS } from "@organic-growth/core";
-import { getSite, listSiteMarkets, setSiteMarkets, clearMetricPoints } from "@organic-growth/db";
+import { listSiteMarkets, setSiteMarkets, clearMetricPoints } from "@organic-growth/db";
+import { requireSite } from "../../../../../src/guard";
 import { fail, json, readJson } from "../../../../../src/server";
 
 /** Countries the business sells to, as Search Console reports them (ISO 3166-1 alpha-3). */
-export async function GET(_request: Request, context: { params: Promise<{ siteId: string }> }) {
+export async function GET(request: Request, context: { params: Promise<{ siteId: string }> }) {
   const { siteId } = await context.params;
-  if (!(await getSite(env.DB, siteId))) return fail("Site not found.", 404);
+  const access = await requireSite(request, siteId, "read");
+  if (access instanceof Response) return access;
   return json({ countries: await listSiteMarkets(env.DB, siteId) });
 }
 
 export async function PUT(request: Request, context: { params: Promise<{ siteId: string }> }) {
   const { siteId } = await context.params;
-  if (!(await getSite(env.DB, siteId))) return fail("Site not found.", 404);
+  const access = await requireSite(request, siteId, "write");
+  if (access instanceof Response) return access;
   const body = await readJson<{ countries?: unknown }>(request);
   const countries = body?.countries;
   if (!Array.isArray(countries) || countries.length > 20 || !countries.every((code) => typeof code === "string" && /^[a-z]{3}$/i.test(code))) {

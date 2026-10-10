@@ -5,6 +5,8 @@ export const worker = defineWorker({
     entrypoint: "./worker.ts",
     compatibilityDate: "2026-10-05",
     compatibilityFlags: ["nodejs_compat"],
+    // Preview URLs are extra addresses for the Worker that nobody uses.
+    previewUrls: false,
     // The daily Results sync, 04:15 UTC: a Cron Trigger (on the Free plan) runs `scheduled` in worker.ts, which creates
     // one SearchSyncWorkflow instance for every site. (Workflow `schedules` would need the paid plan.)
     triggers: [triggers.scheduled({ schedule: "15 4 * * *" })],
@@ -60,6 +62,19 @@ export const worker = defineWorker({
       // left undeclared so they stay optional: set them with `wrangler secret put` in production,
       // and declare them here again to use them in local dev.
       DEEPSEEK_API_KEY: bindings.secret(),
+      // Accounts (Better Auth). BOOTSTRAP_OWNER_EMAIL: comma-separated owners of the initial workspace and /admin.
+      BETTER_AUTH_SECRET: bindings.secret(),
+      BOOTSTRAP_OWNER_EMAIL: bindings.secret(),
+      TURNSTILE_SITE_KEY: bindings.secret(),
+      TURNSTILE_SECRET_KEY: bindings.secret(),
+      // The GitHub App's OAuth client: the install callback proves the installer owns the installation.
+      GITHUB_APP_CLIENT_ID: bindings.secret(),
+      GITHUB_APP_CLIENT_SECRET: bindings.secret(),
+      // Sign-in, verification and invitation email. Sending to any address needs Workers Paid; until
+      // EMAIL_ENABLED is "true", messages are written to the log instead.
+      EMAIL: bindings.sendEmail(),
+      // Sign-in attempts per address: 10 a minute.
+      AUTH_RATE_LIMIT: bindings.rateLimit({ namespace: "1001", simple: { limit: 10, period: 60 } }),
     },
   });
 

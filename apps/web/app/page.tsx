@@ -13,7 +13,10 @@ import { PageResultsView } from "./components/PageResultsView";
 import { resolveLink, type View } from "./components/report-model";
 import { SetupView } from "./components/SetupView";
 import { BrandMark } from "./components/pixel";
+import { authClient } from "./components/auth-client";
 import { Button, LeafIcon, ThemeToggle } from "./components/ui";
+
+type Me = { user: { id: string; email: string }; workspace: { id: string; name: string; role: "owner" | "member" | "client" } | null; workspaces: Array<{ id: string; name: string; role: string }>; platformAdmin: boolean };
 
 /**
  * `steps` are the pipeline steps (README) a view covers; `group` labels the run of views it starts.
@@ -39,8 +42,32 @@ function setQuery(params: Record<string, string | null>) {
   window.history.replaceState({}, "", `${url.pathname}${url.search}`);
 }
 
+/** A signed-in user with no workspace (e.g. an invitation expired before they accepted it) can make one. */
+function NoWorkspace({ email }: { email: string }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const create = async () => {
+    setBusy(true); setError("");
+    const slug = crypto.randomUUID().replaceAll("-", "").slice(0, 16);
+    const made = await authClient.organization.create({ name: `${email.split("@")[0]}'s workspace`, slug });
+    if (made.error || !made.data) { setError(made.error?.message ?? "The workspace couldn't be created. Try again."); setBusy(false); return; }
+    await authClient.organization.setActive({ organizationId: made.data.id });
+    window.location.reload();
+  };
+  return (
+    <main style={{ minHeight: "100vh", display: "grid", placeItems: "center", padding: 24 }}>
+      <div style={{ maxWidth: 420, textAlign: "center", display: "grid", gap: 14 }}>
+        <p>You don't have a workspace yet. Create one to start adding websites.</p>
+        {error && <div className="callout error" role="alert">{error}</div>}
+        <div><Button busy={busy} onClick={create}>Create my workspace</Button></div>
+      </div>
+    </main>
+  );
+}
+
 export default function Home() {
   const [sites, setSites] = useState<SiteRecord[] | null>(null);
+  const [me, setMe] = useState<Me | null>(null);
   const [siteId, setSiteId] = useState("");
   /** Home (the Ask conversation) is where the console opens unless the address names a page. */
   const [view, setView] = useState<View>("ask");
@@ -82,12 +109,16 @@ export default function Home() {
     setAskThread(query.get("thread") ?? "");
     if (query.get("github") === "connected") setNotice("GitHub connected. Choose a repository in Setup.");
     if (query.get("github_error") === "installation_invalid") setError("GitHub returned without a valid install session. Start “Connect GitHub” from this tab and use the same address for the callback.");
-    if (query.get("github_error") === "installation_failed") setError("GitHub installed the app, but Eumon couldn't save the connection. Check that SESSION_SECRET is at least 32 characters, then try again.");
+    if (query.get("github_error") === "authorization_missing") setError("Turn on \u201cRequest user authorization (OAuth) during installation\u201d in the GitHub App\u2019s settings, then install again.");
+    if (query.get("github_error") === "installation_not_yours") setError("That GitHub installation belongs to an account you don\u2019t manage. Install the app from the personal account or as an admin of the organization, then try again.");
+    if (query.get("github_error") === "org_permission_missing") setError("Eumon couldn\u2019t confirm you\u2019re an admin of that GitHub organization. In the GitHub App\u2019s settings, grant Organization permissions \u2192 Members: Read-only, then install again.");
+    if (query.get("github_error") === "installation_failed") setError("GitHub installed the app, but Eumon couldn't save the connection. Try again.");
     const gsc = query.get("gsc");
     if (gsc === "connected") setNotice("Google connected. Choose a Search Console property in Setup.");
     else if (gsc) setError("The Google Search Console connection needs attention — try connecting again.");
     setQuery({ github: null, github_error: null, gsc: null });
 
+    api<Me>("/api/me").then(setMe).catch(() => undefined);
     loadSites(query.get("site") ?? undefined).catch((cause) => setError(errorMessage(cause)));
     api<{ repositories: Repository[] }>("/api/github/repositories")
       .then((data) => { setRepositories(data.repositories); setGithubInstalled(true); })
@@ -98,6 +129,8 @@ export default function Home() {
   useEffect(() => { if (siteId) setQuery({ site: siteId, view, tab, thread: view === "ask" ? askThread || null : null }); }, [siteId, view, tab, askThread]);
   useEffect(() => { if (!notice) return; const timer = setTimeout(() => setNotice(""), 6000); return () => clearTimeout(timer); }, [notice]);
 
+  const nav = me?.workspace?.role === "client" ? NAV.filter((item) => ["overview", "pages", "performance"].includes(item.view)) : NAV;
+  useEffect(() => { if (!nav.some((item) => item.view === view)) { setView("overview"); setTab(null); } }, [nav, view]);
   const site = sites?.find((entry) => entry.id === siteId) ?? null;
   const run = useSiteRun(siteId);
   const tabLabel = view === "overview" && tab ? OVERVIEW_TABS.find((entry) => entry.tab === tab)?.label : undefined;
@@ -111,12 +144,14 @@ export default function Home() {
   // On phones the drawer covers the page, so the page behind it is taken out of reach.
   const covered = drawerOpen && narrow;
 
+  if (me && me.workspaces.length === 0) return <NoWorkspace email={me.user.email} />;
+
   return (
     <main className={`app-shell${drawerOpen ? " ask-open" : ""}`}>
       <aside className="sidebar" inert={covered}>
         <a className="brand" href="/"><BrandMark /><span>Eumon</span></a>
         <div className="workspace-label">{site ? new URL(site.baseUrl).hostname.toUpperCase() : "WORKSPACE"}</div>
-        {NAV.map((item) => (
+        {nav.map((item) => (
           <div key={item.view} className="workspace-item">
             {item.group && <div className="workspace-group">{item.group}</div>}
             <button className={`workspace${view === item.view && site && !adding ? " active" : ""}`} disabled={!site} onClick={() => { setAdding(false); navigate(item.view); }}>
@@ -144,6 +179,14 @@ export default function Home() {
           {run && (view !== "overview" || adding) && <button className="top-actions run-chip" onClick={() => { setAdding(false); navigate("overview"); }}>{runLabel(run)}</button>}
           {site && view !== "ask" && !adding && <button ref={askToggle} className="top-actions ask-toggle" aria-expanded={drawerOpen} onClick={() => setDrawer((value) => !value)}><LeafIcon />Ask Eumon</button>}
           {site && <a className="top-actions" href={site.baseUrl} target="_blank" rel="noreferrer">Open site</a>}
+          {me?.workspace && <span className="top-actions">{me.workspace.name}</span>}
+          {me && me.workspaces.length > 1 && (
+            <select aria-label="Workspace" value={me.workspace?.id ?? ""} onChange={async (event) => { await authClient.organization.setActive({ organizationId: event.target.value }); window.location.reload(); }}>
+              {me.workspaces.map((entry) => <option key={entry.id} value={entry.id}>{entry.name}</option>)}
+            </select>
+          )}
+          {me?.platformAdmin && <a className="top-actions" href="/admin">Admin</a>}
+          {me && <Button variant="ghost" small onClick={async () => { await authClient.signOut(); window.location.assign("/sign-in"); }}>Sign out</Button>}
         </header>
         <div className="content-wrap">
           {error && <div className="callout error" role="alert" style={{ marginBottom: 14 }}>{error} <button className="btn btn-ghost btn-small" onClick={() => setError("")}>Dismiss</button></div>}
@@ -165,7 +208,7 @@ export default function Home() {
               {view === "setup" && (
                 <>
                   <ConnectionsView site={site} repositories={repositories} githubInstalled={githubInstalled} onSiteChanged={(updated) => setSites((items) => items?.map((item) => (item.id === updated.id ? updated : item)) ?? null)} />
-                  <SetupView site={site} />
+                  <SetupView site={site} sites={sites ?? []} role={me?.workspace?.role ?? "member"} />
                 </>
               )}
             </div>

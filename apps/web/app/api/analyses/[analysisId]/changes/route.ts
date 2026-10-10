@@ -1,12 +1,16 @@
 import { env } from "cloudflare:workers";
 import { createId, type Finding } from "@organic-growth/core";
-import { getAnalysisJob, getSite, insertChange, listChanges, type D1Like } from "@organic-growth/db";
+import { getAnalysisJob, insertChange, listChanges, type D1Like } from "@organic-growth/db";
 import { generateSafeTechnicalChange, SAFE_SEO_CONFIG_PATHS } from "@organic-growth/agents";
 import { createGitHubApiClient, createInstallationToken } from "@organic-growth/repo-analyzer";
-import { appLlm, llmFailure } from "../../../../../src/server";
+import { charge } from "../../../../../src/limits";
+import { appLlm, fail, llmFailure } from "../../../../../src/server";
+import { requireOwned } from "../../../../../src/guard";
 
-export async function GET(_request: Request, context: { params: Promise<{ analysisId: string }> }) {
+export async function GET(request: Request, context: { params: Promise<{ analysisId: string }> }) {
   const { analysisId } = await context.params;
+  const access = await requireOwned(request, "analysis", analysisId, "read");
+  if (access instanceof Response) return access;
   const job = await getAnalysisJob(env.DB as D1Like, analysisId);
   if (!job) return Response.json({ error: "Analysis not found." }, { status: 404 });
   const changes = (await listChanges(env.DB as D1Like, job.siteId)).filter((change) => change.analysisId === analysisId);
@@ -15,6 +19,8 @@ export async function GET(_request: Request, context: { params: Promise<{ analys
 
 export async function POST(request: Request, context: { params: Promise<{ analysisId: string }> }) {
   const { analysisId } = await context.params;
+  const access = await requireOwned(request, "analysis", analysisId, "write");
+  if (access instanceof Response) return access;
   const job = await getAnalysisJob(env.DB as D1Like, analysisId);
   if (!job || job.status !== "completed") return Response.json({ error: "A completed analysis is required." }, { status: 404 });
   let body: { findingId?: unknown };
@@ -22,8 +28,10 @@ export async function POST(request: Request, context: { params: Promise<{ analys
   const report = job.report as { findings?: Array<Pick<Finding, "id" | "category" | "title" | "summary" | "evidence" | "pagesAffected">> } | undefined;
   const finding = report?.findings?.find((entry) => entry.id === body.findingId);
   if (!finding || !["sitemap", "indexing"].includes(finding.category)) return Response.json({ error: "Only observed sitemap and indexing findings are eligible for automated configuration proposals." }, { status: 400 });
-  const site = await getSite(env.DB as D1Like, job.siteId);
-  if (!site?.githubInstallationId || !site.githubOwner || !site.githubRepo) return Response.json({ error: "Connect the site's GitHub repository to generate code changes." }, { status: 409 });
+  const { site } = access;
+  if (!site.githubInstallationId || !site.githubOwner || !site.githubRepo) return Response.json({ error: "Connect the site's GitHub repository to generate code changes." }, { status: 409 });
+  const refusal = await charge(env.DB, site.workspaceId!, "aiRunsPerDay");
+  if (refusal) return fail(refusal, 429);
   try {
     const token = await createInstallationToken(env.GITHUB_APP_ID, env.GITHUB_APP_PRIVATE_KEY, site.githubInstallationId);
     const client = createGitHubApiClient(token);

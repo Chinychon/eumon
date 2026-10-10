@@ -1,13 +1,16 @@
 import { env } from "cloudflare:workers";
 import { createId } from "@organic-growth/core";
-import { deleteUnusedProposedDatasets, getPageSettings, getSite, getSiteScope, saveSiteScope, upsertDataset, upsertPageSettings, upsertSource } from "@organic-growth/db";
+import { deleteUnusedProposedDatasets, getPageSettings, getSiteScope, saveSiteScope, upsertDataset, upsertPageSettings, upsertSource } from "@organic-growth/db";
 import { proposeScope } from "@organic-growth/scraper";
 import { gatherSiteEvidence } from "../../../../../src/page-engine";
+import { requireSite } from "../../../../../src/guard";
+import { charge } from "../../../../../src/limits";
 import { appLlm, fail, json, llmFailure, readJson, settingsFor } from "../../../../../src/server";
 
-export async function GET(_request: Request, context: { params: Promise<{ siteId: string }> }) {
+export async function GET(request: Request, context: { params: Promise<{ siteId: string }> }) {
   const { siteId } = await context.params;
-  if (!(await getSite(env.DB, siteId))) return fail("Site not found.", 404);
+  const access = await requireSite(request, siteId, "write");
+  if (access instanceof Response) return access;
   return json({ scope: await getSiteScope(env.DB, siteId) });
 }
 
@@ -18,8 +21,11 @@ export async function GET(_request: Request, context: { params: Promise<{ siteId
  */
 export async function POST(request: Request, context: { params: Promise<{ siteId: string }> }) {
   const { siteId } = await context.params;
-  const site = await getSite(env.DB, siteId);
-  if (!site) return fail("Site not found.", 404);
+  const access = await requireSite(request, siteId, "write");
+  if (access instanceof Response) return access;
+  const { site } = access;
+  const refusal = await charge(env.DB, site.workspaceId!, "aiRunsPerDay");
+  if (refusal) return fail(refusal, 429);
   const body = (await readJson<{ goal?: unknown }>(request)) ?? {};
   const goal = typeof body.goal === "string" ? body.goal.trim().slice(0, 600) : undefined;
   const llm = appLlm();

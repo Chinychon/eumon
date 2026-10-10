@@ -5,6 +5,7 @@ import { isProblemNote, type PageSettings, type SiteRecord } from "@organic-grow
 import { PAGE_LANGUAGES } from "@organic-growth/pages/labels";
 import { api, errorMessage } from "./api";
 import { urlPath } from "./report-model";
+import { MembersPanel } from "./MembersPanel";
 import { WhyRow } from "./ReportTabs";
 import { Badge, Button, Card, CheckIcon, CopyBlock, CrossIcon, Field, PartHead } from "./ui";
 
@@ -29,7 +30,7 @@ function recommendedSnippet(integration: Integration): string {
   return "cloudflare";
 }
 
-export function SetupView({ site }: { site: SiteRecord }) {
+export function SetupView({ site, sites, role }: { site: SiteRecord; sites: SiteRecord[]; role: string }) {
   const [integration, setIntegration] = useState<Integration | null>(null);
   const [form, setForm] = useState<PageSettings | null>(null);
   const [tab, setTab] = useState("cloudflare");
@@ -73,6 +74,7 @@ export function SetupView({ site }: { site: SiteRecord }) {
 
   return (
     <div>
+      <MembersPanel site={site} sites={sites} canInvite={role === "owner"} />
       <PartHead
         id="on-your-site"
         title="On your site"

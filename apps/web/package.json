@@ -13,10 +13,11 @@
     "@organic-growth/pages": "*",
     "@organic-growth/repo-analyzer": "*",
     "@organic-growth/scraper": "*",
+    "better-auth": "1.7.7",
     "d3-force": "^3.0.0",
     "fflate": "0.8.2",
-    "react": "latest",
-    "react-dom": "latest",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
     "react-server-dom-webpack": "^19.3.0",
     "vinext": "^1.0.1"
   },

@@ -1,23 +1,25 @@
 import { env } from "cloudflare:workers";
 import { createId, type DataSourceKind } from "@organic-growth/core";
-import { getDataset, getSite, upsertSource } from "@organic-growth/db";
+import { getDataset, upsertSource } from "@organic-growth/db";
 import { SOURCE_KINDS, validateUrlPattern } from "../../../../../src/datasets";
 import { fail, isPublicHttpUrl, json, readJson } from "../../../../../src/server";
-import { saveSupabaseKey, validateSupabaseKey } from "../../../../../src/supabase-source";
+import { isSupabaseProjectUrl, saveSupabaseKey, validateSupabaseKey } from "../../../../../src/supabase-source";
+import { requireOwned } from "../../../../../src/guard";
 
 const TABLE = /^[A-Za-z_][A-Za-z0-9_]{0,62}$/;
 
 export async function POST(request: Request, context: { params: Promise<{ datasetId: string }> }) {
   const { datasetId } = await context.params;
+  const access = await requireOwned(request, "dataset", datasetId, "write");
+  if (access instanceof Response) return access;
   const dataset = await getDataset(env.DB, datasetId);
   if (!dataset) return fail("Dataset not found.", 404);
-  const site = await getSite(env.DB, dataset.siteId);
-  if (!site) return fail("Site not found.", 404);
+  const { site } = access;
   const body = await readJson<{ url?: unknown; kind?: unknown; urlPattern?: unknown; maxPages?: unknown; table?: unknown; key?: unknown }>(request);
   const kind = SOURCE_KINDS.includes(body?.kind as DataSourceKind) ? body!.kind as DataSourceKind : "listing";
   if (kind === "supabase") {
     // The project URL, the table, and a read-only key that is sealed at once and never returned.
-    if (!isPublicHttpUrl(body?.url)) return fail("Enter the Supabase project URL, e.g. https://abcdefgh.supabase.co.");
+    if (!isSupabaseProjectUrl(String(body?.url ?? ""))) return fail("Enter the project URL from Supabase, such as https://abcd1234.supabase.co.");
     const table = typeof body?.table === "string" ? body.table.trim() : "";
     if (!TABLE.test(table)) return fail("Enter the table or view name (letters, digits and underscores).");
     const key = typeof body?.key === "string" ? body.key.trim() : "";

@@ -87,6 +87,8 @@ export interface SiteRecord {
   ga4Property?: string;
   /** Bumped to revoke every client link to this site's Results. */
   reportShareVersion?: number;
+  /** The workspace that owns the site; access is decided by membership in it. */
+  workspaceId?: string;
   createdAt: string;
   updatedAt: string;
 }

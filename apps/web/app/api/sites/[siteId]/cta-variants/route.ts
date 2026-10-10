@@ -1,11 +1,13 @@
 import { env } from "cloudflare:workers";
 import { createId } from "@organic-growth/core";
-import { getSite, insertCtaVariant, listCtaVariants } from "@organic-growth/db";
+import { insertCtaVariant, listCtaVariants } from "@organic-growth/db";
+import { requireSite } from "../../../../../src/guard";
 import { fail, json, readJson, settingsFor } from "../../../../../src/server";
 
-export async function GET(_request: Request, context: { params: Promise<{ siteId: string }> }) {
+export async function GET(request: Request, context: { params: Promise<{ siteId: string }> }) {
   const { siteId } = await context.params;
-  if (!(await getSite(env.DB, siteId))) return fail("Site not found.", 404);
+  const access = await requireSite(request, siteId, "read");
+  if (access instanceof Response) return access;
   return json({ variants: await listCtaVariants(env.DB, siteId) });
 }
 
@@ -15,8 +17,9 @@ export async function GET(_request: Request, context: { params: Promise<{ siteId
  */
 export async function POST(request: Request, context: { params: Promise<{ siteId: string }> }) {
   const { siteId } = await context.params;
-  const site = await getSite(env.DB, siteId);
-  if (!site) return fail("Site not found.", 404);
+  const access = await requireSite(request, siteId, "write");
+  if (access instanceof Response) return access;
+  const { site } = access;
   const body = await readJson<{ label?: unknown; copy?: unknown; url?: unknown }>(request);
   const label = typeof body?.label === "string" ? body.label.trim() : "";
   const copy = typeof body?.copy === "string" ? body.copy.trim() : "";

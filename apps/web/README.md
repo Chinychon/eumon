@@ -43,16 +43,67 @@ Setup → *Track conversions* provides a dependency-free script for the customer
 
 ## Access control
 
-The app has no built-in user accounts: put the hostname behind **Cloudflare Access**, but exclude the public paths, or landing pages and tracking stop working:
+Every request passes `src/gate.ts` first: public paths pass, everything else needs a signed-in session, and signed-in writes to `/api/*` must come from Eumon's own pages (a cross-origin write is refused with 403).
+
+**Accounts.** Sign-in is Google only on Workers Free. Google creates the account on first use, and a new user gets a personal workspace. Other methods ship off:
+
+- Magic link and email verification need `EMAIL_ENABLED=true` (Workers Paid, Cloudflare Email Service, and `EMAIL_FROM`).
+- Email + password needs `PASSWORD_SIGNIN=true` and email as well (its hashing exceeds the Free CPU limit and sign-up needs verification).
+- While email is off, invitations are copy-paste links shown in Setup → Members.
+
+**Workspaces and roles.**
+
+| Role | Sees | Can |
+|---|---|---|
+| Owner | the workspace | everything a Member can, plus invite and remove people and change the workspace |
+| Member | the workspace | read and write every site; create sites (within limits) |
+| Client | only the sites they were granted | read-only: Results, pages, leads |
+
+Each user may own one workspace. Workspace deletion is disabled in the API, and the database refuses to delete a workspace that still has sites.
+
+**Public paths** (the list in `src/gate.ts`):
 
 - `/p/*` — landing pages, sitemap, and the analytics beacon
-- `/api/sites/*/events` — conversion events from customer sites
-- `/r/*` and `/api/r/*` — client Results links (each is a signed, revocable token)
-- `/api/logs/*` — server and CDN logs pushed by Logpush, Vercel, or a script (each site has its own token)
+- `/api/sites/:id/events` — conversion events from customer sites
+- `/r/*` and `/api/r/*` — client Results links (signed, revocable tokens)
+- `/api/logs/*` — server and CDN logs pushed by Logpush, Vercel, or a script, authenticated by a per-site token
+- `/api/auth/*` — Better Auth's own endpoints (rate limited per IP)
+- `/sign-in` and `/invite/*`
+- static files: `/manifest.json`, `/sw.js`, `/sw-register.js`, `/favicon.ico`, `/robots.txt`, `/icon-*.png`, `/assets/*`
+
+**Free limits.** A workspace with no row in `workspace_limits` gets:
+
+| Limit | Default |
+|---|---|
+| Sites | 1 |
+| Analyses per day | 3 |
+| Scrape pages per day | 500 |
+| Ask questions per day | 20 |
+| AI runs per day (template generate, snippets, scope, source preview, dedupe, AI template design, change generation) | 10 |
+| People (members + clients + pending invitations) | 3 |
+| DataForSEO, pull requests, Google Sheets export | off |
+
+A refused action answers `429` with a sentence saying what to do next. `/admin` (for the emails in `BOOTSTRAP_OWNER_EMAIL`) lists workspaces with today's usage and raises these limits.
+
+**Bootstrap owner.** `BOOTSTRAP_OWNER_EMAIL` (comma-separated) names the platform admins. On first sign-in they become Owner of the initial workspace that holds the sites that existed before accounts, and they can open `/admin`.
+
+**Log tokens.** Each site's log-ingest token can be rotated from Connections. Until you rotate it, the token derived from `SESSION_SECRET` keeps working.
+
+**Pull requests** only ever change `public/robots.txt`.
+
+**Manual setup** (one-off, outside the code):
+
+1. Secrets: `BETTER_AUTH_SECRET` (`openssl rand -hex 32`) and `BOOTSTRAP_OWNER_EMAIL`, set before the first deploy.
+2. Google Cloud: add the redirect URI `<origin>/api/auth/callback/google` to the OAuth client (alongside `<origin>/api/google/callback` for Search Console).
+3. GitHub App: turn on "Request user authorization (OAuth) during installation", copy its Client ID and a client secret into `GITHUB_APP_CLIENT_ID` and `GITHUB_APP_CLIENT_SECRET`, and under Organization permissions set Members to Read-only (installs on an organization are only accepted from its admins). A hand-typed `installation_id` is refused.
+4. Turnstile: create a widget and set `TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET_KEY`.
+5. Rate limit: the `AUTH_RATE_LIMIT` binding's `namespace` in `cloudflare.config.ts` must be unique in your Cloudflare account.
+6. Apply migration `0024` with the deploy: `npm run db:migrate:remote`.
+
+Production can stay on `workers.dev`; `previewUrls` is off so preview hostnames don't serve the app. A custom domain is optional.
 
 ## Current boundaries
 
-- One workspace; no multi-user membership or roles (see Access control).
 - Competitors are owner-supplied domains (up to five per analysis). Eumon reads their sitemaps within a fixed budget (large sitemap indexes are sampled and extrapolated), inspects one page per major section as EumonBot (robots.txt respected), and compares content types with yours and with your datasets. There is no SERP or backlink data, so counts show where competitors invest, not what ranks.
 - The scraper reads server-rendered HTML; sources that only render client-side, require logins, or block robots are skipped.
 - Collected facts are shown to the owner before anything is published, but extraction is model output — review records and page previews before publishing.

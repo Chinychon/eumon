@@ -3,6 +3,9 @@ import { createLlm, describeModelError, LlmError, type JsonLlm, type LlmEnv } fr
 import type { PageSettings, SiteRecord } from "@organic-growth/core";
 import { isSafePublicUrl } from "@organic-growth/crawler";
 import { defaultPageSettings, getPageSettings } from "@organic-growth/db";
+import { readText } from "./body";
+
+export { readText } from "./body";
 
 const NO_STORE = { "Cache-Control": "no-store" };
 
@@ -12,26 +15,6 @@ export function json(data: unknown, status = 200): Response {
 
 export function fail(message: string, status = 400): Response {
   return Response.json({ error: message }, { status, headers: NO_STORE });
-}
-
-/** Reads a request body without trusting Content-Length, so oversized bodies are rejected early. */
-export async function readText(request: Request, maxBytes: number): Promise<string | null> {
-  const reader = request.body?.getReader();
-  if (!reader) return null;
-  const decoder = new TextDecoder();
-  let text = "";
-  let total = 0;
-  for (;;) {
-    const part = await reader.read();
-    if (part.done) break;
-    total += part.value.byteLength;
-    if (total > maxBytes) {
-      await reader.cancel();
-      return null;
-    }
-    text += decoder.decode(part.value, { stream: true });
-  }
-  return text + decoder.decode();
 }
 
 export async function readJson<T = Record<string, unknown>>(request: Request, maxBytes = 64 * 1024): Promise<T | null> {

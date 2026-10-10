@@ -4,3 +4,6 @@ export * from "./match.js";
 export * from "./detect.js";
 export * from "./scope.js";
 export * from "./validate.js";
+export * from "./code.js";
+export * from "./snippet.js";
+export * from "./edit/metadata.js";

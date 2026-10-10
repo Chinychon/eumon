@@ -63,7 +63,6 @@ const serpCompetitors: Source = {
     let due = 0;
     let fetched = 0;
     let cost = 0;
-    const tracked = await listTrackedKeywords(db, site.id);
     for (const market of await coveredMarkets(ctx)) {
       if ((dates[market] ?? "") > staleBefore) continue;
       due++;

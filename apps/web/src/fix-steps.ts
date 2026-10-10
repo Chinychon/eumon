@@ -43,7 +43,8 @@ export async function runFixSteps(env: AppEnv, step: FixStep, siteId: string, an
   if (!site?.githubInstallationId || !site.githubOwner || !site.githubRepo || !site.workspaceId) return;
   // A workspace without pull requests spends no AI or GitHub calls and writes no rows.
   if (await featureRefusal(db, site.workspaceId, "pullRequests")) return;
-  const report = (await getAnalysisJob(db, analysisId))?.report as Report | undefined;
+  const job = await getAnalysisJob(db, analysisId);
+  const report = job?.report as Report | undefined;
   const fingerprint = report?.repo?.fingerprint;
   if (fingerprint?.framework !== "Next.js" || fingerprint.router !== "App Router") return;
   const sensitivePaths = report?.repo?.sensitivePaths ?? [];
@@ -88,7 +89,7 @@ export async function runFixSteps(env: AppEnv, step: FixStep, siteId: string, an
 
   await step.do("fixes-check-merged", async () => {
     const deps = await depsFor(env, site, 0);
-    return checkMergedFixes(deps, deps.pr, { siteId, pages: await listPageHeads(db, analysisId) });
+    return checkMergedFixes(deps, deps.pr, { siteId, pages: await listPageHeads(db, analysisId), analysisStartedAt: job!.createdAt });
   });
 
   const { autopilot, budget } = await getFixSettings(db, siteId);

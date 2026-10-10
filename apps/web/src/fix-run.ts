@@ -333,11 +333,14 @@ export function fixPrBody(fix: FixRecord, origin: string): string {
   ].join("\n\n");
 }
 
-export async function checkMergedFixes(deps: FixDeps, pr: PrOps, input: { siteId: string; pages: PageHead[] }): Promise<number> {
+/** `analysisStartedAt` is when the crawl in `pages` began; only fixes merged before then can show in it. */
+export async function checkMergedFixes(deps: FixDeps, pr: PrOps, input: { siteId: string; pages: PageHead[]; analysisStartedAt: string }): Promise<number> {
   const byUrl = new Map(input.pages.map((p) => [p.url, p]));
+  const started = new Date(input.analysisStartedAt).getTime();
   let reverted = 0;
   for (const fix of await listFixes(deps.db, input.siteId, ["merged"])) {
-    if (fix.verification) continue;
+    // A merged fix's updatedAt is its merge time (verification writes come after this check).
+    if (fix.verification || !(new Date(fix.updatedAt).getTime() < started)) continue;
     try {
       const seen = fix.urls.flatMap((u) => byUrl.get(u) ?? []);
       // Page-level fixes wait for a recrawl that includes their pages.

@@ -7,6 +7,8 @@ import { JSON_LD_COMPONENT, type FixCandidate } from "@organic-growth/fixes";
 import { checkMergedFixes, openStagedFixes, stageCandidates, type FixDeps } from "./fix-run.ts";
 
 const AT = "2026-10-10T00:00:00.000Z";
+/** An analysis that started after every merge in a test. */
+const later = () => new Date(Date.now() + 60_000).toISOString();
 const pageFile = `export async function generateMetadata({ params }) {\n  const { slug } = await params;\n  const procedure = await get(slug);\n  return {\n    title: procedure.name,\n  };\n}\nexport default async function Page() { return <main><h1>x</h1></main>; }\n`;
 const html = (name: string) => `<html><head><title>${name}</title></head><body><h1>${name}</h1><p>${name} in Malaysia from RM 900 with 120 specialists.</p></body></html>`;
 
@@ -87,7 +89,7 @@ describe("fix run", () => {
     files["app/procedures/[slug]/page.tsx"] = { content: fix!.files["app/procedures/[slug]/page.tsx"]!, sha: "merged" };
     const { opened, ops } = prs();
     const pages = [{ url: "https://x.com/procedures/acl", status: 500, hreflang: [], jsonLdTypes: [] }];
-    assert.equal(await checkMergedFixes(deps, ops, { siteId: "s", pages }), 1);
+    assert.equal(await checkMergedFixes(deps, ops, { siteId: "s", pages, analysisStartedAt: later() }), 1);
     assert.equal(opened[0]!.files["app/procedures/[slug]/page.tsx"], pageFile);
     assert.equal((await getFix(db, fix!.id))?.status, "reverted");
     assert.match(opened[0]!.branch, new RegExp(`^eumon/revert-${fix!.id.slice(-6)}-`));
@@ -294,7 +296,7 @@ describe("fix run guards", () => {
     const llms = { ...fix, id: "llms1", kind: "llms-txt", route: "public/llms.txt", filePath: "public/llms.txt", urls: [], problems: [] };
     await stageFix(db, { ...llms, status: "merged" });
     const { opened, ops } = prs();
-    assert.equal(await checkMergedFixes(deps, ops, { siteId: "s", pages: [] }), 0);
+    assert.equal(await checkMergedFixes(deps, ops, { siteId: "s", pages: [], analysisStartedAt: later() }), 0);
     assert.equal(opened.length, 0);
     assert.equal((await getFix(db, fix.id))?.verification, undefined);
     assert.equal((await getFix(db, "llms1"))?.verification?.recrawl, "ok");
@@ -305,7 +307,7 @@ describe("fix run guards", () => {
     files["app/procedures/[slug]/page.tsx"] = { content: fix.files["app/procedures/[slug]/page.tsx"] + "\n// later work", sha: "later" };
     const { opened, ops } = prs();
     const pages = [{ url: "https://x.com/procedures/acl", status: 500, hreflang: [], jsonLdTypes: [] }];
-    assert.equal(await checkMergedFixes(deps, ops, { siteId: "s", pages }), 0);
+    assert.equal(await checkMergedFixes(deps, ops, { siteId: "s", pages, analysisStartedAt: later() }), 0);
     assert.equal(opened.length, 0);
     const after = await getFix(db, fix.id);
     assert.equal(after?.status, "merged");
@@ -319,7 +321,7 @@ describe("fix run guards", () => {
     await stageFix(db, { ...fix, id: "other", route: "/other", urls: ["https://x.com/other"], score: 1, status: "merged" });
     const pages = [{ url: "https://x.com/procedures/acl", status: 500, hreflang: [], jsonLdTypes: [] }, { url: "https://x.com/other", status: 200, title: "Other", hreflang: [], jsonLdTypes: [] }];
     const ops = { createPr: async () => { throw new Error("reference already exists"); } };
-    assert.equal(await checkMergedFixes(deps, ops, { siteId: "s", pages }), 0);
+    assert.equal(await checkMergedFixes(deps, ops, { siteId: "s", pages, analysisStartedAt: later() }), 0);
     const failed = await getFix(db, fix.id);
     assert.deepEqual({ recrawl: failed?.verification?.recrawl, revert: failed?.verification?.revert }, { recrawl: "broken", revert: "failed" });
     assert.equal((await getFix(db, "other"))?.verification?.recrawl, "ok");
@@ -456,5 +458,17 @@ describe("skipped rows and AI calls (I7)", () => {
     await stageCandidates(deps, { ...input, candidates: [jsonld, { ...head, problems: ["title-missing"] }] });
     assert.deepEqual([calls, fetched], [0, 0]);
     assert.deepEqual((await listFixes(db, "s")).map((f) => f.status), ["skipped", "skipped"]);
+  });
+});
+
+describe("merged-fix verification timing (I10)", () => {
+  it("doesn't judge a fix merged after the analysis started", async () => {
+    const { db, deps, files, fix } = await mergedHead();
+    files["app/procedures/[slug]/page.tsx"] = { content: fix.files["app/procedures/[slug]/page.tsx"]!, sha: "merged" };
+    const { opened, ops } = prs();
+    const pages = [{ url: "https://x.com/procedures/acl", status: 500, hreflang: [], jsonLdTypes: [] }];
+    assert.equal(await checkMergedFixes(deps, ops, { siteId: "s", pages, analysisStartedAt: "2020-01-01T00:00:00.000Z" }), 0);
+    assert.equal(opened.length, 0);
+    assert.deepEqual([(await getFix(db, fix.id))?.status, (await getFix(db, fix.id))?.verification], ["merged", undefined]);
   });
 });

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { PendingSync } from "./components/site-data";
 import type { SiteRecord } from "@organic-growth/core";
 import { runLabel, useSiteRun } from "./components/AnalysisProgress";
 import { AskDrawer, AskView } from "./components/Ask";
@@ -67,6 +68,8 @@ function NoWorkspace({ email }: { email: string }) {
 
 export default function Home() {
   const [sites, setSites] = useState<SiteRecord[] | null>(null);
+  /** Syncs started from Setup (saving a property), per site, for the Overview to wait for. */
+  const [pendingSyncs, setPendingSyncs] = useState<Record<string, PendingSync>>({});
   const [me, setMe] = useState<Me | null>(null);
   const [siteId, setSiteId] = useState("");
   /** Home (the Ask conversation) is where the console opens unless the address names a page. */
@@ -200,14 +203,16 @@ export default function Home() {
             />
           ) : (
             <div key={`${site.id}:${view}`} className="view-enter">
-              {view === "overview" && <OverviewView key={site.id} site={site} tab={tab} onTab={setTab} onNavigate={navigate} />}
+              {view === "overview" && <OverviewView key={site.id} site={site} tab={tab} onTab={setTab} onNavigate={navigate}
+                pendingSync={pendingSyncs[site.id]} onSyncDone={() => setPendingSyncs(({ [site.id]: _done, ...rest }) => rest)} />}
               {view === "ask" && <AskView key={site.id} site={site} threadId={askThread} onThreadChange={setAskThread} />}
               {view === "data" && <DataView site={site} onNavigate={navigate} />}
               {view === "pages" && <PagesView site={site} onNavigate={navigate} />}
               {view === "performance" && <PageResultsView site={site} onNavigate={navigate} />}
               {view === "setup" && (
                 <>
-                  <ConnectionsView site={site} repositories={repositories} githubInstalled={githubInstalled} onSiteChanged={(updated) => setSites((items) => items?.map((item) => (item.id === updated.id ? updated : item)) ?? null)} />
+                  <ConnectionsView site={site} repositories={repositories} githubInstalled={githubInstalled} onSiteChanged={(updated) => setSites((items) => items?.map((item) => (item.id === updated.id ? updated : item)) ?? null)}
+                    onSyncStarted={(sync) => setPendingSyncs((current) => ({ ...current, [site.id]: sync }))} />
                   <SetupView site={site} sites={sites ?? []} role={me?.workspace?.role ?? "member"} />
                 </>
               )}

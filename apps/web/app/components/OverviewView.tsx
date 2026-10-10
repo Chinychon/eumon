@@ -13,7 +13,7 @@ import { AiPanel, CompetitorsPanel, EnquiriesPanel, KeywordsPanel, SearchPanel }
 import { HistoryPanel } from "./HistoryPanel";
 import { ExportContext, ExportMenu } from "./export/ExportMenu";
 import { backlogSheets, pageTypeSheets } from "./export/report-sheets";
-import { useLeads, useResults, type Leads } from "./site-data";
+import { useLeads, useResults, type Leads, type PendingSync } from "./site-data";
 import { Button, Card, ViewHeader } from "./ui";
 
 export type Repository = { id: number; name: string; fullName: string; owner: string; defaultBranch: string; isPrivate: boolean };
@@ -74,11 +74,14 @@ async function waitForSyncRun(siteId: string, id: string, startedAt: string, ali
  * lives in the address (`?tab=`), kept by the shell.
  */
 
-export function OverviewView({ site, tab, onTab, onNavigate }: {
+export function OverviewView({ site, tab, onTab, onNavigate, pendingSync, onSyncDone }: {
   site: SiteRecord;
   tab: string | null;
   onTab: (tab: string | null) => void;
   onNavigate: Navigate;
+  /** A sync started elsewhere in this tab (saving a Search Console or GA4 property): waited for, then the numbers reload. */
+  pendingSync?: PendingSync;
+  onSyncDone?: () => void;
 }) {
   const [report, setReport] = useState<Report | null>(null);
   const [pendingId, setPendingId] = useState("");
@@ -103,6 +106,14 @@ export function OverviewView({ site, tab, onTab, onNavigate }: {
   const alive = useRef(true);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, [site.id]);
   const [shared, setShared] = useState(false);
+  // A sync started by saving a property: wait for it here, so the dashboard fills in without a reload.
+  const followed = useRef("");
+  useEffect(() => {
+    if (!pendingSync || followed.current === pendingSync.id) return;
+    followed.current = pendingSync.id;
+    void follow(pendingSync).finally(() => onSyncDone?.());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingSync?.id]);
 
   const loadChanges = useCallback(async (analysisId: string) => {
     const data = await api<{ changes: Change[] }>(`/api/analyses/${analysisId}/changes`).catch(() => ({ changes: [] }));
@@ -210,6 +221,14 @@ export function OverviewView({ site, tab, onTab, onNavigate }: {
     setSyncing(true); setError("");
     try {
       const { id, startedAt } = await api<{ id: string; startedAt: string }>(`/api/sites/${site.id}/results/sync`, { method: "POST" });
+      await follow({ id, startedAt });
+    } catch (cause) { setError(errorMessage(cause)); setSyncing(false); }
+  }
+
+  /** Waits for a sync's run to be recorded, then reloads the numbers and says which sources failed. */
+  async function follow({ id, startedAt }: PendingSync) {
+    setSyncing(true);
+    try {
       const run = await waitForSyncRun(site.id, id, startedAt, () => alive.current);
       if (!alive.current) return;
       if (!run) {

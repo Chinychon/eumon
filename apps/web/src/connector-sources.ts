@@ -9,7 +9,7 @@ import {
 } from "@organic-growth/agents";
 import { addDays, keywordGaps, type BacklinkSummary, type PricedKeyword, type RankedKeyword, type SerpResult } from "@organic-growth/core";
 import {
-  changedPagePaths, defaultPageSettings, firstCrawlLogDay, getPageSettings, listCrawlLogDays, listSiteCompetitorDomains, listSiteMarkets, listSnapshotDates, listSnapshots,
+  changedPagePaths, defaultPageSettings, firstCrawlLogDay, getPageSettings, listCrawlLogDays, listSiteCompetitorDomains, listSiteMarkets, listSnapshotDates, listSnapshots, listTrackedKeywords,
   pruneCrawlLog, saveSnapshot, getSnapshot, type MetricPoint,
 } from "@organic-growth/db";
 import type { Source, SyncContext } from "./results-sync.ts";
@@ -63,6 +63,7 @@ const serpCompetitors: Source = {
     let due = 0;
     let fetched = 0;
     let cost = 0;
+    const tracked = await listTrackedKeywords(db, site.id);
     for (const market of await coveredMarkets(ctx)) {
       if ((dates[market] ?? "") > staleBefore) continue;
       due++;
@@ -109,7 +110,8 @@ export function serpTargets(lists: Awaited<ReturnType<typeof marketLists>>): Arr
  * which result types take the clicks, and whether an AI Overview cites the
  * site. Up to SERPS_PER_SYNC pages per sync, oldest first; each page is
  * checked again after FRESH_DAYS, so a month of daily syncs keeps every list
- * current. Searches no longer targeted drop out of the list.
+ * current. Searches no longer targeted drop out of the list; tracked keywords'
+ * pages (rank tracking writes them daily) stay.
  */
 const serpResults: Source = {
   name: "search results", cadence: "daily", marker: "sync.serp",
@@ -124,6 +126,7 @@ const serpResults: Source = {
     let targeted = 0;
     let fetched = 0;
     let cost = 0;
+    const tracked = await listTrackedKeywords(db, site.id);
     for (const market of await coveredMarkets(ctx)) {
       const lists = await marketLists(ctx, market);
       const targets = serpTargets(lists);
@@ -145,7 +148,7 @@ const serpResults: Source = {
           notes.push(`search results skipped “${target.keyword}” in ${market}: ${said(error)}`);
         }
       }
-      const wanted = new Set(targets.map((target) => target.keyword.toLowerCase()));
+      const wanted = new Set([...targets.map((target) => target.keyword.toLowerCase()), ...tracked]);
       const rows = [...kept.entries()].filter(([key]) => wanted.has(key)).map(([, row]) => row);
       if (changed || rows.length !== kept.size) await saveSnapshot(db, site.id, { kind: "serp", scope: market, periodEnd: today, rows });
     }

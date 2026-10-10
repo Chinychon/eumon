@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { getSite, saveSnapshot, saveTopQueriesSnapshot, setSiteCompetitorDomains, setSiteMarkets, upsertMetricPoints, updateSiteGa4Property, updateSiteGscProperty, upsertOAuthCredential, upsertSite } from "@organic-growth/db";
+import { getSite, saveRankChecks, saveSnapshot, setTrackedKeywords, saveTopQueriesSnapshot, setSiteCompetitorDomains, setSiteMarkets, upsertMetricPoints, updateSiteGa4Property, updateSiteGscProperty, upsertOAuthCredential, upsertSite } from "@organic-growth/db";
 import { openSqliteD1 } from "@organic-growth/db/sqlite";
 import { loadKeywords } from "./keywords-data.ts";
 import { DEMO_SITE_ID } from "@organic-growth/agents";
-import { resultsPayload } from "./results-data.ts";
+import { loadResults, resultsPayload } from "./results-data.ts";
 
 describe("results payload", () => {
   it("says Analytics needs a reconnect, and gives the client link no property IDs or site health", async () => {
@@ -79,5 +79,17 @@ describe("results payload", () => {
     const payload = await resultsPayload(db, site, { keys: { dataForSeo: { login: "a", password: "b" } } });
     assert.deepEqual(payload.site.signals, { speed: false, authority: false, keywords: true, bing: false });
     assert.equal(payload.results.keywords.visibility[0]!.domain, "x.com");
+  });
+
+  it("loads tracked keywords and their checks into the view", async () => {
+    const db = openSqliteD1();
+    const at = new Date().toISOString();
+    const today = at.slice(0, 10);
+    await upsertSite(db, { id: "s", name: "x.com", baseUrl: "https://x.com", createdAt: at, updatedAt: at });
+    await setTrackedKeywords(db, "s", ["kw"]);
+    await setSiteMarkets(db, "s", ["mys"]);
+    await saveRankChecks(db, "s", [{ keyword: "kw", market: "mys", day: today, position: 4, url: "https://x.com/p", features: [] }]);
+    const view = await loadResults(db, (await getSite(db, "s"))!, today);
+    assert.deepEqual(view.ranks.rows.map((row) => [row.keyword, row.position]), [["kw", 4]]);
   });
 });

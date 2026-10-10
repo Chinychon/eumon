@@ -25,7 +25,9 @@ export type FindingCategory =
   | "search"
   | "repository"
   /** AI assistants' access to the site (robots.txt for AI crawlers): reported, never auto-fixed. */
-  | "ai_visibility";
+  | "ai_visibility"
+  /** HTTPS hygiene: mixed content, HTTP links, HSTS. */
+  | "security";
 
 export type CompetitorCategory =
   | "business"
@@ -98,6 +100,10 @@ export interface Finding {
   siteId: string;
   analysisId: string;
   category: FindingCategory;
+  /** The registry check that produced it (packages/core/src/checks); reports from before the registry have none. */
+  checkId?: string;
+  /** Distinguishes several findings from one check: the family, query or entity type. */
+  scopeKey?: string;
   severity: Severity;
   title: string;
   summary: string;

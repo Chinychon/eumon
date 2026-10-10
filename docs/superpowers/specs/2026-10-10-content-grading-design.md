@@ -46,6 +46,8 @@ The four fetches for one target run in parallel. Targets run in sequence inside 
 
 ## 3. Grading (pure, `packages/core/src/content-grade.ts`)
 
+> **Amended 2026-10-10 after review probes.** Lexical topic matching (heading-token Jaccard, stemming, text coverage) proved unreliable on real pages: synonyms (cost/price/harga) never matched, stemming merged distinct topics (side effects/effectiveness, surgeon/surgery), Malay morphology broke stems, and half of two-competitor grades came back empty. **Topics are now proposed by the analysis' LLM and verified in code:** each topic must cite headings that exist verbatim on ≥ 2 competitor pages, and "covered" must quote a passage that exists verbatim in the site's page; anything unverified is dropped or counted missing. Length, structure, score and grade below are unchanged; fewer than 3 verified topics means no grade; no LLM means the target is skipped with a note. The paragraphs on topics and coverage below describe the superseded lexical rules.
+
 **Topics:**
 - Each competitor page's H2 and H3 headings are normalised:
   - lower-cased;

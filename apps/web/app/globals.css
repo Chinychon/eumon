@@ -897,3 +897,10 @@ details.disclosure[open] > summary { margin-bottom: 10px; }
 .today-gone { --c: var(--red); } .coverage-bar .today-gone { background: var(--red); }
 .today-error { --c: var(--red-tint); } .coverage-bar .today-error { background: var(--red-tint); }
 .today-unchecked { --c: var(--line-strong); } .coverage-bar .today-unchecked { background: var(--line-strong); }
+
+/* Sign-in and invitation pages: one centred column, hairline-ruled inputs, square corners. */
+.signin { max-width: 360px; margin: 0 auto; padding: 72px 20px; display: flex; flex-direction: column; gap: 14px; }
+.signin h1 { font-size: 22px; font-weight: 600; margin: 0; }
+.signin p { margin: 0; color: var(--ink-2); font-size: 14px; line-height: 1.55; }
+.signin form { display: flex; flex-direction: column; gap: 14px; border-top: 1px solid var(--line); padding-top: 14px; }
+.signin input { height: 36px; padding: 0 10px; border: 1px solid var(--line); border-radius: 0; background: var(--surface); color: var(--ink); font: inherit; }

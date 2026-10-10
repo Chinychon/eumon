@@ -13,7 +13,10 @@ import { PageResultsView } from "./components/PageResultsView";
 import { resolveLink, type View } from "./components/report-model";
 import { SetupView } from "./components/SetupView";
 import { BrandMark } from "./components/pixel";
+import { authClient } from "./components/auth-client";
 import { Button, LeafIcon, ThemeToggle } from "./components/ui";
+
+type Me = { user: { id: string; email: string }; workspace: { id: string; name: string; role: "owner" | "member" | "client" } | null; workspaces: Array<{ id: string; name: string; role: string }>; platformAdmin: boolean };
 
 /**
  * `steps` are the pipeline steps (README) a view covers; `group` labels the run of views it starts.
@@ -41,6 +44,7 @@ function setQuery(params: Record<string, string | null>) {
 
 export default function Home() {
   const [sites, setSites] = useState<SiteRecord[] | null>(null);
+  const [me, setMe] = useState<Me | null>(null);
   const [siteId, setSiteId] = useState("");
   /** Home (the Ask conversation) is where the console opens unless the address names a page. */
   const [view, setView] = useState<View>("ask");
@@ -88,6 +92,7 @@ export default function Home() {
     else if (gsc) setError("The Google Search Console connection needs attention — try connecting again.");
     setQuery({ github: null, github_error: null, gsc: null });
 
+    api<Me>("/api/me").then(setMe).catch(() => undefined);
     loadSites(query.get("site") ?? undefined).catch((cause) => setError(errorMessage(cause)));
     api<{ repositories: Repository[] }>("/api/github/repositories")
       .then((data) => { setRepositories(data.repositories); setGithubInstalled(true); })
@@ -98,6 +103,8 @@ export default function Home() {
   useEffect(() => { if (siteId) setQuery({ site: siteId, view, tab, thread: view === "ask" ? askThread || null : null }); }, [siteId, view, tab, askThread]);
   useEffect(() => { if (!notice) return; const timer = setTimeout(() => setNotice(""), 6000); return () => clearTimeout(timer); }, [notice]);
 
+  const nav = me?.workspace?.role === "client" ? NAV.filter((item) => ["overview", "pages", "performance"].includes(item.view)) : NAV;
+  useEffect(() => { if (!nav.some((item) => item.view === view)) { setView("overview"); setTab(null); } }, [nav, view]);
   const site = sites?.find((entry) => entry.id === siteId) ?? null;
   const run = useSiteRun(siteId);
   const tabLabel = view === "overview" && tab ? OVERVIEW_TABS.find((entry) => entry.tab === tab)?.label : undefined;
@@ -116,7 +123,7 @@ export default function Home() {
       <aside className="sidebar" inert={covered}>
         <a className="brand" href="/"><BrandMark /><span>Eumon</span></a>
         <div className="workspace-label">{site ? new URL(site.baseUrl).hostname.toUpperCase() : "WORKSPACE"}</div>
-        {NAV.map((item) => (
+        {nav.map((item) => (
           <div key={item.view} className="workspace-item">
             {item.group && <div className="workspace-group">{item.group}</div>}
             <button className={`workspace${view === item.view && site && !adding ? " active" : ""}`} disabled={!site} onClick={() => { setAdding(false); navigate(item.view); }}>
@@ -144,6 +151,14 @@ export default function Home() {
           {run && (view !== "overview" || adding) && <button className="top-actions run-chip" onClick={() => { setAdding(false); navigate("overview"); }}>{runLabel(run)}</button>}
           {site && view !== "ask" && !adding && <button ref={askToggle} className="top-actions ask-toggle" aria-expanded={drawerOpen} onClick={() => setDrawer((value) => !value)}><LeafIcon />Ask Eumon</button>}
           {site && <a className="top-actions" href={site.baseUrl} target="_blank" rel="noreferrer">Open site</a>}
+          {me?.workspace && <span className="top-actions">{me.workspace.name}</span>}
+          {me && me.workspaces.length > 1 && (
+            <select aria-label="Workspace" value={me.workspace?.id ?? ""} onChange={async (event) => { await authClient.organization.setActive({ organizationId: event.target.value }); window.location.reload(); }}>
+              {me.workspaces.map((entry) => <option key={entry.id} value={entry.id}>{entry.name}</option>)}
+            </select>
+          )}
+          {me?.platformAdmin && <a className="top-actions" href="/admin">Admin</a>}
+          {me && <Button variant="ghost" small onClick={async () => { await authClient.signOut(); window.location.assign("/sign-in"); }}>Sign out</Button>}
         </header>
         <div className="content-wrap">
           {error && <div className="callout error" role="alert" style={{ marginBottom: 14 }}>{error} <button className="btn btn-ghost btn-small" onClick={() => setError("")}>Dismiss</button></div>}

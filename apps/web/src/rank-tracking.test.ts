@@ -53,6 +53,23 @@ describe("rank tracking steps", () => {
     assert.deepEqual(serp.rows.map((row) => [row.keyword, row.position, row.checkedAt]).sort(), [["kw 0", null, today], ["kw 3", 3, today]]);
   });
 
+  it("fetches ten at a time and saves every row of a full slice", async () => {
+    const { db, record } = await site(["mys"], []);
+    const stub = serpStub();
+    let inFlight = 0;
+    let most = 0;
+    const fetchFn = (async (url: string, init?: RequestInit) => {
+      most = Math.max(most, ++inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      try { return await stub.fetchFn(url, init); } finally { inFlight--; }
+    }) as typeof fetch;
+    const targets = Array.from({ length: RANK_STEP }, (_, index) => ({ keyword: `kw ${index}`, market: "mys" }));
+    const result = await checkRanks(db, record, auth, today, targets, fetchFn);
+    assert.equal(result.checked, RANK_STEP);
+    assert.equal(most, 10);
+    assert.equal((await listRankChecks(db, "s", today)).length, RANK_STEP);
+  });
+
   it("writes the day's counts and the marker", async () => {
     const { db, record } = await site(["mys"], ["kw 3", "kw 0"]);
     await checkRanks(db, record, auth, today, [{ keyword: "kw 3", market: "mys" }, { keyword: "kw 0", market: "mys" }], serpStub().fetchFn);

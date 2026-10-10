@@ -276,30 +276,53 @@ describe("startSync and startDailySyncs", () => {
     await assert.rejects(() => startSync({ SEARCH_SYNC_WORKFLOW: broken }, { siteId: "s", trigger: "manual" }, now), /binding unavailable/);
   });
 
-  it("checks tracked keywords 40 a step when the workspace may spend DataForSEO, and spends nothing on a second run the same day", async () => {
+  /** A site in a workspace that may spend DataForSEO, tracking `keywords` in `markets`; `run` syncs it and counts SERP fetches. */
+  async function rankSite(markets: string[], keywords: number, dies?: string) {
     const db = openSqliteD1();
     await addSite(db, "s", "");
     await db.prepare(`INSERT INTO organization (id, name, slug, createdAt) VALUES ('w', 'w', 'w', ?)`).bind(at).run();
     await setLimitOverrides(db, "w", { dataForSeo: true });
     await db.prepare("UPDATE sites SET workspace_id = 'w' WHERE id = 's'").run();
-    await setSiteMarkets(db, "s", ["mys"]);
-    await setTrackedKeywords(db, "s", Array.from({ length: 41 }, (_, index) => `kw ${index}`));
-    let serps = 0;
+    await setSiteMarkets(db, "s", markets);
+    await setTrackedKeywords(db, "s", Array.from({ length: keywords }, (_, index) => `kw ${index}`));
+    const serps = { count: 0 };
     const fetchFn = (async (url: string) => {
       if (!url.includes("/serp/")) return new Response(JSON.stringify({ rows: [] }));
-      serps++;
+      serps.count++;
       return new Response(JSON.stringify({ status_code: 20000, tasks: [{ status_code: 20000, cost: 0.004, result: [{ item_types: ["organic"], items: [{ type: "organic", rank_group: 1, domain: "s.com", url: "https://s.com/p", title: "t" }] }] }] }));
     }) as typeof fetch;
-    const { steps, step, count } = recorder();
+    const { steps, step, count } = recorder(dies);
     const keys = { dataForSeo: { login: "me", password: "pw" } };
     const run = () => syncSite(deps(db, count, PASS, { keys, google: () => ({ connect: async () => ({ token: "t", scopes: [] }), fetchFn }) }), step, "s", "daily");
+    return { db, steps, serps, run };
+  }
+
+  it("checks tracked keywords 40 a step when the workspace may spend DataForSEO, and spends nothing on a second run the same day", async () => {
+    const { steps, run, serps } = await rankSite(["mys"], 41);
     let notes = await run();
     assert.ok(notes.includes("ranks: 41 checked in 2 steps, $0.16"), notes.join("; "));
     assert.equal(steps.filter((entry) => /^s\/ranks-\d+$/.test(entry.name)).length, 2);
-    assert.equal(serps, 41);
+    assert.equal(serps.count, 41);
     notes = await run();
-    assert.equal(serps, 41, "a pair already checked today is not asked again");
+    assert.equal(serps.count, 41, "a pair already checked today is not asked again");
     assert.ok(!notes.some((note) => note.startsWith("ranks:")), notes.join("; "));
+  });
+
+  it("goes on to the next slice when a rank step dies", async () => {
+    const { steps, run } = await rankSite(["mys", "sgp"], 2, "s/ranks-1");
+    const notes = await run();
+    assert.ok(notes.includes("ranks failed: boom"), notes.join("; "));
+    assert.ok(steps.some((entry) => entry.name === "s/ranks-2"), "the second market's slice still runs");
+    assert.ok(notes.includes("ranks: 2 checked in 1 step, $0.01"), notes.join("; "));
+  });
+
+  it("skips ranks with a note, and still records the run, when reading the workspace's limits dies", async () => {
+    const { db, steps, serps, run } = await rankSite(["mys"], 2, "s/ranks-limits");
+    const notes = await run();
+    assert.ok(notes.includes("ranks failed: boom"), notes.join("; "));
+    assert.equal(serps.count, 0);
+    assert.ok(steps.some((entry) => entry.name === "s/record"));
+    assert.equal((await listSyncRuns(db, "s")).length, 1);
   });
 
   it("does not check ranks for a site without the DataForSEO feature", async () => {
@@ -309,6 +332,6 @@ describe("startSync and startDailySyncs", () => {
     await setTrackedKeywords(db, "s", ["kw"]);
     const { steps, step, count } = recorder();
     await syncSite(deps(db, count, PASS, { keys: { dataForSeo: { login: "me", password: "pw" } } }), step, "s", "daily");
-    assert.ok(!steps.some((entry) => entry.name.startsWith("s/ranks-")), "FREE_LIMITS has dataForSeo: false; a site without a workspace follows it");
+    assert.ok(!steps.some((entry) => /^s\/ranks-(queue|\d+)$/.test(entry.name)), "FREE_LIMITS has dataForSeo: false; a site without a workspace follows it");
   });
 });

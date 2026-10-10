@@ -8,8 +8,8 @@ import type { StepOptions } from "./sync-steps.ts";
 
 /*
  * Rank tracking's daily steps: the queue of (keyword, market) pairs not yet
- * checked today, SERP fetches 40 a step (the Free plan allows 50 subrequests
- * a step), and the day's counts. Each check also refreshes the `serp`
+ * checked today, SERP fetches 40 a step, ten at a time (the Free plan allows
+ * 50 subrequests a step), and the day's counts. Each check also refreshes the `serp`
  * snapshot row, so the Search results card and the growth plan see today's
  * page without a second fetch.
  */
@@ -17,7 +17,8 @@ import type { StepOptions } from "./sync-steps.ts";
 export const RANK_STEP = 40;
 /** Days of checks kept. */
 const KEEP_DAYS = 400;
-const RANK: StepOptions = { retries: { limit: 1, delay: 30_000 }, timeout: 3 * 60_000 };
+/** Four groups of ten live pages (each several seconds with the AI Overview loaded) fit well inside ten minutes. */
+const RANK: StepOptions = { retries: { limit: 1, delay: 30_000 }, timeout: 10 * 60_000 };
 
 export type RankTarget = { keyword: string; market: string };
 type Auth = { login: string; password: string };
@@ -55,15 +56,21 @@ export async function checkRanks(db: D1Like, site: SiteRecord, auth: Auth, today
   const rows: RankCheck[] = [];
   const pages = new Map<string, SerpResult[]>();
   let cost = 0;
-  for (const target of targets) {
-    try {
-      const answer = await fetchSerp(auth, { keyword: target.keyword, location: marketLocation(target.market)!, language, site: own, checkedAt: today, volume: null }, fetchFn);
-      rows.push({ keyword: target.keyword, market: target.market, day: today, position: answer.row.position, url: answer.row.url, features: answer.row.features });
-      pages.set(target.market, [...(pages.get(target.market) ?? []), answer.row]);
-      cost += answer.cost;
-    } catch (error) {
-      notes.push(`ranks skipped “${target.keyword}” in ${target.market}: ${said(error)}`);
-    }
+  // Ten at a time, as URL inspection asks: forty in a row would outrun the step's timeout.
+  for (let start = 0; start < targets.length; start += 10) {
+    const group = targets.slice(start, start + 10);
+    const answers = await Promise.allSettled(group.map((target) => fetchSerp(auth, { keyword: target.keyword, location: marketLocation(target.market)!, language, site: own, checkedAt: today, volume: null }, fetchFn)));
+    answers.forEach((answer, index) => {
+      const target = group[index]!;
+      if (answer.status === "rejected") {
+        notes.push(`ranks skipped “${target.keyword}” in ${target.market}: ${said(answer.reason)}`);
+        return;
+      }
+      const { row } = answer.value;
+      rows.push({ keyword: target.keyword, market: target.market, day: today, position: row.position, url: row.url, features: row.features });
+      pages.set(target.market, [...(pages.get(target.market) ?? []), row]);
+      cost += answer.value.cost;
+    });
   }
   await saveRankChecks(db, site.id, rows);
   for (const [market, results] of pages) {
@@ -99,7 +106,8 @@ export async function trackRanks(db: D1Like, safe: Safe, site: SiteRecord, auth:
   for (const slice of slices(queue.ok.targets)) {
     round++;
     const result = await safe(`ranks-${round}`, () => checkRanks(db, site, auth, today, slice, fetchFn), RANK);
-    if ("error" in result) { notes.push(`ranks failed: ${result.error}`); break; }
+    // A dead slice costs its note; the next slice (often another market) still runs.
+    if ("error" in result) { notes.push(`ranks failed: ${result.error}`); continue; }
     steps++;
     checked += result.ok.checked;
     cost += result.ok.cost;

@@ -88,6 +88,25 @@ describe("runAssistantTurn", async () => {
     assert.deepEqual(rows.find((row) => row.issue === "Says not found but answers 200")?.urls, 2, "x and y carry the probe's title; the homepage never counts; the raw key is never shown");
   });
 
+  it("reads the health scores and the failed checks from the audit", async () => {
+    await upsertSite(db, site("h"));
+    await createAnalysis(db, { id: "an4", siteId: "h", status: "running", createdAt: now });
+    await saveAnalysisReport(db, "an4", { sitemap: { totalUrls: 3 }, findings: [], audit: {
+      seo: { value: 82.5, indexable: 200, unhealthy: 35 }, ai: { value: null, indexable: 200, unhealthy: 0, reason: "run a full crawl once after deploying" },
+      checks: [{ id: "title.weak", status: "failed", pages: 12 }, { id: "ai.stale", status: "skipped", reason: "x" }, { id: "title.length", status: "passed" }],
+    } }, "summary");
+    const { chat, sent } = scriptedChat([
+      () => [{ type: "tool_calls", calls: [{ id: "c1", name: "audit", arguments: "{}" }] }, { type: "finish", reason: "tool_calls" }],
+      () => [{ type: "text", text: "82." }, { type: "finish", reason: "stop" }],
+    ]);
+    await runAssistantTurn({ env: {}, db, site: site("h"), history: [], question: "How healthy is the site?", emit: () => undefined, chat });
+    const result = sent[1]!.messages.find((message) => message.role === "tool");
+    const parsed = JSON.parse(result?.role === "tool" ? result.content : "{}") as { summary?: string; rows?: Row[] };
+    assert.match(parsed.summary ?? "", /SEO health 82\.5/);
+    assert.match(parsed.summary ?? "", /AI visibility health not scored: run a full crawl once after deploying/);
+    assert.deepEqual(parsed.rows, [{ check: "Weak or missing titles", pillar: "SEO", class: "error", pages: 12, fix: "Generate a unique title per page on the server from the record it shows (name, location, key fact) and the site name." }]);
+  });
+
   it("only reads the current site", async () => {
     const { chat, sent } = scriptedChat([
       () => [{ type: "tool_calls", calls: [{ id: "c1", name: "crawl_coverage", arguments: "{}" }] }, { type: "finish", reason: "tool_calls" }],

@@ -1,5 +1,5 @@
 import { schema, streamChat, type ChatMessage, type ChatTool, type ChatToolCall, type JsonSchema, type LlmEnv } from "@organic-growth/ai";
-import type { CrawlIssue, SiteRecord } from "@organic-growth/core";
+import { CHECKS, type CrawlIssue, type SiteRecord } from "@organic-growth/core";
 import {
   conversionCounts, getAnalysisJob, getConversionSummary, getCrawlCoverage, getDailyTotals, getLatestAnalysisForSite,
   getPagePerformance, getPreviousCompletedAnalysis, listDatasets, listPageRevisions, listRecords, listSiteCompetitorDomains,
@@ -166,6 +166,29 @@ const TOOLS: Tool[] = [
           severity: finding.severity, category: finding.category, finding: finding.title, impact: finding.organicImpactScore,
           summary: finding.summary, next_step: finding.recommendation ?? null,
         })),
+      };
+    },
+  },
+  {
+    name: "audit",
+    label: "Reading the checks",
+    description: "The last analysis's SEO and AI visibility health scores (0-100: the share of indexable pages with no error-class issue) and every check that failed, with its pillar, class, page count and how to fix it.",
+    parameters: schema.object({}),
+    async run(context) {
+      const last = await context.latest();
+      if (!last) return NO_ANALYSIS;
+      type Score = { value: number | null; reason?: string };
+      const audit = (last.report as { audit?: { seo: Score; ai: Score; checks: Array<{ id: string; status: string; pages?: number }> } }).audit;
+      if (!audit) return { summary: "The last analysis ran before checks were scored; running it again lists every check and both health scores.", columns: [], rows: [] };
+      const score = (label: string, entry: Score) => (entry.value === null ? `${label} not scored: ${entry.reason ?? "no full crawl"}` : `${label} ${entry.value}${entry.reason ? ` (${entry.reason})` : ""}`);
+      const failed = audit.checks.filter((row) => row.status === "failed" && CHECKS[row.id]);
+      return {
+        summary: `${score("SEO health", audit.seo)}. ${score("AI visibility health", audit.ai)}. ${failed.length} of ${audit.checks.length} checks failed in the analysis of ${last.completedAt.slice(0, 10)}.`,
+        columns: ["check", "pillar", "class", "pages", "fix"],
+        rows: failed.map((row) => {
+          const check = CHECKS[row.id]!;
+          return { check: check.name, pillar: check.pillars.map((pillar) => (pillar === "seo" ? "SEO" : "AI visibility")).join(", ") || "none", class: check.class, pages: row.pages ?? null, fix: check.docs.how };
+        }),
       };
     },
   },

@@ -11,7 +11,7 @@ const PUBLIC: RegExp[] = [
   /^\/api\/logs\//, // log ingest (per-site token)
   /^\/api\/auth\//, // Better Auth's own endpoints
   /^\/sign-in(\/|$|\.)/, /^\/invite\//,
-  /^\/(manifest\.json|sw\.js|sw-register\.js|favicon\.ico|robots\.txt)$/, /^\/icon-[\w-]+\.png$/, /^\/assets\//,
+  /^\/(manifest\.json|sw\.js|favicon\.ico|robots\.txt)$/, /^\/icon-[\w-]+\.png$/, /^\/assets\//,
 ];
 
 export const isPublicPath = (path: string) => PUBLIC.some((pattern) => pattern.test(path));

@@ -371,3 +371,17 @@ describe("hreflang and alternates (I1)", () => {
     assert.match(fix?.snippet ?? "", /canonical: "\/about"/);
   });
 });
+
+describe("title template (I2)", () => {
+  it("writes only the subject and qualifier when the root layout has a title template", async () => {
+    const { db, deps } = await setup();
+    deps.llm = fakeLlm([
+      { skip: false, reason: "", facts: [], titleSubject: "procedure.name", titleQualifier: null, description: null, schema: [], examples },
+      { supported: true, problems: [] },
+    ]);
+    await stageCandidates(deps, { ...input, titleTemplate: "%s | MedBay", candidates: [{ ...head, urls, problems: ["title-missing"] }] });
+    const [fix] = await listFixes(db, "s");
+    assert.equal(fix?.status, "staged", fix?.result ?? "");
+    assert.match(fix!.files["app/procedures/[slug]/page.tsx"]!, /title: `\$\{procedure\.name\}`,/);
+  });
+});

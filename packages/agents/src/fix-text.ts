@@ -12,7 +12,8 @@ import { placeholders } from "@organic-growth/fixes";
 export const FIX_PROMPT_VERSION = "fix-text-1";
 
 export type FixSample = { url: string; title?: string; h1?: string; description?: string; text: string };
-export type FixTextInput = { kind: "head" | "jsonld"; siteName: string; language: string; problems: string[]; paths: string[]; dynamic: boolean; schemaType?: string; samples: FixSample[]; queries: string[] };
+/** `titleTemplate` is the root layout's `title.template` (e.g. "%s | Acme"); without one, code adds " | <site name>". */
+export type FixTextInput = { kind: "head" | "jsonld"; siteName: string; language: string; problems: string[]; paths: string[]; dynamic: boolean; schemaType?: string; samples: FixSample[]; queries: string[]; titleTemplate?: string };
 export type FixText = {
   facts: string[];
   titleSubject: string | null;
@@ -42,10 +43,18 @@ export function render(pattern: string, values: Map<string, string>): string {
   return out;
 }
 
-export function titleOf(text: FixText, values: Map<string, string>, siteName: string, dynamic: boolean): string | null {
+/** The words the AI wrote: subject plus qualifier, without the site name. */
+function titleCore(text: FixText, values: Map<string, string>, dynamic: boolean): string | null {
   if (!text.titleSubject) return null;
   const subject = dynamic ? values.get(text.titleSubject) ?? "" : text.titleSubject;
-  return `${subject}${text.titleQualifier ? ` ${text.titleQualifier}` : ""} | ${siteName}`;
+  return `${subject}${text.titleQualifier ? ` ${text.titleQualifier}` : ""}`;
+}
+
+/** The title as browsers show it: through the layout's template when there is one, else with " | <site name>". */
+export function titleOf(text: FixText, values: Map<string, string>, siteName: string, dynamic: boolean, template?: string): string | null {
+  const core = titleCore(text, values, dynamic);
+  if (core === null) return null;
+  return template ? template.replace("%s", () => core) : `${core} | ${siteName}`;
 }
 
 /** Every reason the text can't be used. Codes before the colon: `length` and `language` may be retried; the rest can't. */
@@ -95,7 +104,7 @@ export function checkFixText(input: FixTextInput, text: FixText): string[] {
         else seen.set(key, sample.url);
       }
     }
-    const title = titleOf(text, values, input.siteName, input.dynamic);
+    const title = titleOf(text, values, input.siteName, input.dynamic, input.titleTemplate);
     const description = text.description ? render(text.description, values) : null;
     if (title && title.length > 65) errors.add(`length: the title is ${title.length} characters on ${sample.url} (65 at most)`);
     if (description) {
@@ -104,7 +113,7 @@ export function checkFixText(input: FixTextInput, text: FixText): string[] {
       if (expected && !tokens(description).some((w) => expected.includes(w))) errors.add(`language: the description isn't in "${lang}"`);
     }
     const subject = input.dynamic ? values.get(text.titleSubject ?? "") ?? "" : text.titleSubject ?? "";
-    const body = title ? titleOf(text, values, "", input.dynamic)!.replace(/ \| $/, "") : null; // the site name suffix is the site's own words
+    const body = titleCore(text, values, input.dynamic); // the site name suffix or template is the site's own words
     for (const out of [body, description]) {
       if (!out) continue;
       if (/[{}]/.test(out)) errors.add("fact: a variable was left unfilled");
@@ -217,7 +226,7 @@ export async function writeFixText(llm: JsonLlm, input: FixTextInput, budget: { 
   const final = answer;
   const outputs = input.samples.map((sample) => {
     const values = new Map((final.examples.find((e) => e.url === sample.url)?.values ?? []).map((v) => [v.path, v.value]));
-    return { url: sample.url, title: titleOf(final, values, input.siteName, input.dynamic), description: final.description ? render(final.description, values) : null };
+    return { url: sample.url, title: titleOf(final, values, input.siteName, input.dynamic, input.titleTemplate), description: final.description ? render(final.description, values) : null };
   });
   let check: unknown;
   try {

@@ -15,6 +15,8 @@ export type FixDeps = { db: D1Like; repo: FixRepo; fetchPage(url: string): Promi
 export type StageInput = {
   siteId: string; analysisId: string; origin: string; siteName: string; language: string; queries: string[];
   candidates: FixCandidate[]; pages: PageHead[]; sensitivePaths: string[]; routes?: RouteRef[];
+  /** The root layout's `title.template`; when set, titles are written without the site name. */
+  titleTemplate?: string;
 };
 export type PrOps = { createPr(input: { branch: string; title: string; body: string; files: Record<string, string> }): Promise<{ number: number; url: string; nodeId: string; headSha: string }> };
 
@@ -132,7 +134,7 @@ async function stageHead(ctx: Ctx): Promise<Outcome> {
     } else plan.canonical = tpl;
   }
   const wantsTitle = c.problems.some((p) => p.startsWith("title-")), wantsDescription = c.problems.some((p) => p.startsWith("description-"));
-  const placeholder = { ...wanted, ...(wantsTitle ? { title: `Page title | ${input.siteName}` } : {}), ...(wantsDescription ? { description: "One or two sentences on what this page offers." } : {}) };
+  const placeholder = { ...wanted, ...(wantsTitle ? { title: input.titleTemplate ? "Page title" : `Page title | ${input.siteName}` } : {}), ...(wantsDescription ? { description: "One or two sentences on what this page offers." } : {}) };
   if (site.kind === "unsupported") return skip(title, site.reason, metadataSnippet(placeholder, route.dynamic));
 
   let aiReason: string | null = null, warnings: string[] = [], promptSha: string | undefined;
@@ -141,12 +143,13 @@ async function stageHead(ctx: Ctx): Promise<Outcome> {
     else if (deps.budget.calls <= 0) aiReason = "The AI budget for this analysis is used up, so the title and description are offered as a snippet instead.";
     else {
       const samples = await samplesFor(deps, c.urls);
-      const written = await writeFixText(deps.llm, { kind: "head", siteName: input.siteName, language: input.language, problems: c.problems, paths, dynamic: route.dynamic, samples, queries: input.queries }, deps.budget);
+      const written = await writeFixText(deps.llm, { kind: "head", siteName: input.siteName, language: input.language, problems: c.problems, paths, dynamic: route.dynamic, samples, queries: input.queries, ...(input.titleTemplate ? { titleTemplate: input.titleTemplate } : {}) }, deps.budget);
       if (!written.ok) aiReason = written.reason;
       else {
         const { text } = written;
         const q = text.titleQualifier ? ` ${text.titleQualifier}` : "";
-        if (wantsTitle && text.titleSubject) plan.title = route.dynamic ? `{${text.titleSubject}}${q} | ${input.siteName}` : `${text.titleSubject}${q} | ${input.siteName}`;
+        const suffix = input.titleTemplate ? "" : ` | ${input.siteName}`;
+        if (wantsTitle && text.titleSubject) plan.title = route.dynamic ? `{${text.titleSubject}}${q}${suffix}` : `${text.titleSubject}${q}${suffix}`;
         if (wantsDescription && text.description) plan.description = text.description;
         warnings = written.warnings;
         promptSha = FIX_PROMPT_VERSION;

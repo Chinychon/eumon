@@ -56,3 +56,16 @@ export function editMetadataBase(source: string, origin: string): EditResult {
   const entries = { top: [["metadataBase", `new URL(${JSON.stringify(origin)})`] as [string, string]], alternates: [] };
   return edit(source, entries, false, `export const metadata = {\n  metadataBase: new URL(${JSON.stringify(origin)}),\n};`, `Sets metadataBase to ${origin}, so canonical and hreflang URLs resolve to the live site.`);
 }
+
+/** The root layout's `title: { template: "…%s…" }`, which Next.js wraps every child page's title in. */
+export function titleTemplate(source: string): string | undefined {
+  let program: AstNode;
+  try { program = parseModule(source); } catch { return undefined; }
+  const site = findMetadata(program);
+  if (site.kind !== "object" && site.kind !== "function") return undefined;
+  const title = propertyNamed(site.object, "title");
+  const value = title ? unwrap(title.value as AstNode) : null;
+  const template = value?.type === "ObjectExpression" ? propertyNamed(value, "template") : undefined;
+  const literal = template ? unwrap(template.value as AstNode) : null;
+  return literal?.type === "StringLiteral" && String(literal.value).includes("%s") ? String(literal.value) : undefined;
+}

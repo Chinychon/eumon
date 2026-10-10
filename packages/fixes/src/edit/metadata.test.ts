@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { applyEdits, validateEdit } from "../validate.js";
-import { editMetadata, editMetadataBase } from "./metadata.js";
+import { editMetadata, editMetadataBase, titleTemplate } from "./metadata.js";
 import { toCode } from "../code.js";
 
 const applied = (source: string, result: ReturnType<typeof editMetadata>, file = "app/procedures/[slug]/page.tsx") => {
@@ -93,5 +93,14 @@ describe("editMetadataBase", () => {
     const source = `export const metadata = { title: "MedBay" };\nexport default function L({ children }) { return <html><body>{children}</body></html>; }\n`;
     const after = applied(source, editMetadataBase(source, "https://medbaycare.com"), "app/layout.tsx");
     assert.match(after, /metadataBase: new URL\("https:\/\/medbaycare\.com"\)/);
+  });
+});
+
+describe("titleTemplate (I2)", () => {
+  it("reads a root layout's title.template and ignores anything else", () => {
+    assert.equal(titleTemplate(`export const metadata = { title: { default: "Acme", template: "%s | Acme" } };`), "%s | Acme");
+    assert.equal(titleTemplate(`export const metadata = { title: "Acme" };`), undefined);
+    assert.equal(titleTemplate(`export const metadata = { title: { template: "Acme" } };`), undefined);
+    assert.equal(titleTemplate("export const metadata = {"), undefined);
   });
 });

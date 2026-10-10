@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { JsonLlm } from "@organic-growth/ai";
-import { checkFixText, writeFixText, type FixText, type FixTextInput } from "./fix-text.js";
+import { checkFixText, titleOf, writeFixText, type FixText, type FixTextInput } from "./fix-text.js";
 
 const input: FixTextInput = {
   kind: "head", siteName: "Harbour Clinic", language: "en", problems: ["title-missing", "description-missing"],
@@ -38,6 +38,14 @@ describe("checkFixText", () => {
     assert.ok(errors.some((e) => e.includes("no example values for https://x.com/procedures/mri")));
     assert.ok(errors.some((e) => e.includes("1999")));
     assert.ok(errors.some((e) => e.includes('"best"')));
+  });
+
+  it("renders and length-checks the title through the root layout's template (I2)", () => {
+    const values = new Map([["procedure.name", "ACL Reconstruction"]]);
+    assert.equal(titleOf(good, values, "Harbour Clinic", true, "%s · Harbour"), "ACL Reconstruction Cost Malaysia · Harbour");
+    const long = { ...input, titleTemplate: "%s | Harbour Clinic Specialist Hospital, Kuala Lumpur" };
+    assert.deepEqual(checkFixText(input, good), []);
+    assert.ok(checkFixText(long, good).some((e) => e.startsWith("length:") && e.includes("title")));
   });
 
   it("checks rendered lengths and the qualifier against search queries", () => {

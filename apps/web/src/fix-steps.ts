@@ -2,7 +2,7 @@ import { createLlm, type JsonLlm } from "@organic-growth/ai";
 import type { SiteRecord } from "@organic-growth/core";
 import { defaultFetcher } from "@organic-growth/crawler";
 import { getAnalysisJob, getFixSettings, getSite, listPageHeads, listTopQueries, type D1Like } from "@organic-growth/db";
-import { blockedAiSearchAgents, detect, LLMS_MARKER, ROOT_LAYOUTS, type FixCandidate, type RouteRef } from "@organic-growth/fixes";
+import { blockedAiSearchAgents, detect, LLMS_MARKER, ROOT_LAYOUTS, titleTemplate, type FixCandidate, type RouteRef } from "@organic-growth/fixes";
 import type { AppEnv } from "../cloudflare.config";
 import { fixRepoFor } from "./fix-github.ts";
 import { checkMergedFixes, openStagedFixes, stageCandidates, type FixDeps } from "./fix-run.ts";
@@ -70,7 +70,8 @@ export async function runFixSteps(env: AppEnv, step: FixStep, siteId: string, an
       allowAiSearch: fixSettings.allowAiSearch,
     });
     const queries = (await listTopQueries(db, siteId, 50)).map((q) => q.query);
-    return { candidates, queries, origin, siteName, language: settings.language || "en" };
+    const template = layout?.file ? titleTemplate(layout.file.content) : undefined;
+    return { candidates, queries, origin, siteName, language: settings.language || "en", ...(template ? { titleTemplate: template } : {}) };
   });
 
   let calls = FIX_AI_CALLS;
@@ -79,7 +80,7 @@ export async function runFixSteps(env: AppEnv, step: FixStep, siteId: string, an
     calls = await step.do(`fixes-stage-${i / PER_STEP}`, async () => {
       const deps = await depsFor(env, site, calls);
       const pages = await listPageHeads(db, analysisId);
-      await stageCandidates(deps, { siteId, analysisId, origin: prepared.origin, siteName: prepared.siteName, language: prepared.language, queries: prepared.queries, candidates: batch, pages, sensitivePaths, routes });
+      await stageCandidates(deps, { siteId, analysisId, origin: prepared.origin, siteName: prepared.siteName, language: prepared.language, queries: prepared.queries, titleTemplate: prepared.titleTemplate, candidates: batch, pages, sensitivePaths, routes });
       return deps.budget.calls;
     });
   }

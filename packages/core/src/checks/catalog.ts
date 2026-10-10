@@ -390,6 +390,29 @@ export const CATALOG: Check[] = [
       severity: "35 plus 2 per place between the best and 11, plus 15 when the best was in the top 3, capped at 80.",
     } }),
 
+  // Backlinks (referring domains)
+  c({ id: "backlinks.broken_targets", name: "Links to missing pages", pillars: ["seo"], category: "search", class: "warning", scope: "site", sources: ["connector"], fix: "redirect", requires: "referring-domain data",
+    docs: {
+      what: "Three or more real (not spam) sites link to addresses on the site that no longer answer, from the referring-domain profile (DataForSEO).",
+      why: "A link to a missing page passes nothing; the site loses authority it already earned.",
+      how: "Redirect each missing address to its closest live page, or restore the page; these links count again once the address answers. The Search Console import suggests redirects for missing addresses.",
+      severity: "30 plus 4 per linking site, capped at 70.",
+    } }),
+  c({ id: "backlinks.lost", name: "Links lost in 30 days", pillars: ["seo"], category: "search", class: "warning", scope: "site", sources: ["connector"], fix: "none", requires: "referring-domain data",
+    docs: {
+      what: "Three or more real (not spam) sites stopped linking to the site in the last 30 days.",
+      why: "Lost links are lost authority; a cluster often has one cause, such as a moved page or a changed partner site.",
+      how: "Check whether each linking page changed or your page moved; ask the strongest sites to restore the link, and redirect any moved page.",
+      severity: "25 plus 3 per site, capped at 60.",
+    } }),
+  c({ id: "backlinks.spam_wave", name: "Wave of spam links", pillars: ["seo"], category: "search", class: "notice", scope: "site", sources: ["connector"], fix: "none", requires: "referring-domain data",
+    docs: {
+      what: "Twenty or more spam sites started linking to the site in the last 30 days, with the networks they belong to.",
+      why: "Google ignores links like these, so most sites need do nothing; a wave is worth knowing about in case a manual action follows.",
+      how: "Don't buy links, and check Search Console's Manual actions page; disavow only if it reports one. Eumon leaves these sites out of your link counts.",
+      severity: "Always LOW (impact 15).",
+    } }),
+
   // Trends and logs
   c({ id: "trend.impressions_fell", name: "Impressions fell", pillars: ["seo"], category: "search", class: "notice", scope: "site", sources: ["connector"], fix: "none", requires: "Search Console",
     docs: {

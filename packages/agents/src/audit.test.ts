@@ -61,6 +61,11 @@ describe("auditTable", () => {
     assert.equal(auditTable(ctx({ hasAiQuestions: true })).find((row) => row.id === "answers.citation_lost")!.status, "passed");
   });
 
+  it("skips the backlink checks for a site without referring-domain data", () => {
+    assert.deepEqual(auditTable(ctx()).find((row) => row.id === "backlinks.lost"), { id: "backlinks.lost", status: "skipped", reason: "referring-domain data" });
+    assert.equal(auditTable(ctx({ hasReferring: true })).find((row) => row.id === "backlinks.lost")!.status, "passed");
+  });
+
   it("skips the rank checks for a site that tracks no keywords", () => {
     assert.deepEqual(auditTable(ctx()).find((row) => row.id === "rank.fell"), { id: "rank.fell", status: "skipped", reason: "tracked keywords" });
     assert.equal(auditTable(ctx({ hasRanks: true })).find((row) => row.id === "rank.fell")!.status, "passed");

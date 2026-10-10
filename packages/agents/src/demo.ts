@@ -3,7 +3,7 @@ import { addDays, aiAnswerPoints, keyOf, REF_ALPHABET, REF_LENGTH, slugify, sugg
 import { crawlGooglebotBatch, probeAiCrawlers, probeHost, probeNotFound, researchSite, type Fetcher, type SiteResearch } from "@organic-growth/crawler";
 import {
   chunks, createAnalysis, createLead, recordLeadClick, updateLead, defaultPageSettings, recordSyncRun, recountCrawl, upsertPageSettings, datasetCoverage, deleteSite, getAnalysisJob, getCrawlCoverage, getCrawlProgress, importSearchConsoleUrls, insertChange, insertConversionEvent, listAllRecords,
-  listCrawlLogDays, listCrawlPageResults, listPendingCrawlUrls, probePages, recordLandingSession, replaceCurrentSearchMetrics, replacePageSearchMetrics, runStatements, saveAnalysisReport, saveCrawlBatch,
+  listCrawlLogDays, loadReferringLists, listCrawlPageResults, listPendingCrawlUrls, probePages, recordLandingSession, replaceCurrentSearchMetrics, replacePageSearchMetrics, runStatements, saveAnalysisReport, saveCrawlBatch,
   saveAiAnswerChecks, setAiBrandNames, setAiPrompts, saveIndexStatus, saveRankChecks, setTrackedKeywords, saveSearchConsoleChart, saveSearchConsoleChecks, saveSearchConsoleSummary, saveSiteScope, saveSnapshot, searchConsoleReconciliation, saveTopQueriesSnapshot, saveUrlIndexStatus, listSiteCompetitorDomains, setSiteCompetitorDomains, syncFirstPartyResults, updateSiteGa4Property, upsertMetricPoints, type MetricPoint, setSiteMarkets, setTemplatePublication, syncTemplatePages, updateAnalysisProgress,
   updateAnalysisStatus, upsertDataset, upsertRecords, upsertSite, upsertTemplate, type D1Like,
 } from "@organic-growth/db";
@@ -549,6 +549,7 @@ async function analyzeDemo(db: D1Like, input: { analysisId: string; version: num
       inventory: await loadInventories(db, DEMO_SITE_ID, { analysisId: input.analysisId }),
       ranks: await loadRankSignals(db, DEMO_SITE_ID, new Date(input.now).toISOString().slice(0, 10)),
       aiAnswers: await loadAiAnswerSignals(db, DEMO_SITE_ID, new Date(input.now).toISOString().slice(0, 10)),
+      referring: await loadReferringLists(db, DEMO_SITE_ID, own, new Date(input.now).toISOString().slice(0, 10)),
     },
     crawlCoverage: { coverage, examples },
     renderPages: (urls) => renderDemo(urls, input.version),

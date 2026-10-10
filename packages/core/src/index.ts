@@ -20,4 +20,5 @@ export * from "./history.js";
 export * from "./search-console.js";
 export * from "./trends.js";
 export * from "./fingerprint.js";
+export * from "./backlinks.js";
 export * from "./checks/index.js";

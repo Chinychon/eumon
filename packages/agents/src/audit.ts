@@ -25,6 +25,8 @@ export type AuditContext = {
   hasRanks?: boolean;
   /** The site tracks questions asked of AI assistants (AI answer tracking). */
   hasAiQuestions?: boolean;
+  /** The site has a referring-domain profile (the daily sync's DataForSEO step). */
+  hasReferring?: boolean;
   robotsReadable: boolean;
   /** The AI crawler and host probe ran. */
   probed: boolean;
@@ -69,6 +71,7 @@ export function auditTable(ctx: AuditContext): AuditRow[] {
     if (/DataForSEO/.test(needs) && !ctx.hasDataForSeo) return skip(needs);
     if (/tracked keywords/.test(needs) && !ctx.hasRanks) return skip(needs);
     if (/tracked AI questions/.test(needs) && !ctx.hasAiQuestions) return skip(needs);
+    if (/referring-domain/.test(needs) && !ctx.hasReferring) return skip(needs);
     if (/browser render/.test(needs) && !ctx.rendered) return skip(needs);
     if (check.sources.includes("crawl") && !check.sources.includes("sample") && !ctx.coverage?.completedUrls) return skip("a full crawl");
     if (NEEDS_NEW_FIELDS.has(check.id) && ctx.coverage && !ctx.coverage.health?.checked) return skip(RECRAWL);

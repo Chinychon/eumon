@@ -50,6 +50,7 @@
   </table>
   <p>The Keywords tab also shows Rank tracking: daily Google positions for up to 30 keywords the user names, per target market, with the 7- and 30-day change and a line over time.</p>
   <p>The AI visibility tab also shows AI answers: weekly answers from ChatGPT, Gemini, Google AI Mode and Perplexity to the questions the user tracks, per target market, with whether each answer mentions or cites the site and which competitors it names.</p>
+  <p>The Competitors tab also shows Backlinks: the site's real referring domains with the spam count beside them, new, lost and broken links in 30 days, the strongest sites linking to it, the anchor mix, and the spam networks, collapsed. Its findings are on <a href="#findings">Findings</a>.</p>
   <p>The panels in <code>SitePanels.tsx</code> receive data that <code>OverviewView</code> loads once (<code>useResults</code> in <code class="path">apps/web/app/components/site-data.ts</code>, from <code>GET /api/sites/:siteId/results</code>). Report cards are built from <code>ReportTabs.tsx</code>, <code>results/*.tsx</code> and the chart primitives in <code class="path">apps/web/app/components/charts.tsx</code>. Card exports (CSV, Excel, clipboard, Google Sheets) live in <code>apps/web/app/components/export/</code>. What each finding means is on <a href="#findings">Findings</a>.</p>
 
   <h2 id="account-pages">Sign-in, invitation and admin pages</h2>

@@ -7,6 +7,7 @@ import { AI_ANSWER_ENGINES, aiAnswersView, type AiAnswerCheck, type AiAnswersVie
 import { AI_ASSISTANTS, AI_ENGINES, type AiAssistant, type AiEngine } from "./ai-agents.js";
 import { keywordsView, type KeywordsInput } from "./keywords.js";
 import type { PageTypeOutcome } from "./whatsapp.js";
+import { backlinksView, type BacklinksInput, type BacklinksView } from "./backlinks.js";
 import { linksView, type LinksInput, type LinksView } from "./links.js";
 import { addDays } from "./dates.js";
 import { ranksView, type RankCheck, type RanksView } from "./ranks.js";
@@ -127,7 +128,7 @@ export const METRICS = {
   /** AI answer tracking: answers checked, mentioning the brand, citing the site — overall and per engine. Plus `ai_answers_mentioned:<domain>` and `ai_answers_cited:<domain>` for each current competitor. */
   aiAnswers: ["sync.ai_answers", "ai_answers_checked", "ai_answers_mentioned", "ai_answers_cited", ...AI_ANSWER_ENGINES.flatMap(({ engine }) => [`ai_answers_checked.${engine}`, `ai_answers_mentioned.${engine}`, `ai_answers_cited.${engine}`])],
   /** DataForSEO Backlinks: the site's profile. Plus `backlinks:<domain>`, `ref_domains:<domain>` and `backlink_rank:<domain>` for each current competitor. */
-  backlinks: ["sync.backlinks", "backlinks", "ref_domains", "backlink_rank"],
+  backlinks: ["sync.backlinks", "backlinks", "ref_domains", "backlink_rank", "ref_domains_real", "ref_domains_spam", "links_new_real", "links_lost_real", "links_broken_real"],
   /** Bing Webmaster Tools: daily clicks and impressions (Bing and the products built on its index), and crawl counts. */
   bing: ["sync.bing", "bing_clicks", "bing_impressions", "bing_crawled_pages", "bing_crawl_errors", "bing_in_index"],
   /** URLs sent to IndexNow per day. */
@@ -172,6 +173,8 @@ export type ResultsInput = {
   ranks?: { tracked: string[]; checks: RankCheck[] };
   /** Link profiles for the site and each current competitor, and the link gap. */
   links?: LinksInput;
+  /** The site's stored referring domains (bounded lists) and spam networks; null when none are stored. */
+  referring?: BacklinksInput | null;
   /** Crawler requests from the site's server or CDN logs, per day; undefined when no log has been received. */
   crawlLog?: CrawlDayRow[];
   /** The tracked questions, their answer checks (last 90 days), and the site's bare domain. */
@@ -236,7 +239,7 @@ export type ResultsView = {
   };
   serp: SerpView;
   ranks: RanksView;
-  links: LinksView & { history: DayValue[] };
+  links: LinksView & { history: DayValue[]; own: BacklinksView | null };
   /** Bing Webmaster Tools; null until its first sync. */
   bing: {
     clicks: Compare; impressions: Compare;
@@ -365,7 +368,7 @@ export function resultsView(input: ResultsInput): ResultsView {
   };
   const serp = serpView(input.serp?.lists ?? [], input.serp?.suggestions ?? []);
   const ranks = ranksView({ tracked: input.ranks?.tracked ?? [], markets: input.markets, checks: input.ranks?.checks ?? [], today: input.today });
-  const links = { ...linksView(input.links ?? { site: keywordLists.site, competitors: input.competitors ?? [], synced: false, summaries: [], gap: null }), history: series.ref_domains ?? [] };
+  const links = { ...linksView(input.links ?? { site: keywordLists.site, competitors: input.competitors ?? [], synced: false, summaries: [], gap: null }), history: series.ref_domains ?? [], own: input.referring ? backlinksView(input.referring) : null };
   // Bing reports through yesterday, like the first-party numbers.
   const bingImpressions = weekly(series.bing_impressions, from, today, addDays(today, -1));
   const bing = series["sync.bing"]?.length ? {

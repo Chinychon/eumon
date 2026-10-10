@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { dataForSeoLocation, fetchAiAnswer, fetchBacklinkSummary, fetchKeywordOverview, fetchRankedKeywords, fetchSerp } from "./dataforseo.js";
+import { dataForSeoLocation, fetchAiAnswer, fetchBacklinkSummary, fetchReferringDomains, fetchKeywordOverview, fetchRankedKeywords, fetchSerp } from "./dataforseo.js";
 
 const auth = { login: "me@example.com", password: "secret" };
 const envelope = (task: object) => JSON.stringify({ version: "0.1.20260917", status_code: 20000, status_message: "Ok.", cost: 0.0132, tasks_count: 1, tasks_error: 0, tasks: [task] });
@@ -125,5 +125,36 @@ describe("DataForSEO client", () => {
     ] }] }))) as unknown as typeof fetch;
     const answer = await fetchAiAnswer(auth, { engine: "chatgpt", prompt: "q", location: 2458, language: "en", countryIso2: null }, serve);
     assert.deepEqual(answer.sources, [{ domain: "evil.example", url: "" }, { domain: "ok.example", url: "http://ok.example/a" }]);
+  });
+});
+
+describe("referring domains", () => {
+  const item = (extra: object) => ({ domain_from: "a.example", url_from: "https://a.example/p", url_to: "https://x.com/", anchor: "x", dofollow: true, first_seen: "2026-09-14 08:12:00 +00:00", last_seen: "2026-10-01 00:00:00 +00:00", is_lost: false, is_broken: false, domain_from_rank: 40, backlink_spam_score: 3, ...extra });
+  const ask = async (items: object[] | null) => {
+    const asked: Array<{ url: string; body: string }> = [];
+    const fetchFn = (async (url: string, init?: RequestInit) => { asked.push({ url, body: String(init?.body) }); return new Response(envelope({ status_code: 20000, status_message: "Ok.", cost: 0.02, result: [{ items }] })); }) as typeof fetch;
+    return { asked, answer: await fetchReferringDomains(auth, "x.com", fetchFn) };
+  };
+
+  it("asks for one strongest link per domain and maps each item", async () => {
+    const { asked, answer } = await ask([item({ domain_from: "www.a.example", anchor: null, backlink_spam_score: null, domain_from_rank: null, is_lost: true })]);
+    assert.equal(asked[0]!.url, "https://api.dataforseo.com/v3/backlinks/backlinks/live");
+    assert.deepEqual(JSON.parse(asked[0]!.body), [{ target: "x.com", mode: "one_per_domain", backlinks_status_type: "all", include_subdomains: true, exclude_internal_backlinks: true, order_by: ["domain_from_rank,desc"], limit: 1000 }]);
+    assert.deepEqual(answer, { cost: 0.02, rows: [{ domain: "a.example", urlFrom: "https://a.example/p", urlTo: "https://x.com/", anchor: "", dofollow: true, firstSeen: "2026-09-14", lastSeen: "2026-10-01", lost: true, broken: false, rank: 0, spamScore: null }] });
+  });
+
+  it("non-http linking pages are dropped, rows without a domain skipped, and an empty result gives no rows", async () => {
+    assert.deepEqual((await ask([item({ url_from: "javascript:alert(1)" }), item({ domain_from: null })])).answer.rows.map((row) => row.urlFrom), [""]);
+    assert.deepEqual((await ask(null)).answer.rows, []);
+  });
+
+  it("clips anchors to 200 characters and addresses to 500", async () => {
+    const [row] = (await ask([item({ anchor: "a".repeat(300), url_from: `https://a.example/${"p".repeat(600)}`, url_to: `https://x.com/${"q".repeat(600)}` })])).answer.rows;
+    assert.deepEqual([row!.anchor.length, row!.urlFrom.length, row!.urlTo.length], [200, 500, 500]);
+  });
+
+  it("keeps the first row when www.a.example and a.example are the same domain", async () => {
+    const rows = (await ask([item({ domain_from: "www.a.example", domain_from_rank: 50 }), item({ domain_from: "a.example", domain_from_rank: 10 })])).answer.rows;
+    assert.deepEqual(rows.map((row) => [row.domain, row.rank]), [["a.example", 50]]);
   });
 });

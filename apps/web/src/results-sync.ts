@@ -47,10 +47,10 @@ export type Source = {
 const reason = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 /**
- * One site's Results sync: every source in turn, each failing on its own.
- * The notes say what ran, what was skipped and why.
+ * One site's Results sync: the given sources (all by default) in turn, each
+ * failing on its own. The notes say what ran, what was skipped and why.
  */
-export async function syncResults(db: D1Like, site: SiteRecord, now: Date, google: GoogleAccess, keys: SignalKeys = {}): Promise<string[]> {
+export async function syncResults(db: D1Like, site: SiteRecord, now: Date, google: GoogleAccess, keys: SignalKeys = {}, sources: Source[] = SOURCES): Promise<string[]> {
   const today = now.toISOString().slice(0, 10);
   let access: Promise<{ token: string; scopes: string[] }> | undefined;
   const ctx: SyncContext = { db, site, today, now, keys, fetchFn: google.fetchFn, google: () => (access ??= google.connect()) };
@@ -59,8 +59,9 @@ export async function syncResults(db: D1Like, site: SiteRecord, now: Date, googl
   // The demo's domains are fictional and its data is seeded: asking Google, CrUX, Open PageRank or DataForSEO
   // about them spends quota and credits, and replaces the sample data with empty answers.
   const demo = site.id === DEMO_SITE_ID;
-  if (demo) notes.push("demo site: sample data is seeded, so only Eumon's own counts were refreshed");
-  for (const source of demo ? SOURCES.filter((entry) => entry.name === "first-party") : SOURCES) {
+  const runs = demo ? sources.filter((entry) => entry.name === "first-party") : sources;
+  if (demo && runs.length) notes.push("demo site: sample data is seeded, so only Eumon's own counts were refreshed");
+  for (const source of runs) {
     if (source.applies && !source.applies(ctx)) continue;
     if (source.google) {
       if (googleFailed) continue;

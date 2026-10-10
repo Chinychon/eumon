@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { countryName, SERP_FEATURES, type CompetitorSuggestion } from "@organic-growth/core";
+import { addDays, countryName, SERP_FEATURES, type BacklinksView, type CompetitorSuggestion } from "@organic-growth/core";
 import { api, errorMessage, formatDay, formatNumber } from "../api";
 import { BarList, LineChart } from "../charts";
 import type { Payload } from "../site-data";
@@ -109,6 +109,71 @@ export function CompetitorSuggestionsCard({ siteId, data, onAdded }: { siteId: s
   );
 }
 
+const clip = (text: string, max = 80) => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
+
+/** The site's own referring domains: real ones counted, the strongest listed, anchors, and the spam networks left out of the counts. */
+function YourLinks({ own, today, operator }: { own: BacklinksView; today: string; operator: boolean }) {
+  const { counts } = own;
+  const month = addDays(today, -30);
+  return (
+    <>
+      <div className="section-title">Your links</div>
+      <div className="metrics-grid">
+        <Kpi label="Real referring domains" value={formatNumber(counts.real)} caption={counts.spam > 0 ? `${formatNumber(counts.spam)} more from spam sites` : undefined} />
+        <Kpi label="New in 30 days" value={formatNumber(counts.newReal)} />
+        <Kpi label="Lost in 30 days" value={formatNumber(counts.lostReal)} />
+        <Kpi label="Linking to missing pages" value={formatNumber(counts.brokenReal)} />
+      </div>
+      {own.top.length > 0 && (
+        <>
+          <div className="section-title">Strongest sites linking to you</div>
+          <div className="table-wrap">
+            <table className="table top-queries">
+              <thead><tr><th>Linking site</th><th className="num">Rank</th><th>Anchor</th><th>Follow</th><th>First seen</th><th /></tr></thead>
+              <tbody>{own.top.map((row) => (
+                <tr key={row.domain}>
+                  {/* Only http(s) pages become links; anything else from the index stays text. */}
+                  <td>{/^https?:\/\//i.test(row.urlFrom) ? <a href={row.urlFrom} target="_blank" rel="noreferrer nofollow">{row.domain}</a> : row.domain}</td>
+                  <td className="num">{formatNumber(row.rank)}</td>
+                  <td className="small" title={row.anchor}>{row.anchor.trim() ? clip(row.anchor) : <span className="muted">(no text)</span>}</td>
+                  <td className="small">{row.dofollow ? "follow" : "nofollow"}</td>
+                  <td className="small">{formatDay(row.firstSeen)}</td>
+                  <td>{row.firstSeen >= month && <Badge tone="green">new</Badge>}{row.lost && <Badge tone="gray">lost</Badge>}{row.broken && <Badge tone="red">missing page</Badge>}</td>
+                </tr>
+              ))}</tbody>
+            </table>
+          </div>
+        </>
+      )}
+      {own.anchors.length > 0 && (
+        <>
+          <div className="section-title">Anchor text</div>
+          <BarList format={(value) => `${formatNumber(value)} sites`} rows={own.anchors.map((entry) => ({ label: clip(entry.anchor), value: entry.domains }))} />
+        </>
+      )}
+      {own.networks.length > 0 && (
+        <details className="disclosure" style={{ marginTop: 16 }}>
+          <summary>Spam networks: {formatNumber(counts.spam)} sites</summary>
+          <div className="table-wrap">
+            <table className="table top-queries">
+              <thead><tr><th>Shared by</th><th className="num">Sites</th><th>Since</th>{operator && <th>Example</th>}</tr></thead>
+              <tbody>{own.networks.map((network) => (
+                <tr key={network.key}>
+                  <td title={network.label}>{clip(network.label)}</td>
+                  <td className="num">{formatNumber(network.domains)}</td>
+                  <td className="small">{formatDay(network.since)}</td>
+                  {operator && <td className="small mono" title={network.example}>{clip(network.example)}</td>}
+                </tr>
+              ))}</tbody>
+            </table>
+          </div>
+          <p className="small muted">Google ignores most links like these. Eumon leaves them out of your counts. Disavow only if Search Console reports a manual action.</p>
+        </details>
+      )}
+    </>
+  );
+}
+
 /** Each domain's link profile side by side, the site's referring domains over time, and the sites that link to competitors but not to the site. */
 export function BacklinksCard({ data, operator }: Section) {
   const { links } = data.results;
@@ -122,13 +187,15 @@ export function BacklinksCard({ data, operator }: Section) {
     <Card title="Backlinks" subtitle={`Live links from other sites, from DataForSEO's link index, refreshed monthly${links.asOf ? ` (latest ${formatDay(links.asOf)})` : ""}. Referring domains count each linking site once.`}>
       {empty ? <p className="empty-state">{empty}</p> : (
         <>
+          {links.own && <YourLinks own={links.own} today={data.results.today} operator={operator} />}
+          {links.own && <div className="section-title">You and your competitors</div>}
           <div className="table-wrap">
             <table className="table top-queries">
               <thead><tr><th>Domain</th><th className="num">Referring domains</th><th className="num">Backlinks</th><th className="num">Rank (0–1,000)</th><th className="num">Broken links to it</th></tr></thead>
               <tbody>{links.domains.map((entry, index) => (
                 <tr key={entry.domain}>
                   <td>{index === 0 ? <strong>{host}</strong> : entry.domain}</td>
-                  <td className="num">{num(entry.summary?.referringMainDomains)}</td>
+                  <td className="num">{num(entry.summary?.referringMainDomains)}{index === 0 && links.own && <span className="muted"> ({formatNumber(links.own.counts.real)} real)</span>}</td>
                   <td className="num">{num(entry.summary?.backlinks)}</td>
                   <td className="num">{num(entry.summary?.rank)}</td>
                   <td className="num">{num(entry.summary?.brokenBacklinks)}</td>

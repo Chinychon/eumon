@@ -6,7 +6,7 @@
  * row, so every answer carries what it cost; the account allows one task per
  * request.
  */
-import { bareDomain, type AiAnswerEngine, type AiSource, type BacklinkSummary, type LinkGap, type RankedKeyword, type SerpCompetitor, type SerpFeature, type SerpResult } from "@organic-growth/core";
+import { bareDomain, type AiAnswerEngine, type ReferringDomain, type AiSource, type BacklinkSummary, type LinkGap, type RankedKeyword, type SerpCompetitor, type SerpFeature, type SerpResult } from "@organic-growth/core";
 
 export type DataForSeoAuth = { login: string; password: string };
 
@@ -163,6 +163,33 @@ export function backlinkSummary(result: unknown, domain: string): BacklinkSummar
 export async function fetchBacklinkSummary(auth: DataForSeoAuth, domain: string, fetchFn: typeof fetch = fetch): Promise<{ row: BacklinkSummary; cost: number }> {
   const { result, cost } = await post(auth, "backlinks/summary", { target: domain, include_subdomains: true, exclude_internal_backlinks: true, backlinks_status_type: "live" }, fetchFn);
   return { row: backlinkSummary(result, domain), cost };
+}
+
+type BacklinkItem = {
+  domain_from?: string | null; url_from?: string | null; url_to?: string | null; anchor?: string | null; dofollow?: boolean | null;
+  first_seen?: string | null; last_seen?: string | null; is_lost?: boolean | null; is_broken?: boolean | null; domain_from_rank?: number | null; backlink_spam_score?: number | null;
+};
+
+/** The site's referring domains: the strongest link from each, live and lost, up to 1,000, one row per bare domain (the first, strongest, stays). */
+export async function fetchReferringDomains(auth: DataForSeoAuth, domain: string, fetchFn: typeof fetch = fetch): Promise<{ rows: Array<Omit<ReferringDomain, "spam" | "spamReason">>; cost: number }> {
+  const { result, cost } = await post(auth, "backlinks/backlinks", {
+    target: domain, mode: "one_per_domain", backlinks_status_type: "all", include_subdomains: true, exclude_internal_backlinks: true, order_by: ["domain_from_rank,desc"], limit: 1000,
+  }, fetchFn);
+  const items = (result as { items?: BacklinkItem[] | null } | undefined)?.items ?? [];
+  const seen = new Set<string>();
+  const rows = items.flatMap((item) => {
+    if (!item.domain_from) return [];
+    const key = bareDomain(item.domain_from);
+    if (seen.has(key)) return [];
+    seen.add(key);
+    return [{
+      // Clipped: a thousand rows are stored whole and some anchors are pages of text.
+      domain: key, urlFrom: /^https?:\/\//i.test(item.url_from ?? "") ? item.url_from!.slice(0, 500) : "", urlTo: (item.url_to ?? "").slice(0, 500), anchor: (item.anchor ?? "").slice(0, 200), dofollow: Boolean(item.dofollow),
+      firstSeen: (item.first_seen ?? "").slice(0, 10), lastSeen: (item.last_seen ?? "").slice(0, 10), lost: Boolean(item.is_lost), broken: Boolean(item.is_broken),
+      rank: item.domain_from_rank ?? 0, spamScore: item.backlink_spam_score ?? null,
+    }];
+  });
+  return { rows, cost };
 }
 
 type IntersectionItem = { domain_intersection?: Record<string, { target?: string | null; rank?: number | null; backlinks?: number | null } | null> | null };

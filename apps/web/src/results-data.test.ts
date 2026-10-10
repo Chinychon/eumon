@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { getSite, saveAiAnswerChecks, saveRankChecks, setAiPrompts, saveSnapshot, setTrackedKeywords, saveTopQueriesSnapshot, setSiteCompetitorDomains, setSiteMarkets, upsertMetricPoints, updateSiteGa4Property, updateSiteGscProperty, upsertOAuthCredential, upsertSite } from "@organic-growth/db";
 import { openSqliteD1 } from "@organic-growth/db/sqlite";
+import type { D1Like } from "@organic-growth/db";
 import { loadKeywords } from "./keywords-data.ts";
 import { DEMO_SITE_ID } from "@organic-growth/agents";
 import { loadResults, resultsPayload } from "./results-data.ts";
@@ -104,5 +105,26 @@ describe("results payload", () => {
     const view = await loadResults(db, (await getSite(db, "s"))!, today);
     assert.deepEqual(view.aiAnswers.rows.map((row) => [row.prompt, row.market, row.cells.chatgpt?.mentioned]), [["best dentist", "mys", true]]);
     assert.deepEqual(view.aiAnswers.topDomains, [{ domain: "x.com", answers: 1, kind: "site" }], "the site is the bare domain");
+  });
+
+  it("still loads, with the new sections empty, before the migrations that add their tables are applied", async () => {
+    const db = openSqliteD1();
+    const at = new Date().toISOString();
+    await upsertSite(db, { id: "s", name: "x.com", baseUrl: "https://x.com", createdAt: at, updatedAt: at });
+    const site = (await getSite(db, "s"))!;
+    // A deploy goes out on merge; its migrations are applied by hand afterwards.
+    const missing = /\b(referring_domains|tracked_keywords|rank_checks|ai_prompts|ai_answer_checks)\b/;
+    // D1 fails such a statement when it runs, not when it is prepared.
+    const failing = (table: string) => {
+      const fail = () => Promise.reject(new Error(`D1_ERROR: no such table: ${table}`));
+      const statement = { bind: () => statement, all: fail, first: fail, run: fail };
+      return statement as unknown as ReturnType<D1Like["prepare"]>;
+    };
+    const unmigrated: D1Like = {
+      prepare: (sql: string) => (missing.test(sql) ? failing(sql.match(missing)![1]!) : db.prepare(sql)),
+      batch: (statements) => db.batch!(statements),
+    };
+    const results = await loadResults(unmigrated, site);
+    assert.equal(results.links.own, null);
   });
 });

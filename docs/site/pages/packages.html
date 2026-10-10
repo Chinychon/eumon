@@ -2,13 +2,13 @@
   <h1>Packages</h1>
   <p class="lede">What each workspace in the monorepo does, what it depends on, what it exports, its main modules and tests, and what to know before changing it. Use it to find where a piece of logic lives.</p>
 
-  <figure data-diagram="package-deps"><figcaption>Workspace dependencies from each <code>package.json</code>: <code>core</code> sits at the bottom, <code>agents</code> pulls the analysis together, and <code>apps/web</code> uses everything except <code>sdk</code>.</figcaption></figure>
+  <figure data-diagram="package-deps"><figcaption>Workspace dependencies from each <code>package.json</code>: <code>core</code> sits at the bottom, <code>agents</code> pulls the analysis together, and <code>apps/web</code> uses every package.</figcaption></figure>
 
   <p>The npm workspaces are <code>apps/*</code> and <code>packages/*</code> (root <code class="path">package.json</code>). Every package is ESM, named <code>@organic-growth/&lt;name&gt;</code>, written in TypeScript, and compiled by <code>tsc</code> from <code>src/</code> to <code>dist/</code>. Its <code>package.json</code> points <code>main</code>, <code>types</code> and <code>exports</code> at <code>dist/</code>, so every other workspace, including the web app, imports the <strong>built</strong> copy, never the source.</p>
   <table>
     <thead><tr><th>Command</th><th>What it does</th></tr></thead>
     <tbody>
-      <tr><td><code>npm run build:packages</code></td><td>Builds every package in dependency order: core, ai, db, repo-analyzer, crawler, scraper, pages, agents, sdk</td></tr>
+      <tr><td><code>npm run build:packages</code></td><td>Builds every package in dependency order: core, ai, db, repo-analyzer, crawler, scraper, pages, agents</td></tr>
       <tr><td><code>npm test</code></td><td>Builds the packages, then runs every workspace's <code>test</code> script</td></tr>
       <tr><td><code>npm test -w @organic-growth/&lt;name&gt;</code></td><td>One package's tests: <code>tsc -p tsconfig.test.json</code> compiles <code>src</code> (tests included) to <code>dist-test/</code>, then <code>node --test "dist-test/**/*.test.js"</code></td></tr>
       <tr><td><code>npm run typecheck</code></td><td>Builds the packages, then type-checks every workspace</td></tr>
@@ -205,16 +205,8 @@
   </table>
   <p><strong>Tests</strong> (<code>npm test -w @organic-growth/repo-analyzer</code>): <code>analyze.test.ts</code>.</p>
 
-  <h2 id="sdk">sdk</h2>
-  <p>A browser tracker for a customer's JavaScript app. <code>createOrganicGrowthTracker({ siteId, endpoint })</code> returns <code>track(event, { destination })</code>, which posts the event to <code>&lt;endpoint&gt;/&lt;siteId&gt;/events</code> with the page URL and a session id. It reads the landing pages' <code>eumon_sid</code> cookie at send time, so a conversion is credited to the Eumon page the visitor first landed on, and falls back to a session id in <code>sessionStorage</code>. Failures are swallowed so tracking never affects the host app.</p>
-  <dl class="facts">
-    <dt>Dependencies</dt><dd><code>@organic-growth/core</code> (type import of <code>ConversionEventName</code>)</dd>
-    <dt>Entry</dt><dd><code class="path">packages/sdk/src/index.ts</code>, the only file; export <code>.</code></dd>
-  </dl>
-  <p><strong>Tests</strong>: none; the package has no <code>test</code> script. No workspace imports it. <code class="path">apps/web/README.md</code> documents it as the alternative to the dependency-free tracking script for JavaScript apps. Events land in <code>conversion_events</code> (<a href="#data-model--landing-page-engine">Data model</a>).</p>
-
   <h2 id="web">web (apps/web)</h2>
-  <p><code>@organic-growth/web</code> is the deployed app: a vinext (React Server Components on Vite) app running as a Cloudflare Worker, with the dashboard UI, the API routes, the public landing pages, and the Workflows that run analyses, scrapes and search syncs. It depends on every package except <code>sdk</code>. It is not built to <code>dist/</code> for other workspaces; it is the consumer. Details are on <a href="#web-app">Web app</a>.</p>
+  <p><code>@organic-growth/web</code> is the deployed app: a vinext (React Server Components on Vite) app running as a Cloudflare Worker, with the dashboard UI, the API routes, the public landing pages, and the Workflows that run analyses, scrapes and search syncs. It depends on every package. It is not built to <code>dist/</code> for other workspaces; it is the consumer. Details are on <a href="#web-app">Web app</a>.</p>
   <dl class="facts">
     <dt>Worker entry</dt><dd><code class="path">apps/web/worker.ts</code>: hands <code>/api/auth/*</code> to Better Auth, runs the sign-in gate before every other request, sets the security headers, and exports the Workflow classes <code>SiteAnalysisWorkflow</code>, <code>ScrapeWorkflow</code>, <code>SearchSyncWorkflow</code></dd>
     <dt>Accounts</dt><dd><code>better-auth</code> 1.7.7 (<code class="path">apps/web/src/auth.ts</code>); the tables are on <a href="#data-model--accounts-and-workspaces">Data model</a></dd>

@@ -107,7 +107,7 @@
   <ul>
     <li><strong>Packages import each other's built <code>dist/</code>.</strong> Every package's <code>main</code> and <code>types</code> point at <code>./dist</code> (for example <code class="path">packages/core/package.json:6</code>), and the web app imports the packages the same way. An edit to <code>packages/*/src</code> is invisible to the web app and to other packages until <code>npm run build:packages</code> runs. <code>npm run dev</code> rebuilds them first (<code class="path">apps/web/scripts/predev.mjs</code>), but a running dev server does not; rebuild and reload after changing a package.</li>
     <li><strong>Tests run against compiled code.</strong> Each package's <code>test</code> script compiles with <code>tsconfig.test.json</code> into <code>dist-test/</code> and runs <code>node --test</code> on that. A test in one package exercises the other packages' <code>dist/</code>, not their source. The root <code>npm test</code> runs <code>build:packages</code> first; running one workspace's tests does not.</li>
-    <li><strong>Build order matters.</strong> <code>build:packages</code> in the root <code class="path">package.json</code> builds core, ai, db, repo-analyzer, crawler, scraper, pages, agents, sdk in that order. A new package or a new dependency between packages needs a place in that list.</li>
+    <li><strong>Build order matters.</strong> <code>build:packages</code> in the root <code class="path">package.json</code> builds core, ai, db, repo-analyzer, crawler, scraper, pages, agents in that order. A new package or a new dependency between packages needs a place in that list.</li>
   </ul>
   <p>What each package does is on <a href="#packages">Packages</a>.</p>
 

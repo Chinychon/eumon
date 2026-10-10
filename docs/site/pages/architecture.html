@@ -173,7 +173,7 @@
   <p>The customer's own domain forwards a path (by default <code>/guides</code>) to <code>/p/&lt;siteId&gt;/…</code>. Pages are indexable only when the request comes through that proxy (header <code>X-Eumon-Proxy: 1</code>, or an <code>X-Forwarded-Host</code> equal to the site's public host); direct hits on the app host get <code>X-Robots-Tag: noindex</code> (<code class="path">apps/web/src/public-pages.ts:31</code>).</p>
 
   <h2 id="package-layers">How the packages layer</h2>
-  <p>Shared code lives in nine workspaces under <code>packages/</code>, all named <code>@organic-growth/*</code>. The root <code>build:packages</code> script builds them in dependency order: core, ai, db, repo-analyzer, crawler, scraper, pages, agents, sdk.</p>
+  <p>Shared code lives in eight workspaces under <code>packages/</code>, all named <code>@organic-growth/*</code>. The root <code>build:packages</code> script builds them in dependency order: core, ai, db, repo-analyzer, crawler, scraper, pages, agents.</p>
   <figure data-diagram="package-deps"><figcaption>Internal dependencies between the packages and the web app, from each <code>package.json</code>; arrows point at the package being used.</figcaption></figure>
   <table>
     <thead><tr><th>Package</th><th>Depends on</th><th>Touches</th></tr></thead>
@@ -183,14 +183,13 @@
       <tr><td><code>db</code></td><td>core</td><td>D1, through a small <code>D1Like</code> interface (<code class="path">packages/db/src/d1.ts</code>). Tests run against <code>openSqliteD1</code>, Node's built-in SQLite with every migration applied (<code class="path">packages/db/src/sqlite.ts</code>).</td></tr>
       <tr><td><code>crawler</code></td><td>core</td><td>Network: fetches pages, sitemaps and robots.txt through an injectable <code>fetcher</code>.</td></tr>
       <tr><td><code>repo-analyzer</code></td><td>core</td><td>Network: GitHub API and GitHub App installation tokens.</td></tr>
-      <tr><td><code>sdk</code></td><td>core</td><td>Browser <code>fetch</code> to <code>/api/sites/:siteId/events</code>. For customers' JavaScript apps; the web app does not import it.</td></tr>
       <tr><td><code>pages</code></td><td>ai, core</td><td>No I/O. Renders landing-page HTML, sitemaps and templates. Model calls go through a <code>JsonLlm</code> passed in.</td></tr>
       <tr><td><code>scraper</code></td><td>ai, core, crawler</td><td>Network: discovers and fetches source pages; extraction uses a <code>JsonLlm</code> passed in.</td></tr>
       <tr><td><code>agents</code></td><td>ai, core, crawler, db, repo-analyzer, pages</td><td>Both D1 and network: the analysis pipeline, Ask Eumon, Google, Bing, DataForSEO and PageSpeed clients, the demo site.</td></tr>
       <tr><td><code>@organic-growth/web</code></td><td>agents, ai, core, crawler, db, pages, repo-analyzer, scraper</td><td>Everything: routes, Workflows, bindings.</td></tr>
     </tbody>
   </table>
-  <p>Every package except <code>sdk</code> has a <code>test</code> script that compiles with <code>tsconfig.test.json</code> and runs <code>node --test</code>, so all of them are tested in plain Node, not in a Worker runtime. Code that needs D1 is tested against <code>openSqliteD1</code>; model calls go through a <code>JsonLlm</code> argument, and the crawler and <code>createLlm</code> accept a <code>fetcher</code> argument. More per package in <a href="#packages">Packages</a>.</p>
+  <p>Every package has a <code>test</code> script that compiles with <code>tsconfig.test.json</code> and runs <code>node --test</code>, so all of them are tested in plain Node, not in a Worker runtime. Code that needs D1 is tested against <code>openSqliteD1</code>; model calls go through a <code>JsonLlm</code> argument, and the crawler and <code>createLlm</code> accept a <code>fetcher</code> argument. More per package in <a href="#packages">Packages</a>.</p>
 
   <h2 id="external-services">External services</h2>
   <p>Each of these is called from code in the repo. The DataForSEO, Bing, PageSpeed/CrUX, Open PageRank and IndexNow keys are read by <code>signalKeys()</code> (<code class="path">apps/web/src/results-access.ts:9</code>), which treats an empty value as not configured. The GitHub App is optional for sites without a repository.</p>

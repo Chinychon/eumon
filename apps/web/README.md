@@ -39,7 +39,7 @@ Proxies must send `X-Eumon-Proxy: 1` (or an `X-Forwarded-Host` matching the publ
 
 ### Conversion tracking
 
-Setup → *Track conversions* provides a dependency-free script for the customer's main site. It auto-tracks WhatsApp, phone, email, and form submissions (never form contents) and exposes `eumonTrack(event)`. It reuses the landing pages' `eumon_sid` cookie, so conversions are credited to the page a visitor first landed on. JavaScript apps can use `@organic-growth/sdk` instead, which reads the same cookie.
+Setup → *Track conversions* provides a dependency-free script for the customer's main site. It auto-tracks WhatsApp, phone, email, and form submissions (never form contents) and exposes `eumonTrack(event)`. It reuses the landing pages' `eumon_sid` cookie, so conversions are credited to the page a visitor first landed on.
 
 ## Access control
 

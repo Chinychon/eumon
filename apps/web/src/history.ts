@@ -1,4 +1,4 @@
-import { resolutions } from "@organic-growth/core";
+import { CHECKS, findingKey, resolutions } from "@organic-growth/core";
 import { historyRuns, listChanges, listCtaVariants, listPageRevisions, listPublications, type D1Like } from "@organic-growth/db";
 
 /*
@@ -11,6 +11,8 @@ export type HistoryRow = {
   kind: HistoryKind; at: string; title: string; detail: string;
   /** Resolutions: the finding's category (which tab explains it), when it was first reported, and whether it came back. */
   category?: string; since?: string; reopenedAt?: string;
+  /** The registry check's name, for resolutions saved since findings carry one. */
+  check?: string;
   /** A pull request to open, or the engine page an action belongs to. */
   href?: string; view?: "performance" | "pages";
 };
@@ -36,12 +38,13 @@ export async function assembleHistory(db: D1Like, siteId: string): Promise<Histo
   const prTitle = (change: (typeof done)[number]) => `${change.prNumber ? `Pull request #${change.prNumber}` : "Change"}: ${change.title}`;
 
   const resolutionRows: HistoryRow[] = resolved.map((entry) => {
-    const fixed = changesFor.get(entry.key)?.find((change) => change.createdAt >= entry.firstSeen && change.createdAt <= entry.resolvedAt);
+    // A change made before the check registry is filed under the finding's title key.
+    const fixed = (changesFor.get(entry.key) ?? changesFor.get(findingKey(entry)))?.find((change) => change.createdAt >= entry.firstSeen && change.createdAt <= entry.resolvedAt);
     return {
       kind: fixed ? "fixed" : entry.vanished ? "vanished" : "resolved",
       at: entry.resolvedAt, title: entry.title,
       detail: fixed ? prTitle(fixed) : entry.vanished ? "Every page it pointed at is gone or erroring, so it no longer applies." : "The analysis stopped reporting it.",
-      category: entry.category, since: entry.firstSeen, reopenedAt: entry.reopenedAt, href: fixed?.prUrl,
+      category: entry.category, ...(CHECKS[entry.key.split("|")[0]!] ? { check: CHECKS[entry.key.split("|")[0]!]!.name } : {}), since: entry.firstSeen, reopenedAt: entry.reopenedAt, href: fixed?.prUrl,
     };
   });
   const actions: HistoryRow[] = [

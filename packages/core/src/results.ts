@@ -209,6 +209,8 @@ export type ResultsView = {
     funnel: Array<{ label: string; value: number }> | null;
   };
   health: { value: number | null; day: string | null };
+  /** Each pillar's health score from the latest analysis, and the latest one on or before 28 days ago. */
+  scores: Record<"seo" | "ai", { value: number | null; before: number | null; day: string | null }>;
   speed: {
     /** Whether CrUX has been asked yet; asked with no values means too few Chrome visits. */
     measured: boolean;
@@ -429,6 +431,10 @@ export function resultsView(input: ResultsInput): ResultsView {
     health: {
       value: latest(series.site_health, today),
       day: series.site_health?.length ? series.site_health[series.site_health.length - 1]!.day : null,
+    },
+    scores: {
+      seo: { value: latest(series.health_seo, today), before: latest(series.health_seo, addDays(today, -28)), day: series.health_seo?.at(-1)?.day ?? null },
+      ai: { value: latest(series.health_ai, today), before: latest(series.health_ai, addDays(today, -28)), day: series.health_ai?.at(-1)?.day ?? null },
     },
     speed, lab, authority, keywords, serp, links, bing, indexNow, crawlLog, outcomes, ai,
   };

@@ -69,6 +69,12 @@ const ISSUES: Record<CrawlIssue, string> = {
   missingStructuredData: "No structured data", invalidStructuredData: "Invalid structured data", botFallback: "Googlebot gets a different answer",
   botChallenge: "Bot challenge instead of the page", duplicateTitle: "Shares its title with other pages",
   softNotFound: "Says not found but answers 200", nearDuplicate: "Nearly the same page as another",
+  redirectChain: "Two or more redirects", metaRefresh: "Meta refresh redirect", mixedContent: "Loads HTTP resources on HTTPS", httpLinks: "Links to HTTP pages of the site",
+  titleLength: "Title under 30 or over 60 characters", descriptionLength: "Meta description over 160 characters", duplicateDescription: "Shares its description with other pages",
+  h1EqualsTitle: "H1 repeats the title", headingSkips: "Skips heading levels", langMissing: "No language declared", viewportMissing: "No viewport tag",
+  imagesNoAlt: "Images without alt text", thinContent: "Under 150 words", yearInSlug: "Year in the URL", snippetBlocked: "Blocks search snippets (nosnippet)",
+  stale: "Article not updated in a year", noDate: "Article without a date", noAnswerStructure: "No question headings, lists or summary",
+  lowEvidence: "No statistics, quotes or sources", noAuthor: "Article without an author", noLandmarks: "No <main> or <article>",
 };
 
 const TOOLS: Tool[] = [

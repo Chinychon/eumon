@@ -3,6 +3,7 @@ import { WorkflowEntrypoint } from "cloudflare:workers";
 import { NonRetryableError } from "cloudflare:workflows";
 import type { WorkflowEvent, WorkflowStep } from "cloudflare:workers";
 import type { AppEnv } from "../cloudflare.config";
+import { runFixSteps } from "./fix-steps.ts";
 import { createLlm, type JsonLlm } from "@organic-growth/ai";
 import {
   datasetCoverage,
@@ -203,6 +204,7 @@ export class SiteAnalysisWorkflow extends WorkflowEntrypoint<AppEnv, AnalysisPay
           return plan.highestImpactOpportunity;
         },
       );
+      await runFixSteps(this.env, step, siteId, analysisId).catch(() => undefined);
       return { analysisId, status: "completed" };
     } catch (error) {
       const message = error instanceof Error ? error.message : "Analysis failed unexpectedly.";

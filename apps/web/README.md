@@ -89,7 +89,7 @@ A refused action answers with a sentence saying what to do next: `429` for the s
 
 **Log tokens.** Each site's log-ingest token can be rotated from Connections. Until you rotate it, the token derived from `SESSION_SECRET` keeps working.
 
-**Pull requests** only ever change `public/robots.txt`.
+**Pull requests** come from the fix engine, on Next.js App Router repositories only: page metadata (titles, descriptions, canonicals, hreflang), the root layout's `metadataBase`, structured data with Eumon's own component, `public/llms.txt` and AI search crawler rules in `public/robots.txt`. They open as drafts, and a person merges them.
 
 **Manual setup** (one-off, outside the code):
 

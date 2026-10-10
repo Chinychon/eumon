@@ -180,7 +180,7 @@ export default function Home() {
               {view === "setup" && (
                 <>
                   <ConnectionsView site={site} repositories={repositories} githubInstalled={githubInstalled} onSiteChanged={(updated) => setSites((items) => items?.map((item) => (item.id === updated.id ? updated : item)) ?? null)} />
-                  <SetupView site={site} />
+                  <SetupView site={site} sites={sites ?? []} role={me?.workspace?.role ?? "member"} />
                 </>
               )}
             </div>

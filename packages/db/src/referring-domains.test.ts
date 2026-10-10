@@ -37,7 +37,7 @@ describe("referring domains store", () => {
     assert.deepEqual(await all(db), []);
   });
 
-  it("lists strongest first, filtered by spam / new / lost / broken, limited", async () => {
+  it("lists live first, then strongest, filtered by spam / new / lost / broken, limited", async () => {
     const db = await site();
     await replaceReferringDomains(db, "s", [
       row("a.example", { rank: 80, firstSeen: "2026-10-08" }),
@@ -47,26 +47,28 @@ describe("referring domains store", () => {
       row("e.example", { rank: 90, lost: true, lastSeen: "2026-09-01", broken: true }),
     ]);
     const domains = async (filter: Parameters<typeof listReferringDomains>[2]) => (await listReferringDomains(db, "s", filter)).map((r) => r.domain);
-    assert.deepEqual(await domains({ limit: 100 }), ["e.example", "a.example", "b.example", "c.example", "d.example"]);
-    assert.deepEqual(await domains({ limit: 3 }), ["e.example", "a.example", "b.example"]);
+    assert.deepEqual(await domains({ limit: 100 }), ["a.example", "c.example", "d.example", "e.example", "b.example"]);
+    assert.deepEqual(await domains({ limit: 3 }), ["a.example", "c.example", "d.example"]);
     assert.deepEqual(await domains({ limit: 100, spam: true }), ["c.example"]);
-    assert.deepEqual(await domains({ limit: 100, spam: false }), ["e.example", "a.example", "b.example", "d.example"]);
+    assert.deepEqual(await domains({ limit: 100, spam: false }), ["a.example", "d.example", "e.example", "b.example"]);
     assert.deepEqual(await domains({ limit: 100, newSince: "2026-10-07" }), ["a.example", "c.example"]);
     assert.deepEqual(await domains({ limit: 100, lostSince: "2026-10-01" }), ["b.example"]);
     assert.deepEqual(await domains({ limit: 100, broken: true }), ["d.example"]);
   });
 
-  it("counts in one query: real, spam, new real since a day, lost real since a day, broken live real, dofollow real, new spam since a day", async () => {
+  it("counts in one query: live real, live spam, new real since a day (lost or not), lost real since a day, broken live real, dofollow live real, new spam since a day, every row", async () => {
     const db = await site();
     await replaceReferringDomains(db, "s", [
       row("a.example", { firstSeen: "2026-10-08", dofollow: true }),
-      row("b.example", { firstSeen: "2026-09-01", lost: true, lastSeen: "2026-10-08", dofollow: false }),
+      row("b.example", { firstSeen: "2026-09-01", lost: true, lastSeen: "2026-10-08", dofollow: true }),
       row("c.example", { spam: true, spamReason: "network", firstSeen: "2026-10-09", dofollow: true }),
       row("d.example", { firstSeen: "2026-09-01", lastSeen: "2026-09-01", broken: true, dofollow: true }),
       row("e.example", { firstSeen: "2026-09-01", lastSeen: "2026-09-01", lost: true, broken: true, dofollow: false }),
+      row("f.example", { spam: true, spamReason: "network", firstSeen: "2026-09-01", lost: true }),
+      row("g.example", { firstSeen: "2026-10-08", lost: true, lastSeen: "2026-10-09" }),
     ]);
     assert.deepEqual(await referringDomainCounts(db, "s", "2026-10-07"), {
-      real: 4, spam: 1, newReal: 1, lostReal: 1, brokenReal: 1, dofollowReal: 2, newSpam: 1,
+      real: 2, spam: 1, newReal: 2, lostReal: 2, brokenReal: 1, dofollowReal: 2, newSpam: 1, total: 7,
     });
   });
 
@@ -94,5 +96,14 @@ describe("loadReferringLists", () => {
     assert.equal(lists.counts.spam, 1);
     assert.equal(lists.asOf, "2026-10-10");
     assert.equal(lists.networks.length, 1);
+  });
+
+  it("still shows a site whose links are all lost", async () => {
+    const db = await site();
+    await replaceReferringDomains(db, "s", [row("gone.example", { lost: true, lastSeen: "2026-10-05" })]);
+    const lists = await loadReferringLists(db, "s", "x.com", "2026-10-10");
+    assert.ok(lists, "the lost link is something to show");
+    assert.deepEqual([lists.counts.real, lists.counts.total], [0, 1]);
+    assert.deepEqual(lists.lostReal.map((r) => r.domain), ["gone.example"]);
   });
 });

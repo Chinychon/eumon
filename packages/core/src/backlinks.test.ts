@@ -111,7 +111,7 @@ describe("spamNetworks", () => {
 describe("backlinksView", () => {
   it("the lists and anchor mix, capped", () => {
     const top = classifyReferringDomains(many(30, (i) => ({ anchor: i < 5 ? "" : i < 12 ? "clinic" : `a${i}` })), SITE);
-    const counts = { real: 30, spam: 0, newReal: 0, lostReal: 0, brokenReal: 0, dofollowReal: 30, newSpam: 0 };
+    const counts = { real: 30, spam: 0, newReal: 0, lostReal: 0, brokenReal: 0, dofollowReal: 30, newSpam: 0, total: 30 };
     const view = backlinksView({ asOf: "2026-10-10", counts, top, newReal: top.slice(0, 2), lostReal: [], brokenReal: [], networks: [] });
     const net = (i: number) => ({ key: `anchor:${i}`, kind: "anchor" as const, label: `a${i}`, domains: 20 - i, since: "2026-09-01", example: "https://n.example/" });
     assert.equal(view.top.length, 25);

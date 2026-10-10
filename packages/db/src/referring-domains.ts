@@ -25,27 +25,29 @@ const fromRow = (row: Row): ReferringDomain => ({
   lost: Boolean(row.lost), broken: Boolean(row.broken), rank: Number(row.rank), spamScore: row.spam_score === null ? null : Number(row.spam_score), spam: Boolean(row.spam), spamReason: row.spam_reason,
 });
 
+/** Live first, then strongest. */
 export async function listReferringDomains(db: D1Like, siteId: string, filter: { spam?: boolean; newSince?: string; lostSince?: string; broken?: boolean; limit: number }): Promise<ReferringDomain[]> {
   const where = ["site_id = ?1"];
   if (filter.spam !== undefined) where.push(`spam = ${filter.spam ? 1 : 0}`);
   if (filter.newSince) where.push("first_seen >= ?2");
   if (filter.lostSince) where.push("lost = 1 AND last_seen >= ?3");
   if (filter.broken) where.push("broken = 1 AND lost = 0");
-  const { results } = await db.prepare(`SELECT * FROM referring_domains WHERE ${where.join(" AND ")} ORDER BY rank DESC, domain LIMIT ?4`)
+  const { results } = await db.prepare(`SELECT * FROM referring_domains WHERE ${where.join(" AND ")} ORDER BY lost, rank DESC, domain LIMIT ?4`)
     .bind(siteId, filter.newSince ?? "", filter.lostSince ?? "", filter.limit).all<Row>();
   return results.map(fromRow);
 }
 
+/** Real and spam are live links; new counts by first seen, so a link found and lost within the window is both new and lost. */
 export async function referringDomainCounts(db: D1Like, siteId: string, since: string): Promise<ReferringCounts> {
   const row = await db.prepare(
-    `SELECT SUM(spam = 0) AS real, SUM(spam = 1) AS spam,
+    `SELECT SUM(spam = 0 AND lost = 0) AS real, SUM(spam = 1 AND lost = 0) AS spam,
             SUM(spam = 0 AND first_seen >= ?2) AS new_real, SUM(spam = 0 AND lost = 1 AND last_seen >= ?2) AS lost_real,
-            SUM(spam = 0 AND broken = 1 AND lost = 0) AS broken_real, SUM(spam = 0 AND dofollow = 1) AS dofollow_real,
-            SUM(spam = 1 AND first_seen >= ?2) AS new_spam
+            SUM(spam = 0 AND broken = 1 AND lost = 0) AS broken_real, SUM(spam = 0 AND lost = 0 AND dofollow = 1) AS dofollow_real,
+            SUM(spam = 1 AND first_seen >= ?2) AS new_spam, COUNT(*) AS total
      FROM referring_domains WHERE site_id = ?1`,
   ).bind(siteId, since).first<Record<string, number | null>>();
   const n = (key: string) => Number(row?.[key] ?? 0);
-  return { real: n("real"), spam: n("spam"), newReal: n("new_real"), lostReal: n("lost_real"), brokenReal: n("broken_real"), dofollowReal: n("dofollow_real"), newSpam: n("new_spam") };
+  return { real: n("real"), spam: n("spam"), newReal: n("new_real"), lostReal: n("lost_real"), brokenReal: n("broken_real"), dofollowReal: n("dofollow_real"), newSpam: n("new_spam"), total: n("total") };
 }
 
 /** What the card and findings read: counts, short real lists (never the whole table) and the networks grouped at refresh; null when the site has no rows. */
@@ -59,5 +61,5 @@ export async function loadReferringLists(db: D1Like, siteId: string, domain: str
     listReferringDomains(db, siteId, { spam: false, broken: true, limit: 25 }),
     getSnapshot<SpamNetwork>(db, siteId, "spam_networks", domain),
   ]);
-  return counts.real + counts.spam === 0 ? null : { asOf: networks?.periodEnd ?? null, counts, top, newReal, lostReal, brokenReal, networks: networks?.rows ?? [] };
+  return counts.total === 0 ? null : { asOf: networks?.periodEnd ?? null, counts, top, newReal, lostReal, brokenReal, networks: networks?.rows ?? [] };
 }

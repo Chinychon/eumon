@@ -21,6 +21,7 @@ export type ReferringDomain = {
   spamReason: string | null;
 };
 
+/** `real` and `spam` count live rows; `total` counts every stored row, live or lost. */
 export type ReferringCounts = {
   real: number;
   spam: number;
@@ -29,6 +30,7 @@ export type ReferringCounts = {
   brokenReal: number;
   dofollowReal: number;
   newSpam: number;
+  total: number;
 };
 
 export const REFERRING_LIMITS = {

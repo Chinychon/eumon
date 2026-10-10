@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
 import type { CrawlCoverage } from "@organic-growth/core";
-import { aiReadiness, auditSitemap, defaultFetcher, robotsState, sitemapEntries, fetchGooglebotPage, findingsFromCrawlCoverage, headerNoindex, isBotChallenge, isEmptyShell, parseHtmlSignals, runTechnicalSeoAudit, type Fetcher, probeNotFound } from "./index.js";
+import { aiReadiness, auditSitemap, defaultFetcher, robotsState, sitemapEntries, fetchGooglebotPage, findingsFromCrawlCoverage, headerNoindex, isBotChallenge, isEmptyShell, isSafePublicUrl, parseHtmlSignals, runTechnicalSeoAudit, type Fetcher, probeNotFound } from "./index.js";
 import { hamming, nearDuplicate } from "@organic-growth/core";
 import { classifyLanguage, classifyUrlType, isSameSite } from "./urls.js";
 
@@ -466,5 +466,15 @@ describe("coverage findings for soft 404s, near-duplicates and languages", () =>
     assert.deepEqual(noindex.evidence.byLocale, { default: 26, id: 9 });
     const single = findingsFromCrawlCoverage({ siteId: "s", analysisId: "a", coverage: { ...base, issues: { noindex: 35 } } });
     assert.doesNotMatch(single.find((finding) => finding.title === "Sitemap lists pages that are marked noindex")!.summary, /By language/);
+  });
+});
+
+describe("isSafePublicUrl", () => {
+  it("refuses local names written with a trailing dot, and still accepts public ones", () => {
+    for (const url of ["http://localhost./", "http://foo.localhost./", "http://metadata.google.internal./", "http://printer.local./"]) {
+      assert.equal(isSafePublicUrl(url), false, url);
+    }
+    assert.equal(isSafePublicUrl("https://example.com./"), true);
+    assert.equal(isSafePublicUrl("http://127.0.0.1./"), false);
   });
 });

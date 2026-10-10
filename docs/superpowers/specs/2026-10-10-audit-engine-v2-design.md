@@ -113,7 +113,7 @@ Class decides the score (§4); severity decides the plan's ranking, as today. **
 | `security.hsts_missing` | No HSTS | notice | site | crawl | server | **New.** Homepage response lacks `Strict-Transport-Security`. |
 | `security.mixed_content` | Mixed content | error | page | crawl | content | **New.** Browsers block or warn; Google treats it as a security issue. |
 | `security.http_links` | Links to HTTP pages | warning | page | crawl | links | **New.** |
-| `http.error` | URLs that fail | error | page | crawl | server | "Sitemap URLs fail or return error responses" |
+| `http.error` | URLs that fail | error | page | crawl | server | "Sitemap URLs fail or return error responses". Also `ai`: a page that errors cannot be cited. |
 | `http.redirect_chain` | Redirect chains | error | page | crawl | redirect | **New.** Two or more hops; Google follows up to ten but each hop costs crawl and dilutes signals. |
 | `http.meta_refresh` | Meta refresh redirects | error | page | crawl | redirect | **New.** Split from `redirected`. |
 | `fetch.failed` | Sampled page could not be fetched | warning | page | sample | server | "Failed to fetch …" |
@@ -125,6 +125,7 @@ Class decides the score (§4); severity decides the plan's ranking, as today. **
 | `render.googlebot_less` | Googlebot gets less content | warning | page | render | server | "Googlebot receives less content than browsers". Also `ai`. |
 | `render.prerender_mismatch` | Crawlers get HTML browsers don't | warning | page | render | server | "Crawlers get pre-rendered HTML that browsers don't" |
 | `render.meta_by_js` | Titles and meta set by JavaScript | error | page | render | meta | "Titles and meta tags are set by JavaScript". Also `ai` (AI crawlers do not run JavaScript). |
+| `render.js_content` | Content added by JavaScript | warning | page | render | server | "Page content only appears after JavaScript runs" / "Part of the page content is added by JavaScript". Also `ai`. |
 | `render.coverage_weak` | Large sitemap, weak render coverage | warning | site | sample | server | "Large sitemap with weak render coverage" |
 | `title.weak` | Weak or missing titles | error | page | crawl, sample | meta | "Sitemap URLs are missing useful title tags", "Weak or missing titles on indexable pages" |
 | `title.duplicate` | Duplicate titles | warning | page | crawl | meta | "Several indexable pages share the same title" |
@@ -224,7 +225,7 @@ A new workflow step `probe-ai-crawlers`, after the crawl and before `runFullAnal
 
 `ai.crawler_refused` fires when a search-facing agent that robots.txt allows was refused or challenged on every probed URL (a single refused URL is rate limiting, not policy). Summary names the agents and the status, and when `cf-mitigated` or a Cloudflare challenge page was seen, says "Cloudflare's AI crawler setting is blocking it". Recommendation: allow the search-facing agents in the firewall or Cloudflare's AI Crawl Control, keep blocking training agents if that is the intent.
 
-`server.www_duplicate`, `server.http_not_redirected` and `ai.llms_txt` run in the same step (three fetches). The step makes 45 subrequests at most, under the Free plan's 50 per step. When robots.txt was unreadable the probe does not run and `ai.crawler_refused` is skipped with that reason.
+`server.www_duplicate`, `server.http_not_redirected` and `ai.llms_txt` run in the same step (three fetches). The step makes 47 fetches at most (robots.txt, 42 agent fetches, 4 host fetches), under the Free plan's 50 subrequests per step. When robots.txt was unreadable the probe does not run and `ai.crawler_refused` is skipped with that reason.
 
 ## 7. Checks Eumon does not run, and why
 

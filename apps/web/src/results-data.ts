@@ -23,10 +23,11 @@ export async function loadResults(db: D1Like, site: SiteRecord, today = new Date
     // Ninety days: a chat can take weeks to become a customer.
     outcomesByPageType(db, site.id, addDays(today, -90)),
     loadConnectorLists(db, site, { markets, competitors }, today),
-    listTrackedKeywords(db, site.id),
-    listRankChecks(db, site.id, addDays(today, -90)),
-    listAiPrompts(db, site.id),
-    listAiAnswerChecks(db, site.id, addDays(today, -90)),
+    // Empty until the migrations adding these tables are applied: a merge deploys first, migrations follow by hand.
+    listTrackedKeywords(db, site.id).catch(() => []),
+    listRankChecks(db, site.id, addDays(today, -90)).catch(() => []),
+    listAiPrompts(db, site.id).catch(() => []),
+    listAiAnswerChecks(db, site.id, addDays(today, -90)).catch(() => []),
   ]);
   return resultsView({
     today, goLive: pages.goLive, markets, series, index, published: pages.published,

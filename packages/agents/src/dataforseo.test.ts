@@ -148,6 +148,11 @@ describe("referring domains", () => {
     assert.deepEqual((await ask(null)).answer.rows, []);
   });
 
+  it("clips anchors to 200 characters and addresses to 500", async () => {
+    const [row] = (await ask([item({ anchor: "a".repeat(300), url_from: `https://a.example/${"p".repeat(600)}`, url_to: `https://x.com/${"q".repeat(600)}` })])).answer.rows;
+    assert.deepEqual([row!.anchor.length, row!.urlFrom.length, row!.urlTo.length], [200, 500, 500]);
+  });
+
   it("keeps the first row when www.a.example and a.example are the same domain", async () => {
     const rows = (await ask([item({ domain_from: "www.a.example", domain_from_rank: 50 }), item({ domain_from: "a.example", domain_from_rank: 10 })])).answer.rows;
     assert.deepEqual(rows.map((row) => [row.domain, row.rank]), [["a.example", 50]]);

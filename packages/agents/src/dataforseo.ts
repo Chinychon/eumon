@@ -183,7 +183,8 @@ export async function fetchReferringDomains(auth: DataForSeoAuth, domain: string
     if (seen.has(key)) return [];
     seen.add(key);
     return [{
-      domain: key, urlFrom: /^https?:\/\//i.test(item.url_from ?? "") ? item.url_from! : "", urlTo: item.url_to ?? "", anchor: item.anchor ?? "", dofollow: Boolean(item.dofollow),
+      // Clipped: a thousand rows are stored whole and some anchors are pages of text.
+      domain: key, urlFrom: /^https?:\/\//i.test(item.url_from ?? "") ? item.url_from!.slice(0, 500) : "", urlTo: (item.url_to ?? "").slice(0, 500), anchor: (item.anchor ?? "").slice(0, 200), dofollow: Boolean(item.dofollow),
       firstSeen: (item.first_seen ?? "").slice(0, 10), lastSeen: (item.last_seen ?? "").slice(0, 10), lost: Boolean(item.is_lost), broken: Boolean(item.is_broken),
       rank: item.domain_from_rank ?? 0, spamScore: item.backlink_spam_score ?? null,
     }];

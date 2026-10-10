@@ -119,7 +119,7 @@ function YourLinks({ own, today, operator }: { own: BacklinksView; today: string
     <>
       <div className="section-title">Your links</div>
       <div className="metrics-grid">
-        <Kpi label="Real referring domains" value={formatNumber(counts.real)} caption={counts.spam > 0 ? `${formatNumber(counts.spam)} more from spam networks` : undefined} />
+        <Kpi label="Real referring domains" value={formatNumber(counts.real)} caption={counts.spam > 0 ? `${formatNumber(counts.spam)} more from spam sites` : undefined} />
         <Kpi label="New in 30 days" value={formatNumber(counts.newReal)} />
         <Kpi label="Lost in 30 days" value={formatNumber(counts.lostReal)} />
         <Kpi label="Linking to missing pages" value={formatNumber(counts.brokenReal)} />

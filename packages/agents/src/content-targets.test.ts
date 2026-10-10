@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import { LlmError, LlmHttpError, type JsonLlm, type JsonRequest } from "@organic-growth/ai";
 import { TOPIC_PROPOSAL_SCHEMA, type RankCheck, type SearchMetricRow, type SerpResult, type TopicProposal } from "@organic-growth/core";
 import type { Fetcher, FetchResult } from "@organic-growth/crawler";
-import { fetchGradedPage, gradeTarget, pickContentTargets, proposeTopics, TopicProposalError, type ContentGradeRow, type ContentTarget } from "./content-targets.js";
+import { fetchGradedPage, gradeTarget, LlmUnavailableError, pickContentTargets, proposeTopics, TopicProposalError, type ContentGradeRow, type ContentTarget } from "./content-targets.js";
 
 const today = "2026-10-10";
 const check = (keyword: string, position: number | null, extra: Partial<RankCheck> = {}): RankCheck =>
@@ -140,6 +140,21 @@ describe("fetchGradedPage", () => {
     assert.deepEqual(page.headings.filter((h) => h.startsWith("Section")), sections);
   });
 
+  it("caps each heading, so an unclosed <h2> can't swallow the page, and still reads the headings after it", async () => {
+    const body = `<html><body><main><h1>Eye care</h1><h2>Intro ${"word ".repeat(600)}<p>${filler(150)}</p><h2>Later section</h2><p>${filler(20)}</p><h3>Last one</h3></main></body></html>`;
+    const page = (await fetchGradedPage("https://a.com/broken", fakeFetcher({ "https://a.com/broken": { body } }).fetcher))!;
+    assert.ok(page.headings.every((h) => h.length <= 160), page.headings.map((h) => h.length).join(","));
+    assert.ok(page.headings.includes("Later section") && page.headings.includes("Last one"), JSON.stringify(page.headings));
+  });
+
+  it("reads headings from the main content only, not the nav, header or footer", async () => {
+    const withMain = `<html><body><nav><h2>Menu</h2></nav>${html(["Real section"]).replace(/^.*<body>/s, "").replace("</main>", "</main><footer><h3>Footer links</h3></footer>")}`;
+    const noMain = `<html><body><nav><h2>Menu</h2></nav><header><h2>Header promo</h2></header><div><h2>Real section</h2><p>${filler(150)}</p></div><aside><h3>Sidebar</h3></aside><footer><h3>Footer links</h3></footer></body></html>`;
+    const { fetcher } = fakeFetcher({ "https://a.com/m": { body: withMain }, "https://a.com/n": { body: noMain } });
+    assert.deepEqual((await fetchGradedPage("https://a.com/m", fetcher))!.headings, ["Real section"]);
+    assert.deepEqual((await fetchGradedPage("https://a.com/n", fetcher))!.headings, ["Real section"]);
+  });
+
   it("returns null for an error status, an empty shell, a thin page, or a fetch that throws", async () => {
     const { fetcher } = fakeFetcher({
       "https://x.com/gone": { status: 410, body: html(["A"]) },
@@ -174,7 +189,9 @@ describe("proposeTopics", () => {
     const input = { query: "q", market: "mys", page: { url: "u", headings: [], mainText: "", words: 0, listsOrTables: false, questionHeadings: 0, faq: false }, competitors: [] };
     await assert.rejects(proposeTopics(fakeLlm(() => { throw new LlmError("truncated"); }), input), TopicProposalError);
     for (const answer of [null, {}, { topics: "none" }]) await assert.rejects(proposeTopics(fakeLlm(() => answer), input), TopicProposalError);
-    await assert.rejects(proposeTopics(fakeLlm(() => { throw new LlmHttpError("deepseek", 503, "down"); }), input), LlmHttpError);
+    await assert.rejects(proposeTopics(fakeLlm(() => { throw new LlmHttpError("deepseek", 503, "down"); }), input), LlmUnavailableError);
+    await assert.rejects(proposeTopics(fakeLlm(() => { throw new TypeError("fetch failed"); }), input), LlmUnavailableError);
+    await assert.rejects(proposeTopics(fakeLlm(() => { throw new LlmHttpError("deepseek", 401, "bad key"); }), input), (error) => error instanceof LlmHttpError);
   });
 });
 
@@ -207,9 +224,17 @@ describe("gradeTarget", () => {
   it("skips with a note when the AI can't be reached, so one outage doesn't fail the other targets", async () => {
     const { fetcher } = fakeFetcher(PAGES);
     const http = await gradeTarget(target, { serpRow: serpRow(TOP3), site: "x.com", llm: fakeLlm(() => { throw new LlmHttpError("deepseek", 503, "down"); }), fetcher });
-    assert.deepEqual(http, { skipped: "the AI could not be reached (deepseek API error 503: down)" });
+    assert.deepEqual(http, { skipped: "the AI could not be reached" });
     const network = await gradeTarget(target, { serpRow: serpRow(TOP3), site: "x.com", llm: fakeLlm(() => { throw new TypeError("fetch failed"); }), fetcher });
-    assert.deepEqual(network, { skipped: "the AI could not be reached (fetch failed)" });
+    assert.deepEqual(network, { skipped: "the AI could not be reached" });
+  });
+
+  it("fails visibly on a missing or bad AI key, and on a bug in our own code", async () => {
+    const { fetcher } = fakeFetcher(PAGES);
+    const run = (model: JsonLlm) => gradeTarget(target, { serpRow: serpRow(TOP3), site: "x.com", llm: model, fetcher });
+    await assert.rejects(run(fakeLlm(() => { throw new LlmHttpError("anthropic", 401, "invalid x-api-key"); })), (error) => error instanceof LlmHttpError && error.status === 401);
+    // A bug reading the answer, outside the llm call: the getter throws when proposeTopics reads `topics`.
+    await assert.rejects(run(fakeLlm(() => ({ get topics(): unknown { throw new TypeError("our bug"); } }))), /our bug/);
   });
 
   it("treats a robots.txt that answers 5xx as a disallow", async () => {

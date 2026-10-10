@@ -1,9 +1,9 @@
-import { LlmError, type JsonLlm } from "@organic-growth/ai";
+import { LlmError, LlmHttpError, type JsonLlm, type JsonRequest } from "@organic-growth/ai";
 import {
   addDays, bareDomain, competitorKind, gradeContent, TOPIC_PROPOSAL_SCHEMA, verifyTopics,
   type ContentGrade, type GradedPage, type RankCheck, type SearchMetricRow, type SerpResult, type TopicProposal,
 } from "@organic-growth/core";
-import { BROWSER_UA, contentMarkup, contentSignals, defaultFetcher, elementSpans, fetchRobots, innerText, isEmptyShell, parseHtmlSignals, type Fetcher } from "@organic-growth/crawler";
+import { BROWSER_UA, contentMarkup, contentSignals, defaultFetcher, elementSpans, fetchRobots, innerText, isEmptyShell, mainMarkup, parseHtmlSignals, type Fetcher } from "@organic-growth/crawler";
 
 /*
  * Content grading, the agent half: which searches to grade this analysis, and
@@ -33,6 +33,7 @@ export const CONTENT_TARGETS = {
   MIN_WORDS: 100, // less is a stub, not a page to compare
   MAIN_TEXT_CHARS: 30_000, // what the AI reads of the site's page; long guides cover topics late
   HEADINGS_MAX: 80, // H2/H3 per page sent to the AI
+  HEADING_CHARS: 160, // a longer "heading" is an unclosed tag swallowing the body
 } as const;
 
 const key = (query: string, market: string) => `${query.trim().toLowerCase()}|${market}`;
@@ -104,8 +105,12 @@ export async function fetchGradedPage(url: string, fetcher: Fetcher = defaultFet
   const content = contentSignals(response.body, response.finalUrl, { jsonLdTypes: signals.jsonLdTypes, jsonLd: signals.jsonLdObjects });
   if (content.words < CONTENT_TARGETS.MIN_WORDS) return null;
   // Not headingOutline: its 20-heading cap fills with header, sidebar and footer headings on long pages.
-  const markup = contentMarkup(response.body);
-  const headings = elementSpans(markup, ["h2", "h3"]).map((h) => innerText(markup.slice(h.contentStart, h.contentEnd))).filter(Boolean).slice(0, CONTENT_TARGETS.HEADINGS_MAX);
+  // Each fragment is bounded: an unclosed <h2> runs to the next </h2> anywhere, or the end of the page.
+  const scope = mainMarkup(contentMarkup(response.body));
+  const headings = elementSpans(scope, ["h2", "h3"])
+    .map((h) => innerText(scope.slice(h.contentStart, Math.min(h.contentEnd, h.contentStart + 2000))).slice(0, CONTENT_TARGETS.HEADING_CHARS))
+    .filter(Boolean)
+    .slice(0, CONTENT_TARGETS.HEADINGS_MAX);
   return {
     url,
     headings,
@@ -119,6 +124,8 @@ export async function fetchGradedPage(url: string, fetcher: Fetcher = defaultFet
 
 /** The AI's topic list could not be used; the caller notes a skip. */
 export class TopicProposalError extends Error {}
+/** The AI provider failed (outage, network, binding); the caller notes a skip. A missing or bad key is not this: it propagates. */
+export class LlmUnavailableError extends Error {}
 
 const PROPOSE_SYSTEM = [
   "You compare a web page with the pages that rank above it on Google for a search.",
@@ -137,24 +144,26 @@ export async function proposeTopics(
   llm: JsonLlm,
   input: { query: string; market: string; page: GradedPage; competitors: Array<GradedPage & { domain: string }> },
 ): Promise<TopicProposal[]> {
+  const request: JsonRequest = {
+    system: PROPOSE_SYSTEM,
+    user: JSON.stringify({
+      query: input.query,
+      market: input.market,
+      competitors: input.competitors.map((c) => ({ domain: c.domain, headings: c.headings })),
+      page: { url: input.page.url, headings: input.page.headings, mainText: input.page.mainText.slice(0, CONTENT_TARGETS.MAIN_TEXT_CHARS) },
+    }),
+    schema: TOPIC_PROPOSAL_SCHEMA,
+    maxTokens: 4000,
+    effort: "low",
+  };
   let answer: { topics?: unknown } | null;
+  // Only the provider call is wrapped: a bug in our own code before or after it must fail visibly.
   try {
-    answer = await llm.json<{ topics?: unknown } | null>({
-      system: PROPOSE_SYSTEM,
-      user: JSON.stringify({
-        query: input.query,
-        market: input.market,
-        competitors: input.competitors.map((c) => ({ domain: c.domain, headings: c.headings })),
-        page: { url: input.page.url, headings: input.page.headings, mainText: input.page.mainText.slice(0, CONTENT_TARGETS.MAIN_TEXT_CHARS) },
-      }),
-      schema: TOPIC_PROPOSAL_SCHEMA,
-      maxTokens: 4000,
-      effort: "low",
-    });
+    answer = await llm.json<{ topics?: unknown } | null>(request);
   } catch (error) {
-    // Provider outages (LlmHttpError, network) propagate: they are not a bad answer.
     if (error instanceof LlmError) throw new TopicProposalError(error.message);
-    throw error;
+    if (error instanceof LlmHttpError && (error.status === 401 || error.status === 403)) throw error; // setup problem, not an outage
+    throw new LlmUnavailableError(error instanceof Error ? error.message : String(error), { cause: error });
   }
   if (!answer || !Array.isArray(answer.topics)) throw new TopicProposalError("The AI's answer had no topic list.");
   return answer.topics as TopicProposal[];
@@ -211,8 +220,12 @@ export async function gradeTarget(
     proposals = await proposeTopics(input.llm, { query: target.query, market: target.market, page, competitors });
   } catch (error) {
     if (error instanceof TopicProposalError) return { skipped: "the AI's topic list could not be read" };
-    // An outage (LlmHttpError, network, binding) skips this target instead of failing the step's others.
-    return { skipped: `the AI could not be reached (${error instanceof Error ? error.message : String(error)})` };
+    // An outage skips this target instead of failing the step's others; the provider's detail stays out of the stored note.
+    if (error instanceof LlmUnavailableError) {
+      console.warn(`content grading: AI unavailable for "${target.query}": ${error.message}`);
+      return { skipped: "the AI could not be reached" };
+    }
+    throw error;
   }
   const topics = verifyTopics(proposals, { page, competitors, query: target.query });
   const grade = gradeContent({ page, competitors, topics });

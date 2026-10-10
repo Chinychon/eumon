@@ -1,6 +1,6 @@
 import type { CrawlPageResult, Finding, SitemapAudit } from "@organic-growth/core";
 import { CHECKS, finding, organicImpactScore, simhash } from "@organic-growth/core";
-import { contentMarkup, elementSpans, findTags, hasToken, innerText, parseAttributes, stripElements, visibleText } from "./html.js";
+import { contentMarkup, elementSpans, findTags, hasToken, innerText, mainMarkup, parseAttributes, stripElements, visibleText } from "./html.js";
 import { contentSignals, titleWidth } from "./content-signals.js";
 import { GOOGLEBOT_TOKEN, parseRobots, type RobotsPolicy } from "./robots.js";
 import { classifyLanguage, classifyUrlType, isSameSite, sameDocument } from "./urls.js";
@@ -174,8 +174,7 @@ export function parseHtmlSignals(html: string, pageUrl?: string): HtmlSignals {
   }
 
   const text = visibleText(markup);
-  const main = elementSpans(markup, ["main", "article"])[0];
-  const mainText = visibleText(main ? markup.slice(main.contentStart, main.contentEnd) : stripElements(markup, ["nav", "header", "footer", "aside", "form"]));
+  const mainText = visibleText(mainMarkup(markup));
   return {
     title: title ? innerText(title) : undefined,
     description: metaContent("description"),

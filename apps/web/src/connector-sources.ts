@@ -165,6 +165,7 @@ const serpResults: Source = {
 
 /** DataForSEO answers 40204 (and 402 or 403 over HTTP) when the Backlinks API isn't active on the account. */
 const notActive = (error: unknown) => error instanceof DataForSeoError && (error.code === 40204 || error.code === 402 || error.code === 403);
+const NOT_ACTIVE = "backlinks: the Backlinks API isn't active on this DataForSEO account (app.dataforseo.com → Backlinks API)";
 
 /**
  * Link profiles for the site and each competitor, and the link gap: sites
@@ -199,11 +200,13 @@ const backlinks: Source = {
         fetched++;
         cost += answer.cost;
       } catch (error) {
-        if (notActive(error)) return { notes: ["backlinks: the Backlinks API isn't active on this DataForSEO account (app.dataforseo.com → Backlinks API)"] };
+        if (notActive(error)) return { notes: [NOT_ACTIVE] };
         notes.push(`backlinks skipped ${domain}: ${said(error)}`);
-        continue;
       }
-      if (domain !== own) continue;
+    }
+    // The site's referring domains on their own schedule (the spam networks snapshot's day), so a failed read is tried the next day.
+    const listDue = ((await listSnapshotDates(db, site.id, "spam_networks"))[own] ?? "") <= staleBefore;
+    if (listDue) {
       try {
         const referring = await fetchReferringDomains(keys.dataForSeo!, own, fetchFn);
         const classified = classifyReferringDomains(referring.rows, own);
@@ -219,9 +222,9 @@ const backlinks: Source = {
           { metric: "links_broken_real", day: today, value: counts.brokenReal },
         );
         cost += referring.cost;
-        notes.push(`backlinks: ${classified.length} referring domains read, ${counts.real} real, ${counts.spam} spam (${networks.length} networks), ${dollars(referring.cost)}`);
+        notes.push(`backlinks: ${classified.length} referring domains read, ${counts.real} real, ${counts.spam} spam (${networks.length} network${networks.length === 1 ? "" : "s"}), ${dollars(referring.cost)}`);
       } catch (error) {
-        if (notActive(error)) return { points, notes: ["backlinks: the Backlinks API isn't active on this DataForSEO account (app.dataforseo.com → Backlinks API)"] };
+        if (notActive(error)) return { points, notes: [NOT_ACTIVE] };
         notes.push(`referring domains skipped: ${said(error)}`);
       }
     }
@@ -234,11 +237,11 @@ const backlinks: Source = {
         fetched++;
         cost += answer.cost;
       } catch (error) {
-        if (notActive(error)) return { points, notes: ["backlinks: the Backlinks API isn't active on this DataForSEO account (app.dataforseo.com → Backlinks API)"] };
+        if (notActive(error)) return { points, notes: [NOT_ACTIVE] };
         notes.push(`link gap skipped: ${said(error)}`);
       }
     }
-    return { points, notes: [due ? `backlinks: ${fetched} of ${due} lists fetched, ${dollars(cost)}` : "backlinks: lists fresh", ...notes] };
+    return { points, notes: [...(due ? [`backlinks: ${fetched} of ${due} lists fetched, ${dollars(cost)}`] : listDue ? [] : ["backlinks: lists fresh"]), ...notes] };
   },
 };
 
@@ -316,4 +319,6 @@ const crawlLog: Source = {
   },
 };
 
-export const CONNECTOR_SOURCES: Source[] = [serpCompetitors, serpResults, backlinks, bing, indexNow, crawlLog];
+/** The DataForSEO connectors, which run in the sync's own DataForSEO step. */
+export const DATAFORSEO_CONNECTOR_SOURCES: Source[] = [serpCompetitors, serpResults, backlinks];
+export const CONNECTOR_SOURCES: Source[] = [bing, indexNow, crawlLog];

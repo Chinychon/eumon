@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { DEMO_SITE_ID } from "@organic-growth/agents";
-import { createAnalysis, enqueueAnalysisCrawlUrls, listMetricSeries, listSyncRuns, saveCrawlBatch, setAiPrompts, setLimitOverrides, setSiteMarkets, setTrackedKeywords, updateAnalysisStatus, updateSiteGscProperty, upsertSite } from "@organic-growth/db";
+import {
+  createAnalysis, defaultPageSettings, enqueueAnalysisCrawlUrls, listMetricSeries, listSyncRuns, saveCrawlBatch, setAiPrompts, setLimitOverrides, setSiteCompetitorDomains, setSiteMarkets, setTrackedKeywords,
+  updateAnalysisStatus, updateSiteGa4Property, updateSiteGscProperty, upsertPageSettings, upsertSite,
+} from "@organic-growth/db";
 import { openSqliteD1 } from "@organic-growth/db/sqlite";
-import { SEARCH_CONSOLE_SCOPE } from "./gsc-auth.ts";
+import { ANALYTICS_SCOPE, SEARCH_CONSOLE_SCOPE } from "./gsc-auth.ts";
 import { pacificDayStart, startDailySyncs, startSync, syncSite, type StepLike, type SyncDeps } from "./sync-steps.ts";
 
 const now = new Date("2026-10-07T04:15:00Z");
@@ -214,6 +217,63 @@ describe("sync steps", () => {
     const notes = await syncSite(deps(db, count, PASS), step, DEMO_SITE_ID, "manual");
     assert.equal(total(), 0);
     assert.ok(notes[0]!.startsWith("demo site"), notes.join("; "));
+  });
+});
+
+describe("subrequests per step", () => {
+  // DataForSEO's envelope around one result.
+  const dfs = (result: unknown) => ({ status_code: 20000, status_message: "Ok.", tasks: [{ status_code: 20000, status_message: "Ok.", cost: 0.01, result: [result] }] });
+  const queries = Array.from({ length: 40 }, (_, index) => `query ${index}`);
+  const answer = (url: string, init?: RequestInit): Response => {
+    const { host, pathname } = new URL(url);
+    const body = init?.body ? JSON.parse(String(init.body)) : null;
+    const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status });
+    if (pathname.includes("urlInspection")) return PASS();
+    if (host === "api.dataforseo.com") {
+      if (pathname.includes("ranked_keywords")) return json(dfs({ items: queries.map((keyword) => ({ keyword_data: { keyword, keyword_info: { search_volume: 100 } }, ranked_serp_element: { serp_item: { rank_group: 5, relative_url: "/", etv: 1 } } })) }));
+      if (pathname.includes("keyword_overview")) return json(dfs({ items: body[0].keywords.map((keyword: string) => ({ keyword, keyword_info: { search_volume: 100 } })) }));
+      if (pathname.includes("serp/google")) return json(dfs({ item_types: [], items: [] }));
+      if (pathname.includes("backlinks/summary")) return json(dfs({ rank: 10, backlinks: 5, referring_domains: 4, referring_main_domains: 4 }));
+      if (pathname.includes("backlinks/backlinks")) return json(dfs({ items: Array.from({ length: 50 }, (_, index) => ({ domain_from: `d${index}.com`, url_from: `https://d${index}.com/p`, url_to: "https://s.com/", anchor: "s", dofollow: true, first_seen: "2026-01-01 00:00:00 +00:00", last_seen: "2026-10-01 00:00:00 +00:00", is_lost: false, is_broken: false, domain_from_rank: 100 - index })) }));
+      return json(dfs({ items: [] }));
+    }
+    if (pathname.includes("searchAnalytics")) {
+      return json({ rows: body.dimensions[0] === "date" ? [{ keys: ["2026-10-01"], clicks: 1, impressions: 10, ctr: 0.1, position: 5 }] : queries.map((query) => ({ keys: [query], clicks: 1, impressions: 10, ctr: 0.1, position: 5 })) });
+    }
+    if (host.includes("pagespeedonline")) return json({ lighthouseResult: { categories: { performance: { score: 0.9 } } } });
+    if (host.includes("chromeuxreport")) return json({}, 404);
+    if (host.includes("bing")) return json({ d: [] });
+    return json({ rows: [], response: [] });
+  };
+
+  it("keeps the sources and DataForSEO steps within 50 fetches each on a worst-case Monday, and records the run", async () => {
+    const monday = new Date("2026-10-05T04:15:00Z");
+    const db = openSqliteD1();
+    await addSite(db, "s");
+    await updateSiteGa4Property(db, "s", "properties/9");
+    await setSiteCompetitorDomains(db, "s", ["a.com", "b.com", "c.com"]);
+    await setSiteMarkets(db, "s", ["mys", "sgp"]);
+    await upsertPageSettings(db, { ...defaultPageSettings("s", "s.com", "https://s.com"), verifiedAt: at, updatedAt: at });
+    await publishPages(db, "s", 1);
+    await db.prepare(`INSERT INTO organization (id, name, slug, createdAt) VALUES ('w', 'w', 'w', ?)`).bind(at).run();
+    await setLimitOverrides(db, "w", { dataForSeo: true });
+    await db.prepare("UPDATE sites SET workspace_id = 'w' WHERE id = 's'").run();
+    const { steps, step, count } = recorder();
+    const fetchFn = (async (url: string, init?: RequestInit) => {
+      count();
+      return answer(url, init);
+    }) as typeof fetch;
+    // Connecting costs one token fetch in production.
+    const google = () => ({ connect: async () => { await fetchFn("https://oauth2.googleapis.com/token"); return { token: "t", scopes: [SEARCH_CONSOLE_SCOPE, ANALYTICS_SCOPE] }; }, fetchFn });
+    const keys = { googleApiKey: "g", openPageRankKey: "o", dataForSeo: { login: "l", password: "p" }, bingApiKey: "b", indexNowSecret: "x".repeat(40) };
+    const notes = await syncSite({ db, keys, now: () => monday, google }, step, "s", "daily");
+    const fetches = Object.fromEntries(steps.map((entry) => [entry.name, entry.inspections]));
+    console.log("fetches per step:", JSON.stringify(fetches));
+    for (const [name, made] of Object.entries(fetches)) assert.ok(made <= 50, `${name} made ${made} fetches`);
+    assert.ok(fetches["s/sources"]! > 0 && fetches["s/dataforseo"]! > 0, JSON.stringify(fetches));
+    assert.ok(notes.some((note) => note.startsWith("speed:")) && notes.some((note) => note.startsWith("search results:")), notes.join("; "));
+    assert.ok(notes.some((note) => /^backlinks: \d+ referring domains read/.test(note)), notes.join("; "));
+    assert.equal((await listSyncRuns(db, "s")).length, 1);
   });
 });
 

@@ -136,7 +136,7 @@ describe("backlinks", () => {
     const { db, record } = await site();
     const stub = dataForSeoStub({ referring: linkItems(2, 10) });
     const notes = await syncResults(db, record, now, { ...noGoogle, fetchFn: stub.fetchFn }, { dataForSeo });
-    assert.ok(notes.some((note) => note.startsWith("backlinks: 12 referring domains read, 2 real, 10 spam (1 networks)")), notes.join("; "));
+    assert.ok(notes.some((note) => note.startsWith("backlinks: 12 referring domains read, 2 real, 10 spam (1 network)")), notes.join("; "));
     const stored = await db.prepare("SELECT spam, COUNT(*) AS n FROM referring_domains WHERE site_id = 's' GROUP BY spam ORDER BY spam").all<{ spam: number; n: number }>();
     assert.deepEqual(stored.results.map((row) => [row.spam, row.n]), [[0, 2], [1, 10]]);
     const series = await listMetricSeries(db, "s", ["ref_domains_real", "ref_domains_spam"], "2026-10-07", "2026-10-07");
@@ -146,6 +146,18 @@ describe("backlinks", () => {
     stub.asked.length = 0;
     await syncResults(db, record, new Date("2026-10-20T04:15:00Z"), { ...noGoogle, fetchFn: stub.fetchFn }, { dataForSeo });
     assert.ok(!stub.asked.some((call) => call.endpoint.startsWith("backlinks/")));
+  });
+
+  it("reads the referring domains when their list is missing, even with a fresh profile, so a failed read is tried the next day", async () => {
+    const { db, record } = await site();
+    await saveSnapshot(db, "s", { kind: "backlinks", scope: "x.com", periodEnd: "2026-10-06", rows: [{ rank: 100, backlinks: 900, referringDomains: 60, referringMainDomains: 50 }] });
+    const stub = dataForSeoStub({ referring: linkItems(2, 0) });
+    const notes = await syncResults(db, record, now, { ...noGoogle, fetchFn: stub.fetchFn }, { dataForSeo });
+    assert.deepEqual(stub.asked.map((call) => call.endpoint), ["backlinks/backlinks"], "the profile is fresh; only the list is due");
+    assert.ok(notes.some((note) => note.startsWith("backlinks: 2 referring domains read")), notes.join("; "));
+    stub.asked.length = 0;
+    await syncResults(db, record, now, { ...noGoogle, fetchFn: stub.fetchFn }, { dataForSeo });
+    assert.deepEqual(stub.asked, [], "a second run the same day reads nothing");
   });
 
   it("loads the stored referring domains into the view, bounded, and nothing when there are none", async () => {

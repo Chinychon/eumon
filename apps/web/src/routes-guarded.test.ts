@@ -4,7 +4,7 @@ import { join, relative } from "node:path";
 import { describe, it } from "node:test";
 
 /** Routes the gate leaves public; each authenticates its own way (a token, a signed link, OAuth state). */
-const PUBLIC = new Set(["sites/[siteId]/events/route.ts", "r/[token]/route.ts", "logs/[siteId]/route.ts"]);
+const PUBLIC = new Set(["sites/[siteId]/events/route.ts", "r/[token]/route.ts", "logs/[siteId]/route.ts", "github/webhook/route.ts"]);
 const GUARD = /\brequire(Site|Owned|Workspace|Viewer|PlatformAdmin)\(/;
 const root = new URL("../app/api/", import.meta.url).pathname;
 

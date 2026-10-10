@@ -9,6 +9,7 @@ import { BarList, Funnel, Heatmap, PairedBars, Scatter } from "./charts";
 import { CrawlGarden } from "./pixel";
 import { CrawlLogCard } from "./results/ConnectorCards";
 import { SPEED_SUBTITLE, SpeedSection } from "./results/sections";
+import { FixesPanel } from "./FixesPanel";
 import { SiteGraph } from "./SiteGraph";
 import { familyLabel, findingArea, gapsFirst, HEALTH_COLUMNS, opportunityArea, pageTypeHealth, servedShare, urlPath, type Finding, type Navigate, type Report } from "./report-model";
 import { ExportMenu } from "./export/ExportMenu";
@@ -24,8 +25,6 @@ import { Badge, Button, Card, Kpi } from "./ui";
  * the page reads at a glance. Sections return fragments, so they stack into
  * the page's ruled `.results` column.
  */
-
-export type Change = { id: string; findingId?: string; title: string; reason: string; patch: string; prUrl?: string };
 
 const SEVERITY_CLASS: Record<string, string> = { CRITICAL: "critical", HIGH: "high", MEDIUM: "medium", LOW: "low", INFORMATIONAL: "info" };
 const path = urlPath;
@@ -55,17 +54,14 @@ const FindingTitle = ({ finding }: { finding: Finding }) => {
 export const Severity = ({ value }: { value: string }) => <span className={`severity ${SEVERITY_CLASS[value] ?? "info"}`}>{value}</span>;
 
 /** The site as Google receives it, where it breaks, how fast it is, and the fixes, most impact first. Speed comes from the sync, so it shows before any analysis. */
-export function TechnicalTab({ siteId, report, results, running, changes, busy, hasRepo, onGenerateChange, onOpenPullRequest, onRecrawl, onSetup }: {
+export function TechnicalTab({ siteId, report, results, running, busy, hasRepo, onRecrawl, onSetup }: {
   siteId: string;
   report: Report | null;
   results: Payload | null;
   /** An analysis is under way, so the empty states wait for it rather than ask for one. */
   running: boolean;
-  changes: Change[];
   busy: string;
   hasRepo: boolean;
-  onGenerateChange: (findingId: string) => void;
-  onOpenPullRequest: (change: Change) => void;
   onRecrawl: () => void;
   /** Opens Setup, where server logs are connected. */
   onSetup?: () => void;
@@ -117,10 +113,10 @@ export function TechnicalTab({ siteId, report, results, running, changes, busy, 
       {speed}
       <SiteGraph siteId={siteId} />
       <ChecksCard report={report} pillar="seo" />
+      <FixesPanel siteId={siteId} hasRepo={hasRepo} />
       <Card title="Fixes" actions={<><span className="count-pill">{findings.length} findings</span>{findings.length > 0 && <ExportMenu title="Technical fixes" sheets={() => fixSheets(report, (category) => findingArea(category) === "technical")} />}</>}>
         {findings.length ? findings.map((finding) => (
-          <FindingRow key={finding.id} finding={finding} change={changes.find((item) => item.findingId === finding.id)} busy={busy}
-            fixable={hasRepo && ["sitemap", "indexing"].includes(finding.category)} onGenerateChange={onGenerateChange} onOpenPullRequest={onOpenPullRequest} />
+          <FindingRow key={finding.id} finding={finding} />
         )) : <p className="empty-state">No technical issues surfaced in this analysis.</p>}
       </Card>
       {report.repo && <CodeIntelligence repo={report.repo} />}
@@ -152,23 +148,11 @@ function TechnicalNumbers({ report, results, running }: { report: Report | null;
   );
 }
 
-function FindingRow({ finding, change, busy, fixable, onGenerateChange, onOpenPullRequest }: {
-  finding: Finding; change?: Change; busy: string; fixable: boolean;
-  onGenerateChange: (findingId: string) => void; onOpenPullRequest: (change: Change) => void;
-}) {
+function FindingRow({ finding }: { finding: Finding }) {
   return (
     <WhyRow lead={<Severity value={finding.severity} />} title={<FindingTitle finding={finding} />} aside={<span className="impact">{finding.organicImpactScore}<small>impact</small></span>}>
       <p>{finding.summary}</p>
       {finding.recommendation && <p><strong>Next step.</strong> {finding.recommendation}</p>}
-      {fixable && !change && <button className="inline-action" disabled={Boolean(busy)} onClick={() => onGenerateChange(finding.id)}>{busy === finding.id ? "Preparing reviewable change…" : "Generate safe configuration fix"}</button>}
-      {change && (
-        <div className="change-card">
-          <strong>{change.title}</strong>
-          <p>{change.reason}</p>
-          <pre>{change.patch}</pre>
-          {change.prUrl ? <a href={change.prUrl} target="_blank" rel="noreferrer">Open draft pull request</a> : <button className="inline-action" disabled={Boolean(busy)} onClick={() => onOpenPullRequest(change)}>{busy === change.id ? "Opening draft PR…" : "Create draft GitHub PR"}</button>}
-        </div>
-      )}
     </WhyRow>
   );
 }

@@ -1571,3 +1571,4 @@ export async function getSiteLogToken(db: D1Like, siteId: string): Promise<strin
 export async function setSiteLogToken(db: D1Like, siteId: string, token: string): Promise<void> {
   await db.prepare("UPDATE sites SET log_token = ? WHERE id = ?").bind(token, siteId).run();
 }
+export * from "./fixes.js";

@@ -71,8 +71,9 @@ npx cf d1 migrations list 591e4045-cbff-4ef4-a894-cbe4ece424ec --dir ../../packa
       <tr><td><code>SESSION_SECRET</code></td><td>Signs the Google connection's OAuth state and client Results links; derives each site's IndexNow key and original server-log token. 32+ characters. Changing it breaks every IndexNow key file, every unrotated log token and every shared Results link.</td></tr>
       <tr><td><code>OAUTH_ENCRYPTION_KEY</code></td><td>Encrypts stored Google tokens. Base64url of exactly 32 random bytes.</td></tr>
       <tr><td><code>GOOGLE_CLIENT_ID</code>, <code>GOOGLE_CLIENT_SECRET</code></td><td>Google sign-in, and the Google connection for Search Console and Analytics.</td></tr>
-      <tr><td><code>GITHUB_APP_ID</code>, <code>GITHUB_APP_SLUG</code>, <code>GITHUB_APP_PRIVATE_KEY</code></td><td>GitHub App for repository analysis and draft pull requests.</td></tr>
+      <tr><td><code>GITHUB_APP_ID</code>, <code>GITHUB_APP_SLUG</code>, <code>GITHUB_APP_PRIVATE_KEY</code></td><td>GitHub App for repository analysis and pull requests (see <a href="#flow-fixes">Code fixes</a>).</td></tr>
       <tr><td><code>GITHUB_APP_CLIENT_ID</code>, <code>GITHUB_APP_CLIENT_SECRET</code></td><td>The same App's OAuth client, used to check who installed it.</td></tr>
+      <tr><td><code>GITHUB_WEBHOOK_SECRET</code></td><td>Verifies webhook deliveries from the GitHub App. Must match the secret set on the App.</td></tr>
       <tr><td><code>GOOGLE_API_KEY</code></td><td>CrUX and PageSpeed Insights.</td></tr>
       <tr><td><code>OPEN_PAGERANK_KEY</code></td><td>Authority scores.</td></tr>
       <tr><td><code>DATAFORSEO_LOGIN</code>, <code>DATAFORSEO_PASSWORD</code></td><td>Keyword volume, difficulty, competitor keywords, search results pages, backlinks.</td></tr>

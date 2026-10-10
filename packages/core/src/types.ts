@@ -41,7 +41,8 @@ export type ChangeStatus =
   | "rejected"
   | "pr_opened"
   | "merged"
-  | "failed";
+  | "failed"
+  | "staged" | "skipped" | "draft" | "ready" | "closed" | "reverted";
 
 export type ConversionEventName =
   | "page_view"

@@ -21,7 +21,7 @@ The work lands as three ordered parts on one branch: **C** (hardening, independe
 
 ### A1. Library: Better Auth on D1
 
-Better Auth (`better-auth@1.7.x`) runs inside the Worker with its tables in the existing D1 database. Plugins: `organization` (workspaces, members, invitations, active workspace on the session), `magicLink`, `emailAndPassword`, and the Google social provider. Its handler is mounted at `apps/web/app/api/auth/[...all]/route.ts`. The D1 connection uses Better Auth's D1 support if the installed version has it natively, otherwise the `kysely-d1` dialect; the plan verifies which.
+Better Auth (`better-auth@1.7.7`) runs inside the Worker with its tables in the existing D1 database. It accepts the D1 binding directly (`database: env.DB`, through its built-in D1 Kysely dialect). Plugins: `organization` (workspaces, members, invitations, active workspace on the session), `magicLink`, `captcha` (Turnstile), plus `emailAndPassword` and the Google social provider. `worker.ts` passes `/api/auth/*` straight to `auth.handler`, so no route file is needed.
 
 The auth instance is built once per isolate from `cloudflare:workers` `env` (`apps/web/src/auth.ts`), exporting `auth` and `getSession(request)`.
 
@@ -49,7 +49,9 @@ The auth instance is built once per isolate from `cloudflare:workers` `env` (`ap
 ### A4. Data model (migration `0024_accounts.sql`)
 
 - Better Auth tables: `user`, `session`, `account`, `verification`, `organization`, `member`, `invitation` (the shapes Better Auth's CLI generates for these plugins, written into the migration by hand).
-- `sites.workspace_id TEXT REFERENCES organization(id) ON DELETE CASCADE`. SQLite can't add a constrained column with a non-null default, so `sites` is rebuilt the way `0019` rebuilt tables; every existing site goes to `ws_initial`.
+- `sites.workspace_id TEXT REFERENCES organization(id) ON DELETE CASCADE`, added with `ALTER TABLE … ADD COLUMN` (nullable; the app always sets it) and then set to `ws_initial` for every existing site. The table is **not** rebuilt: D1 enforces foreign keys, so dropping `sites` would cascade-delete every child row.
+- `site_access_invites (invitation_id, site_id)`: the sites a pending Client invitation grants; copied into `site_access` when the invitation is accepted.
+- `workspace_github_installations (workspace_id, installation_id, created_at)` (part B).
 - `organization` row `ws_initial` ("Eumon") is inserted by the migration.
 - `site_access (user_id, site_id, created_at, PRIMARY KEY (user_id, site_id))`, both cascading: client grants.
 - `workspace_limits (workspace_id PRIMARY KEY, sites, crawl_pages_per_day, ask_per_day, ai_runs_per_day, members, dataforseo, pull_requests, sheets_export)`. No row = the free defaults in code; `ws_initial` gets a row with no limits.
@@ -66,12 +68,14 @@ The auth instance is built once per isolate from `cloudflare:workers` `env` (`ap
 | Member | workspace | read and write every site in the workspace; create sites (within limits) |
 | Client | listed sites (`site_access`) | read-only: the Results dashboard, pages, leads; no settings, connections, publishing, deletes, PRs, Ask, or exports |
 
+A Client is a Better Auth organization member with the custom role `client` (defined with the plugin's access control so it can't invite or manage anything). One invitation flow serves both kinds of user: a Client invitation also writes its sites to `site_access_invites`, and the `afterAcceptInvitation` hook copies them into `site_access`. Each user may create one workspace (`organizationLimit: 1`), so free limits can't be multiplied by creating more workspaces. A new user gets a personal workspace at sign-up unless a pending invitation is waiting for their email.
+
 Share links (`/r/*`) keep working unchanged for no-login viewing.
 
 ### A6. Enforcement, two layers
 
 **Layer 1: the gate in `worker.ts`.** Before vinext sees a request:
-- **Public** (passes through): `/p/*`, `/api/sites/*/events`, `/r/*`, `/api/r/*`, `/api/logs/*` (token-checked), `/api/auth/*`, `/sign-in`, `/sign-up`, `/invite/*`, static assets, `manifest.json`, `sw.js`, `sw-register.js`.
+- **Public** (passes through): `/p/*`, `/api/sites/*/events`, `/r/*`, `/api/r/*`, `/api/logs/*` (token-checked), `/api/auth/*`, `/sign-in`, `/invite/*`, static assets, `manifest.json`, `sw.js`, `sw-register.js`.
 - **Everything else** needs a session: `/api/*` → `401 {error}`, pages → `303 /sign-in?next=…`.
 - **CSRF:** any non-GET/HEAD `/api/*` request (outside `/api/auth/*`, which Better Auth checks itself, and the public endpoints) whose `Origin` isn't the request's own origin → 403.
 - The session is attached for routes to read (`getSession(request)` is cached per request).
@@ -97,7 +101,7 @@ It returns `{ user, site, role }` or a 403/404 `Response`. A site the user can't
 | pageId | `generated_pages.site_id` |
 | jobId | the job's site |
 
-Per route, the required level: `GET` routes are `read` unless they expose secrets or connections (`connectors`, `integration`, `gsc/properties`, `ga4/properties`, `share` → `write`); every POST/PUT/PATCH/DELETE is `write`; `DELETE /api/sites/:id` and the share link mint/revoke are `admin`. The plan carries the full route table; a test asserts every `route.ts` calls the guard or is on the public list.
+Per route, the required level: `GET` routes are `read` unless they expose secrets or connections (`connectors`, `integration`, `gsc/properties`, `ga4/properties`, `share` → `write`); every POST/PUT/PATCH/DELETE is `write`; `DELETE /api/sites/:id` is `admin`; minting and revoking a share link is `write` (Members share Results with clients). The plan carries the full route table; a test asserts every `route.ts` calls the guard or is on the public list.
 
 **Workspace-scoped routes:**
 - `GET /api/sites` returns the active workspace's sites, plus any sites a Client was granted.
@@ -113,7 +117,8 @@ Defaults for a workspace with no `workspace_limits` row:
 | Limit | Default | Checked at |
 |---|---|---|
 | Sites | 1 | `POST /api/sites` (count) |
-| Crawl/scrape pages per day | 500 | queueing an analysis, scrape, or source preview, charged its page budget |
+| Analyses per day | 3 | `POST /api/sites/:id/analyses` |
+| Scrape pages per day | 500 | `POST /api/datasets/:id/scrape`, charged the sum of the started sources' `maxPages` |
 | Ask questions per day | 20 | `POST /api/sites/:id/assistant` |
 | AI generation runs per day | 10 | template generate, snippets, scope, source preview |
 | Members + clients | 3 | invitations |
@@ -126,7 +131,7 @@ Defaults for a workspace with no `workspace_limits` row:
 
 ### A8. UI
 
-Pages `/sign-in`, `/sign-up`, `/invite/[id]`, and `/admin`, plus a workspace switcher and members panel (Setup → Members: invite by email, with a copy-paste link while email is off; roles; client site grants). Styling follows `apps/web/DESIGN.md`: square corners, hairline rules, Geist. Buttons for flagged-off methods are not rendered. Client users see the dashboard with write controls hidden; the API refuses them regardless.
+Pages `/sign-in` (one page for signing in and signing up: Google creates the account on first use, and the password form has a sign-up toggle), `/invite/[id]`, and `/admin`, plus a workspace switcher and members panel (Setup → Members: invite by email, with a copy-paste link while email is off; roles; client site grants). Styling follows `apps/web/DESIGN.md`: square corners, hairline rules, Geist. Buttons for flagged-off methods are not rendered. Client users see the dashboard with write controls hidden; the API refuses them regardless.
 
 ---
 
@@ -156,13 +161,14 @@ Pages `/sign-in`, `/sign-up`, `/invite/[id]`, and `/admin`, plus a workspace swi
 1. **No workers.dev or preview URLs:** `cloudflare.config.ts` sets them off. The plan confirms the option names `cf/config` uses.
 2. **Trailing dots:** `isSafePublicUrl` strips one trailing dot from the hostname before its checks, so `localhost.`, `x.internal.`, and `printer.local.` are refused.
 3. **Supabase pull:** `https:` only, host must end `.supabase.co`, `AbortSignal.timeout(15_000)`, body read through a 5 MB capped reader.
-4. **Sitemap cap:** sitemap reads use `maxBytes: 10_000_000` (the comment's intent), and URLs collected per analysis are capped.
-5. **Browser render:** the request interceptor continues only same-site requests plus the page's own subresource hosts, and aborts `ws:`/`wss:` connections and anything failing `isSafePublicUrl`.
-6. **Beacon variants:** `servePublicBeacon` drops `v` unless it is an active variant of that site.
+4. **Sitemap cap:** stays 25 MB (Google allows 50 MB sitemaps, so a 10 MB cap would break real sites); the comment that says 10 MB is corrected.
+5. **Browser render:** WebSocket connections, which request interception never sees, are blocked through CDP `Network.setBlockedURLs` (`ws://*`, `wss://*`). Third-party subresources stay allowed, because client-rendered pages need their CDNs and APIs to render.
+6. **Beacon variants:** the variant counter update also requires `active = 1` (it was already limited to the site's own variants).
 7. **CSV formulas:** the guard regex becomes `/^[=+\-@\t\r]/`.
 8. **Security headers:**
-   - Dashboard responses: `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, `X-Frame-Options: DENY`, and a CSP allowing self, Turnstile, and the inline theme script by hash.
-   - `/p/*` HTML: `nosniff`, and a CSP of `default-src 'none'; img-src * data:; style-src 'unsafe-inline'; script-src 'self' 'nonce-…'; connect-src 'self'; base-uri 'none'; form-action 'self'`. Frame embedding stays allowed there, since customers' proxies may need it.
+   - Dashboard responses: `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, `X-Frame-Options: DENY`, and `Content-Security-Policy: frame-ancestors 'none'; base-uri 'self'; object-src 'none'`.
+   - `/p/*` HTML: `nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, and `Content-Security-Policy: base-uri 'none'; object-src 'none'`. Frame embedding stays allowed there, since customers' proxies may need it.
+   - **Ceiling:** neither CSP restricts `script-src`. vinext writes inline RSC payload scripts and the landing-page beacon is an inline script with per-page config, so a script policy needs per-request nonces threaded through both renderers. The renderer's escaping (audited clean) stays the XSS defence; a nonce-based `script-src` is the upgrade.
 9. **Per-site log token:** `sites.log_token` is nullable. While it is null, `tokenMatches` accepts the existing `SESSION_SECRET`-derived token, so configured log drains keep working. "Rotate" in Connectors stores a random 32-byte token; from then on only the stored token is accepted.
 10. **Proxy snippets** (Worker, nginx, Apache) stop forwarding `Cookie` and `Authorization`.
 11. **Dependencies:** pin `react`/`react-dom` to the installed versions; apply non-breaking `npm audit fix`.
@@ -174,6 +180,8 @@ Pages `/sign-in`, `/sign-up`, `/invite/[id]`, and `/admin`, plus a workspace swi
 | Name | Kind | Needed |
 |---|---|---|
 | `BETTER_AUTH_SECRET` | secret | yes |
+| `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET` | secret | yes (the GitHub App's OAuth credentials, for B1) |
+| `AUTH_RATE_LIMIT` | `rateLimit` binding | yes (10 requests / 60 s per IP on `/api/auth/*`) |
 | `BOOTSTRAP_OWNER_EMAIL` | secret | yes |
 | `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | secret | yes |
 | `EMAIL` | `send_email` binding | yes (declared; sends only once on Paid) |

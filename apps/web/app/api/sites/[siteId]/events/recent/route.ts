@@ -2,7 +2,7 @@ import { env } from "cloudflare:workers";
 import { listRecentEvents } from "@organic-growth/db";
 import { requireSite } from "../../../../../../src/guard";
 
-/** The latest conversion events received, so the operator can check the tracker is installed. */
+/** The latest conversion events received, so the user can check the tracker is installed. */
 export async function GET(request: Request, context: { params: Promise<{ siteId: string }> }) {
   const { siteId } = await context.params;
   const access = await requireSite(request, siteId, "read");

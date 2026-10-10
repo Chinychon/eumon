@@ -4,7 +4,7 @@ import { deleteUnusedProposedDatasets, getPageSettings, getSiteScope, saveSiteSc
 import { proposeScope } from "@organic-growth/scraper";
 import { gatherSiteEvidence } from "../../../../../src/page-engine";
 import { requireSite } from "../../../../../src/guard";
-import { charge } from "../../../../../src/limits";
+import { charge, refund } from "../../../../../src/limits";
 import { appLlm, fail, json, llmFailure, readJson, settingsFor } from "../../../../../src/server";
 
 export async function GET(request: Request, context: { params: Promise<{ siteId: string }> }) {
@@ -24,15 +24,18 @@ export async function POST(request: Request, context: { params: Promise<{ siteId
   const access = await requireSite(request, siteId, "write");
   if (access instanceof Response) return access;
   const { site } = access;
-  const refusal = await charge(env.DB, site.workspaceId!, "aiRunsPerDay");
-  if (refusal) return fail(refusal, 429);
   const body = (await readJson<{ goal?: unknown }>(request)) ?? {};
   const goal = typeof body.goal === "string" ? body.goal.trim().slice(0, 600) : undefined;
   const llm = appLlm();
   if (llm instanceof Response) return llm;
+  const refusal = await charge(env.DB, site.workspaceId!, "aiRunsPerDay");
+  if (refusal) return fail(refusal, 429);
 
   const evidence = await gatherSiteEvidence(site, goal);
-  if (!evidence.pages.length) return fail("Eumon could not read the website's homepage. Check that the URL is public and loads without a login.", 422);
+  if (!evidence.pages.length) {
+    await refund(env.DB, site.workspaceId!, "aiRunsPerDay");
+    return fail("Eumon could not read the website's homepage. Check that the URL is public and loads without a login.", 422);
+  }
 
   let proposal;
   try {

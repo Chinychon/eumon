@@ -18,9 +18,6 @@ export async function POST(request: Request, context: { params: Promise<{ source
   if (!source) return fail("Source not found.", 404);
   const dataset = await getDataset(env.DB, source.datasetId);
   if (!dataset) return fail("Dataset not found.", 404);
-  const refusal = await charge(env.DB, access.site.workspaceId!, "aiRunsPerDay");
-  if (refusal) return fail(refusal, 429);
-
   const fetcher = new PoliteFetcher();
   let expanded;
   try {
@@ -47,8 +44,12 @@ export async function POST(request: Request, context: { params: Promise<{ source
     } else {
       try {
         const response = await fetcher.fetch(first);
+        // Only the sample extraction uses the model, so only it is charged: not the match count, the robots check, or a page that failed.
+        const refusal = response.status >= 400 ? null : await charge(env.DB, access.site.workspaceId!, "aiRunsPerDay");
         if (response.status >= 400) {
           sampleError = `The first page returned HTTP ${response.status}.`;
+        } else if (refusal) {
+          sampleError = refusal;
         } else {
           const extracted = await extractRecordsFromHtml({ llm, dataset, url: response.finalUrl, html: response.body, maxRecords: 20 });
           sample = { url: response.finalUrl, summary: extracted.summary, records: extracted.records.map((record) => record.data) };

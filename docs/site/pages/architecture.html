@@ -1,13 +1,14 @@
 <article id="architecture" data-title="Architecture" data-group="How it works">
   <h1>Architecture</h1>
-  <p class="lede">How Eumon runs: one Cloudflare Worker serves the dashboard, the API, the public landing pages and the background Workflows, on top of a stack of TypeScript packages. Read this before changing bindings, adding a route, or moving code between packages.</p>
+  <p class="lede">How Eumon runs: one Cloudflare Worker checks who is asking, then serves the dashboard, the API, the public landing pages and the background Workflows, on top of a stack of TypeScript packages. Read this before changing bindings, adding a route, or moving code between packages.</p>
 
-  <figure data-diagram="architecture"><figcaption>One Worker handles browser requests, the daily cron trigger and three Workflows, and talks to D1, Browser Rendering, Workers AI and outside APIs.</figcaption></figure>
+  <figure data-diagram="architecture"><figcaption>One Worker passes every browser request through a sign-in gate, runs the daily cron trigger and three Workflows, and talks to D1, Browser Rendering, Workers AI and outside APIs.</figcaption></figure>
 
   <h2 id="one-worker">One Worker does everything</h2>
   <p>There is a single deployable: the <code>apps/web</code> workspace (<code>@organic-growth/web</code>), deployed as the Worker named <code>eumon</code>. The same Worker:</p>
   <ul>
-    <li>renders the dashboard at <code>/</code>,</li>
+    <li>renders the dashboard at <code>/</code>, the sign-in page, invitation links and <code>/admin</code>,</li>
+    <li>answers Better Auth's sign-in endpoints under <code>/api/auth/*</code>,</li>
     <li>answers the JSON API under <code>/api/*</code>,</li>
     <li>serves published landing pages under <code>/p/&lt;siteId&gt;/…</code> and the client share link under <code>/r/&lt;token&gt;</code>,</li>
     <li>runs the daily cron trigger,</li>
@@ -21,9 +22,11 @@
     <dt>Worker settings and bindings</dt>
     <dd><code class="path">apps/web/cloudflare.config.ts</code>, written with the <code>cf/config</code> helpers (<code>defineWorker</code>, <code>bindings</code>, <code>triggers</code>, <code>exports</code>). There is no <code>wrangler.jsonc</code>. The <code>AppEnv</code> type is inferred from this file, so a binding added here is typed everywhere.</dd>
     <dt>Worker entry</dt>
-    <dd><code class="path">apps/web/worker.ts</code> (the <code>entrypoint</code> in the config). It wraps vinext's fetch handler, re-exports the three Workflow classes, and adds the <code>scheduled</code> handler.</dd>
+    <dd><code class="path">apps/web/worker.ts</code> (the <code>entrypoint</code> in the config). Its <code>fetch</code> checks every request before handing it to vinext's fetch handler (see <a href="#architecture--request-flow">How a request flows</a>). It also re-exports the three Workflow classes and adds the <code>scheduled</code> handler.</dd>
     <dt>Compatibility</dt>
     <dd><code>compatibilityDate: "2026-10-05"</code>, flag <code>nodejs_compat</code>.</dd>
+    <dt>Preview URLs</dt>
+    <dd><code>previewUrls: false</code> (<code class="path">apps/web/cloudflare.config.ts:9</code>), so preview hostnames don't serve the app. The <code>workers.dev</code> address is not turned off; the sign-in gate protects it like any other hostname.</dd>
     <dt>Static files</dt>
     <dd><code>apps/web/public/</code>, served through the <code>ASSETS</code> binding with <code>notFoundHandling: "none"</code>.</dd>
     <dt>Dev server</dt>
@@ -46,6 +49,8 @@
       <tr><td><code>BROWSER</code></td><td>Browser Rendering</td><td>The analysis workflow launches it through <code>@cloudflare/puppeteer</code> to render one page per template, so raw HTML can be compared with the rendered DOM (<code class="path">apps/web/src/analysis-workflow.ts:214</code>).</td></tr>
       <tr><td><code>AI</code></td><td>Workers AI</td><td>The last-resort language model (see <a href="#architecture--external-services">External services</a>).</td></tr>
       <tr><td><code>ASSETS</code></td><td>Static assets</td><td>Files in <code>apps/web/public/</code>.</td></tr>
+      <tr><td><code>EMAIL</code></td><td>Send email (<code>bindings.sendEmail()</code>)</td><td>Sign-in links, email verification and invitations, through Cloudflare Email Service. It only sends when <code>EMAIL_ENABLED</code> is <code>"true"</code> and <code>EMAIL_FROM</code> is set; otherwise the message is written to the log (<code class="path">apps/web/src/auth.ts:31</code>). Sending to any address needs Workers Paid.</td></tr>
+      <tr><td><code>AUTH_RATE_LIMIT</code></td><td>Rate limit, namespace <code>1001</code>, 10 per 60 seconds (<code class="path">apps/web/cloudflare.config.ts:77</code>)</td><td>Caps sign-in attempts per IP address. See <a href="#architecture--request-flow">How a request flows</a>. The namespace must be unique in the Cloudflare account.</td></tr>
     </tbody>
   </table>
   <p>Each Workflow binding names <code>worker: "eumon"</code>, so the Worker creates instances of its own exported classes.</p>
@@ -54,10 +59,14 @@
   <table>
     <thead><tr><th>Secret</th><th>Purpose</th></tr></thead>
     <tbody>
-      <tr><td><code>SESSION_SECRET</code></td><td>Signs the GitHub install cookie, Google OAuth state and client share tokens; also the base of the per-site crawl-log token and IndexNow key. Needs at least 32 characters.</td></tr>
+      <tr><td><code>SESSION_SECRET</code></td><td>Signs the Google OAuth state and client share tokens; also the base of each site's IndexNow key and of its log-ingest token until that token is rotated. Needs at least 32 characters. It does not sign sessions.</td></tr>
+      <tr><td><code>BETTER_AUTH_SECRET</code></td><td>Signs sign-in sessions (<code class="path">apps/web/src/auth.ts:52</code>). At least 32 characters; keep it separate from <code>SESSION_SECRET</code>.</td></tr>
+      <tr><td><code>BOOTSTRAP_OWNER_EMAIL</code></td><td>Comma-separated emails. With a verified email, these people own the initial workspace and can open <code>/admin</code>. See <a href="#architecture--sign-in">Sign-in</a>.</td></tr>
+      <tr><td><code>TURNSTILE_SITE_KEY</code>, <code>TURNSTILE_SECRET_KEY</code></td><td>The Turnstile bot check on the email sign-in endpoints.</td></tr>
       <tr><td><code>OAUTH_ENCRYPTION_KEY</code></td><td>Encrypts stored Google refresh tokens.</td></tr>
-      <tr><td><code>GOOGLE_CLIENT_ID</code>, <code>GOOGLE_CLIENT_SECRET</code></td><td>Google OAuth client (Search Console, GA4, Sheets).</td></tr>
+      <tr><td><code>GOOGLE_CLIENT_ID</code>, <code>GOOGLE_CLIENT_SECRET</code></td><td>Google OAuth client: Google sign-in, and connecting a site's Search Console, GA4 and Sheets.</td></tr>
       <tr><td><code>GITHUB_APP_ID</code>, <code>GITHUB_APP_SLUG</code>, <code>GITHUB_APP_PRIVATE_KEY</code></td><td>The GitHub App for repository analysis and draft pull requests.</td></tr>
+      <tr><td><code>GITHUB_APP_CLIENT_ID</code>, <code>GITHUB_APP_CLIENT_SECRET</code></td><td>The GitHub App's OAuth client. The install callback uses it to prove the person installing owns the installation (<code class="path">apps/web/src/github-install.ts:27</code>).</td></tr>
       <tr><td><code>GOOGLE_API_KEY</code></td><td>PageSpeed Insights and CrUX.</td></tr>
       <tr><td><code>OPEN_PAGERANK_KEY</code></td><td>Open PageRank authority scores.</td></tr>
       <tr><td><code>DATAFORSEO_LOGIN</code>, <code>DATAFORSEO_PASSWORD</code></td><td>DataForSEO (keyword volume, competitor keywords, results pages, backlinks).</td></tr>
@@ -65,11 +74,78 @@
       <tr><td><code>DEEPSEEK_API_KEY</code></td><td>DeepSeek, the first-choice language model.</td></tr>
     </tbody>
   </table>
+  <p><code>EMAIL_ENABLED</code>, <code>EMAIL_FROM</code> and <code>PASSWORD_SIGNIN</code> are plain settings read by <code class="path">apps/web/src/auth.ts:17</code>. They are not declared in <code>cloudflare.config.ts</code>, and unset means off, so email and password sign-in stay off until they are declared and set.</p>
   <div class="callout trap"><p>Cloudflare has no optional secrets: every secret declared in <code>cloudflare.config.ts</code> must be set on the Worker before a deploy. That is why <code>ANTHROPIC_API_KEY</code> and <code>LLM_MODEL</code> are deliberately left out of the config. Set them with <code>wrangler secret put</code> in production; to use them in local dev, declare them in the config again. Keep settings in the config and not in the Cloudflare dashboard, or a Workers Builds deploy (strict mode) aborts on the difference. See <a href="#gotchas">Gotchas</a>.</p></div>
   <div class="callout warn"><p><code>remoteBindings</code> is <code>false</code> in <code>vite.config.ts</code>, so the <code>AI</code> binding does not work in local dev. Set <code>DEEPSEEK_API_KEY</code> or <code>ANTHROPIC_API_KEY</code> in <code>apps/web/.dev.vars</code> to use the AI steps locally.</p></div>
 
+  <h2 id="request-flow">How a request flows</h2>
+  <p>Every request reaches the <code>fetch</code> handler in <code class="path">apps/web/worker.ts:31</code> before vinext sees it. In order:</p>
+  <ol>
+    <li><strong>Sign-in endpoints.</strong> Paths under <code>/api/auth/</code> go to Better Auth (<code class="path">apps/web/worker.ts:33</code>). Anything but a <code>GET</code> first takes one token from <code>AUTH_RATE_LIMIT</code>, keyed on the <code>cf-connecting-ip</code> header, and answers 429 when the bucket is empty. Better Auth's endpoints that list a workspace's people (<code class="path">apps/web/src/auth-paths.ts:2</code>) only check membership, so the Worker refuses them with 403 for a Client of any workspace the request could name (<code class="path">apps/web/worker.ts:18</code>).</li>
+    <li><strong>Session.</strong> For any other path that is not public, the Worker reads the session with <code>authFor(env).api.getSession</code>. Public paths skip this, so landing pages, the beacon and conversion events never touch the auth tables (<code class="path">apps/web/worker.ts:44</code>).</li>
+    <li><strong>The gate.</strong> <code>gate(request, signedIn)</code> (<code class="path">apps/web/src/gate.ts:21</code>) lets public paths through. Without a session, <code>/api/*</code> answers 401 and a page redirects (303) to <code>/sign-in?next=…</code>. With a session, a write to <code>/api/*</code> (any method but <code>GET</code>, <code>HEAD</code>, <code>OPTIONS</code>) whose <code>Origin</code> header is not the app's own origin answers 403, because the session cookie travels on cross-site requests too.</li>
+    <li><strong>The route.</strong> vinext runs the page or route handler (<a href="#architecture--request-routing">How requests are handled</a>). Each API handler calls a guard that checks the caller's role (<a href="#architecture--route-guards">Route guards and limits</a>).</li>
+    <li><strong>Headers.</strong> The response gets the app's security headers, except under <code>/p/</code>, where landing pages set their own (<code class="path">apps/web/worker.ts:49</code>; see <a href="#architecture--security-headers">Security headers</a>).</li>
+  </ol>
+  <p>The public paths are a list of patterns in <code class="path">apps/web/src/gate.ts:7</code>: landing pages (<code>/p/</code>), conversion events, client Results links (<code>/r/</code>, <code>/api/r/</code>), log ingest (<code>/api/logs/</code>), Better Auth, <code>/sign-in</code>, <code>/invite/</code> and the static files. The public API routes check what they can on their own: client links need a signed token, log ingest a per-site token, and conversion events an <code>Origin</code> on the site's own domain. Everything else needs a session, so a route someone forgets to guard is still not public. The full list and what each path is for: <a href="#web-app--access-control">Web app: access control</a>.</p>
+  <div class="callout warn"><p>A new public path needs an entry in <code class="path">apps/web/src/gate.ts:7</code> and, for an API route, in the <code>PUBLIC</code> set of <code class="path">apps/web/src/routes-guarded.test.ts:7</code>. Otherwise the gate turns it into a sign-in redirect, or the test fails because the handler calls no guard.</p></div>
+
+  <h2 id="sign-in">Sign-in: Better Auth</h2>
+  <p>Accounts, sessions and workspaces come from Better Auth, configured in <code class="path">apps/web/src/auth.ts</code>. A workspace is a Better Auth organization.</p>
+  <dl class="facts">
+    <dt>One instance per isolate</dt>
+    <dd><code>authFor(env)</code> (<code class="path">apps/web/src/auth.ts:132</code>) builds the instance with <code>createAuth(env)</code> on first use and reuses it, since <code>env</code> is fixed for an isolate's lifetime.</dd>
+    <dt>Storage</dt>
+    <dd>D1, through <code>database: env.DB</code> (<code class="path">apps/web/src/auth.ts:51</code>). Migration <code>0024_accounts.sql</code> creates Better Auth's tables (<code>user</code>, <code>session</code>, <code>account</code>, <code>verification</code>, <code>organization</code>, <code>member</code>, <code>invitation</code>, with Better Auth's camelCase columns) and Eumon's own: <code>site_access</code>, <code>site_access_invites</code>, <code>workspace_limits</code>, <code>workspace_usage</code>, <code>workspace_github_installations</code>, plus <code>sites.workspace_id</code> and <code>sites.log_token</code>. See <a href="#data-model">Data model</a>.</dd>
+    <dt>Methods</dt>
+    <dd>Google, through the same <code>GOOGLE_CLIENT_ID</code> as the Search Console connection, with <code>includeGrantedScopes: false</code> so sign-in tokens stay sign-in scoped (<code class="path">apps/web/src/auth.ts:63</code>). Its redirect URI is <code>/api/auth/callback/google</code>. Magic links need <code>EMAIL_ENABLED</code>; email with password needs <code>PASSWORD_SIGNIN</code> as well (<code class="path">apps/web/src/auth.ts:26</code>). Passwords hash with WebCrypto PBKDF2 (<code class="path">apps/web/src/passwords.ts</code>), which still exceeds the Free plan's CPU limit.</dd>
+    <dt>Turnstile</dt>
+    <dd>Better Auth's captcha plugin checks a Turnstile token on the email endpoints: sign-up, email sign-in, magic link, password reset, verification email (<code class="path">apps/web/src/auth.ts:118</code>). Google sign-in has no Turnstile check, and the sign-in page only loads the widget when an email method is on (<code class="path">apps/web/app/sign-in/SignInForm.tsx:38</code>).</dd>
+    <dt>Rate limit</dt>
+    <dd><code>AUTH_RATE_LIMIT</code>, applied by the Worker before Better Auth runs (<code class="path">apps/web/worker.ts:35</code>).</dd>
+    <dt>Sessions</dt>
+    <dd>30 days, extended at most once a day, with a signed cookie cache of 5 minutes (<code class="path">apps/web/src/auth.ts:73</code>). Most requests read the session from the cookie and touch no D1 rows, which matters on D1's free limits.</dd>
+    <dt>Roles</dt>
+    <dd><code>owner</code>, <code>member</code> and <code>client</code>, built with the organization plugin's access control; <code>client</code> has no organization permissions (<code class="path">apps/web/src/auth.ts:41</code>). Each user may own one workspace (<code>organizationLimit</code> calls <code>ownsWorkspace</code>); being a Member or Client of others doesn't count. The API cannot delete a workspace (<code>disableOrganizationDeletion</code>).</dd>
+    <dt>Invitations</dt>
+    <dd>Owners invite through <code>POST /api/workspace/invitations</code>, which returns a link to share by hand while email is off. A Client invitation lists the sites it grants; accepting copies them into <code>site_access</code> (<code class="path">apps/web/src/auth.ts:107</code>). Everyone in the workspace (Owners included) plus pending invitations count against the workspace's people limit (<code class="path">apps/web/src/auth.ts:101</code>).</dd>
+    <dt>Bootstrap owner</dt>
+    <dd>Migration 0024 creates the workspace <code>ws_initial</code>, moves every existing site into it, and gives it no limits. A user whose verified email is in <code>BOOTSTRAP_OWNER_EMAIL</code> joins it as Owner when their account is created and on every new session (<code class="path">packages/db/src/workspaces.ts:32</code>, <code class="path">packages/db/src/workspaces.ts:55</code>). The same list decides who may open <code>/admin</code>.</dd>
+  </dl>
+
+  <h2 id="route-guards">Route guards and limits</h2>
+  <p>The gate only knows whether someone is signed in. Which sites they may see, and what they may change, is checked in each API handler with one of the guards in <code class="path">apps/web/src/guard.ts</code>:</p>
+  <table>
+    <thead><tr><th>Guard</th><th>Use it when the route</th></tr></thead>
+    <tbody>
+      <tr><td><code>requireSite(request, siteId, need)</code></td><td>names a site. Returns the site and the caller's role, or a response to return. A site the caller can't see answers 404, the same as a missing one (<code class="path">apps/web/src/guard.ts:32</code>).</td></tr>
+      <tr><td><code>requireOwned(request, kind, id, need)</code></td><td>names a row that belongs to a site (an analysis, change, job, record, dataset, source, template or page). It looks up the row's <code>site_id</code> (<code class="path">apps/web/src/access.ts:26</code>), then checks the site.</td></tr>
+      <tr><td><code>requireWorkspace(request, need)</code></td><td>works on the active workspace: listing and adding sites, invitations, the GitHub install.</td></tr>
+      <tr><td><code>requireViewer(request)</code></td><td>only needs a signed-in user, such as <code>GET /api/me</code>.</td></tr>
+      <tr><td><code>requirePlatformAdmin(request)</code></td><td>is part of <code>/admin</code>. Anyone not listed in <code>BOOTSTRAP_OWNER_EMAIL</code> with a verified email gets 404.</td></tr>
+    </tbody>
+  </table>
+  <p><code>need</code> is <code>"read"</code>, <code>"write"</code> or <code>"admin"</code>, and <code>allows(role, need)</code> (<code class="path">apps/web/src/access.ts:6</code>) decides. Owners and Members see every site in the workspace; a Client sees only sites in <code>site_access</code> (<code>siteForUser</code>, <code class="path">packages/db/src/index.ts:1370</code>). <code class="path">apps/web/src/routes-guarded.test.ts</code> reads every <code>route.ts</code> under <code>app/api</code> and fails if an exported handler doesn't call a guard.</p>
+  <p>Limits sit next to the guards in <code class="path">apps/web/src/limits.ts</code>. Every workspace starts from <code>FREE_LIMITS</code> (<code class="path">apps/web/src/limits.ts:18</code>), and a row in <code>workspace_limits</code> overrides any of them; <code>/admin</code> writes those rows.</p>
+  <ul>
+    <li><strong>Metered actions</strong> (analyses, scraped pages, Ask questions, AI runs) call <code>charge</code> once the route's own checks pass, just before the work (<code class="path">apps/web/src/limits.ts:43</code>). It is one upsert into <code>workspace_usage</code> that only adds while the day's total stays within the limit (<code class="path">packages/db/src/workspaces.ts:103</code>), so two requests at once cannot both pass the last slot. A refusal answers 429 with a sentence to show. A request refused for another reason costs nothing, and work that then can't start is given back with <code>refund</code> (line 50). Page views and beacons are never metered.</li>
+    <li><strong>Features</strong> (DataForSEO, pull requests, Sheets export) are on or off per workspace. <code>featureRefusal</code> (<code class="path">apps/web/src/limits.ts:57</code>) makes a route answer 403, and the Results sync drops the DataForSEO key for workspaces without it (<code class="path">apps/web/src/sync-steps.ts:93</code>).</li>
+    <li><strong>Counts</strong>: the site limit is checked by <code>POST /api/sites</code>, the people limit by Better Auth's invitation hook.</li>
+  </ul>
+  <p>The default numbers are listed in <a href="#web-app--access-control">Web app: access control</a>.</p>
+
+  <h2 id="security-headers">Security headers</h2>
+  <p><code class="path">apps/web/src/headers.ts</code> holds two header sets.</p>
+  <dl class="facts">
+    <dt>The app (<code>APP_HEADERS</code>)</dt>
+    <dd><code>X-Content-Type-Options: nosniff</code>, <code>Referrer-Policy: strict-origin-when-cross-origin</code>, <code>X-Frame-Options: DENY</code>, and <code>Content-Security-Policy: frame-ancestors 'none'; base-uri 'self'; object-src 'none'</code>. The Worker adds them to every response outside <code>/p/</code>, including the gate's refusals and Better Auth's responses.</dd>
+    <dt>Landing pages (<code>PAGE_HEADERS</code>)</dt>
+    <dd><code>nosniff</code>, the same referrer policy, and <code>Content-Security-Policy: base-uri 'none'; object-src 'none'</code>. No frame rules, because the customer's own site may frame them. Set on landing-page HTML by <code class="path">apps/web/src/public-pages.ts:47</code>.</dd>
+  </dl>
+  <div class="callout warn"><p>Neither policy restricts scripts (no <code>script-src</code>). vinext streams the React Server Components payload as inline <code>&lt;script&gt;</code> tags, and the landing-page beacon is an inline script with per-page config (<code class="path">packages/pages/src/render.ts:142</code>). A script policy would need a per-request nonce threaded through both renderers. Until then, HTML escaping in the renderers is the defence against injected scripts, so keep every value escaped.</p></div>
+
   <h2 id="cron">The cron trigger</h2>
-  <p>The config declares one trigger, <code>triggers.scheduled({ schedule: "15 4 * * *" })</code>: every day at 04:15 UTC (<code class="path">apps/web/cloudflare.config.ts:10</code>). Cloudflare calls the <code>scheduled</code> handler in <code class="path">apps/web/worker.ts:15</code>, which calls <code>startDailySyncs</code> (<code class="path">apps/web/src/sync-steps.ts:208</code>) inside <code>ctx.waitUntil</code>.</p>
+  <p>The config declares one trigger, <code>triggers.scheduled({ schedule: "15 4 * * *" })</code>: every day at 04:15 UTC (<code class="path">apps/web/cloudflare.config.ts:12</code>). Cloudflare calls the <code>scheduled</code> handler in <code class="path">apps/web/worker.ts:52</code>, which calls <code>startDailySyncs</code> (<code class="path">apps/web/src/sync-steps.ts:212</code>) inside <code>ctx.waitUntil</code>.</p>
   <ol>
     <li><code>startDailySyncs</code> lists every site (<code>listSitesForResults</code> in <code class="path">packages/db/src/metrics.ts:283</code>).</li>
     <li>For each site it calls <code>startSync</code> with <code>trigger: "daily"</code>, which creates a <code>SearchSyncWorkflow</code> instance with the ID <code>daily-&lt;YYYY-MM-DD&gt;-&lt;siteId&gt;</code>.</li>
@@ -79,13 +155,17 @@
   <div class="callout note"><p>A cron trigger is used instead of Workflow schedules because schedules need the paid plan. The sync workflow runs a site's sources in one step and URL inspections in steps of 40 to stay within the Free plan's 50 subrequests per step. See <a href="#flow-sync">Results sync flow</a>.</p></div>
 
   <h2 id="request-routing">How requests are handled</h2>
-  <p>vinext maps URLs to files under <code>apps/web/app/</code>. There is no middleware file; every request goes straight to its page or route handler.</p>
+  <p>After the gate, vinext maps URLs to files under <code>apps/web/app/</code>. There is no vinext middleware file: the checks before a route live in <code class="path">apps/web/worker.ts</code> (<a href="#architecture--request-flow">How a request flows</a>).</p>
   <table>
     <thead><tr><th>Path</th><th>File</th><th>What it is</th></tr></thead>
     <tbody>
       <tr><td><code>/</code></td><td><code class="path">apps/web/app/page.tsx</code></td><td>The dashboard, a single client component that switches views in place and keeps the view in the query string. See <a href="#web-app">Web app</a>.</td></tr>
       <tr><td><code>/api/*</code></td><td><code>apps/web/app/api/**/route.ts</code></td><td>JSON route handlers, one file per path, exporting <code>GET</code>, <code>POST</code>, <code>PATCH</code>, <code>PUT</code>, <code>DELETE</code> or <code>OPTIONS</code>. Full list in <a href="#web-app--api-routes">Web app: API routes</a>.</td></tr>
       <tr><td><code>/p/:siteId/…</code></td><td><code class="path">apps/web/app/p/[siteId]/[[...path]]/route.ts</code></td><td>Public landing pages, hub page, sitemap, IndexNow key file and the analytics beacon. Rendering is in <code class="path">apps/web/src/public-pages.ts</code>.</td></tr>
+      <tr><td><code>/api/auth/*</code></td><td>none: <code class="path">apps/web/worker.ts:33</code></td><td>Better Auth's endpoints (sign-in, callbacks, session, workspaces, invitations), handed to <code>authFor(env).handler</code>.</td></tr>
+      <tr><td><code>/sign-in</code></td><td><code class="path">apps/web/app/sign-in/page.tsx</code></td><td>Sign-in. Shows only the methods that are switched on; <code>next</code> is limited to a path on the app (<code class="path">apps/web/src/next-path.ts</code>).</td></tr>
+      <tr><td><code>/invite/:id</code></td><td><code class="path">apps/web/app/invite/[id]/page.tsx</code></td><td>Accepting an invitation, after signing in with the invited address.</td></tr>
+      <tr><td><code>/admin</code></td><td><code class="path">apps/web/app/admin/page.tsx</code></td><td>Workspaces with today's usage, and their limits. Its API answers 404 to anyone not listed in <code>BOOTSTRAP_OWNER_EMAIL</code>.</td></tr>
       <tr><td><code>/r/:token</code></td><td><code class="path">apps/web/app/r/[token]/page.tsx</code></td><td>The client's read-only Results page, fed by <code>GET /api/r/:token</code>.</td></tr>
       <tr><td>anything in <code>public/</code></td><td><code>apps/web/public/</code></td><td>Icons, <code>manifest.json</code>, and a retired <code>sw.js</code>.</td></tr>
     </tbody>
@@ -117,14 +197,17 @@
   <table>
     <thead><tr><th>Service</th><th>Used for</th><th>Where</th></tr></thead>
     <tbody>
-      <tr><td>Google OAuth</td><td>Connecting a site's Google account. Scopes: <code>webmasters.readonly</code>, <code>analytics.readonly</code>, <code>drive.file</code>.</td><td><code class="path">apps/web/src/gsc-auth.ts</code>, <code>/api/sites/:siteId/gsc/connect</code>, <code>/api/google/callback</code></td></tr>
+      <tr><td>Google sign-in</td><td>Signing in to Eumon, through Better Auth's Google provider.</td><td><code class="path">apps/web/src/auth.ts:63</code>, <code>/api/auth/callback/google</code></td></tr>
+      <tr><td>Google OAuth</td><td>Connecting a site's Google account. Scopes: <code>webmasters.readonly</code>, <code>analytics.readonly</code>, <code>drive.file</code>. The signed state carries the site, the user and a nonce that must match a cookie set in the same browser (<code class="path">apps/web/src/google-state.ts:11</code>).</td><td><code class="path">apps/web/src/gsc-auth.ts</code>, <code>/api/sites/:siteId/gsc/connect</code>, <code>/api/google/callback</code></td></tr>
+      <tr><td>Cloudflare Turnstile</td><td>Bot check on the email sign-in endpoints.</td><td><code class="path">apps/web/src/auth.ts:118</code>, <code class="path">apps/web/app/sign-in/SignInForm.tsx</code></td></tr>
+      <tr><td>Cloudflare Email Service</td><td>Sign-in, verification and invitation email, once switched on.</td><td><code class="path">apps/web/src/auth.ts:31</code></td></tr>
       <tr><td>Google Search Console</td><td>Clicks, impressions, queries per page; property list.</td><td><code class="path">packages/agents/src/google-search-console.ts</code></td></tr>
       <tr><td>URL Inspection API</td><td>Whether Google indexed each sitemap URL.</td><td><code class="path">packages/agents/src/google-search-console.ts</code>, <code class="path">apps/web/src/url-inspection.ts</code></td></tr>
       <tr><td>Google Analytics 4</td><td>Property list (Admin API) and organic sessions (Data API).</td><td><code class="path">packages/agents/src/google-analytics.ts</code></td></tr>
       <tr><td>Google Sheets</td><td>"Google Sheets" export from report cards.</td><td><code class="path">packages/agents/src/google-sheets.ts</code></td></tr>
       <tr><td>PageSpeed Insights, CrUX</td><td>Lab and real-user speed scores (<code>GOOGLE_API_KEY</code>).</td><td><code class="path">packages/agents/src/site-signals.ts</code></td></tr>
       <tr><td>Open PageRank</td><td>Authority estimate for the site and its competitors.</td><td><code class="path">packages/agents/src/site-signals.ts</code></td></tr>
-      <tr><td>GitHub App</td><td>Repository list, code analysis, draft pull requests for safe SEO config changes.</td><td><code class="path">packages/repo-analyzer/src/github-app.ts</code>, <code class="path">packages/agents/src/github-pr.ts</code></td></tr>
+      <tr><td>GitHub App</td><td>Repository list, code analysis, draft pull requests that change only <code>public/robots.txt</code> (<code class="path">packages/agents/src/change-generator.ts:10</code>). On install, a user token from GitHub OAuth proves the installer owns the installation before it is stored for the workspace.</td><td><code class="path">packages/repo-analyzer/src/github-app.ts</code>, <code class="path">packages/agents/src/github-pr.ts</code>, <code class="path">apps/web/src/github-install.ts</code></td></tr>
       <tr><td>DataForSEO</td><td>Keyword volume and difficulty, competitor keywords, search results pages, backlinks.</td><td><code class="path">packages/agents/src/dataforseo.ts</code></td></tr>
       <tr><td>Bing Webmaster Tools</td><td>Bing clicks, impressions and crawl counts.</td><td><code class="path">packages/agents/src/bing.ts</code></td></tr>
       <tr><td>IndexNow</td><td>Submitting changed landing-page URLs. The key file is served from the site's mount path; the key is derived from <code>SESSION_SECRET</code>.</td><td><code class="path">packages/agents/src/bing.ts</code>, <code class="path">apps/web/src/public-pages.ts</code></td></tr>

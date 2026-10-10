@@ -2,7 +2,7 @@
   <h1>Eumon overview</h1>
   <p class="lede">What Eumon does, who uses it, and how the monorepo is laid out. Read this first, then follow the pointers at the bottom.</p>
 
-  <figure data-diagram="architecture"><figcaption>One Cloudflare Worker serves the dashboard, the API and the public landing pages, and runs three Workflows against one D1 database.</figcaption></figure>
+  <figure data-diagram="architecture"><figcaption>One Cloudflare Worker checks sign-in on every request, serves the dashboard, the API and the public landing pages, and runs three Workflows against one D1 database.</figcaption></figure>
 
   <h2 id="what-it-is">What Eumon is</h2>
   <p>Eumon is an organic growth engine for businesses of any size, from a single-location business to a large company running many sites. It has two halves that share one site record, one database and one dashboard.</p>
@@ -27,12 +27,23 @@
   </ul>
   <p>The full pipeline is on <a href="#flow-pages">the landing-page flow</a> page.</p>
 
-  <h2 id="who-uses-it">Who uses it</h2>
+  <h2 id="accounts">Accounts and roles</h2>
+  <p>Everyone who uses the dashboard signs in. Each user belongs to a <strong>workspace</strong>, and every site belongs to one workspace. A new user gets a workspace of their own at first sign-in, unless an invitation is waiting for their email address (<code class="path">packages/db/src/workspaces.ts:32</code>). An Owner invites other people into the workspace as Members or Clients.</p>
+  <table>
+    <thead><tr><th>Role</th><th>Sees</th><th>Can</th></tr></thead>
+    <tbody>
+      <tr><td>Owner</td><td>Every site in the workspace</td><td>Everything a Member can, plus invite and remove people.</td></tr>
+      <tr><td>Member</td><td>Every site in the workspace</td><td>Read and change every site: analyse it, connect data sources, collect data, publish pages. Add sites, within the workspace's limits.</td></tr>
+      <tr><td>Client</td><td>Only the sites an Owner granted them</td><td>Read only. The dashboard shows them Dashboard, Landing pages and Page results (<code class="path">apps/web/app/page.tsx:132</code>), and the API refuses every change.</td></tr>
+    </tbody>
+  </table>
+  <p>The rule behind the table is one function, <code>allows</code> (<code class="path">apps/web/src/access.ts:6</code>): Owners may do anything, Members anything except workspace administration, Clients only read.</p>
   <ul>
-    <li><strong>Dashboard users</strong>: analyse a site, connect its data sources, collect data, publish pages, and watch which pages bring customers. A user can manage one site or many.</li>
-    <li><strong>Read-only viewers</strong>: see a site's numbers through a read-only client link (<code>/r/&lt;token&gt;</code>), a signed and revocable token that stacks every Results section into one report.</li>
+    <li><strong>Sign-in</strong> is with Google. Magic links and email with password are built but ship switched off, because they need email sending (<code class="path">apps/web/src/auth.ts:26</code>).</li>
+    <li><strong>Limits</strong>: each workspace has a site count and daily allowances (analyses, scraped pages, Ask questions, AI runs). The people listed as admins raise them per workspace on the <code>/admin</code> page.</li>
+    <li><strong>Read-only client links</strong> still exist: <code>/r/&lt;token&gt;</code> is a signed, revocable token that shows a site's Results as one report to anyone holding the link, with no account.</li>
   </ul>
-  <div class="callout note"><p>For now, sign-in is handled outside the app: the hostname goes behind Cloudflare Access, with the public paths excluded (<a href="#web-app--access-control">Web app: access control</a>). Built-in accounts and roles are on the way, and this section will change when they land.</p></div>
+  <div class="callout note"><p>Access is enforced inside the app. A request gate checks for a session before any route runs, and every API route checks the caller's role on the site it touches. Details: <a href="#web-app--access-control">Web app: access control</a> and <a href="#architecture--request-flow">Architecture: how a request flows</a>.</p></div>
   <p>The engine stays generic: nothing about any one business or industry is hard-coded. Datasets, fields and page ideas come from each site's own pages and search data.</p>
 
   <h2 id="monorepo-map">Monorepo map</h2>
@@ -57,7 +68,7 @@
   <h2 id="where-next">Where to go next</h2>
   <ul>
     <li>Run it locally: <a href="#getting-started">Getting started</a>.</li>
-    <li>How the pieces fit: <a href="#architecture">Architecture</a>.</li>
+    <li>How the pieces fit, and how a request is checked: <a href="#architecture">Architecture</a>.</li>
     <li>The three main flows: <a href="#flow-analysis">site analysis</a>, <a href="#flow-sync">the daily Results sync</a>, <a href="#flow-pages">the landing-page engine</a>.</li>
     <li>Tables and ownership: <a href="#data-model">Data model</a>. What each finding means: <a href="#findings">Findings</a>.</li>
     <li>Per-package detail: <a href="#packages">Packages</a> and <a href="#web-app">Web app</a>.</li>

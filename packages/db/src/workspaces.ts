@@ -82,6 +82,11 @@ export async function grantInvitedSites(db: D1Like, invitationId: string, userId
   ).bind(userId, nowIso(), invitationId).run();
 }
 
+/** Whether the user owns a workspace already; being a Member or Client of others doesn't count. */
+export async function ownsWorkspace(db: D1Like, userId: string): Promise<boolean> {
+  return Boolean(await db.prepare(`SELECT 1 AS yes FROM member WHERE userId = ? AND role = 'owner' LIMIT 1`).bind(userId).first());
+}
+
 /** Members (any role) plus invitations still pending: what the members limit counts. */
 export async function memberSlotsUsed(db: D1Like, workspaceId: string): Promise<number> {
   const row = await db.prepare(
@@ -104,6 +109,12 @@ export async function chargeUsage(db: D1Like, input: { workspaceId: string; day:
      RETURNING count`,
   ).bind(input.workspaceId, input.day, input.metric, input.amount, limit).first<{ count: number }>();
   return Boolean(row);
+}
+
+/** Gives back an amount charged for an action that then didn't run. */
+export async function refundUsage(db: D1Like, input: { workspaceId: string; day: string; metric: string; amount: number }): Promise<void> {
+  await db.prepare(`UPDATE workspace_usage SET count = MAX(count - ?, 0) WHERE workspace_id = ? AND day = ? AND metric = ?`)
+    .bind(input.amount, input.workspaceId, input.day, input.metric).run();
 }
 
 export async function getLimitOverrides(db: D1Like, workspaceId: string): Promise<Record<string, unknown>> {

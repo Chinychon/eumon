@@ -160,7 +160,7 @@ export class ScrapeWorkflow extends WorkflowEntrypoint<AppEnv, ScrapePayload> {
       }
 
       // Pages list the same entity many times, so scraped records are merged by name. A table is the authority for its
-      // rows: its namesakes stay apart for the inventory to show, and the operator merges by hand.
+      // rows: its namesakes stay apart for the inventory to show, and the user merges by hand.
       const mergedCount = tables.length === setup.sources.length ? 0 : await step.do("merge-duplicates", async () => {
         await updateJob(db, jobId, { progress: { message: "Merging records that name the same thing", done: 1, total: 1 } });
         try {

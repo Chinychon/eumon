@@ -1,10 +1,10 @@
 import { env } from "cloudflare:workers";
-import { setLimitOverrides } from "@organic-growth/db";
+import { getLimitOverrides, setLimitOverrides } from "@organic-growth/db";
 import { requirePlatformAdmin } from "../../../../../../src/guard";
-import { FREE_LIMITS, type Limits } from "../../../../../../src/limits";
+import { FREE_LIMITS, mergeOverrides, type Limits } from "../../../../../../src/limits";
 import { fail, json, readJson } from "../../../../../../src/server";
 
-/** Replaces a workspace's overrides. Numbers: a non-negative integer or null (unlimited); features: true or false. Unknown keys are dropped. */
+/** Changes the limits sent and keeps the rest. Numbers: a non-negative integer or null (unlimited); features: true or false. Unknown keys are dropped. */
 export async function PUT(request: Request, context: { params: Promise<{ workspaceId: string }> }) {
   const admin = await requirePlatformAdmin(request);
   if (admin instanceof Response) return admin;
@@ -21,6 +21,7 @@ export async function PUT(request: Request, context: { params: Promise<{ workspa
     }
     (overrides as Record<string, unknown>)[key] = value;
   }
-  await setLimitOverrides(env.DB, workspaceId, overrides);
-  return json({ workspaceId, overrides });
+  const merged = mergeOverrides(await getLimitOverrides(env.DB, workspaceId) as Partial<Limits>, overrides);
+  await setLimitOverrides(env.DB, workspaceId, merged);
+  return json({ workspaceId, overrides: merged });
 }

@@ -28,7 +28,7 @@ export type ImportOutcome =
 
 const isReason = (value: unknown): value is GscReason => GSC_REASONS.some((entry) => entry.reason === value);
 
-/** Reads one export and records it; a URL list needs its reason, from the file name or the operator. */
+/** Reads one export and records it; a URL list needs its reason, from the file name or the user. */
 export async function importExport(db: D1Like, site: Pick<SiteRecord, "id" | "baseUrl">, text: string, options: { reason?: string | null; fileName?: string | null; now?: Date } = {}): Promise<ImportOutcome> {
   const host = new URL(site.baseUrl).hostname;
   const parsed = parseSearchConsoleExport(text, host);

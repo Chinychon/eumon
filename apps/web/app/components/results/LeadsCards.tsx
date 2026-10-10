@@ -11,7 +11,7 @@ import { Button, Card, Kpi } from "../ui";
  * What enquiries became. Every WhatsApp link Eumon tracks writes a short code
  * into the visitor's message; staff match a chat by its code here and mark it
  * chat, qualified, customer (with its value) or lost. The outcomes card is on
- * the client link too; the desk where leads are marked is the operator's.
+ * the client link too; the desk where leads are marked is the dashboard's.
  */
 
 type Lead = {

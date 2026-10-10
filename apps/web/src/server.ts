@@ -32,7 +32,7 @@ export async function settingsFor(site: SiteRecord): Promise<PageSettings> {
   return (await getPageSettings(env.DB, site.id)) ?? defaultPageSettings(site.id, prettySiteName(site), site.baseUrl);
 }
 
-/** "edeadesign.com.my" → "Edeadesign"; repository names are kept as-is. */
+/** "example-dental.com.my" → "Example-dental"; repository names are kept as-is. */
 export function prettySiteName(site: Pick<SiteRecord, "name" | "baseUrl" | "githubRepo">): string {
   if (site.githubRepo && site.name !== new URL(site.baseUrl).hostname) return site.name;
   const label = new URL(site.baseUrl).hostname.replace(/^www\./, "").split(".")[0] ?? site.name;

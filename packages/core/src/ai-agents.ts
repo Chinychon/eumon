@@ -32,7 +32,7 @@ export type AiAgent = {
   agent: string;
   engine: AiEngine;
   kind: AiFetchKind;
-  /** What the operator should know about blocking it. */
+  /** What the site's owner should know about blocking it. */
   purpose: string;
   /** A crawler that feeds AI answers (an AI search index), so blocking it hides the site from those answers. Live fetchers always do. */
   search?: boolean;

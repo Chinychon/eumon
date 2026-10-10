@@ -3,7 +3,7 @@
  * the API, the client link, and the tests all compute the same numbers.
  */
 
-import { AI_ANSWER_ENGINES } from "./ai-answers.js";
+import { AI_ANSWER_ENGINES, aiAnswersView, type AiAnswerCheck, type AiAnswersView } from "./ai-answers.js";
 import { AI_ASSISTANTS, AI_ENGINES, type AiAssistant, type AiEngine } from "./ai-agents.js";
 import { keywordsView, type KeywordsInput } from "./keywords.js";
 import type { PageTypeOutcome } from "./whatsapp.js";
@@ -173,6 +173,8 @@ export type ResultsInput = {
   links?: LinksInput;
   /** Crawler requests from the site's server or CDN logs, per day; undefined when no log has been received. */
   crawlLog?: CrawlDayRow[];
+  /** The tracked questions, their answer checks (last 90 days), and the site's bare domain. */
+  aiAnswers?: { prompts: string[]; checks: AiAnswerCheck[]; site: string };
 };
 
 export type SpeedValue = { p75: number | null; rating: SpeedRating | null };
@@ -243,6 +245,7 @@ export type ResultsView = {
   /** From the site's server or CDN logs; null until a log arrives. */
   crawlLog: CrawlLogView | null;
   ai: AiView;
+  aiAnswers: AiAnswersView;
 };
 
 /** AI visibility: who reads Eumon's pages for AI assistants, who sends visitors, and what that brings. */
@@ -408,6 +411,11 @@ export function resultsView(input: ResultsInput): ResultsView {
     crawlersAllowed: allowed === null || checked === null ? null : { allowed, checked },
   };
 
+  const aiAnswers = aiAnswersView({
+    prompts: input.aiAnswers?.prompts ?? [], markets: input.markets, checks: input.aiAnswers?.checks ?? [], site: input.aiAnswers?.site ?? "",
+    competitors: input.competitors ?? [], today, overview: { searches: serp.aiOverview.searches, citesYou: serp.aiOverview.citesYou },
+  });
+
   const ga4Sessions = weekly(series.ga4_organic_sessions, from, today, googleComplete);
   const ga4Events = weekly(series.ga4_organic_key_events, from, today, googleComplete);
 
@@ -436,6 +444,6 @@ export function resultsView(input: ResultsInput): ResultsView {
       value: latest(series.site_health, today),
       day: series.site_health?.length ? series.site_health[series.site_health.length - 1]!.day : null,
     },
-    speed, lab, authority, keywords, serp, ranks, links, bing, indexNow, crawlLog, outcomes, ai,
+    speed, lab, authority, keywords, serp, ranks, links, bing, indexNow, crawlLog, outcomes, ai, aiAnswers,
   };
 }

@@ -300,7 +300,7 @@ export function OverviewView({ site, tab, onTab, onNavigate }: {
             {results.data && current === "enquiries" && <EnquiriesPanel site={site} data={results.data} report={report} leads={leads} onNavigate={onNavigate} onLeadsChanged={() => void reloadResults()} />}
             {results.data && current === "keywords" && <KeywordsPanel site={site} data={results.data} onSaved={() => void reloadResults()} />}
             {results.data && current === "competitors" && <CompetitorsPanel site={site} data={results.data} report={report} onNavigate={onNavigate} onCompetitorsChanged={() => setCompetitorCount((count) => (count ?? 0) + 1)} />}
-            {results.data && current === "ai" && <AiPanel data={results.data} report={report} onNavigate={onNavigate} />}
+            {results.data && current === "ai" && <AiPanel site={site} data={results.data} report={report} onNavigate={onNavigate} onSaved={() => void reloadResults()} />}
             {current === "history" && <HistoryPanel siteId={site.id} onNavigate={onNavigate} />}
           </>
         )}

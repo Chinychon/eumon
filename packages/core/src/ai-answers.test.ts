@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { aiAnswerPoints, readAnswer, type AiAnswerCheck } from "./ai-answers.js";
+import { aiAnswerPoints, aiAnswersView, readAnswer, type AiAnswerCheck } from "./ai-answers.js";
 
 const base = { prompt: "best dentist kl", sources: [], brandNames: ["Bright Smile"], site: "brightsmile.example", competitors: ["rival-dental.example", "othersmile.example"] };
 
@@ -98,5 +98,70 @@ describe("aiAnswerPoints", () => {
     assert.equal(points["ai_answers_mentioned.gemini"], 1);
     assert.equal(points["ai_answers_mentioned:r.example"], 1);
     assert.equal(points["ai_answers_cited:r.example"], 0);
+  });
+});
+
+describe("aiAnswersView", () => {
+  const src = (...domains: string[]) => domains.map((domain) => ({ domain, url: `https://${domain}/` }));
+  const check = (prompt: string, engine: AiAnswerCheck["engine"], day: string, mentioned: boolean, cited: boolean, sources: AiAnswerCheck["sources"] = [], rivals: AiAnswerCheck["rivals"] = []): AiAnswerCheck =>
+    ({ prompt, market: "mys", engine, day, mentioned, cited, citedRank: cited ? 1 : null, sources, rivals, excerpt: `${prompt} ${engine} ${day}` });
+  const checks = [
+    check("a", "chatgpt", "2026-10-01", false, false, src("wiki.example")),
+    check("a", "chatgpt", "2026-10-06", true, false, src("wiki.example")),
+    check("a", "chatgpt", "2026-10-08", true, true, src("blog.brightsmile.example", "wiki.example", "wiki.example")),
+    check("a", "perplexity", "2026-10-09", true, false, src("wiki.example", "rival.example"), [{ domain: "rival.example", mentioned: false, cited: true }]),
+    check("b", "chatgpt", "2026-10-09", false, false, src("wiki.example")),
+    check("gone", "chatgpt", "2026-10-09", true, true, src("gone.example"), [{ domain: "rival.example", mentioned: true, cited: true }]),
+  ];
+  const view = aiAnswersView({
+    prompts: ["a", "b"], markets: ["mys"], checks, site: "brightsmile.example", competitors: ["rival.example"],
+    today: "2026-10-10", overview: { searches: 4, citesYou: 1 },
+  });
+
+  it("rows hold the latest check of each cell, prompts in list order", () => {
+    assert.deepEqual(view.rows.map((row) => [row.prompt, row.market, Object.keys(row.cells).sort()]), [["a", "mys", ["chatgpt", "perplexity"]], ["b", "mys", ["chatgpt"]]]);
+    assert.equal(view.rows[0]!.cells.chatgpt!.day, "2026-10-08");
+    assert.equal(view.checked, 3);
+    assert.equal(view.asOf, "2026-10-09");
+    assert.equal(view.prompts, 2);
+    assert.deepEqual(view.totals, { mentioned: 2, cited: 1 });
+    assert.deepEqual(view.overview, { searches: 4, citesYou: 1 });
+  });
+
+  it("ignores removed questions", () => {
+    assert.ok(!view.rows.some((row) => row.prompt === "gone"));
+    assert.ok(!view.topDomains.some((row) => row.domain === "gone.example"));
+  });
+
+  it("counts each engine over the latest checks", () => {
+    assert.deepEqual(view.engines.map(({ engine, checked, mentioned, cited }) => [engine, checked, mentioned, cited]),
+      [["chatgpt", 2, 1, 1], ["gemini", 0, 0, 0], ["ai_mode", 0, 0, 0], ["perplexity", 1, 1, 0]]);
+    assert.equal(view.engines[0]!.label, "ChatGPT");
+  });
+
+  it("share of voice: answers naming or citing each site, the site first", () => {
+    assert.deepEqual(view.shareOfVoice, [
+      { domain: "brightsmile.example", site: true, answers: 2, share: 2 / 3 },
+      { domain: "rival.example", site: false, answers: 1, share: 1 / 3 },
+    ]);
+    const none = aiAnswersView({ prompts: [], markets: ["mys"], checks, site: "brightsmile.example", competitors: [], today: "2026-10-10", overview: { searches: 0, citesYou: 0 } });
+    assert.equal(none.shareOfVoice[0]!.share, null);
+    assert.equal(none.asOf, null);
+  });
+
+  it("top domains count distinct answers citing each, with their kind", () => {
+    assert.deepEqual(view.topDomains, [
+      { domain: "wiki.example", answers: 3, kind: "other" },
+      { domain: "blog.brightsmile.example", answers: 1, kind: "site" },
+      { domain: "rival.example", answers: 1, kind: "competitor" },
+    ]);
+  });
+
+  it("weeks: 12 Monday weeks, oldest first, a cell checked twice in a week counted once", () => {
+    assert.equal(view.weeks.length, 12);
+    assert.equal(view.weeks[0]!.week, "2026-07-20");
+    assert.deepEqual(view.weeks[10], { week: "2026-09-28", checked: 1, mentioned: 0, cited: 0 });
+    assert.deepEqual(view.weeks[11], { week: "2026-10-05", checked: 3, mentioned: 2, cited: 1 });
+    assert.deepEqual(view.weeks[9], { week: "2026-09-21", checked: 0, mentioned: 0, cited: 0 });
   });
 });

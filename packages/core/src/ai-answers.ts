@@ -132,3 +132,91 @@ export function aiAnswerPoints(checks: AiAnswerCheck[], prompts: string[], marke
   }
   return points;
 }
+
+export type AiAnswersView = {
+  prompts: number;
+  markets: string[];
+  /** Cells (question × market × engine) with an answer. */
+  checked: number;
+  /** The latest day any current cell was checked. */
+  asOf: string | null;
+  totals: { mentioned: number; cited: number };
+  engines: Array<{ engine: AiAnswerEngine; label: string; checked: number; mentioned: number; cited: number }>;
+  rows: Array<{ prompt: string; market: string; cells: Partial<Record<AiAnswerEngine, AiAnswerCheck>> }>;
+  /** Answers naming or citing the site and each competitor; share of their sum. */
+  shareOfVoice: Array<{ domain: string; site: boolean; answers: number; share: number | null }>;
+  /** Source domains by the number of answers citing them, top 10. */
+  topDomains: Array<{ domain: string; answers: number; kind: "site" | "competitor" | "other" }>;
+  /** The last 12 Monday weeks, oldest first: each cell counted once a week, its later check. */
+  weeks: Array<{ week: string; checked: number; mentioned: number; cited: number }>;
+  /** Google AI Overviews in the checked search results, and those citing the site. */
+  overview: { searches: number; citesYou: number };
+};
+
+const mondayOf = (day: string) => addDays(day, -((new Date(`${day}T00:00:00Z`).getUTCDay() + 6) % 7));
+
+/** The AI answers card: the latest answer per question, market and engine, and what they add up to. */
+export function aiAnswersView(input: { prompts: string[]; markets: string[]; checks: AiAnswerCheck[]; site: string; competitors: string[]; today: string; overview: { searches: number; citesYou: number } }): AiAnswersView {
+  const latest = latestChecks(input.checks, input.prompts, input.markets);
+  const count = (rows: AiAnswerCheck[], pick: (row: AiAnswerCheck) => boolean) => rows.filter(pick).length;
+  const cellOf = new Map(latest.map((check) => [`${check.prompt}|${check.market}|${check.engine}`, check]));
+  const rows = input.prompts.flatMap((prompt) => input.markets.map((market) => {
+    const cells: Partial<Record<AiAnswerEngine, AiAnswerCheck>> = {};
+    for (const { engine } of AI_ANSWER_ENGINES) {
+      const check = cellOf.get(`${prompt}|${market}|${engine}`);
+      if (check) cells[engine] = check;
+    }
+    return { prompt, market, cells };
+  }));
+
+  const site = bareDomain(input.site);
+  const siteAnswers = count(latest, (row) => row.mentioned || row.cited);
+  const rivals = input.competitors.map((domain) => ({
+    domain, site: false,
+    answers: count(latest, (row) => row.rivals.some((rival) => rival.domain === bareDomain(domain) && (rival.mentioned || rival.cited))),
+  })).sort((a, b) => b.answers - a.answers);
+  const voices = [{ domain: input.site, site: true, answers: siteAnswers }, ...rivals];
+  const total = voices.reduce((sum, voice) => sum + voice.answers, 0);
+
+  const cites = new Map<string, number>();
+  for (const check of latest) {
+    for (const domain of new Set(check.sources.map((source) => bareDomain(source.domain)))) cites.set(domain, (cites.get(domain) ?? 0) + 1);
+  }
+  const topDomains = [...cites].map(([domain, answers]) => ({
+    domain, answers,
+    kind: site && isOrUnder(domain, site) ? "site" as const : input.competitors.some((rival) => isOrUnder(domain, bareDomain(rival))) ? "competitor" as const : "other" as const,
+  })).sort((a, b) => b.answers - a.answers || a.domain.localeCompare(b.domain)).slice(0, 10);
+
+  // Every check of a current cell, keyed by its week: a cell's later check in a week replaces the earlier.
+  const thisWeek = mondayOf(input.today);
+  const weekStarts = Array.from({ length: 12 }, (_, index) => addDays(thisWeek, -7 * (11 - index)));
+  const byWeek = new Map(weekStarts.map((week) => [week, new Map<string, AiAnswerCheck>()]));
+  for (const check of input.checks) {
+    if (!input.prompts.includes(check.prompt) || !input.markets.includes(check.market)) continue;
+    const cells = byWeek.get(mondayOf(check.day));
+    const key = `${check.prompt}|${check.market}|${check.engine}`;
+    const seen = cells?.get(key);
+    if (cells && (!seen || check.day > seen.day)) cells.set(key, check);
+  }
+  const weeks = weekStarts.map((week) => {
+    const cells = [...byWeek.get(week)!.values()];
+    return { week, checked: cells.length, mentioned: count(cells, (row) => row.mentioned), cited: count(cells, (row) => row.cited) };
+  });
+
+  return {
+    prompts: input.prompts.length,
+    markets: input.markets,
+    checked: latest.length,
+    asOf: latest.reduce<string | null>((max, check) => (max === null || check.day > max ? check.day : max), null),
+    totals: { mentioned: count(latest, (row) => row.mentioned), cited: count(latest, (row) => row.cited) },
+    engines: AI_ANSWER_ENGINES.map(({ engine, label }) => {
+      const mine = latest.filter((row) => row.engine === engine);
+      return { engine, label, checked: mine.length, mentioned: count(mine, (row) => row.mentioned), cited: count(mine, (row) => row.cited) };
+    }),
+    rows,
+    shareOfVoice: voices.map((voice) => ({ ...voice, share: total ? voice.answers / total : null })),
+    topDomains,
+    weeks,
+    overview: input.overview,
+  };
+}

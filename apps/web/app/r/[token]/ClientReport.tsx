@@ -2,6 +2,7 @@
 
 import { formatDay } from "../../components/api";
 import { BacklinksCard, BingCard, SearchResultsCard } from "../../components/results/ConnectorCards";
+import { AiAnswersCard } from "../../components/results/AiAnswersCard";
 import { KeywordsCard } from "../../components/results/KeywordsCard";
 import { RankTrackingCard } from "../../components/results/RankTrackingCard";
 import { AiReadersCard, AiReferralsCard, AUTHORITY_NOTE, AuthoritySection, EnquiriesCard, GoogleSearchCard, KeyNumbers, ProofHeadline, QuestionSearchesCard, SpeedSection } from "../../components/results/sections";
@@ -40,6 +41,7 @@ export function ClientReport({ token }: { token: string }) {
             {data.results.links.domains.some((entry) => entry.summary) && <BacklinksCard data={data} operator={false} />}
             <EnquiriesCard data={data} operator={false} />
             <OutcomesCard data={data} operator={false} />
+            {data.results.aiAnswers.checked > 0 && <AiAnswersCard view={data.results.aiAnswers} siteId="" operator={false} hasCredentials={data.site.signals.keywords} hasMarkets={data.results.markets.length > 0} />}
             {data.results.ai && (
               <>
                 <AiReadersCard data={data} operator={false} />

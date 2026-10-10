@@ -788,11 +788,21 @@ details.disclosure[open] > summary { margin-bottom: 10px; }
 .radar-shape.s1 { animation-delay: .12s; }
 .radar-shape.s0 circle { fill: var(--s1); }
 .radar-shape.s1 circle { fill: var(--s2); }
+.radar-shape.s2 polygon { fill: color-mix(in srgb, var(--s3) 16%, transparent); stroke: var(--s3); }
+.radar-shape.s3 polygon { fill: color-mix(in srgb, var(--s4) 16%, transparent); stroke: var(--s4); }
+.radar-shape.s2 circle { fill: var(--s3); }
+.radar-shape.s3 circle { fill: var(--s4); }
 .radar-label { font-family: var(--mono); font-size: 10.5px; letter-spacing: .04em; fill: var(--muted); }
 .radar-value { fill: var(--ink-2); font-variant-numeric: tabular-nums; }
 .radar .chart-legend { justify-content: center; }
 @keyframes radar-in { from { opacity: 0; transform: scale(.6); } to { opacity: 1; transform: scale(1); } }
 @media (prefers-reduced-motion: reduce) { .radar-shape { animation: none; } }
+/* AI answers grid: each answer a bare mark that opens its excerpt below the row. */
+.ai-cell { border: 0; background: none; padding: 2px 8px; color: var(--muted); font-size: 15px; line-height: 1; }
+.ai-cell.mentioned { color: var(--amber); }
+.ai-cell.cited { color: var(--green); }
+.ai-cell:hover, .ai-cell[aria-expanded="true"] { background: var(--surface-2); }
+.ai-answer-detail blockquote { margin: 6px 0; padding-left: 10px; border-left: 2px solid var(--line-strong); color: var(--ink-2); white-space: pre-wrap; }
 .paired-row.s0 i { background: var(--s1); }
 .paired-row.s1 i { background: var(--s3); }
 .paired-row.s2 i { background: var(--s4); }

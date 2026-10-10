@@ -11,13 +11,27 @@ import { estimateDemand } from "./demand.js";
 
 export type RankSignals = { tracked: string[]; markets: string[]; checks: RankCheck[]; today: string };
 
-/** Thresholds, with their reasons. */
+/**
+ * Thresholds, with their reasons. A finding stays while the keyword is still
+ * down, so History says "Resolved" only when it recovers (or its checks leave
+ * the 90 days read):
+ * - Fell: today's position is FALL_PLACES or more below a check in the 90
+ *   days. The best is the best position in the BEST_WINDOW_DAYS up to the
+ *   latest such check, and the fall began the day after the last check at
+ *   that best. Back within FALL_PLACES − 1 places of the best, it is gone.
+ * - Dropped out: today's check is not in the ten, and the keyword's most
+ *   recent run of ranked checks (anywhere in the 90 days) lasted HELD_DAYS
+ *   or more with a best of BEST_AT_MOST or better. A fall that ends out of
+ *   the ten is only this finding.
+ */
 export const RANKS = {
-  /** Days the best position is taken from. */
-  LOOKBACK_DAYS: 30,
+  /** Days of checks read: how long a finding can stay while the keyword is still down. */
+  LOOKBACK_DAYS: 90,
+  /** Days before the fall began that its best position is taken from. */
+  BEST_WINDOW_DAYS: 30,
   /** A fall under this many places is noise between Google's data centres. */
   FALL_PLACES: 5,
-  /** A best past this was never a real ranking to lose. */
+  /** A best past this was never a real ranking to lose. With ten results fetched every best is 10 or better, so it only matters if the depth is raised. */
   BEST_AT_MOST: 20,
   /** A keyword must have held a position this many days before "dropped out" means anything. */
   HELD_DAYS: 7,
@@ -48,20 +62,34 @@ export function findingsFromRanks(input: { siteId: string; analysisId: string; r
   for (const series of seriesOf(input.ranks).values()) {
     if (series.length < 2) continue;
     const latest = series.at(-1)!;
-    const ranked = series.filter((row) => row.position !== null);
-    if (!ranked.length) continue;
+    const market = countryName(latest.market);
+    // The checks the best is taken from: before the fall, or the run that ended out of the ten.
+    let window: RankCheck[];
+    if (latest.position !== null) {
+      const now = latest.position;
+      const lastGood = [...series].reverse().find((row) => row.position !== null && now - row.position >= RANKS.FALL_PLACES);
+      if (!lastGood) continue;
+      window = series.filter((row) => row.day >= addDays(lastGood.day, -RANKS.BEST_WINDOW_DAYS) && row.day <= lastGood.day);
+    } else {
+      const lastRanked = [...series].reverse().find((row) => row.position !== null);
+      if (!lastRanked) continue;
+      const end = series.indexOf(lastRanked);
+      let start = end;
+      while (start > 0 && series[start - 1]!.position !== null) start--;
+      window = series.slice(start, end + 1);
+    }
+    const ranked = window.filter((row) => row.position !== null);
     const best = Math.min(...ranked.map((row) => row.position!));
+    if (best > RANKS.BEST_AT_MOST) continue;
     const bestRow = ranked.find((row) => row.position === best)!;
     const lastBest = [...ranked].reverse().find((row) => row.position === best)!;
-    const since = series[series.indexOf(lastBest) + 1]?.day ?? latest.day;
-    const market = countryName(latest.market);
+    const since = series[series.indexOf(lastBest) + 1]!.day;
     const appeared = latest.features.filter((feature) => !bestRow.features.includes(feature)).map(label);
     const pages = `The page was ${path(bestRow.url)} then and ${path(latest.url)} now${bestRow.url && latest.url && bestRow.url !== latest.url ? ": Google swapped the page it shows" : ""}.`;
     const since_ = appeared.length ? ` Since then the results page gained ${appeared.join(", ")}, which pushes the links down.` : "";
     const evidence: JsonObject = { keyword: latest.keyword, market: latest.market, best, now: latest.position, since, pageThen: bestRow.url, pageNow: latest.url };
     if (latest.position !== null) {
       const places = latest.position - best;
-      if (places < RANKS.FALL_PLACES || best > RANKS.BEST_AT_MOST) continue;
       drafts.push({
         impact: Math.min(80, 35 + 2 * places + (best <= 3 ? 15 : 0)),
         title: `“${latest.keyword}” fell from ${best} to ${latest.position} in ${market} since ${since}`,
@@ -69,11 +97,9 @@ export function findingsFromRanks(input: { siteId: string; analysisId: string; r
         evidence, pagesAffected: [latest.url ?? bestRow.url].filter((url): url is string => Boolean(url)),
       });
     } else {
-      // Held: the run of ranked days ending at the last ranked check.
-      const lastRanked = ranked.at(-1)!;
-      let held = 0;
-      for (let index = series.indexOf(lastRanked); index >= 0 && series[index]!.position !== null; index--) held++;
-      if (held < RANKS.HELD_DAYS || best > RANKS.BEST_AT_MOST) continue;
+      const held = window.length;
+      if (held < RANKS.HELD_DAYS) continue;
+      const lastRanked = window.at(-1)!;
       const left = series[series.indexOf(lastRanked) + 1]!.day;
       drafts.push({
         impact: Math.min(80, 35 + 2 * (11 - best) + (best <= 3 ? 15 : 0)),
@@ -120,7 +146,7 @@ export function rankOpportunities(input: { siteId: string; analysisId: string; r
   return made;
 }
 
-/** What the analysis reads: the tracked list, the target markets, and 30 days of checks; null when nothing is tracked. */
+/** What the analysis reads: the tracked list, the target markets, and 90 days of checks; null when nothing is tracked. */
 export async function loadRankSignals(db: D1Like, siteId: string, today = new Date().toISOString().slice(0, 10)): Promise<RankSignals | null> {
   const tracked = await listTrackedKeywords(db, siteId);
   if (!tracked.length) return null;

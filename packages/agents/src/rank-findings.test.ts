@@ -35,6 +35,22 @@ describe("findingsFromRanks", () => {
     assert.equal(run(series("kw", [3])).length, 0);
   });
 
+  it("keeps a drop-out while the keyword is still out: forty days after leaving, having held 2 for twenty days", () => {
+    const findings = run(series("kw", [...Array<number>(20).fill(2), ...Array<null>(41).fill(null)]));
+    assert.equal(findings.length, 1);
+    assert.equal(findings[0]!.title, `“kw” dropped out of the top 10 in Malaysia since ${day(40)}`);
+  });
+
+  it("keeps a fall while the keyword is still down: from 3 to 9 forty days ago and still 9", () => {
+    const findings = run(series("kw", [...Array<number>(20).fill(3), ...Array<number>(41).fill(9)]));
+    assert.equal(findings.length, 1);
+    assert.equal(findings[0]!.title, `“kw” fell from 3 to 9 in Malaysia since ${day(40)}`);
+  });
+
+  it("a fall that recovered to within four places of its best gives nothing", () => {
+    assert.equal(run(series("kw", [...Array<number>(20).fill(3), ...Array<number>(20).fill(9), ...Array<number>(10).fill(7)])).length, 0);
+  });
+
   it("no finding for an untracked keyword; at most five, biggest falls first", () => {
     assert.equal(run(series("gone", [1, 1, 1, 9]), ["kw"]).length, 0);
     const many = Array.from({ length: 7 }, (_, index) => series(`k${index}`, [1, 1, 1, 2 + index + 5]));

@@ -42,6 +42,29 @@ function setQuery(params: Record<string, string | null>) {
   window.history.replaceState({}, "", `${url.pathname}${url.search}`);
 }
 
+/** A signed-in user with no workspace (e.g. an invitation expired before they accepted it) can make one. */
+function NoWorkspace({ email }: { email: string }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const create = async () => {
+    setBusy(true); setError("");
+    const slug = crypto.randomUUID().replaceAll("-", "").slice(0, 16);
+    const made = await authClient.organization.create({ name: `${email.split("@")[0]}'s workspace`, slug });
+    if (made.error || !made.data) { setError(made.error?.message ?? "The workspace couldn't be created. Try again."); setBusy(false); return; }
+    await authClient.organization.setActive({ organizationId: made.data.id });
+    window.location.reload();
+  };
+  return (
+    <main style={{ minHeight: "100vh", display: "grid", placeItems: "center", padding: 24 }}>
+      <div style={{ maxWidth: 420, textAlign: "center", display: "grid", gap: 14 }}>
+        <p>You don't have a workspace yet. Create one to start adding websites.</p>
+        {error && <div className="callout error" role="alert">{error}</div>}
+        <div><Button busy={busy} onClick={create}>Create my workspace</Button></div>
+      </div>
+    </main>
+  );
+}
+
 export default function Home() {
   const [sites, setSites] = useState<SiteRecord[] | null>(null);
   const [me, setMe] = useState<Me | null>(null);
@@ -120,6 +143,8 @@ export default function Home() {
   const drawerOpen = drawer && Boolean(site) && view !== "ask" && !adding;
   // On phones the drawer covers the page, so the page behind it is taken out of reach.
   const covered = drawerOpen && narrow;
+
+  if (me && me.workspaces.length === 0) return <NoWorkspace email={me.user.email} />;
 
   return (
     <main className={`app-shell${drawerOpen ? " ask-open" : ""}`}>

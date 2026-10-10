@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { getSite, listSitesForUser, setSiteWorkspace, siteForUser, upsertSite } from "./index.js";
-import { addSiteInvites, chargeUsage, grantInvitedSites, INITIAL_WORKSPACE_ID, memberRole, memberSlotsUsed, setUpNewUser, workspaceForNewSession } from "./workspaces.js";
+import { addSiteInvites, chargeUsage, grantInvitedSites, INITIAL_WORKSPACE_ID, memberRole, memberSlotsUsed, revokeWorkspaceSiteAccess, setUpNewUser, workspaceForNewSession } from "./workspaces.js";
 import { openSqliteD1 } from "./sqlite.js";
 import type { D1Like } from "./d1.js";
 
@@ -77,6 +77,29 @@ describe("new users", () => {
     assert.equal(await workspaceForNewSession(db, "v", []), null, "no personal workspace while invited");
   });
 
+  it("ignores expired invitations when deciding whether to give a personal workspace", async () => {
+    const db = openSqliteD1();
+    await workspace(db, "w1"); await user(db, "inviter", "i@x");
+    const invite = (id: string, email: string, expires: string) => db.prepare(`INSERT INTO invitation (id, organizationId, email, role, status, expiresAt, createdAt, inviterId) VALUES (?, 'w1', ?, 'client', 'pending', ?, ?, 'inviter')`).bind(id, email, expires, AT).run();
+    await invite("old", "e@x", "2020-01-01T00:00:00.000Z");
+    await user(db, "e", "e@x");
+    await setUpNewUser(db, { id: "e", name: "Eve", email: "e@x", emailVerified: true }, []);
+    assert.ok(await workspaceForNewSession(db, "e", []), "expired invitation: personal workspace");
+    await invite("new", "f@x", "2099-01-01T00:00:00.000Z");
+    await user(db, "f", "f@x");
+    await setUpNewUser(db, { id: "f", name: "Fay", email: "f@x", emailVerified: true }, []);
+    assert.equal(await workspaceForNewSession(db, "f", []), null, "live invitation: none");
+  });
+
+  it("creates a personal workspace on a new session for a user who has none and no live invitation", async () => {
+    const db = openSqliteD1();
+    await user(db, "u", "u@x");
+    const id = await workspaceForNewSession(db, "u", []);
+    assert.ok(id);
+    assert.equal(await memberRole(db, id, "u"), "owner");
+    assert.equal(await workspaceForNewSession(db, "u", []), id, "second session reuses it");
+  });
+
   it("makes listed admins owners of the initial workspace, verified emails only", async () => {
     const db = openSqliteD1();
     await user(db, "a", "Boss@x");
@@ -112,5 +135,18 @@ describe("usage", () => {
     assert.equal(await charge(4, "2026-10-11"), false, "more than the limit at once");
     assert.equal(await charge(1, "2026-10-11"), true, "a new day");
     assert.equal(await chargeUsage(db, { workspaceId: "w1", day: "2026-10-10", metric: "askPerDay", amount: 50, limit: null }), true, "unlimited");
+  });
+});
+
+describe("revokeWorkspaceSiteAccess", () => {
+  it("removes a user's grants in one workspace only", async () => {
+    const db = openSqliteD1();
+    await workspace(db, "w1"); await workspace(db, "w2"); await user(db, "c", "c@x");
+    await member(db, "w1", "c", "client"); await member(db, "w2", "c", "client");
+    await site(db, "a", "w1"); await site(db, "b", "w2");
+    for (const s of ["a", "b"]) await db.prepare("INSERT INTO site_access (user_id, site_id, created_at) VALUES ('c', ?, ?)").bind(s, AT).run();
+    await revokeWorkspaceSiteAccess(db, "w1", "c");
+    assert.equal(await siteForUser(db, "c", "a"), null);
+    assert.ok(await siteForUser(db, "c", "b"));
   });
 });

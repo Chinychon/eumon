@@ -34,23 +34,40 @@ export async function setUpNewUser(db: D1Like, user: { id: string; name: string;
     await addMember(db, INITIAL_WORKSPACE_ID, user.id, "owner");
     return;
   }
-  const invited = await db.prepare(`SELECT 1 AS yes FROM invitation WHERE lower(email) = lower(?) AND status = 'pending' LIMIT 1`).bind(user.email).first();
-  if (invited) return;
+  if (await hasLiveInvitation(db, user.email)) return;
+  await createPersonalWorkspace(db, user);
+}
+
+/** Better Auth stores expiresAt as an ISO string, which sorts like time. */
+async function hasLiveInvitation(db: D1Like, email: string): Promise<boolean> {
+  return Boolean(await db.prepare(`SELECT 1 AS yes FROM invitation WHERE lower(email) = lower(?) AND status = 'pending' AND expiresAt > ? LIMIT 1`).bind(email, nowIso()).first());
+}
+
+async function createPersonalWorkspace(db: D1Like, user: { id: string; name: string; email: string }): Promise<string> {
   const id = createId("ws");
   const name = `${(user.name || user.email.split("@")[0] || "My").trim().slice(0, 60)}'s workspace`;
   await db.prepare(`INSERT INTO organization (id, name, slug, createdAt) VALUES (?, ?, ?, ?)`).bind(id, name, id, nowIso()).run();
   await addMember(db, id, user.id, "owner");
+  return id;
 }
 
 /** The workspace a new session opens in: the initial one for admins (joining it if the list grew since sign-up), else the user's first. */
 export async function workspaceForNewSession(db: D1Like, userId: string, adminEmails: string[]): Promise<string | null> {
-  const user = await db.prepare(`SELECT email, emailVerified FROM "user" WHERE id = ?`).bind(userId).first<{ email: string; emailVerified: number }>();
+  const user = await db.prepare(`SELECT name, email, emailVerified FROM "user" WHERE id = ?`).bind(userId).first<{ name: string; email: string; emailVerified: number }>();
   if (user && Number(user.emailVerified) === 1 && isAdmin(user.email, adminEmails)) {
     await addMember(db, INITIAL_WORKSPACE_ID, userId, "owner");
     return INITIAL_WORKSPACE_ID;
   }
   const row = await db.prepare(`SELECT organizationId FROM member WHERE userId = ? ORDER BY createdAt LIMIT 1`).bind(userId).first<{ organizationId: string }>();
-  return row?.organizationId ?? null;
+  if (row) return row.organizationId;
+  // Nobody is left without a workspace, unless an invitation is waiting for them.
+  if (!user || (await hasLiveInvitation(db, user.email))) return null;
+  return createPersonalWorkspace(db, { id: userId, ...user });
+}
+
+/** A removed member's client grants must not outlive their membership. */
+export async function revokeWorkspaceSiteAccess(db: D1Like, workspaceId: string, userId: string): Promise<void> {
+  await db.prepare(`DELETE FROM site_access WHERE user_id = ? AND site_id IN (SELECT id FROM sites WHERE workspace_id = ?)`).bind(userId, workspaceId).run();
 }
 
 export async function addSiteInvites(db: D1Like, invitationId: string, siteIds: string[]): Promise<void> {

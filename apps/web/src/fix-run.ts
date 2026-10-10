@@ -2,7 +2,7 @@ import { FIX_PROMPT_VERSION, writeFixText, type FixSample } from "@organic-growt
 import type { JsonLlm } from "@organic-growth/ai";
 import { createId } from "@organic-growth/core";
 import { parseHtmlSignals, visibleText } from "@organic-growth/crawler";
-import { countOpenFixes, hasLiveFix, listFixes, stageFix, updateFix, type D1Like, type FixRecord } from "@organic-growth/db";
+import { countOpenFixes, hasLiveFix, listFixes, stageFix, updateFix, type D1Like, type FixRecord, type FixSettings } from "@organic-growth/db";
 import {
   blockedAiSearchAgents, buildLlmsTxt, componentPath, editAiRobots, editJsonLd, editLlmsTxt, editMetadata, editMetadataBase, findMetadata, findPage,
   JSON_LD_COMPONENT, jsonLdCode, jsonLdSnippet, memberPaths, metadataSnippet, parseModule, pathOf, routeForPath, stripLocale, urlTemplate, validateEdit, validateFile,
@@ -337,4 +337,11 @@ export async function checkMergedFixes(deps: FixDeps, pr: PrOps, input: { siteId
     }
   }
   return reverted;
+}
+
+export function parseFixSettings(body: unknown): FixSettings | string {
+  const b = body as Partial<FixSettings> | null;
+  if (!b || typeof b.allowAiSearch !== "boolean" || typeof b.autopilot !== "boolean") return "Send allowAiSearch and autopilot as true or false.";
+  if (!Number.isInteger(b.budget) || b.budget! < 1 || b.budget! > 5) return "The PR budget must be a whole number from 1 to 5.";
+  return { allowAiSearch: b.allowAiSearch, budget: b.budget!, autopilot: b.autopilot };
 }

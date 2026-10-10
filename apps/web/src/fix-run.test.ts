@@ -317,3 +317,16 @@ describe("fix run guards", () => {
     assert.equal((await getFix(db, "other"))?.verification?.recrawl, "ok");
   });
 });
+
+import { parseFixSettings } from "./fix-run.ts";
+
+describe("parseFixSettings", () => {
+  it("accepts booleans and a budget from 1 to 5", () => {
+    assert.deepEqual(parseFixSettings({ allowAiSearch: true, budget: 2, autopilot: false }), { allowAiSearch: true, budget: 2, autopilot: false });
+  });
+  it("explains what's wrong otherwise", () => {
+    assert.equal(typeof parseFixSettings({ allowAiSearch: "yes", budget: 2, autopilot: true }), "string");
+    assert.equal(typeof parseFixSettings({ allowAiSearch: true, budget: 9, autopilot: true }), "string");
+    assert.equal(typeof parseFixSettings(null), "string");
+  });
+});

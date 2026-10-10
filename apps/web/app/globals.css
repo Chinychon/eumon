@@ -905,3 +905,9 @@ details.disclosure[open] > summary { margin-bottom: 10px; }
 .signin form { display: flex; flex-direction: column; gap: 14px; border-top: 1px solid var(--line); padding-top: 14px; }
 .signin input { height: 36px; padding: 0 10px; border: 1px solid var(--line); border-radius: 0; background: var(--surface); color: var(--ink); font: inherit; }
 .admin { max-width: 960px; margin: 0 auto; padding: 32px 16px; }
+
+/* Code fixes panel */
+.fix-settings { display: grid; gap: 8px; margin-bottom: 14px; font-size: 13px; color: var(--ink-2); }
+.fix-row { padding: 10px 0; border-top: 1px solid var(--line); font-size: 13px; }
+.fix-row > summary { cursor: pointer; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.fix-row pre { max-height: 220px; overflow: auto; padding: 10px; background: var(--surface-2); border: 1px solid var(--line); font-family: var(--mono); font-size: 12px; white-space: pre-wrap; word-break: break-word; border-radius: 0; }

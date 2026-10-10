@@ -47,7 +47,7 @@ import { connectorSignals, loadConnectorLists } from "./connectors-data";
 import { loadKeywords } from "./keywords-data";
 import { gradeContentSteps, loadContentGrades } from "./content-grading";
 import { signalKeys } from "./results-access";
-import { workflowSteps } from "./sync-steps";
+import { startSync, workflowSteps } from "./sync-steps";
 
 /** The analysis' AI client, or null when no model is configured. Made where it is used: it never crosses a step boundary. */
 function makeLlm(env: AppEnv): JsonLlm | null {
@@ -247,6 +247,8 @@ export class SiteAnalysisWorkflow extends WorkflowEntrypoint<AppEnv, AnalysisPay
         },
       );
       await runFixSteps(this.env, step, siteId, analysisId).catch((error) => console.error("Fix steps failed", error));
+      // Fresh findings deserve fresh numbers: refresh the site's data sources (joins a run already going).
+      await step.do("sync", () => startSync(this.env, { siteId, trigger: "manual" })).catch((error) => console.error("Sync after analysis failed", error));
       return { analysisId, status: "completed" };
     } catch (error) {
       const message = error instanceof Error ? error.message : "Analysis failed unexpectedly.";

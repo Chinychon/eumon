@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
 import { ApiError, api, formatNumber } from "./api";
 import { CrawlGarden } from "./pixel";
 import { Button, CheckIcon, Kpi, useTweened } from "./ui";
@@ -152,7 +152,7 @@ function Delta({ delta, index }: { delta: RunDelta; index: number }) {
 /**
  * What a running analysis is doing: stage timeline, crawl progress with pace
  * and time left, the crawl garden, and what the crawl has found so far. When
- * the run finishes the card stays to say what changed, and the garden blooms.
+ * the run finishes the card stays to say what changed.
  */
 export function AnalysisProgress({ run, analysisId, finish, onDismiss }: {
   run?: RunProgress;
@@ -163,6 +163,15 @@ export function AnalysisProgress({ run, analysisId, finish, onDismiss }: {
   const [confirming, setConfirming] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [cancelError, setCancelError] = useState("");
+  // The elapsed time ticks on the browser's clock, offset to the server's, so a slow or failed poll doesn't freeze it.
+  const serverNow = run ? Date.parse(run.now) : 0;
+  const skew = useMemo(() => serverNow - Date.now(), [serverNow]);
+  const [clock, setClock] = useState(() => Date.now());
+  useEffect(() => {
+    if (finish) return;
+    const timer = setInterval(() => setClock(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [finish]);
   const crawl = run?.crawl;
   const done = crawl ? crawl.total - crawl.pending : 0;
   const shown = useTweened(done);
@@ -184,6 +193,7 @@ export function AnalysisProgress({ run, analysisId, finish, onDismiss }: {
   }
 
   const now = Date.parse(run.now);
+  const elapsedNow = finish ? now : Math.max(now, clock + skew);
   const { progress } = run;
   const finished = Boolean(finish);
   const history = progress?.history ?? [];
@@ -243,7 +253,7 @@ export function AnalysisProgress({ run, analysisId, finish, onDismiss }: {
             </div>
             <div className="row">
               {!run.stalled && <NotifyWhenDone />}
-              <span className="count-pill">{duration(now - Date.parse(run.queuedAt))} elapsed</span>
+              <span className="count-pill">{duration(elapsedNow - Date.parse(run.queuedAt))} elapsed</span>
               {!run.stalled && !confirming && <Button small variant="secondary" onClick={() => setConfirming(true)}>Cancel run</Button>}
             </div>
           </div>
@@ -299,7 +309,7 @@ export function AnalysisProgress({ run, analysisId, finish, onDismiss }: {
           ))}
 
           <div className="run-garden">
-            <CrawlGarden families={crawl.families} bloom={finished} label={gardenLabel} />
+            <CrawlGarden families={crawl.families} label={gardenLabel} />
           </div>
 
           {!finished && (

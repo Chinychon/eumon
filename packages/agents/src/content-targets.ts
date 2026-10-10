@@ -179,7 +179,8 @@ const domainOf = (url: string) => {
 
 export async function gradeTarget(
   target: ContentTarget,
-  input: { serpRow: SerpResult; site: string; llm: JsonLlm | null; fetcher?: Fetcher },
+  /** `beforeAi` runs right before the AI call, once the pages are read; a throw from it propagates (the caller's allowance check). */
+  input: { serpRow: SerpResult; site: string; llm: JsonLlm | null; fetcher?: Fetcher; beforeAi?: () => Promise<void> },
 ): Promise<{ row: ContentGradeRow } | { skipped: string }> {
   const C = CONTENT_TARGETS;
   if (!input.llm) return { skipped: "no AI model configured" };
@@ -215,6 +216,7 @@ export async function gradeTarget(
   const competitors = picked.flatMap((rival, i) => (rivals[i] ? [{ ...rivals[i]!, domain: rival.domain }] : []));
   if (competitors.length < C.MIN_COMPETITORS) return { skipped: "fewer than 2 competitor pages could be read" };
 
+  await input.beforeAi?.();
   let proposals: TopicProposal[];
   try {
     proposals = await proposeTopics(input.llm, { query: target.query, market: target.market, page, competitors });

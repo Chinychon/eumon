@@ -73,13 +73,16 @@ export async function checkRanks(db: D1Like, site: SiteRecord, auth: Auth, today
     });
   }
   await saveRankChecks(db, site.id, rows);
-  for (const [market, results] of pages) {
-    const kept = new Map(((await getSnapshot<SerpResult>(db, site.id, "serp", market))?.rows ?? []).map((row) => [row.keyword.toLowerCase(), row]));
-    // The keyword list's volume is kept when the page was already there; a tracked keyword outside the lists has none.
-    for (const row of results) kept.set(row.keyword.toLowerCase(), { ...row, volume: kept.get(row.keyword.toLowerCase())?.volume ?? null });
-    await saveSnapshot(db, site.id, { kind: "serp", scope: market, periodEnd: today, rows: [...kept.values()] });
-  }
+  for (const [market, results] of pages) await saveSerpRows(db, site.id, market, results, today);
   return { checked: rows.length, cost, notes };
+}
+
+/** Fresh results pages into a market's `serp` list, replacing the same search's row. */
+export async function saveSerpRows(db: D1Like, siteId: string, market: string, results: SerpResult[], today: string): Promise<void> {
+  const kept = new Map(((await getSnapshot<SerpResult>(db, siteId, "serp", market))?.rows ?? []).map((row) => [row.keyword.toLowerCase(), row]));
+  // The keyword list's volume is kept when the page was already there; a tracked keyword outside the lists has none.
+  for (const row of results) kept.set(row.keyword.toLowerCase(), { ...row, volume: kept.get(row.keyword.toLowerCase())?.volume ?? null });
+  await saveSnapshot(db, siteId, { kind: "serp", scope: market, periodEnd: today, rows: [...kept.values()] });
 }
 
 /** The day's ledger points and the marker, then the prune. */

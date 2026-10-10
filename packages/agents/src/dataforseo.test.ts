@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { dataForSeoLocation, fetchKeywordOverview, fetchRankedKeywords } from "./dataforseo.js";
+import { dataForSeoLocation, fetchBacklinkSummary, fetchKeywordOverview, fetchRankedKeywords, fetchSerp } from "./dataforseo.js";
 
 const auth = { login: "me@example.com", password: "secret" };
 const envelope = (task: object) => JSON.stringify({ version: "0.1.20260917", status_code: 20000, status_message: "Ok.", cost: 0.0132, tasks_count: 1, tasks_error: 0, tasks: [task] });
@@ -38,6 +38,14 @@ describe("DataForSEO client", () => {
         { keyword: "loh guan lye hospital", volume: 2400, difficulty: null, intent: null, position: 43, url: "/", traffic: 0 },
       ],
     });
+  });
+
+  it("calls each endpoint at its documented URL: `/live` once, before `/advanced` for the SERP API", async () => {
+    const urls: string[] = [];
+    const fetchFn = (async (url: string) => { urls.push(url); return new Response(envelope({ status_code: 20000, status_message: "Ok.", cost: 0.004, result: [{ item_types: [], items: [] }] })); }) as typeof fetch;
+    await fetchSerp(auth, { keyword: "x", location: 2458, language: "en", site: "x.com", checkedAt: "2026-10-10", volume: null }, fetchFn);
+    await fetchBacklinkSummary(auth, "x.com", fetchFn);
+    assert.deepEqual(urls, ["https://api.dataforseo.com/v3/serp/google/organic/live/advanced", "https://api.dataforseo.com/v3/backlinks/summary/live"]);
   });
 
   it("returns no rows for a domain DataForSEO doesn't know, and what the call cost", async () => {

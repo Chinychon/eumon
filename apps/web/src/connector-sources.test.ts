@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import { indexNowKey } from "@organic-growth/agents";
 import type { PricedKeyword, RankedKeyword, SerpResult } from "@organic-growth/core";
 import {
-  defaultPageSettings, getSite, getSnapshot, listCrawlLogDays, listMetricSeries, saveSnapshot, setSiteCompetitorDomains, setSiteMarkets, updateSiteGscProperty, upsertPageSettings, upsertSite,
+  defaultPageSettings, getSite, getSnapshot, listCrawlLogDays, listMetricSeries, saveSnapshot, setSiteCompetitorDomains, setSiteMarkets, setTrackedKeywords, updateSiteGscProperty, upsertPageSettings, upsertSite,
 } from "@organic-growth/db";
 import { openSqliteD1 } from "@organic-growth/db/sqlite";
 import { loadConnectorLists } from "./connectors-data.ts";
@@ -84,6 +84,19 @@ describe("search results and search competitors", () => {
     assert.deepEqual(lists.serp.suggestions.map((entry) => entry.domain), ["new-rival.example"]);
     assert.equal(lists.serp.lists[0]!.rows.length, 21);
     assert.equal((await loadConnectorLists(db, record, { markets: ["mys"], competitors: [] })).serp.lists.length, 0, "another market's lists are hidden");
+  });
+
+  it("keeps a tracked keyword's results page the rank checks wrote, and counts its AI Overview", async () => {
+    const { db, record } = await site({ markets: ["idn"] });
+    await setTrackedKeywords(db, "s", ["veneers jakarta"]);
+    await saveSnapshot(db, "s", { kind: "keywords", scope: "sc-domain:x.com|idn", periodEnd: "2026-10-04", rows: [priced("q0", 1000, 8)] });
+    const tracked: SerpResult = { keyword: "veneers jakarta", checkedAt: "2026-10-07", volume: null, features: ["ai_overview"], position: 2, url: "https://x.com/v", aiOverviewSources: [], cited: false, organic: [] };
+    await saveSnapshot(db, "s", { kind: "serp", scope: "idn", periodEnd: "2026-10-07", rows: [tracked] });
+    await syncResults(db, record, now, { ...noGoogle, fetchFn: dataForSeoStub().fetchFn }, { dataForSeo });
+    const rows = (await getSnapshot<SerpResult>(db, "s", "serp", "idn"))!.rows.map((row) => row.keyword).sort();
+    assert.deepEqual(rows, ["q0", "veneers jakarta"]);
+    const series = await listMetricSeries(db, "s", ["serp_ai_overviews"], "2026-10-07", "2026-10-07");
+    assert.equal(series.serp_ai_overviews![0]!.value, 1);
   });
 
   it("waits for keyword lists before choosing searches", async () => {

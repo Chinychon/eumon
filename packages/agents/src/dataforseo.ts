@@ -29,10 +29,10 @@ export class DataForSeoError extends Error {
   }
 }
 
-/** Posts one task to `/v3/<path>/live` and returns its first result (undefined when the task has none) with its cost. */
+/** Posts one task to `/v3/<path>/live` (or to `path` as given when it already names its live mode, like `…/live/advanced`) and returns its first result (undefined when the task has none) with its cost. */
 async function post<T>(auth: DataForSeoAuth, path: string, task: object, fetchFn: typeof fetch): Promise<{ result: T | undefined; cost: number }> {
   const name = path.replace(/^dataforseo_labs\/google\//, "");
-  const response = await fetchFn(`https://api.dataforseo.com/v3/${path}/live`, {
+  const response = await fetchFn(`https://api.dataforseo.com/v3/${/\/live(\/|$)/.test(path) ? path : `${path}/live`}`, {
     method: "POST",
     headers: { Authorization: `Basic ${btoa(`${auth.login}:${auth.password}`)}`, "Content-Type": "application/json" },
     body: JSON.stringify([task]),

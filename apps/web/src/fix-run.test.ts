@@ -394,6 +394,21 @@ describe("title template (I2)", () => {
     assert.equal(fix?.status, "staged", fix?.result ?? "");
     assert.match(fix!.files["app/procedures/[slug]/page.tsx"]!, /title: `\$\{procedure\.name\}`,/);
   });
+
+  it("keeps the site name on the root page (a layout template skips its own segment) but not in a route group", async () => {
+    for (const [file, suffix] of [["app/page.tsx", " | MedBay"], ["app/(x)/page.tsx", ""]] as const) {
+      const { db, deps, files } = await setup();
+      files[file] = { content: pageFile, sha: "sha1" };
+      deps.llm = fakeLlm([
+        { skip: false, reason: "", facts: [], titleSubject: "procedure.name", titleQualifier: null, description: null, schema: [], examples },
+        { supported: true, problems: [] },
+      ]);
+      await stageCandidates(deps, { ...input, titleTemplate: "%s | MedBay", candidates: [{ ...head, file, urls, problems: ["title-missing"] }] });
+      const [fix] = await listFixes(db, "s");
+      assert.equal(fix?.status, "staged", fix?.result ?? "");
+      assert.ok(fix!.files[file]!.includes(`title: \`\${procedure.name}${suffix}\`,`), file);
+    }
+  });
 });
 
 import { transitionFix } from "@organic-growth/db";

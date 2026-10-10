@@ -99,7 +99,10 @@ function languagesFor(tpl: string, pathLocales: Record<string, string[]>, langua
 }
 
 async function stageHead(ctx: Ctx): Promise<Outcome> {
-  const { deps, input, c } = ctx;
+  const { deps, c } = ctx;
+  // Next.js applies `title.template` to child segments only, so the root page (the layout's own segment) needs the full title.
+  const input = { ...ctx.input };
+  if (/^(src\/)?app\/page\.[jt]sx?$/.test(c.file)) delete input.titleTemplate;
   const route = c.route!;
   const title = headTitle(c.problems, route.pathPattern);
   const file = await deps.repo.getFile(c.file);

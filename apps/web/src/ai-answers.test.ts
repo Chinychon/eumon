@@ -22,8 +22,8 @@ async function site(markets: string[], prompts: string[]) {
 const check = (prompt: string, engine: AiTarget["engine"], day: string) => ({ prompt, market: "mys", engine, day, mentioned: false, cited: false, citedRank: null, sources: [], rivals: [], excerpt: "" });
 const ok = (result: unknown) => new Response(JSON.stringify({ status_code: 20000, tasks: [{ status_code: 20000, cost: 0.01, result: [result] }] }));
 
-/** DataForSEO stand-in answering by URL: ChatGPT names the brand and a rival, AI Mode cites the site, Perplexity and Gemini say nothing; `refuses` names an engine path that answers 40501. */
-function stub(refuses?: string) {
+/** DataForSEO stand-in answering by URL: ChatGPT names the brand and a rival, AI Mode cites the site, Perplexity and Gemini say nothing; `refuses` names an engine path that answers 40501, `empty` one that answers with nothing. */
+function stub(refuses?: string, empty?: string) {
   let inFlight = 0;
   const seen = { most: 0, urls: [] as string[] };
   const fetchFn = (async (url: string) => {
@@ -32,6 +32,7 @@ function stub(refuses?: string) {
     await new Promise((resolve) => setTimeout(resolve, 1));
     try {
       if (refuses && url.includes(refuses)) return new Response(JSON.stringify({ status_code: 20000, tasks: [{ status_code: 40501, status_message: "Invalid Field: 'location_code'." }] }));
+      if (empty && url.includes(empty)) return ok({ markdown: "", sources: [] });
       if (url.includes("chat_gpt")) return ok({ markdown: "Try Bright Smile, or rival.example.", sources: [{ domain: "wiki.example", url: "https://wiki.example/a" }] });
       if (url.includes("ai_mode")) return ok({ items: [{ text: "Plenty of clinics.", references: [{ domain: "brightsmile.example", url: "https://brightsmile.example/x" }] }] });
       if (url.includes("perplexity")) return ok({ items: [{ sections: [{ text: "Nobody in particular.", annotations: [] }] }] });
@@ -93,6 +94,14 @@ describe("AI answer steps", () => {
     assert.equal(result.checked, 3);
     assert.equal(result.notes.length, 1);
     assert.ok(result.notes[0]!.startsWith("ai answers skipped “q1” on Gemini in mys: "), result.notes[0]);
+    assert.deepEqual((await listAiAnswerChecks(db, "s", today)).map((row) => row.engine).sort(), ["ai_mode", "chatgpt", "perplexity"]);
+  });
+
+  it("an empty answer is a note, not a row; the rest are saved", async () => {
+    const { db, record } = await site(["mys"], ["q1"]);
+    const result = await checkAiAnswers(db, record, auth, today, cells(["q1"]), stub(undefined, "gemini").fetchFn);
+    assert.equal(result.checked, 3);
+    assert.deepEqual(result.notes, ["ai answers: Gemini gave no answer to “q1” in mys"]);
     assert.deepEqual((await listAiAnswerChecks(db, "s", today)).map((row) => row.engine).sort(), ["ai_mode", "chatgpt", "perplexity"]);
   });
 

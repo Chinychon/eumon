@@ -7,18 +7,18 @@ import { aiAnswerOpportunities, findingsFromAiAnswers, loadAiAnswerSignals, type
 
 const today = "2026-10-10";
 const day = (back: number) => new Date(Date.UTC(2026, 9, 10 - back)).toISOString().slice(0, 10);
-/** One answer, `back` days ago; each rival is named and cited with a page of its own. */
-const check = (prompt: string, engine: AiAnswerCheck["engine"], back: number, options: { mentioned?: boolean; cited?: boolean; rivals?: string[]; market?: string } = {}): AiAnswerCheck => ({
+/** One answer, `back` days ago; each of `rivals` is named and cited with a page of its own, each of `namedOnly` only named. */
+const check = (prompt: string, engine: AiAnswerCheck["engine"], back: number, options: { mentioned?: boolean; cited?: boolean; rivals?: string[]; namedOnly?: string[]; market?: string } = {}): AiAnswerCheck => ({
   prompt, market: options.market ?? "mys", engine, day: day(back), mentioned: options.mentioned ?? false, cited: options.cited ?? false, citedRank: options.cited ? 1 : null,
   sources: [
     ...(options.cited ? [{ domain: "x.com", url: "https://x.com/p" }] : []),
     ...(options.rivals ?? []).map((domain) => ({ domain, url: `https://${domain}/${prompt.replace(/\W+/g, "-")}` })),
     { domain: "wiki.example", url: "https://wiki.example/a" },
   ],
-  rivals: (options.rivals ?? []).map((domain) => ({ domain, mentioned: true, cited: true })),
+  rivals: [...(options.rivals ?? []).map((domain) => ({ domain, mentioned: true, cited: true })), ...(options.namedOnly ?? []).map((domain) => ({ domain, mentioned: true, cited: false }))],
   excerpt: "…",
 });
-const signals = (checks: AiAnswerCheck[], prompts = [...new Set(checks.map((row) => row.prompt))]): AiAnswerSignals => ({ prompts, markets: ["mys"], checks, today });
+const signals = (checks: AiAnswerCheck[], prompts = [...new Set(checks.map((row) => row.prompt))]): AiAnswerSignals => ({ prompts, markets: ["mys"], competitors: ["rival.example", "www.other.example"], checks, today });
 const findings = (checks: AiAnswerCheck[], prompts?: string[]) => findingsFromAiAnswers({ siteId: "s", analysisId: "a", signals: signals(checks, prompts) });
 /** Rivals instead of the site in ChatGPT and Gemini. */
 const instead = (prompt: string) => [check(prompt, "chatgpt", 0, { rivals: ["rival.example"] }), check(prompt, "gemini", 0, { rivals: ["other.example"] })];
@@ -40,6 +40,13 @@ describe("findingsFromAiAnswers: competitors instead of you", () => {
   it("an engine where the site is mentioned doesn't count", () => {
     const mixed = [check("q3", "chatgpt", 0, { rivals: ["rival.example"] }), check("q3", "gemini", 0, { mentioned: true, rivals: ["rival.example"] })];
     assert.equal(findings([...instead("q1"), ...instead("q2"), ...mixed]).length, 0);
+  });
+
+  it("a competitor only named counts; a domain no longer among the competitors doesn't", () => {
+    const named = (prompt: string) => [check(prompt, "chatgpt", 0, { namedOnly: ["rival.example"] }), check(prompt, "gemini", 0, { namedOnly: ["other.example"] })];
+    assert.equal(findings([...instead("q1"), ...instead("q2"), ...named("q3")]).length, 1);
+    const dropped = [check("q3", "chatgpt", 0, { rivals: ["former.example"] }), check("q3", "gemini", 0, { rivals: ["former.example"] })];
+    assert.equal(findings([...instead("q1"), ...instead("q2"), ...dropped]).length, 0);
   });
 
   it("no finding for a removed question or an untargeted market", () => {
@@ -89,6 +96,17 @@ describe("aiAnswerOpportunities", () => {
     assert.deepEqual(run(checks, [existing("two")]).map((row) => row.priorityScore), [12, 8]);
   });
 
+  it("needs a cited competitor still on the list: none for one only named, none for a former competitor", () => {
+    assert.deepEqual(run([check("named", "chatgpt", 0, { namedOnly: ["rival.example"] }), check("named", "gemini", 0, { namedOnly: ["rival.example"] })]), []);
+    assert.deepEqual(run([check("former", "chatgpt", 0, { rivals: ["former.example"] })]), []);
+  });
+
+  it("names the pages cited by the engines that skip the site only", () => {
+    const made = run([check("q", "chatgpt", 0, { rivals: ["rival.example"] }), check("q", "gemini", 0, { cited: true, rivals: ["other.example"] })]);
+    assert.match(made[0]!.rationale, /https:\/\/rival\.example\/q/);
+    assert.doesNotMatch(made[0]!.rationale, /other\.example/);
+  });
+
   it("at most five", () => {
     assert.equal(run(Array.from({ length: 7 }, (_, index) => instead(`q${index}`)).flat()).length, 5);
   });
@@ -101,6 +119,6 @@ describe("loadAiAnswerSignals", () => {
     await upsertSite(db, { id: "s", name: "x.com", baseUrl: "https://x.com", createdAt: at, updatedAt: at });
     assert.equal(await loadAiAnswerSignals(db, "s", today), null);
     await setAiPrompts(db, "s", ["q1"]);
-    assert.deepEqual(await loadAiAnswerSignals(db, "s", today), { prompts: ["q1"], markets: [], checks: [], today });
+    assert.deepEqual(await loadAiAnswerSignals(db, "s", today), { prompts: ["q1"], markets: [], competitors: [], checks: [], today });
   });
 });

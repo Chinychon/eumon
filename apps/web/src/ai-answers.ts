@@ -60,6 +60,11 @@ export async function checkAiAnswers(db: D1Like, site: SiteRecord, auth: Auth, t
         return;
       }
       cost += answer.value.cost;
+      // An empty answer says nothing about the site; saved, it would read as a lost citation. The cell stays due and is asked again tomorrow.
+      if (!answer.value.text.trim() && !answer.value.sources.length) {
+        notes.push(`ai answers: ${ENGINE_LABEL[target.engine]} gave no answer to “${target.prompt}” in ${target.market}`);
+        return;
+      }
       const read = readAnswer({ prompt: target.prompt, text: answer.value.text, sources: answer.value.sources, brandNames: [site.name, ...brandNames], site: own, competitors });
       rows.push({ ...target, day: today, ...read, sources: answer.value.sources.slice(0, 20) });
     });

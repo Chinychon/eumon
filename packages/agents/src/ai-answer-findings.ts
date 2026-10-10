@@ -1,5 +1,5 @@
 import { addDays, AI_ANSWER_ENGINES, bareDomain, countryName, createId, isOrUnder, latestChecks, severityFromImpact, type AiAnswerCheck, type Finding, type JsonObject, type Opportunity } from "@organic-growth/core";
-import { listAiAnswerChecks, listAiPrompts, listSiteMarkets, type D1Like } from "@organic-growth/db";
+import { listAiAnswerChecks, listAiPrompts, listSiteCompetitorDomains, listSiteMarkets, type D1Like } from "@organic-growth/db";
 import { estimateDemand } from "./demand.js";
 
 /*
@@ -9,7 +9,8 @@ import { estimateDemand } from "./demand.js";
  * cited and the site isn't.
  */
 
-export type AiAnswerSignals = { prompts: string[]; markets: string[]; checks: AiAnswerCheck[]; today: string };
+/** `competitors` is today's list: a check's stored rivals reflect the list when it was asked. */
+export type AiAnswerSignals = { prompts: string[]; markets: string[]; competitors: string[]; checks: AiAnswerCheck[]; today: string };
 
 /**
  * Thresholds, with their reasons. Only current questions in target markets
@@ -35,11 +36,17 @@ const named = (row: AiAnswerCheck) => row.rivals.filter((rival) => rival.mention
 /** The answer's first three distinct source domains. */
 const citesNow = (row: AiAnswerCheck) => [...new Set(row.sources.map((source) => bareDomain(source.domain)))].slice(0, 3);
 
-/** Checks of current questions in target markets within the lookback. */
+/** A check with only the rivals still among the competitors. */
+function currentRivals(row: AiAnswerCheck, competitors: Set<string>): AiAnswerCheck {
+  return { ...row, rivals: row.rivals.filter((rival) => competitors.has(bareDomain(rival.domain))) };
+}
+
+/** Checks of current questions in target markets within the lookback, with current competitors only: every rule reads its checks from here. */
 function inWindow(signals: AiAnswerSignals): AiAnswerCheck[] {
   const since = addDays(signals.today, -AI_FINDINGS.LOOKBACK_DAYS);
   const prompts = new Set(signals.prompts);
-  return signals.checks.filter((row) => prompts.has(row.prompt) && signals.markets.includes(row.market) && row.day >= since);
+  const competitors = new Set(signals.competitors.map(bareDomain));
+  return signals.checks.filter((row) => prompts.has(row.prompt) && signals.markets.includes(row.market) && row.day >= since).map((row) => currentRivals(row, competitors));
 }
 
 /** The latest answers grouped per (prompt, market). */
@@ -121,7 +128,7 @@ export function aiAnswerOpportunities(input: { siteId: string; analysisId: strin
     const rivalCited = rows.filter((row) => row.rivals.some((rival) => rival.cited));
     const missing = rivalCited.filter((row) => !row.cited);
     if (!missing.length || quoted.has(prompt.toLowerCase())) continue;
-    const pages = [...new Set(rivalCited.flatMap((row) => row.sources.filter((source) => row.rivals.some((rival) => rival.cited && isOrUnder(bareDomain(source.domain), rival.domain))).map((source) => source.url)))].slice(0, 3);
+    const pages = [...new Set(missing.flatMap((row) => row.sources.filter((source) => row.rivals.some((rival) => rival.cited && isOrUnder(bareDomain(source.domain), rival.domain))).map((source) => source.url)))].slice(0, 3);
     const estimate = estimateDemand({ kind: "ai_answer", engines: missing.length });
     made.push({
       id: createId("opp"), siteId: input.siteId, analysisId: input.analysisId,
@@ -139,6 +146,6 @@ export function aiAnswerOpportunities(input: { siteId: string; analysisId: strin
 export async function loadAiAnswerSignals(db: D1Like, siteId: string, today = new Date().toISOString().slice(0, 10)): Promise<AiAnswerSignals | null> {
   const prompts = await listAiPrompts(db, siteId);
   if (!prompts.length) return null;
-  const [markets, checks] = await Promise.all([listSiteMarkets(db, siteId), listAiAnswerChecks(db, siteId, addDays(today, -AI_FINDINGS.LOOKBACK_DAYS))]);
-  return { prompts, markets, checks, today };
+  const [markets, competitors, checks] = await Promise.all([listSiteMarkets(db, siteId), listSiteCompetitorDomains(db, siteId), listAiAnswerChecks(db, siteId, addDays(today, -AI_FINDINGS.LOOKBACK_DAYS))]);
+  return { prompts, markets, competitors, checks, today };
 }

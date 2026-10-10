@@ -144,7 +144,10 @@ export type BacklinksView = {
 const LIST_CAP = 25;
 const ANCHOR_CAP = 10;
 
-export function backlinksView(input: { asOf: string | null; counts: ReferringCounts; top: ReferringDomain[]; newReal: ReferringDomain[]; lostReal: ReferringDomain[]; brokenReal: ReferringDomain[]; spamRows: ReferringDomain[] }): BacklinksView {
+/** What the view reads: the bounded lists, and the networks the last refresh grouped from every spam row. */
+export type BacklinksInput = { asOf: string | null; counts: ReferringCounts; top: ReferringDomain[]; newReal: ReferringDomain[]; lostReal: ReferringDomain[]; brokenReal: ReferringDomain[]; networks: SpamNetwork[] };
+
+export function backlinksView(input: BacklinksInput): BacklinksView {
   const mix = new Map<string, { anchor: string; domains: number }>();
   for (const row of input.top) {
     if (row.spam) continue;
@@ -158,7 +161,7 @@ export function backlinksView(input: { asOf: string | null; counts: ReferringCou
     counts: input.counts,
     top: input.top.slice(0, LIST_CAP),
     anchors: [...mix.values()].sort((a, b) => b.domains - a.domains).slice(0, ANCHOR_CAP),
-    networks: spamNetworks(input.spamRows).slice(0, 5),
+    networks: input.networks.slice(0, 5),
     newReal: input.newReal.slice(0, LIST_CAP),
     lostReal: input.lostReal.slice(0, LIST_CAP),
     brokenReal: input.brokenReal.slice(0, LIST_CAP),

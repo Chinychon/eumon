@@ -8,6 +8,7 @@ import {
 import { openSqliteD1 } from "@organic-growth/db/sqlite";
 import { loadConnectorLists } from "./connectors-data.ts";
 import { ingestLog, logToken, readLogBody, tokenMatches } from "./crawl-logs.ts";
+import { loadResults } from "./results-data.ts";
 import { syncResults } from "./results-sync.ts";
 
 const now = new Date("2026-10-07T04:15:00Z");
@@ -145,6 +146,19 @@ describe("backlinks", () => {
     stub.asked.length = 0;
     await syncResults(db, record, new Date("2026-10-20T04:15:00Z"), { ...noGoogle, fetchFn: stub.fetchFn }, { dataForSeo });
     assert.ok(!stub.asked.some((call) => call.endpoint.startsWith("backlinks/")));
+  });
+
+  it("loads the stored referring domains into the view, bounded, and nothing when there are none", async () => {
+    const { db, record } = await site();
+    assert.equal((await loadConnectorLists(db, record, { markets: [], competitors: [] }, "2026-10-07")).referring, null);
+    await syncResults(db, record, now, { ...noGoogle, fetchFn: dataForSeoStub({ referring: linkItems(2, 10) }).fetchFn }, { dataForSeo });
+    const own = (await loadResults(db, record, "2026-10-07")).links.own!;
+    assert.equal(own.asOf, "2026-10-07", "the spam networks snapshot's day");
+    assert.deepEqual([own.counts.real, own.counts.spam, own.counts.newReal], [2, 10, 2]);
+    assert.deepEqual(own.top.map((row) => row.domain).sort(), ["real0.example", "real1.example"], "real rows only");
+    assert.equal(own.newReal.length, 2);
+    assert.deepEqual(own.anchors.map((entry) => entry.domains), [1, 1]);
+    assert.deepEqual(own.networks.map((network) => network.domains), [10]);
   });
 
   it("clears earlier rows when the list comes back empty", async () => {

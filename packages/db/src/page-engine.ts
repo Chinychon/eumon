@@ -863,7 +863,7 @@ export async function incrementPageMetric(
   ];
   if (input.variantId && (column === "views" || column === "cta_clicks")) {
     const counter = column === "views" ? "impressions" : "clicks";
-    statements.push(db.prepare(`UPDATE cta_variants SET ${counter} = ${counter} + 1 WHERE id = ? AND site_id = ?`)
+    statements.push(db.prepare(`UPDATE cta_variants SET ${counter} = ${counter} + 1 WHERE id = ? AND site_id = ? AND active = 1`)
       .bind(input.variantId, input.siteId));
   }
   await runStatements(db, statements);

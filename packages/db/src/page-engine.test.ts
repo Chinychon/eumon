@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { GeneratedPage, PageTemplate } from "@organic-growth/core";
 import { listRecordKeys, listSiteMarkets, setSiteMarkets, upsertSite } from "./index.js";
-import { datasetCoverage, defaultPageSettings, deleteTemplate, getPageSettings, listPageRevisions, recordLandingSession, setTemplatePublication, syncTemplatePages, upsertDataset, upsertPageSettings, upsertRecords, upsertTemplate } from "./page-engine.js";
+import { datasetCoverage, defaultPageSettings, deleteTemplate, getPageSettings, incrementPageMetric, insertCtaVariant, listCtaVariants, listPageRevisions, recordLandingSession, setTemplatePublication, syncTemplatePages, upsertDataset, upsertPageSettings, upsertRecords, upsertTemplate } from "./page-engine.js";
 import { openSqliteD1 } from "./sqlite.js";
 
 describe("datasetCoverage", () => {
@@ -100,5 +100,19 @@ describe("landing sessions", () => {
     await upsertSite(db, { id: "s", name: "x.com", baseUrl: "https://x.com", createdAt: at, updatedAt: at });
     assert.equal(await recordLandingSession(db, { siteId: "s", sessionId: "b".repeat(16), pageId: "p1", source: "ai:chatgpt" }), true);
     assert.equal(await recordLandingSession(db, { siteId: "s", sessionId: "b".repeat(16), pageId: "p1", source: "ai:chatgpt" }), false);
+  });
+});
+
+describe("CTA variant counters", () => {
+  it("never count a paused variant", async () => {
+    const db = openSqliteD1();
+    const at = new Date().toISOString();
+    await upsertSite(db, { id: "s", name: "x.com", baseUrl: "https://x.com", createdAt: at, updatedAt: at });
+    await upsertDataset(db, { id: "ds", siteId: "s", name: "D", entityType: "d", description: "", fields: [{ key: "name", label: "Name", type: "text" as const }], keyField: "name", pageIdeas: [], status: "active", createdAt: at, updatedAt: at });
+    await upsertTemplate(db, { id: "t", siteId: "s", datasetId: "ds", name: "t", groupBy: [], pathPattern: "/p", titlePattern: "t", descriptionPattern: "", h1Pattern: "", introPattern: "", itemTitleField: "name", itemFields: [], sortDir: "asc", minRecords: 1, faq: [], status: "active", createdAt: at, updatedAt: at });
+    await syncTemplatePages(db, "t", [{ id: "p", siteId: "s", templateId: "t", path: "/p", groupKey: "p", groupValues: {}, title: "p", description: "", h1: "p", intro: "", faq: [], recordIds: [], items: [], facts: {}, related: [], qualityScore: 0.8, qualityIssues: [], status: "draft", createdAt: at, updatedAt: at }]);
+    await insertCtaVariant(db, { id: "v", siteId: "s", label: "B", copy: "Chat", url: "https://wa.me/1", active: false, impressions: 0, clicks: 0, createdAt: at });
+    await incrementPageMetric(db, { siteId: "s", pageId: "p", kind: "cta_clicks", variantId: "v" });
+    assert.equal((await listCtaVariants(db, "s"))[0]!.clicks, 0);
   });
 });

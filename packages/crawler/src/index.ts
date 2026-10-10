@@ -570,7 +570,7 @@ export async function collectSitemapUrls(
     return [];
   }
   // Sitemaps can be much larger than ordinary HTML pages. Keep the normal
-  // page-response cap, while allowing a bounded 10 MB for XML sitemap files.
+  // page-response cap, while allowing a bounded 25 MB for XML sitemap files.
   const res = await fetcher(sitemapUrl, { maxBytes: 25_000_000 });
   if (res.status >= 400) {
     errors.push(`${sitemapUrl} returned ${res.status}`);

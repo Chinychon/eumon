@@ -23,6 +23,9 @@ export default {
   async fetch(request) {
     const url = new URL(request.url);
     const headers = new Headers(request.headers);
+    // The visitor's own cookies and credentials stay on your site.
+    headers.delete("cookie");
+    headers.delete("authorization");
     headers.set("X-Eumon-Proxy", "1");
     headers.set("X-Forwarded-Host", url.host);
     return fetch(TARGET + url.pathname + url.search, {
@@ -87,6 +90,8 @@ module.exports = {
     proxy_set_header Host ${new URL(target).host};
     proxy_set_header X-Forwarded-Host $host;
     proxy_set_header X-Eumon-Proxy 1;
+    proxy_set_header Cookie "";
+    proxy_set_header Authorization "";
     proxy_ssl_server_name on;
 }`,
     },
@@ -97,6 +102,8 @@ module.exports = {
       language: "apache",
       code: `SSLProxyEngine on
 RequestHeader set X-Eumon-Proxy "1"
+RequestHeader unset Cookie
+RequestHeader unset Authorization
 ProxyPass "${prefix || "/"}" "${target}${prefix}"
 ProxyPassReverse "${prefix || "/"}" "${target}${prefix}"`,
     },

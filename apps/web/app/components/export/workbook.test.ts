@@ -49,3 +49,10 @@ describe("spreadsheet formulas", () => {
     assert.equal(toTsv([sheet]).split("\n")[2], "'-2+3\t7");
   });
 });
+
+describe("formula guard", () => {
+  it("defuses cells that start with a tab or carriage return too", () => {
+    const rows = toCsv({ name: "x", columns: ["a"], rows: [["\t=1+1"], ["\r=1+1"], ["=1+1"]] }).split("\r\n").slice(1, 4);
+    for (const row of rows) assert.match(row, /^"?'/, JSON.stringify(row));
+  });
+});

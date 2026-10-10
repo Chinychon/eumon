@@ -5,6 +5,8 @@ export const worker = defineWorker({
     entrypoint: "./worker.ts",
     compatibilityDate: "2026-10-05",
     compatibilityFlags: ["nodejs_compat"],
+    // Preview URLs are extra addresses for the Worker that nobody uses.
+    previewUrls: false,
     // The daily Results sync, 04:15 UTC: a Cron Trigger (on the Free plan) runs `scheduled` in worker.ts, which creates
     // one SearchSyncWorkflow instance for every site. (Workflow `schedules` would need the paid plan.)
     triggers: [triggers.scheduled({ schedule: "15 4 * * *" })],

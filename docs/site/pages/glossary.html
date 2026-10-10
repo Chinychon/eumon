@@ -34,7 +34,21 @@
     <dt>Question search</dt>
     <dd>a query phrased as a question (<code>QUESTION_QUERY_PATTERN</code>), counted from the 28-day query list the sync already fetches.</dd>
     <dt>AI readiness</dt>
-    <dd>an analysis's robots.txt verdict per AI token (exact token match), llms.txt, and FAQ markup. Blocking is reported (<code>ai_visibility</code> findings), never auto-fixed.</dd>
+    <dd>an analysis's robots.txt verdict per AI token (exact token match), llms.txt, Q&amp;A markup, and the probe: how a firewall answered each AI agent that robots.txt allows. Blocking in robots.txt is reported, never scored and never auto-fixed.</dd>
+  </dl>
+
+  <h2 id="audit">Audit</h2>
+  <dl>
+    <dt>Check (<code class="path">packages/core/src/checks/catalog.ts</code>)</dt>
+    <dd>one entry in the registry: an id that is never renamed, its pillars, finding category, class, scope, sources, fix kind and docs. Every finding names its check (<code>checkId</code>). The <a href="#checks">Checks</a> page is generated from the registry.</dd>
+    <dt>Pillar</dt>
+    <dd>SEO or AI visibility: which health score a check counts toward. A check can be in both; conversion and data checks are in neither.</dd>
+    <dt>Class</dt>
+    <dd>error, warning or notice. Only error-class page checks make a page unhealthy for the score; severity, set per finding, ranks the growth plan.</dd>
+    <dt>Health score (<code>healthScore</code>)</dt>
+    <dd>per pillar, the share of indexable crawled pages with no error-class issue, 0 to 100; zero when a site-wide error of the pillar stands; empty without a full crawl. Written to the ledger as <code>health_seo</code> and <code>health_ai</code>.</dd>
+    <dt>Audit table (<code>report.audit.checks</code>)</dt>
+    <dd>every registered check as passed, failed (with its page count) or skipped (with what the site lacks, or "run a full crawl once after deploying" for crawl rows older than the checks).</dd>
   </dl>
 
   <h2 id="sync">Sync</h2>

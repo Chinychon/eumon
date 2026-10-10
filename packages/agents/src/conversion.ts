@@ -1,4 +1,4 @@
-import { createId, severityFromImpact, type ConversionEventName, type Finding } from "@organic-growth/core";
+import { CHECKS, finding, type ConversionEventName, type Finding } from "@organic-growth/core";
 import type { PageInspection } from "@organic-growth/crawler";
 
 type Path = "whatsapp" | "phone" | "email" | "form" | "booking";
@@ -49,10 +49,11 @@ export function auditConversion(inspections: PageInspection[]): ConversionAudit 
  * search can't be measured or learned from.
  */
 export function findingsFromConversion(audit: ConversionAudit, input: { siteId: string; analysisId: string; familySizes: Record<string, number>; repoAnalytics?: string[] }): Finding[] {
-  const findings: Array<Pick<Finding, "title" | "summary" | "recommendation" | "evidence" | "organicImpactScore" | "pagesAffected">> = [];
+  const findings: Array<Pick<Finding, "title" | "summary" | "recommendation" | "evidence" | "organicImpactScore" | "pagesAffected" | "scopeKey"> & { checkId: string }> = [];
   const without = audit.templates.filter((template) => template.paths.length === 0);
   if (without.length && without.length === audit.templates.length) {
     findings.push({
+      checkId: "conversion.no_contact",
       title: "Visitors have no obvious way to get in touch",
       summary: `None of the ${audit.templates.length} page templates checked has a WhatsApp link, phone link, enquiry form, or booking call to action in its HTML. Organic visitors who are ready to act have nowhere to go.`,
       recommendation: "Put one clear call to action on every page template — WhatsApp, phone, or a short enquiry form — near the top and again after the main content.",
@@ -64,6 +65,8 @@ export function findingsFromConversion(audit: ConversionAudit, input: { siteId: 
     for (const template of without.filter((entry) => entry.family !== "page")) {
       const size = input.familySizes[template.family] ?? 1;
       findings.push({
+        checkId: "conversion.no_cta",
+        scopeKey: template.family,
         title: `No call to action on ${familyLabel(template.family)}`,
         summary: `${template.url} has no WhatsApp link, phone link, enquiry form, or booking call to action, while other templates on the site do. ${size > 1 ? `The sitemap lists ~${size.toLocaleString("en")} pages of this type.` : ""}`.trim(),
         recommendation: "Add the site's main call to action to this template, ideally one that names the item on the page (\"Ask about this treatment\").",
@@ -76,6 +79,7 @@ export function findingsFromConversion(audit: ConversionAudit, input: { siteId: 
   // A connected repository that installs analytics outranks a miss in the fetched pages.
   if (audit.templates.length && audit.tracking.length === 0 && !input.repoAnalytics?.length) {
     findings.push({
+      checkId: "conversion.no_tracking",
       title: "No analytics or conversion tracking found",
       summary: `None of the ${audit.templates.length} pages checked loads Google Analytics, Tag Manager, PostHog, Plausible, or Eumon's tracker in its HTML or its own scripts. Organic leads, conversion rates, and revenue by landing page can't be measured.`,
       recommendation: "Install Eumon's conversion snippet (Setup → Track conversions): it records WhatsApp, phone, email, and form conversions and credits them to the landing page a visitor arrived on.",
@@ -85,13 +89,5 @@ export function findingsFromConversion(audit: ConversionAudit, input: { siteId: 
     });
   }
   const createdAt = new Date().toISOString();
-  return findings.map((finding) => ({
-    id: createId("finding"),
-    siteId: input.siteId,
-    analysisId: input.analysisId,
-    category: "conversion" as const,
-    severity: severityFromImpact(finding.organicImpactScore),
-    ...finding,
-    createdAt,
-  }));
+  return findings.map(({ checkId, organicImpactScore: impact, ...rest }) => finding(CHECKS[checkId]!, { ...rest, siteId: input.siteId, analysisId: input.analysisId, impact, createdAt }));
 }

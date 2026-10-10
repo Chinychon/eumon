@@ -13,6 +13,7 @@ import { ExportMenu } from "./export/ExportMenu";
 import { competitorSheets, pick } from "./export/report-sheets";
 import type { Leads, Payload } from "./site-data";
 import { Card } from "./ui";
+import { ChecksCard } from "./ChecksCard";
 
 /*
  * The Overview's Search, Enquiries, Keywords and Competitors tabs: the daily
@@ -97,6 +98,7 @@ export function AiPanel({ data, report, onNavigate }: { data: Payload; report: R
       <AiReferralsCard data={data} operator onNavigate={onNavigate} />
       <QuestionSearchesCard data={data} operator onNavigate={onNavigate} />
       <AiReadinessCard report={report} />
+      <ChecksCard report={report} pillar="ai" />
     </div>
   );
 }

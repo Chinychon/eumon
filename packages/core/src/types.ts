@@ -25,7 +25,9 @@ export type FindingCategory =
   | "search"
   | "repository"
   /** AI assistants' access to the site (robots.txt for AI crawlers): reported, never auto-fixed. */
-  | "ai_visibility";
+  | "ai_visibility"
+  /** HTTPS hygiene: mixed content, HTTP links, HSTS. */
+  | "security";
 
 export type CompetitorCategory =
   | "business"
@@ -98,6 +100,10 @@ export interface Finding {
   siteId: string;
   analysisId: string;
   category: FindingCategory;
+  /** The registry check that produced it (packages/core/src/checks); reports from before the registry have none. */
+  checkId?: string;
+  /** Distinguishes several findings from one check: the family, query or entity type. */
+  scopeKey?: string;
   severity: Severity;
   title: string;
   summary: string;
@@ -160,6 +166,42 @@ export type CrawlPageResult = {
    * type), from full-crawl fetches only. Stored in `page_links`, not with the page.
    */
   internalLinks?: Array<{ path: string; family: string }>;
+  /** Redirects followed before the final response; 2 or more is a chain. */
+  redirectHops?: number;
+  /** The response carried Strict-Transport-Security. */
+  hsts?: boolean;
+  /** The title's display width when it has CJK characters (each counts twice); absent means its length. */
+  titleWidth?: number;
+  /*
+   * Content signals (packages/crawler/src/content-signals.ts). `viewport`,
+   * `words`, `leadWords`, `images`, `landmarks`, `listsOrTables`,
+   * `articleLike`, `author` and `entitySchema` are always written by crawls
+   * that read them, so their absence means a result from before they existed.
+   */
+  lang?: string;
+  viewport?: boolean;
+  images?: number;
+  imagesNoAlt?: number;
+  mixedContent?: number;
+  httpLinks?: number;
+  externalLinks?: number;
+  h1?: string;
+  words?: number;
+  questionHeadings?: number;
+  listsOrTables?: boolean;
+  leadWords?: number;
+  statistics?: number;
+  quotes?: number;
+  /** Last-modified day (YYYY-MM-DD) from structured data, Open Graph or a <time> element. */
+  modified?: string;
+  articleLike?: boolean;
+  author?: boolean;
+  /** nosnippet or max-snippet:0: the page cannot appear in AI Overviews or AI Mode. */
+  snippetBlocked?: boolean;
+  landmarks?: number;
+  headingSkips?: boolean;
+  /** Organization, LocalBusiness or Person structured data with sameAs or url. */
+  entitySchema?: boolean;
 }
 
 export type SitemapAudit = {
@@ -189,7 +231,36 @@ export type CrawlIssue =
   | "invalidStructuredData"
   | "duplicateTitle"
   | "botFallback"
-  | "botChallenge";
+  | "botChallenge"
+  | "redirectChain"
+  | "metaRefresh"
+  | "mixedContent"
+  | "httpLinks"
+  | "titleLength"
+  | "descriptionLength"
+  | "duplicateDescription"
+  | "h1EqualsTitle"
+  | "headingSkips"
+  | "langMissing"
+  | "viewportMissing"
+  | "imagesNoAlt"
+  | "thinContent"
+  | "yearInSlug"
+  | "snippetBlocked"
+  | "stale"
+  | "noDate"
+  | "noAnswerStructure"
+  | "lowEvidence"
+  | "noAuthor"
+  | "noLandmarks";
+
+/** Internal-link problems from `page_links` against one crawl; null parts when the crawl recorded no links. */
+export type LinkGraphIssues = {
+  orphans: { count: number; examples: string[] } | null;
+  singleInbound: { count: number; examples: string[] } | null;
+  brokenLinks: { links: number; sources: number; targets: Array<{ path: string; status: number; from: number }> } | null;
+  depth: { deep: number; examples: string[]; skipped?: string } | null;
+};
 
 export type CrawlIssueExample = { url: string; detail?: string };
 
@@ -230,6 +301,10 @@ export type CrawlCoverage = {
   /** URL counts per issue. Absent in reports created before these checks existed. */
   issues?: Partial<Record<CrawlIssue, number>>;
   issueExamples?: Partial<Record<CrawlIssue, CrawlIssueExample[]>>;
+  /** Indexable pages, and those with an error-class issue per pillar (packages/core/src/checks/health.ts); `checked` is false when no row carries the content signals. */
+  health?: { indexable: number; unhealthySeo: number; unhealthyAi: number; checked: boolean };
+  duplicateDescriptionGroups?: Array<{ description: string; count: number; examples: string[] }>;
+  linkGraph?: LinkGraphIssues;
   duplicateTitleGroups?: Array<{ title: string; count: number; examples: string[] }>;
   /** Indexable pages with the same title whose text hashes are within a few bits; `suffixed` when their URLs differ only by a trailing code. */
   nearDuplicateGroups?: Array<{ title: string; urls: string[]; suffixed: boolean }>;

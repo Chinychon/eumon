@@ -1,5 +1,6 @@
 import {
-  createId,
+  CHECKS,
+  finding,
   rankSeverityByOrganicImpact,
   type CrawlCoverage,
   type CrawlPageResult,
@@ -15,8 +16,12 @@ import {
   defaultFetcher,
   fetchPageAudit,
   fetchRobots,
+  findingsFromAiContent,
   findingsFromCrawl,
   findingsFromCrawlCoverage,
+  findingsFromLinkGraph,
+  findingsFromHostProbe,
+  type HostProbeResult,
   findingsFromRendering,
   inspectPage,
   scriptTrackers,
@@ -47,6 +52,7 @@ import {
 import { findingsFromCode } from "./code-findings.js";
 import { findingsFromCrawlLog, findingsFromInventory, findingsFromSearchConsoleImport, findingsFromTrends, type ConnectorSignals } from "./connector-findings.js";
 import { notFoundProbeFinding } from "./not-found-probe.js";
+import { buildAudit } from "./audit.js";
 import { findingsFromRanks } from "./rank-findings.js";
 import { auditConversion, findingsFromConversion } from "./conversion.js";
 import {
@@ -160,6 +166,8 @@ export interface RunAnalysisInput {
   keywords?: KeywordsInput;
   /** Search results pages, suggested competitors, links and crawl-log coverage from the sync, when synced. */
   connectors?: ConnectorSignals;
+  /** How AI crawlers and the host answered (`probeAiCrawlers`, `probeHost`), when the caller probed. */
+  hostProbe?: HostProbeResult;
   /** What the site answered for a URL that cannot exist (`probeNotFound`), when the caller probed. */
   notFoundProbe?: { url: string; finalUrl?: string; status: number; title?: string };
 }
@@ -216,18 +224,17 @@ export async function runFullAnalysis(input: RunAnalysisInput) {
         inspectedHtml.set(url, audited.googlebotHtml);
       }
     } catch (err) {
-      findings.push({
-        id: createId("finding"),
+      findings.push(finding(CHECKS["fetch.failed"]!, {
         siteId: input.siteId,
         analysisId,
-        category: "rendering" as const,
-        severity: "MEDIUM" as const,
+        severity: "MEDIUM",
         title: `Failed to fetch ${url}`,
         summary: String(err),
         evidence: { url, error: String(err) },
-        organicImpactScore: 30,
+        impact: 30,
+        scopeKey: url,
         createdAt: now,
-      });
+      }));
     }
   }
 
@@ -275,6 +282,9 @@ export async function runFullAnalysis(input: RunAnalysisInput) {
       coverage: input.crawlCoverage.coverage,
       examples: input.crawlCoverage.examples,
     }));
+    findings.push(...findingsFromLinkGraph({ siteId: input.siteId, analysisId, linkGraph: input.crawlCoverage.coverage.linkGraph }));
+    // The homepage's entity markup comes from the sample, which always includes it; the 50 crawl examples may not.
+    findings.push(...findingsFromAiContent({ siteId: input.siteId, analysisId, coverage: input.crawlCoverage.coverage, homepage: pageResults.find((page) => new URL(page.finalUrl ?? page.url).pathname === "/") }));
   } else {
     findings.push(...sampleFindings);
   }
@@ -312,8 +322,9 @@ export async function runFullAnalysis(input: RunAnalysisInput) {
   // An error page or a challenge page is not robots.txt: only a real one is parsed.
   const [robotsResponse, llmsResponse] = await Promise.all(["/robots.txt", "/llms.txt"].map((path) =>
     fetcher(new URL(path, input.baseUrl).toString(), { maxBytes: 500_000 }).catch(() => null)));
-  const robotsTxt = robotsState(robotsResponse ?? null).body;
-  const aiAccess = aiReadiness({ robots: robotsResponse ?? null, llms: llmsResponse ?? null, pages: pageResults });
+  const robots = robotsState(robotsResponse ?? null);
+  const robotsTxt = robots.body;
+  const aiAccess = { ...aiReadiness({ robots: robotsResponse ?? null, llms: llmsResponse ?? null, pages: pageResults }), ...(input.hostProbe ? { probe: input.hostProbe.ai } : {}) };
 
   findings.push(
     ...runTechnicalSeoAudit({
@@ -323,6 +334,7 @@ export async function runFullAnalysis(input: RunAnalysisInput) {
       sitemap,
       pages: pageResults,
       robotsTxt,
+      robotsState: robots.robots,
       fullCrawl: fullCrawlChecks,
     }),
   );
@@ -359,6 +371,7 @@ export async function runFullAnalysis(input: RunAnalysisInput) {
   if (input.connectors?.logCoverage) findings.push(...findingsFromCrawlLog({ siteId: input.siteId, analysisId, coverage: input.connectors.logCoverage }));
   findings.push(...findingsFromSearchConsoleImport({ siteId: input.siteId, analysisId, view: input.connectors?.searchConsole ?? null }));
   findings.push(...findingsFromTrends({ siteId: input.siteId, analysisId, trends: input.connectors?.trends ?? null, sitemapUrls: sitemap.totalUrls ?? null, discovered: input.connectors?.searchConsole?.summary?.rows.find((row) => row.reason === "discovered")?.pages ?? null }));
+  findings.push(...findingsFromHostProbe({ siteId: input.siteId, analysisId, probe: input.hostProbe }));
   findings.push(...findingsFromRanks({ siteId: input.siteId, analysisId, ranks: input.connectors?.ranks }));
   const probeFinding = input.notFoundProbe ? notFoundProbeFinding(input.notFoundProbe, input.siteId, analysisId) : null;
   if (probeFinding) findings.push(probeFinding);
@@ -385,6 +398,21 @@ export async function runFullAnalysis(input: RunAnalysisInput) {
     connectors: input.connectors,
   };
 
+  const audit = buildAudit({
+    findings: rankedFindings,
+    coverage: fullCrawl ? input.crawlCoverage?.coverage : undefined,
+    hasRepo: Boolean(repo),
+    hasSearch: searchMetrics.length > 0,
+    hasLogs: Boolean(input.connectors?.logCoverage),
+    hasDataset: (input.datasets ?? []).length > 0,
+    rendered: comparisons.length > 0,
+    languages: Math.max(input.crawlCoverage?.coverage.locales?.length ?? 1, new Set(pageResults.map((page) => page.locale ?? "default")).size),
+    hasDataForSeo: Boolean(input.keywords),
+    hasRanks: Boolean(input.connectors?.ranks?.tracked.length),
+    robotsReadable: input.hostProbe?.robotsReadable ?? robots.robots !== "unreadable",
+    probed: Boolean(input.hostProbe),
+    probe: input.hostProbe?.ai,
+  });
   const opportunities = buildOpportunities(bundle);
   const plan = synthesizeGrowthPlan(bundle);
   const searchNarrative = analyzeSearchTraffic(searchMetrics, brandTerms, search);
@@ -399,6 +427,7 @@ export async function runFullAnalysis(input: RunAnalysisInput) {
     coverage: input.crawlCoverage?.coverage ?? null,
     pages: pageResults,
     findings: rankedFindings,
+    audit,
     competitors,
     opportunities,
     plan,

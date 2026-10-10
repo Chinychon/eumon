@@ -230,3 +230,23 @@ describe("enquiries by source", () => {
     assert.equal(series["leads_eumon.search"]!.length, series.leads_eumon!.length, "every day leads_eumon has, the split has too");
   });
 });
+
+describe("health score points", () => {
+  it("writes both pillar scores and their counts from the report's audit", () => {
+    const points = analysisHealthPoints({ audit: { seo: { value: 82.5, indexable: 200, unhealthy: 35 }, ai: { value: null, indexable: 200, unhealthy: 72, reason: "x" }, checks: [] } }, "2026-10-10");
+    const by = Object.fromEntries(points.map((point) => [point.metric, point.value]));
+    assert.equal(by.health_seo, 82.5);
+    assert.equal("health_ai" in by, false, "a null score writes no point");
+    assert.equal(by.health_pages, 200);
+    assert.equal(by.health_unhealthy_seo, 35);
+    assert.equal(by.health_unhealthy_ai, 72);
+  });
+
+  it("writes none for a report without an audit", () => {
+    assert.ok(!analysisHealthPoints({}, "2026-10-10").some((point) => point.metric.startsWith("health_")));
+  });
+
+  it("are ledger metrics the Results view knows", () => {
+    for (const metric of ["health_seo", "health_ai", "health_pages", "health_unhealthy_seo", "health_unhealthy_ai"]) assert.ok(METRICS.analysis.includes(metric), metric);
+  });
+});

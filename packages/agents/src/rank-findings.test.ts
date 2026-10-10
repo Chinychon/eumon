@@ -19,12 +19,15 @@ describe("findingsFromRanks", () => {
     assert.match(findings[0]!.summary, /\/a .*\/b/s);
     assert.match(findings[0]!.summary, /AI Overview/);
     assert.equal(findings[0]!.organicImpactScore, 35 + 2 * 6);
+    assert.equal(findings[0]!.checkId, "rank.fell");
+    assert.equal(findings[0]!.scopeKey, "kw|mys", "one History key per keyword and market, whatever the positions in the title");
   });
 
   it("dropping out of the ten after holding a position seven days or more", () => {
     const findings = run(series("kw", [2, 2, 2, 2, 2, 2, 2, 3, null, null]));
     assert.equal(findings[0]!.title, `“kw” dropped out of the top 10 in Malaysia since ${day(1)}`);
     assert.equal(findings[0]!.organicImpactScore, Math.min(80, 35 + 2 * 9 + 15));
+    assert.equal(findings[0]!.checkId, "rank.dropped_out");
   });
 
   it("a stable series, a small fall, a fall from a weak best, a short hold before leaving, and a single check give nothing", () => {

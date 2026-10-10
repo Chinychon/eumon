@@ -126,3 +126,19 @@ describe("demo site", () => {
     assert.equal(report.notFoundProbe?.status, 404, "the probe's answer is kept on the report");
   });
 });
+
+describe("demo site audit", () => {
+  it("shows every new check at least once, and both health scores", async () => {
+    const db = openSqliteD1();
+    await seedDemoSite(db, Date.now());
+    type Report = { findings: Array<{ checkId?: string; title: string }>; audit: { seo: { value: number | null }; ai: { value: number | null; reason?: string }; checks: Array<{ id: string; status: string }> } };
+    const report = (await getAnalysisJob(db, "analysis_demo_2"))!.report as Report;
+    const failed = new Set(report.findings.map((finding) => finding.checkId));
+    for (const id of ["http.redirect_chain", "security.mixed_content", "ai.snippet_blocked", "links.orphan", "links.broken_internal", "ai.stale", "ai.no_author", "url.year_in_slug", "security.hsts_missing", "ai.crawler_refused", "image.alt_missing", "title.length"]) {
+      assert.ok(failed.has(id), `${id} not in ${[...failed].join(", ")}`);
+    }
+    assert.ok(typeof report.audit.seo.value === "number" && report.audit.seo.value > 0 && report.audit.seo.value < 100, `SEO ${report.audit.seo.value}`);
+    assert.ok(typeof report.audit.ai.value === "number" && report.audit.ai.value > 0, `AI ${report.audit.ai.value} ${report.audit.ai.reason ?? ""}`);
+    assert.equal(report.audit.checks.length, 94);
+  });
+});

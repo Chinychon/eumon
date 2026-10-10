@@ -8,6 +8,7 @@ import { Heatmap, PairedBars, Scatter } from "./charts";
 import { LeadFunnel, TechnicalTab, searchPoints, type Change } from "./ReportTabs";
 import { AREA_PLACE, doFirst, gapsFirst, HEALTH_COLUMNS, pageTypeHealth, type Navigate, type Place, type Report } from "./report-model";
 import { KeyNumbers, ProofHeadline } from "./results/sections";
+import { HealthTiles } from "./ChecksCard";
 import { AiPanel, CompetitorsPanel, EnquiriesPanel, KeywordsPanel, SearchPanel } from "./SitePanels";
 import { HistoryPanel } from "./HistoryPanel";
 import { ExportContext, ExportMenu } from "./export/ExportMenu";
@@ -282,6 +283,7 @@ export function OverviewView({ site, tab, onTab, onNavigate }: {
                     <KeyNumbers data={results.data} operator />
                   </>
                 ) : <Card title="Google clicks per week"><p className="empty-state">{results.error || "Loading…"}</p></Card>}
+                <HealthTiles report={report} scores={results.data?.results.scores} onOpen={openTab} />
               </div>
               <button className="connections-strip" onClick={() => onNavigate("setup")}>
                 <span className="connections-label">Connections</span>

@@ -126,7 +126,7 @@ export const METRICS = {
   /** AI answer tracking: answers checked, mentioning the brand, citing the site — overall and per engine. Plus `ai_answers_mentioned:<domain>` and `ai_answers_cited:<domain>` for each current competitor. */
   aiAnswers: ["sync.ai_answers", "ai_answers_checked", "ai_answers_mentioned", "ai_answers_cited", ...AI_ANSWER_ENGINES.flatMap(({ engine }) => [`ai_answers_checked.${engine}`, `ai_answers_mentioned.${engine}`, `ai_answers_cited.${engine}`])],
   /** DataForSEO Backlinks: the site's profile. Plus `backlinks:<domain>`, `ref_domains:<domain>` and `backlink_rank:<domain>` for each current competitor. */
-  backlinks: ["sync.backlinks", "backlinks", "ref_domains", "backlink_rank"],
+  backlinks: ["sync.backlinks", "backlinks", "ref_domains", "backlink_rank", "ref_domains_real", "ref_domains_spam", "links_new_real", "links_lost_real", "links_broken_real"],
   /** Bing Webmaster Tools: daily clicks and impressions (Bing and the products built on its index), and crawl counts. */
   bing: ["sync.bing", "bing_clicks", "bing_impressions", "bing_crawled_pages", "bing_crawl_errors", "bing_in_index"],
   /** URLs sent to IndexNow per day. */

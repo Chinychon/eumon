@@ -5,12 +5,12 @@
  * upkeep of the crawl log the site's servers send.
  */
 import {
-  authorityDomain, DataForSeoError, fetchBacklinkSummary, fetchBingCrawlStats, fetchBingTraffic, fetchLinkGap, fetchSerp, fetchSerpCompetitors, indexNowKey, submitIndexNow,
+  authorityDomain, DataForSeoError, fetchBacklinkSummary, fetchBingCrawlStats, fetchBingTraffic, fetchLinkGap, fetchReferringDomains, fetchSerp, fetchSerpCompetitors, indexNowKey, submitIndexNow,
 } from "@organic-growth/agents";
-import { addDays, keywordGaps, type BacklinkSummary, type PricedKeyword, type RankedKeyword, type SerpResult } from "@organic-growth/core";
+import { addDays, classifyReferringDomains, keywordGaps, spamNetworks, type BacklinkSummary, type PricedKeyword, type RankedKeyword, type SerpResult } from "@organic-growth/core";
 import {
   changedPagePaths, defaultPageSettings, firstCrawlLogDay, getPageSettings, listCrawlLogDays, listSiteCompetitorDomains, listSiteMarkets, listSnapshotDates, listSnapshots, listTrackedKeywords,
-  pruneCrawlLog, saveSnapshot, getSnapshot, type MetricPoint,
+  pruneCrawlLog, referringDomainCounts, replaceReferringDomains, saveSnapshot, getSnapshot, type MetricPoint,
 } from "@organic-growth/db";
 import type { Source, SyncContext } from "./results-sync.ts";
 import { dollars, FRESH_DAYS, marketLocation, noMarkets, said } from "./source-helpers.ts";
@@ -201,6 +201,28 @@ const backlinks: Source = {
       } catch (error) {
         if (notActive(error)) return { notes: ["backlinks: the Backlinks API isn't active on this DataForSEO account (app.dataforseo.com → Backlinks API)"] };
         notes.push(`backlinks skipped ${domain}: ${said(error)}`);
+        continue;
+      }
+      if (domain !== own) continue;
+      try {
+        const referring = await fetchReferringDomains(keys.dataForSeo!, own, fetchFn);
+        const classified = classifyReferringDomains(referring.rows, own);
+        const networks = spamNetworks(classified);
+        await replaceReferringDomains(db, site.id, classified);
+        await saveSnapshot(db, site.id, { kind: "spam_networks", scope: own, periodEnd: today, rows: networks });
+        const counts = await referringDomainCounts(db, site.id, addDays(today, -30));
+        points.push(
+          { metric: "ref_domains_real", day: today, value: counts.real },
+          { metric: "ref_domains_spam", day: today, value: counts.spam },
+          { metric: "links_new_real", day: today, value: counts.newReal },
+          { metric: "links_lost_real", day: today, value: counts.lostReal },
+          { metric: "links_broken_real", day: today, value: counts.brokenReal },
+        );
+        cost += referring.cost;
+        notes.push(`backlinks: ${classified.length} referring domains read, ${counts.real} real, ${counts.spam} spam (${networks.length} networks), ${dollars(referring.cost)}`);
+      } catch (error) {
+        if (notActive(error)) return { points, notes: ["backlinks: the Backlinks API isn't active on this DataForSEO account (app.dataforseo.com → Backlinks API)"] };
+        notes.push(`referring domains skipped: ${said(error)}`);
       }
     }
     const gapScope = competitors.slice(0, 3).sort().join(",");

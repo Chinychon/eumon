@@ -29,7 +29,7 @@ const priced = (keyword: string, volume: number, position: number): PricedKeywor
 const ranked = (keyword: string, volume: number, position: number): RankedKeyword => ({ keyword, volume, difficulty: 20, intent: "commercial", position, url: "/x", traffic: 5 });
 
 /** A DataForSEO stand-in that records each call's endpoint and task. */
-function dataForSeoStub(answers: { serp?: (keyword: string) => object; refuseBacklinks?: boolean } = {}) {
+function dataForSeoStub(answers: { serp?: (keyword: string) => object; refuseBacklinks?: boolean; referring?: object[] } = {}) {
   const asked: Array<{ endpoint: string; task: Record<string, unknown> }> = [];
   const fetchFn = (async (url: string, init?: RequestInit) => {
     const task = JSON.parse(String(init?.body ?? "[{}]"))[0] as Record<string, unknown>;
@@ -40,6 +40,7 @@ function dataForSeoStub(answers: { serp?: (keyword: string) => object; refuseBac
     if (endpoint.startsWith("backlinks/")) {
       if (answers.refuseBacklinks) return new Response(JSON.stringify({ status_code: 20000, tasks: [{ status_code: 40204, status_message: "Access denied." }] }));
       if (endpoint.endsWith("summary")) return ok({ result: [{ rank: task.target === "x.com" ? 100 : 400, backlinks: 900, referring_domains: 60, referring_main_domains: task.target === "x.com" ? 50 : 300 }] });
+      if (endpoint.endsWith("backlinks/backlinks")) return ok({ result: [{ items: answers.referring ?? [] }] });
       return ok({ result: [{ items: [{ domain_intersection: { 1: { target: "news.example", rank: 350, backlinks: 3 } } }] }] });
     }
     return ok({ result: [{ items: [] }] });
@@ -112,7 +113,7 @@ describe("backlinks", () => {
     const { db, record } = await site({ competitors: ["rival.example"] });
     const stub = dataForSeoStub();
     const notes = await syncResults(db, record, now, { ...noGoogle, fetchFn: stub.fetchFn }, { dataForSeo });
-    assert.ok(notes.includes("backlinks: 3 of 3 lists fetched, $0.03"), notes.join("; "));
+    assert.ok(notes.includes("backlinks: 3 of 3 lists fetched, $0.04"), notes.join("; "));
     assert.deepEqual(stub.asked.find((call) => call.endpoint.endsWith("domain_intersection"))!.task.exclude_targets, ["x.com"]);
     const series = await listMetricSeries(db, "s", ["ref_domains", "ref_domains:rival.example"], "2026-10-07", "2026-10-07");
     assert.deepEqual([series.ref_domains![0]!.value, series["ref_domains:rival.example"]![0]!.value], [50, 300]);
@@ -123,6 +124,35 @@ describe("backlinks", () => {
     stub.asked.length = 0;
     const again = await syncResults(db, record, new Date("2026-10-20T04:15:00Z"), { ...noGoogle, fetchFn: stub.fetchFn }, { dataForSeo });
     assert.ok(again.includes("backlinks: lists fresh") && !stub.asked.some((call) => call.endpoint.startsWith("backlinks/")), again.join("; "));
+  });
+
+  const linkItems = (real: number, spam: number) => [
+    ...Array.from({ length: real }, (_, i) => ({ domain_from: `real${i}.example`, url_from: `https://real${i}.example/story-${i}`, url_to: "https://x.com/", anchor: `story ${i}`, dofollow: true, first_seen: "2026-10-01 00:00:00 +00:00", last_seen: "2026-10-05 00:00:00 +00:00", domain_from_rank: 300, backlink_spam_score: 2 })),
+    ...Array.from({ length: spam }, (_, i) => ({ domain_from: `spam${i}.example`, url_from: `https://spam${i}.example/blog/post-123`, url_to: "https://x.com/", anchor: `a${i}`, dofollow: true, first_seen: "2026-10-01 00:00:00 +00:00", last_seen: "2026-10-05 00:00:00 +00:00", domain_from_rank: 5, backlink_spam_score: 40 })),
+  ];
+
+  it("reads the referring domains with the profile, classifies and stores them, and refreshes only monthly", async () => {
+    const { db, record } = await site();
+    const stub = dataForSeoStub({ referring: linkItems(2, 10) });
+    const notes = await syncResults(db, record, now, { ...noGoogle, fetchFn: stub.fetchFn }, { dataForSeo });
+    assert.ok(notes.some((note) => note.startsWith("backlinks: 12 referring domains read, 2 real, 10 spam (1 networks)")), notes.join("; "));
+    const stored = await db.prepare("SELECT spam, COUNT(*) AS n FROM referring_domains WHERE site_id = 's' GROUP BY spam ORDER BY spam").all<{ spam: number; n: number }>();
+    assert.deepEqual(stored.results.map((row) => [row.spam, row.n]), [[0, 2], [1, 10]]);
+    const series = await listMetricSeries(db, "s", ["ref_domains_real", "ref_domains_spam"], "2026-10-07", "2026-10-07");
+    assert.deepEqual([series.ref_domains_real![0]!.value, series.ref_domains_spam![0]!.value], [2, 10]);
+    assert.equal((await getSnapshot<{ domains: number }>(db, "s", "spam_networks", "x.com"))?.rows[0]?.domains, 10);
+
+    stub.asked.length = 0;
+    await syncResults(db, record, new Date("2026-10-20T04:15:00Z"), { ...noGoogle, fetchFn: stub.fetchFn }, { dataForSeo });
+    assert.ok(!stub.asked.some((call) => call.endpoint.startsWith("backlinks/")));
+  });
+
+  it("clears earlier rows when the list comes back empty", async () => {
+    const { db, record } = await site();
+    await syncResults(db, record, now, { ...noGoogle, fetchFn: dataForSeoStub({ referring: linkItems(2, 0) }).fetchFn }, { dataForSeo });
+    await syncResults(db, record, new Date("2026-11-20T04:15:00Z"), { ...noGoogle, fetchFn: dataForSeoStub({ referring: [] }).fetchFn }, { dataForSeo });
+    const left = await db.prepare("SELECT COUNT(*) AS n FROM referring_domains WHERE site_id = 's'").first<{ n: number }>();
+    assert.equal(left?.n, 0);
   });
 
   it("says once when the Backlinks API isn't active, without failing the sync", async () => {

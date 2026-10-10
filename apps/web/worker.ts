@@ -1,7 +1,7 @@
 import { memberRole } from "@organic-growth/db";
 import handler from "vinext/server/fetch-handler";
 import type { AppEnv } from "./cloudflare.config";
-import { isRosterPath } from "./src/auth-paths.js";
+import { isRosterPath, requestedWorkspaces } from "./src/auth-paths.js";
 import { authFor } from "./src/auth.js";
 import { gate, isPublicPath } from "./src/gate.js";
 import { APP_HEADERS, withHeaders } from "./src/headers.js";
@@ -18,11 +18,12 @@ const app = (typeof handler === "function" ? { fetch: handler } : handler) as Ex
 async function isClientOfRequested(env: AppEnv, request: Request, url: URL): Promise<boolean> {
   const session = await authFor(env).api.getSession({ headers: request.headers });
   if (!session) return false;
-  const slug = url.searchParams.get("organizationSlug");
-  const workspaceId = slug
-    ? (await env.DB.prepare("SELECT id FROM organization WHERE slug = ?").bind(slug).first<{ id: string }>())?.id
-    : url.searchParams.get("organizationId") ?? (session.session as { activeOrganizationId?: string | null }).activeOrganizationId;
-  return Boolean(workspaceId) && (await memberRole(env.DB as never, workspaceId!, session.user.id)) === "client";
+  const { ids, slug } = requestedWorkspaces(url.searchParams, (session.session as { activeOrganizationId?: string | null }).activeOrganizationId);
+  const bySlug = slug ? (await env.DB.prepare("SELECT id FROM organization WHERE slug = ?").bind(slug).first<{ id: string }>())?.id : undefined;
+  for (const workspaceId of bySlug ? [...ids, bySlug] : ids) {
+    if ((await memberRole(env.DB as never, workspaceId, session.user.id)) === "client") return true;
+  }
+  return false;
 }
 
 export default {

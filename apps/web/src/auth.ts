@@ -105,6 +105,8 @@ export function createAuth(env: AuthEnv) {
             }
           },
           afterAcceptInvitation: async ({ invitation, user }) => {
+            // Leaving a workspace doesn't run afterRemoveMember, so start from no grants: only this invitation's sites.
+            await revokeWorkspaceSiteAccess(db, invitation.organizationId, user.id);
             await grantInvitedSites(db, invitation.id, user.id);
           },
           afterRemoveMember: async ({ member, organization: workspace }) => {

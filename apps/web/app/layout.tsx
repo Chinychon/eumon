@@ -40,8 +40,6 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <link rel="icon" href="/icon-192.png" sizes="192x192" type="image/png" />
         <link rel="icon" href="/icon-512.png" sizes="512x512" type="image/png" />
         <link rel="apple-touch-icon" href="/icon-192.png" />
-        {/* Service Worker Registration */}
-        <script src="/sw-register.js" async></script>
       </head>
       <body>{children}</body>
     </html>

@@ -1,21 +1,7 @@
-// Network first: the app and its data always come fresh, so a deploy never
-// leaves anyone on stale HTML pointing at deleted assets. The shell is kept
-// only as an offline fallback.
-const CACHE_NAME = "eumon-v2";
-const SHELL = ["/", "/manifest.json", "/icon-192.png", "/icon-512.png"];
-
-self.addEventListener("install", (event) => {
-  event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(SHELL)));
-  self.skipWaiting();
-});
-
+// Retired. Browsers that installed the old offline-shell worker fetch this on their next visit:
+// it clears that worker's cache and unregisters itself.
+// ponytail: delete this file once old installs have had time to update (a few months).
+self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", (event) => {
-  event.waitUntil(caches.keys().then((names) => Promise.all(names.filter((name) => name !== CACHE_NAME).map((name) => caches.delete(name)))));
-  self.clients.claim();
-});
-
-self.addEventListener("fetch", (event) => {
-  const { request } = event;
-  if (request.method !== "GET" || new URL(request.url).pathname.startsWith("/api/")) return;
-  event.respondWith(fetch(request).catch(() => caches.match(request).then((cached) => cached ?? (request.mode === "navigate" ? caches.match("/") : Response.error()))));
+  event.waitUntil(caches.keys().then((names) => Promise.all(names.map((name) => caches.delete(name)))).then(() => self.registration.unregister()));
 });

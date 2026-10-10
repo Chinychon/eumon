@@ -17,7 +17,6 @@ export const worker = defineWorker({
     assets: { notFoundHandling: "none" },
     env: {
       ASSETS: bindings.assets(),
-      IMAGES: bindings.images(),
       // Bound by ID alone: the binding Cloudflare reports has no database name, and a deploy (Workers
       // Builds runs it in strict mode) stops on any difference from the Worker's dashboard settings.
       DB: bindings.d1({

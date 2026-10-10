@@ -4,73 +4,17 @@
  * No React here, so it runs under `node --test`.
  */
 
+import type { runFullAnalysis } from "@organic-growth/agents";
+
 export type Finding = { id: string; category: string; severity: string; title: string; summary: string; recommendation?: string; organicImpactScore: number };
 
-export type Report = {
-  analysisId: string;
-  site: { name: string; baseUrl: string; fingerprint?: { framework: string; rendering?: string; deployment?: string } };
-  sitemap: { totalUrls: number; sampledUrls: number; errors: string[] };
+/** The saved report: the pipeline's output plus what the workflow adds. Reports saved before a section existed lack it. */
+type Saved = Awaited<ReturnType<typeof runFullAnalysis>> & {
   /** Unchanged pages whose results were carried over from the last crawl. */
   crawlReuse?: { urls: number; from?: string };
-  coverage?: {
-    totalUrls: number;
-    completedUrls: number;
-    emptyShellUrls: number;
-    httpErrorUrls: number;
-    families?: Array<{ family: string; urls: number; crawled: number; emptyShells: number; errors: number; noindex: number; missingStructuredData: number }>;
-  } | null;
-  pages: Array<{ url: string; renderedTextLength: number }>;
-  findings: Finding[];
-  competitors: Array<{ domain: string; category: string; summary: string; relevanceScore?: number; architectureNotes?: string; conversionNotes?: string; technicalNotes?: string }>;
-  opportunities: Array<{ title: string; rationale: string; priorityScore: number; potentialPage?: string; intent?: string }>;
-  plan: { situation: string; competitiveAdvantage: string; highestImpactOpportunity: string; priorities: Array<{ rank: number; title: string; whyThisMatters: string }> };
-  searchNarrative: { totalClicks: number; totalImpressions: number; narrative: string };
-  competition?: {
-    rows: Array<{
-      key: string;
-      label: string;
-      status: "gap" | "advantage" | "shared" | "yours_only";
-      you: { pages: number; urls?: number; languages?: number };
-      data?: { dataset: string; records: number; livePages: number };
-      competitors: Array<{ domain: string; pages: number; urls?: number; languages?: number; examples: string[] }>;
-    }>;
-    competitors: Array<{ domain: string; analyzed: boolean; partial: boolean; estimatedUrls: number }>;
-    insights: string[];
-    aiLabels: boolean;
-  } | null;
-  aiReadiness?: {
-    robots: "read" | "missing" | "unreadable";
-    crawlers: Array<{ agent: string; purpose: string; kind: "crawler" | "live" | "control"; allowed: boolean }>;
-    llmsTxt: boolean;
-    faqPages: { pages: number; of: number };
-  } | null;
-  conversion?: {
-    templates: Array<{ family: string; url: string; paths: string[]; prices: boolean; tracking: string[] }>;
-    tracking: string[];
-    suggestedEvents: Array<{ event: string; trigger: string }>;
-  } | null;
-  search?: {
-    totals: { clicks: number; impressions: number; ctr: number };
-    targetMarkets: string[];
-    targetShare: { clicks: number; impressions: number } | null;
-    countries: Array<{ country: string; name: string; impressionShare: number }>;
-    brandedShare: number;
-    commercialShare: number;
-    entityQueries: { share: number; byType: Array<{ entityType: string; clicks: number; examples: string[] }> } | null;
-    strikingDistance: Array<{ query: string; page: string; position: number; impressions: number; clicks: number }>;
-    lowCtrPages: Array<{ page: string; impressions: number; ctr: number; expectedCtr: number; position: number; queries: string[] }>;
-    cannibalized: Array<{ query: string; impressions: number; pages: Array<{ page: string; position: number }> }>;
-    narrative: string;
-  } | null;
-  repo?: { fingerprint: Fingerprint; routeInspections?: RouteInspection[]; sitemapCode?: { source: string; splitsSitemaps: boolean } } | null;
-  rendering?: {
-    comparisons: Array<{ url: string; family: string; verdict: string; rawTextLength: number; renderedTextLength: number; rawTitle?: string; renderedTitle?: string }>;
-    repeatability: Array<{ family: string; urls: number; attempts: number; failed: number; medianMs: number }>;
-  };
 };
-
-type RouteInspection = { pathPattern: string; source: string; dynamic: boolean; rendering: string; renderingEvidence?: string; clientDataFetching?: string; metadata: string; sequentialAwaits: number; unboundedQueries: string[] };
-type Fingerprint = { framework: string; router?: string; rendering?: string; deployment?: string; cms?: string; database?: string; analytics: string[]; seoTooling: string[]; contentSource?: string; language: string; packageManager: string };
+type Later = "coverage" | "competition" | "aiReadiness" | "conversion" | "search" | "repo" | "rendering";
+export type Report = Omit<Saved, Later> & Partial<Pick<Saved, Later>>;
 
 /** What a finding or opportunity is about, which decides the page that explains it. */
 export type Area = "technical" | "search" | "keywords" | "competitors" | "leads" | "ai" | "data";

@@ -80,6 +80,22 @@ export const AI_ROBOTS_CHECKS: Array<{ agent: string; purpose: string; kind: AiF
   ...AI_ROBOTS_TOKENS.map((entry) => ({ ...entry, kind: "control" as const, search: false })),
 ];
 
+/**
+ * The agents an analysis fetches as, with the user-agent string each vendor
+ * documents. The search-facing ones feed answers and are reported when a
+ * firewall refuses them; the training ones are probed so the policy is
+ * visible, never reported.
+ */
+export const AI_PROBE_AGENTS: Array<{ agent: string; userAgent: string; search: boolean }> = [
+  { agent: "OAI-SearchBot", userAgent: "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko); compatible; OAI-SearchBot/1.0; +https://openai.com/searchbot", search: true },
+  { agent: "ChatGPT-User", userAgent: "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko); compatible; ChatGPT-User/1.0; +https://openai.com/bot", search: true },
+  { agent: "PerplexityBot", userAgent: "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; PerplexityBot/1.0; +https://perplexity.ai/perplexitybot)", search: true },
+  { agent: "Claude-SearchBot", userAgent: "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; Claude-SearchBot/1.0; +https://www.anthropic.com/claude-searchbot)", search: true },
+  { agent: "Claude-User", userAgent: "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; Claude-User/1.0; +https://www.anthropic.com/claude-user)", search: true },
+  { agent: "GPTBot", userAgent: "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko); compatible; GPTBot/1.1; +https://openai.com/gptbot", search: false },
+  { agent: "ClaudeBot", userAgent: "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; ClaudeBot/1.0; +claudebot@anthropic.com)", search: false },
+];
+
 /** Longest tokens first, so `Claude-SearchBot` is never read as `ClaudeBot` and `ChatGPT-User` wins over a generic match. */
 const BY_LENGTH = [...AI_AGENTS].sort((a, b) => b.agent.length - a.agent.length);
 const token = (agent: string) => new RegExp(`(^|[^a-z0-9-])${agent.replace(/[-]/g, "\\-")}([^a-z0-9-]|$)`, "i");

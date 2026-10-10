@@ -20,6 +20,8 @@ import {
   findingsFromCrawl,
   findingsFromCrawlCoverage,
   findingsFromLinkGraph,
+  findingsFromHostProbe,
+  type HostProbeResult,
   findingsFromRendering,
   inspectPage,
   scriptTrackers,
@@ -162,6 +164,8 @@ export interface RunAnalysisInput {
   keywords?: KeywordsInput;
   /** Search results pages, suggested competitors, links and crawl-log coverage from the sync, when synced. */
   connectors?: ConnectorSignals;
+  /** How AI crawlers and the host answered (`probeAiCrawlers`, `probeHost`), when the caller probed. */
+  hostProbe?: HostProbeResult;
   /** What the site answered for a URL that cannot exist (`probeNotFound`), when the caller probed. */
   notFoundProbe?: { url: string; finalUrl?: string; status: number; title?: string };
 }
@@ -318,7 +322,7 @@ export async function runFullAnalysis(input: RunAnalysisInput) {
     fetcher(new URL(path, input.baseUrl).toString(), { maxBytes: 500_000 }).catch(() => null)));
   const robots = robotsState(robotsResponse ?? null);
   const robotsTxt = robots.body;
-  const aiAccess = aiReadiness({ robots: robotsResponse ?? null, llms: llmsResponse ?? null, pages: pageResults });
+  const aiAccess = { ...aiReadiness({ robots: robotsResponse ?? null, llms: llmsResponse ?? null, pages: pageResults }), ...(input.hostProbe ? { probe: input.hostProbe.ai } : {}) };
 
   findings.push(
     ...runTechnicalSeoAudit({
@@ -365,6 +369,7 @@ export async function runFullAnalysis(input: RunAnalysisInput) {
   if (input.connectors?.logCoverage) findings.push(...findingsFromCrawlLog({ siteId: input.siteId, analysisId, coverage: input.connectors.logCoverage }));
   findings.push(...findingsFromSearchConsoleImport({ siteId: input.siteId, analysisId, view: input.connectors?.searchConsole ?? null }));
   findings.push(...findingsFromTrends({ siteId: input.siteId, analysisId, trends: input.connectors?.trends ?? null, sitemapUrls: sitemap.totalUrls ?? null, discovered: input.connectors?.searchConsole?.summary?.rows.find((row) => row.reason === "discovered")?.pages ?? null }));
+  findings.push(...findingsFromHostProbe({ siteId: input.siteId, analysisId, probe: input.hostProbe }));
   const probeFinding = input.notFoundProbe ? notFoundProbeFinding(input.notFoundProbe, input.siteId, analysisId) : null;
   if (probeFinding) findings.push(probeFinding);
   findings.push(...findingsFromInventory({ siteId: input.siteId, analysisId, inventories: input.connectors?.inventory ?? [] }));

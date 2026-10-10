@@ -149,3 +149,14 @@ describe("runFullAnalysis with a full crawl", () => {
     assert.ok(!ids.includes("robots.sitemap_undeclared"), "the fixture robots.txt names its sitemap");
   });
 });
+
+describe("runFullAnalysis with a host probe", () => {
+  it("reports what the probe found and keeps it on the report", async () => {
+    const hostProbe = { ai: [{ agent: "PerplexityBot", search: true, allowedByRobots: true, fetched: 3, refused: 3, challenge: true }], host: { wwwDuplicate: true, httpRedirected: true, hsts: true, llmsTxt: "present" as const }, robotsReadable: true };
+    const report = await runFullAnalysis({ analysisId: "a", siteId: "s", name: "Clinic", baseUrl: "https://clinic.example", fetcher: fixtureSite(), repeatability: false, maxPages: 5, hostProbe });
+    const ids = report.findings.map((f) => f.checkId);
+    assert.ok(ids.includes("ai.crawler_refused"), ids.join(", "));
+    assert.ok(ids.includes("server.www_duplicate"));
+    assert.deepEqual(report.aiReadiness.probe, hostProbe.ai);
+  });
+});

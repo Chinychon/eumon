@@ -772,3 +772,4 @@ export * from "./ai-readiness.js";
 export * from "./content-signals.js";
 export * from "./link-findings.js";
 export * from "./ai-findings.js";
+export * from "./probe.js";

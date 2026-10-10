@@ -6,8 +6,13 @@ import { api, errorMessage, formatDay } from "../api";
 import { BarList, LineChart, Radar } from "../charts";
 import { Badge, Button, Card, Kpi } from "../ui";
 
-/** A check costs about $0.0048 at DataForSEO; four engines, asked weekly (about 4.3 times a month). */
-const monthlyCost = (questions: number, markets: number) => questions * markets * 4 * 0.0048 * 4.3;
+/** Checks a month: four engines, asked weekly (about 4.3 times a month), but never more than the 40 a day the sync asks. */
+const monthlyChecks = (questions: number, markets: number) => Math.min(questions * markets * 4 * 4.3, 40 * 30);
+/** At 40 a day, 280 checks fit in a week; more cells than that are each asked less often. */
+const cadence = (questions: number, markets: number) => {
+  const cells = questions * markets * 4;
+  return cells > 280 ? `about every ${Math.ceil(cells / 280)} weeks` : "weekly";
+};
 const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
 const percent = (part: number, whole: number) => (whole ? Math.round((part / whole) * 100) : null);
 const lines = (text: string) => text.split("\n").map((line) => line.trim()).filter(Boolean);
@@ -31,7 +36,7 @@ function Detail({ check }: { check: AiAnswerCheck }) {
         <p className="small">Competitors in this answer: {check.rivals.map((rival) => `${rival.domain} (${[rival.mentioned && "named", rival.cited && "cited"].filter(Boolean).join(", ")})`).join("; ")}</p>
       )}
       {sources.length > 0 && (
-        <p className="small">Sources: {sources.map((source, index) => <Fragment key={source.url}>{index > 0 && " · "}<a href={source.url} target="_blank" rel="noreferrer">{source.domain}</a></Fragment>)}</p>
+        <p className="small">Sources: {sources.map((source, index) => <Fragment key={`${index}|${source.domain}`}>{index > 0 && " · "}{source.url ? <a href={source.url} target="_blank" rel="noreferrer">{source.domain}</a> : source.domain}</Fragment>)}</p>
       )}
     </div>
   );
@@ -114,7 +119,7 @@ export function AiAnswersCard({ view, siteId, operator, hasCredentials, hasMarke
             <Kpi label="Answers that cite you" value={`${view.totals.cited} of ${view.checked}`} />
             <Kpi label="Google AI Overviews citing you" value={`${view.overview.citesYou} of ${view.overview.searches}`} caption="from the search results checked" />
           </div>
-          <Radar caption="Share of answers naming or citing each site, by engine" axes={AI_ANSWER_ENGINES.map(({ label }) => label)} series={radar} />
+          <Radar caption="Share of answers naming or citing each site, by engine" axes={AI_ANSWER_ENGINES.map(({ label }) => label)} series={radar} unit="the share of answers, in per cent" />
           <div className="section-title">Share of voice</div>
           <BarList rows={view.shareOfVoice.map((entry) => ({ label: `${entry.site ? `${entry.domain} (you)` : entry.domain}${entry.share === null ? "" : ` · ${Math.round(entry.share * 100)}%`}`, value: entry.answers }))} />
           <p className="small muted">Answers that name or cite each site, of the latest answer to every question, market and engine.</p>
@@ -193,7 +198,7 @@ export function AiAnswersCard({ view, siteId, operator, hasCredentials, hasMarke
           <div className="row" style={{ gap: 12, alignItems: "center", marginTop: 8 }}>
             <Button small variant="secondary" disabled={!changed} busy={busy} onClick={save}>Save questions</Button>
             <span className="small muted">
-              Up to {AI_PROMPTS_MAX}, one per line. {plural(questionCount, "question")} × {plural(markets, "market")} × 4 engines ≈ ${monthlyCost(questionCount, markets).toFixed(2)} a month at DataForSEO. Answers are checked weekly; the first ones arrive at the next sync.
+              Up to {AI_PROMPTS_MAX}, one per line. {plural(questionCount, "question")} × {plural(markets, "market")} × 4 engines ≈ ${(monthlyChecks(questionCount, markets) * 0.0048).toFixed(2)} a month at DataForSEO. Answers are checked {cadence(questionCount, markets)}; the first ones arrive at the next sync.
             </span>
             {saved && !changed && <span className="small muted">Saved</span>}
           </div>

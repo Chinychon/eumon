@@ -195,9 +195,9 @@ type ScraperResult = { markdown?: string | null; items?: Array<{ text?: string |
 type AiNode = { text?: string | null; markdown?: string | null; references?: Array<{ domain?: string | null; url?: string | null }> | null; items?: AiNode[] | null };
 type ResponsesResult = { items?: Array<{ sections?: Array<{ text?: string | null; annotations?: Array<{ url?: string | null }> | null }> | null }> | null };
 
-/** A source as Eumon keeps it: its bare domain (from the URL when DataForSEO gives none) and URL; sources with neither are dropped. */
+/** A source as Eumon keeps it: its bare domain (from the URL when DataForSEO gives none) and URL, kept only when http(s) since the card links it; sources with neither are dropped. */
 function source(entry: { domain?: string | null; url?: string | null }): AiSource[] {
-  const url = entry.url ?? "";
+  const url = /^https?:\/\//i.test(entry.url ?? "") ? entry.url! : "";
   let domain = entry.domain ?? "";
   if (!domain && url) { try { domain = new URL(url).hostname; } catch { return []; } }
   return domain ? [{ domain: bareDomain(domain), url }] : [];

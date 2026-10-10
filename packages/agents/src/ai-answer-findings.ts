@@ -128,7 +128,7 @@ export function aiAnswerOpportunities(input: { siteId: string; analysisId: strin
     const rivalCited = rows.filter((row) => row.rivals.some((rival) => rival.cited));
     const missing = rivalCited.filter((row) => !row.cited);
     if (!missing.length || quoted.has(prompt.toLowerCase())) continue;
-    const pages = [...new Set(missing.flatMap((row) => row.sources.filter((source) => row.rivals.some((rival) => rival.cited && isOrUnder(bareDomain(source.domain), rival.domain))).map((source) => source.url)))].slice(0, 3);
+    const pages = [...new Set(missing.flatMap((row) => row.sources.filter((source) => row.rivals.some((rival) => rival.cited && isOrUnder(bareDomain(source.domain), rival.domain))).map((source) => source.url)))].filter(Boolean).slice(0, 3);
     const estimate = estimateDemand({ kind: "ai_answer", engines: missing.length });
     made.push({
       id: createId("opp"), siteId: input.siteId, analysisId: input.analysisId,

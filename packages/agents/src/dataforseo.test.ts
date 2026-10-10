@@ -118,4 +118,12 @@ describe("DataForSEO client", () => {
     const gemini = await fetchAiAnswer(auth, { ...input, engine: "gemini" }, serve({ markdown: "", items: [{ text: "From items." }], sources: [] }));
     assert.equal(gemini.text, "From items.");
   });
+
+  it("keeps a source's URL only when it is http(s)", async () => {
+    const serve = (async () => new Response(envelope({ status_code: 20000, status_message: "Ok.", cost: 0, result: [{ markdown: "x", sources: [
+      { domain: "evil.example", url: "javascript:alert(1)" }, { domain: "ok.example", url: "http://ok.example/a" }, { domain: null, url: "data:text/html,hi" },
+    ] }] }))) as unknown as typeof fetch;
+    const answer = await fetchAiAnswer(auth, { engine: "chatgpt", prompt: "q", location: 2458, language: "en", countryIso2: null }, serve);
+    assert.deepEqual(answer.sources, [{ domain: "evil.example", url: "" }, { domain: "ok.example", url: "http://ok.example/a" }]);
+  });
 });

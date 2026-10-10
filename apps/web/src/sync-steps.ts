@@ -5,13 +5,16 @@ import {
   countInspectionsSince, getSite, indexStatusCounts, listSitesForResults, publishedPages, recordSyncRun, upsertMetricPoints, urlsToInspect, type D1Like, type SyncTrigger,
 } from "@organic-growth/db";
 import { FREE_LIMITS, keysForLimits, limitsFor } from "./limits.ts";
+import { trackAiAnswers } from "./ai-answers.ts";
 import { trackRanks } from "./rank-tracking.ts";
-import { syncResults, type GoogleAccess, type SignalKeys } from "./results-sync.ts";
+import { DATAFORSEO_SOURCES, OTHER_SOURCES } from "./results-sources.ts";
+import { syncResults, type GoogleAccess, type SignalKeys, type Source } from "./results-sync.ts";
 import { COVERAGE_URLS_PER_DAY, inspectEumonPages, inspectQueuedUrls, INSPECTION_STEP, PAGE_INSPECTIONS_PER_DAY } from "./url-inspection.ts";
 
 /*
  * One site's Results sync as Workflow steps: the generated pages' search data,
- * the sources, then URL inspections 40 a step (the Free plan allows 50
+ * the sources, DataForSEO's sources in a step of their own, rank tracking and
+ * AI answers, then URL inspections 40 a step (the Free plan allows 50
  * subrequests a step) against what is left of Google's 2,000 a day for the
  * property, then the sync run recorded with every note. One instance per site
  * (`startDailySyncs`, `startSync`), so each has its own 1,024 steps.
@@ -100,18 +103,26 @@ export async function syncSite(deps: SyncDeps, step: StepLike, siteId: string, t
       const pages = await safe("page-search", () => deps.pageSearch!(site).then((result) => `pages: ${n(result.queries)} query rows`, (error) => `pages failed: ${message(error)}`));
       notes.push("ok" in pages ? pages.ok : `pages failed: ${pages.error}`);
     }
-    const sources = await safe("sources", async () => {
+    // The sources in two steps, DataForSEO's apart, so neither passes 50 subrequests. Each reads the keys itself:
+    // a step's output is persisted, so credentials never pass through one.
+    const runSources = (name: string, list: Source[]) => safe(name, async () => {
       const keys = site.workspaceId ? keysForLimits(deps.keys, await limitsFor(deps.db, site.workspaceId)) : keysForLimits(deps.keys, FREE_LIMITS);
-      return syncResults(deps.db, site, deps.now(), deps.google(siteId), keys).catch((error) => [`results failed: ${message(error)}`]);
+      return syncResults(deps.db, site, deps.now(), deps.google(siteId), keys, list).catch((error) => [`${name === "sources" ? "results" : name} failed: ${message(error)}`]);
     }, { retries: { limit: 1, delay: 60_000 } });
+    const sources = await runSources("sources", OTHER_SOURCES);
     notes.push(...("ok" in sources ? sources.ok : [`results failed: ${sources.error}`]));
-    // Rank tracking: DataForSEO where the workspace may spend it, after the sources so a new keyword list is priced first.
-    // The step returns only whether it may: a step's output is persisted, so credentials never pass through one.
+    // DataForSEO where the workspace may spend it: the keyword lists, search results and backlinks, then rank tracking
+    // and AI answers, after the lists so a new keyword list is priced first. The step returns only whether it may.
     const dataForSeo = deps.keys.dataForSeo;
     if (dataForSeo) {
-      const mayRank = await safe("ranks-limits", async () => site.workspaceId ? (await limitsFor(deps.db, site.workspaceId)).dataForSeo : FREE_LIMITS.dataForSeo);
-      if ("error" in mayRank) notes.push(`ranks failed: ${mayRank.error}`);
-      else if (mayRank.ok) notes.push(...await trackRanks(deps.db, safe, site, dataForSeo, startedAt.slice(0, 10), deps.google(siteId).fetchFn));
+      const mayRank = await safe("dataforseo-limits", async () => site.workspaceId ? (await limitsFor(deps.db, site.workspaceId)).dataForSeo : FREE_LIMITS.dataForSeo);
+      if ("error" in mayRank) notes.push(`dataforseo limits failed: ${mayRank.error}`);
+      else if (mayRank.ok) {
+        const lists = await runSources("dataforseo", DATAFORSEO_SOURCES);
+        notes.push(...("ok" in lists ? lists.ok : [`dataforseo failed: ${lists.error}`]));
+        notes.push(...await trackRanks(deps.db, safe, site, dataForSeo, startedAt.slice(0, 10), deps.google(siteId).fetchFn));
+        notes.push(...await trackAiAnswers(deps.db, safe, site, dataForSeo, startedAt.slice(0, 10), deps.google(siteId).fetchFn));
+      }
     }
     // A site whose Google access failed has nothing to inspect with.
     if (inspects && !notes.some((note) => note.startsWith("google failed"))) notes.push(...await inspectSite(deps, safe, site, startedAt.slice(0, 10), spent, published));

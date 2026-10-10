@@ -56,6 +56,16 @@ describe("auditTable", () => {
     assert.equal(auditTable(ctx({ coverage: { ...ctx().coverage!, linkGraph: undefined } })).find((row) => row.id === "links.orphan")!.status, "skipped");
   });
 
+  it("skips the AI answer checks for a site that tracks no questions", () => {
+    assert.deepEqual(auditTable(ctx()).find((row) => row.id === "answers.citation_lost"), { id: "answers.citation_lost", status: "skipped", reason: "tracked AI questions" });
+    assert.equal(auditTable(ctx({ hasAiQuestions: true })).find((row) => row.id === "answers.citation_lost")!.status, "passed");
+  });
+
+  it("skips the backlink checks for a site without referring-domain data", () => {
+    assert.deepEqual(auditTable(ctx()).find((row) => row.id === "backlinks.lost"), { id: "backlinks.lost", status: "skipped", reason: "referring-domain data" });
+    assert.equal(auditTable(ctx({ hasReferring: true })).find((row) => row.id === "backlinks.lost")!.status, "passed");
+  });
+
   it("skips the rank checks for a site that tracks no keywords", () => {
     assert.deepEqual(auditTable(ctx()).find((row) => row.id === "rank.fell"), { id: "rank.fell", status: "skipped", reason: "tracked keywords" });
     assert.equal(auditTable(ctx({ hasRanks: true })).find((row) => row.id === "rank.fell")!.status, "passed");

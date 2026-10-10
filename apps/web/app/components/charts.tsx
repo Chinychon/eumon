@@ -287,7 +287,7 @@ export function PairedBars({ groups, series }: { groups: Array<{ label: string; 
  * a large one, and every axis label carries its real numbers. A table with
  * the same numbers follows for screen readers.
  */
-export function Radar({ axes, series, caption }: { axes: string[]; series: Array<{ name: string; values: Array<number | null> }>; caption: string }) {
+export function Radar({ axes, series, caption, unit = "the counts" }: { axes: string[]; series: Array<{ name: string; values: Array<number | null> }>; caption: string; unit?: string }) {
   const size = 340;
   const center = size / 2;
   const radius = 108;
@@ -328,7 +328,7 @@ export function Radar({ axes, series, caption }: { axes: string[]; series: Array
         })}
       </svg>
       <div className="chart-legend">{series.map((entry, index) => <span key={entry.name} className={`s${index}`}>{entry.name}</span>)}</div>
-      <p className="small muted">The numbers under each name are the counts; axis lengths are square-root scaled, so a small one stays visible beside a large one.</p>
+      <p className="small muted">The numbers under each name are {unit}; axis lengths are square-root scaled, so a small one stays visible beside a large one.</p>
       <table className="sr-only">
         <caption>{caption}</caption>
         <thead><tr><th>Axis</th>{series.map((entry) => <th key={entry.name}>{entry.name}</th>)}</tr></thead>

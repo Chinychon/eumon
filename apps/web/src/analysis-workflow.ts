@@ -23,7 +23,7 @@ import {
   updateSiteFingerprint,
 } from "@organic-growth/db";
 import {
-  MAX_COMPETITORS, crawlLogCoverage, fetchSearchConsoleMetrics, loadInventories, loadRankSignals, loadTrendSignals, probeTitleForCoverage, queueFullCrawl, runFullAnalysis, synthesizePlanNarrative,
+  MAX_COMPETITORS, crawlLogCoverage, fetchSearchConsoleMetrics, loadAiAnswerSignals, loadInventories, loadRankSignals, loadTrendSignals, probeTitleForCoverage, queueFullCrawl, runFullAnalysis, synthesizePlanNarrative,
 } from "@organic-growth/agents";
 import {
   buildRepoSnapshotFromGitHub,
@@ -203,12 +203,13 @@ export class SiteAnalysisWorkflow extends WorkflowEntrypoint<AppEnv, AnalysisPay
           // Keyword lists from the Performance sync give opportunities real volume and difficulty, and the biggest gaps.
           // An enrichment only: an analysis never fails for want of them (for example before migration 0016 has run).
           const keywords = await loadKeywords(db, { id: siteId, baseUrl: site.baseUrl, gscProperty: site.gscProperty }, { markets: targetMarkets, competitors }).catch(() => undefined);
-          // Search results, links and the crawl log, likewise an enrichment only.
+          // Search results, links, the crawl log, rank tracking and AI answers, likewise an enrichment only.
+          const [ranks, aiAnswers] = await Promise.all([loadRankSignals(db, siteId).catch(() => null), loadAiAnswerSignals(db, siteId).catch(() => null)]);
           const connectors = await Promise.all([
             loadConnectorLists(db, { id: siteId, baseUrl: site.baseUrl }, { markets: targetMarkets, competitors }),
             crawlLogCoverage(db, siteId, analysisId),
             searchConsoleReconciliation(db, siteId, analysisId).catch(() => null),
-          ]).then(async ([lists, coverage, searchConsole]) => connectorSignals(lists, coverage, searchConsole, await loadTrendSignals(db, siteId, lists.crawlLog).catch(() => null), inventory, await loadRankSignals(db, siteId).catch(() => null))).catch(() => connectorSignals({ serp: { lists: [], suggestions: [] }, links: undefined } as never, null, null, null, inventory, null))
+          ]).then(async ([lists, coverage, searchConsole]) => connectorSignals(lists, coverage, searchConsole, await loadTrendSignals(db, siteId, lists.crawlLog).catch(() => null), inventory, ranks, aiAnswers)).catch(() => connectorSignals({ serp: { lists: [], suggestions: [] }, links: undefined } as never, null, null, null, inventory, ranks, aiAnswers))
             .then(async (signals) => ({ ...signals, contentGrades: await loadContentGrades(db, { id: siteId, baseUrl: site.baseUrl }).catch(() => []) }));
           const raw = await runFullAnalysis({
             analysisId,

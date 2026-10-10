@@ -3,7 +3,7 @@ import { addDays, rankCountPoints, type RankCheck, type SerpResult, type SiteRec
 import {
   checkedPairsOn, defaultPageSettings, getPageSettings, getSnapshot, listRankChecks, listSiteMarkets, listTrackedKeywords, pruneRankChecks, saveRankChecks, saveSnapshot, upsertMetricPoints, type D1Like,
 } from "@organic-growth/db";
-import { dollars, marketLocation, said } from "./source-helpers.ts";
+import { dollars, marketLocation, said, sliceByMarket } from "./source-helpers.ts";
 import type { StepOptions } from "./sync-steps.ts";
 
 /*
@@ -24,15 +24,7 @@ export type RankTarget = { keyword: string; market: string };
 type Auth = { login: string; password: string };
 
 /** Slices of at most RANK_STEP pairs, never mixing markets: a step then costs 1 + 40 + 1 + 2 subrequests whatever the market count. */
-export function slices(targets: RankTarget[]): RankTarget[][] {
-  const out: RankTarget[][] = [];
-  for (const target of targets) {
-    const last = out[out.length - 1];
-    if (last && last.length < RANK_STEP && last[0]!.market === target.market) last.push(target);
-    else out.push([target]);
-  }
-  return out;
-}
+export const slices = (targets: RankTarget[]) => sliceByMarket(targets, RANK_STEP);
 
 /** Every tracked keyword in every covered market, minus the pairs already checked today. */
 export async function rankQueue(db: D1Like, site: SiteRecord, today: string): Promise<{ targets: RankTarget[]; notes: string[] }> {

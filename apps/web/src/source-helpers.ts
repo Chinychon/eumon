@@ -23,3 +23,14 @@ export const noMarkets = (name: string) => async ({ db, site }: SyncContext) => 
 export const FRESH_DAYS = 28;
 export const dollars = (cost: number) => `$${cost.toFixed(2)}`;
 export const said = (error: unknown) => (error instanceof Error ? error.message : String(error));
+
+/** Slices of at most `size`, never mixing markets, so a step's subrequests stay fixed whatever the market count. */
+export function sliceByMarket<T extends { market: string }>(targets: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (const target of targets) {
+    const last = out[out.length - 1];
+    if (last && last.length < size && last[0]!.market === target.market) last.push(target);
+    else out.push([target]);
+  }
+  return out;
+}

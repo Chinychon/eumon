@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { getSite, saveRankChecks, saveSnapshot, setTrackedKeywords, saveTopQueriesSnapshot, setSiteCompetitorDomains, setSiteMarkets, upsertMetricPoints, updateSiteGa4Property, updateSiteGscProperty, upsertOAuthCredential, upsertSite } from "@organic-growth/db";
+import { getSite, saveAiAnswerChecks, saveRankChecks, setAiPrompts, saveSnapshot, setTrackedKeywords, saveTopQueriesSnapshot, setSiteCompetitorDomains, setSiteMarkets, upsertMetricPoints, updateSiteGa4Property, updateSiteGscProperty, upsertOAuthCredential, upsertSite } from "@organic-growth/db";
 import { openSqliteD1 } from "@organic-growth/db/sqlite";
+import type { D1Like } from "@organic-growth/db";
 import { loadKeywords } from "./keywords-data.ts";
 import { DEMO_SITE_ID } from "@organic-growth/agents";
 import { loadResults, resultsPayload } from "./results-data.ts";
@@ -102,5 +103,39 @@ describe("results payload", () => {
     await saveSnapshot(db, "s", { kind: "content_grades", scope: "x.com", periodEnd: today, rows: [row("b", 80, "B", 5), row("f", 10, "F", 1), row("f2", 10, "F", 9)] });
     const view = await loadResults(db, (await getSite(db, "s"))!, today);
     assert.deepEqual(view.contentGrades.map((grade) => grade.query), ["f2", "f", "b"]);
+  });
+
+  it("loads tracked questions and their answers into the view", async () => {
+    const db = openSqliteD1();
+    const at = new Date().toISOString();
+    const today = at.slice(0, 10);
+    await upsertSite(db, { id: "s", name: "x.com", baseUrl: "https://www.x.com", createdAt: at, updatedAt: at });
+    await setAiPrompts(db, "s", ["best dentist"]);
+    await setSiteMarkets(db, "s", ["mys"]);
+    await saveAiAnswerChecks(db, "s", [{ prompt: "best dentist", market: "mys", engine: "chatgpt", day: today, answered: true, mentioned: true, cited: true, citedRank: 1, sources: [{ domain: "x.com", url: "https://x.com/" }], rivals: [], excerpt: "x.com" }]);
+    const view = await loadResults(db, (await getSite(db, "s"))!, today);
+    assert.deepEqual(view.aiAnswers.rows.map((row) => [row.prompt, row.market, row.cells.chatgpt?.mentioned]), [["best dentist", "mys", true]]);
+    assert.deepEqual(view.aiAnswers.topDomains, [{ domain: "x.com", answers: 1, kind: "site" }], "the site is the bare domain");
+  });
+
+  it("still loads, with the new sections empty, before the migrations that add their tables are applied", async () => {
+    const db = openSqliteD1();
+    const at = new Date().toISOString();
+    await upsertSite(db, { id: "s", name: "x.com", baseUrl: "https://x.com", createdAt: at, updatedAt: at });
+    const site = (await getSite(db, "s"))!;
+    // A deploy goes out on merge; its migrations are applied by hand afterwards.
+    const missing = /\b(referring_domains|tracked_keywords|rank_checks|ai_prompts|ai_answer_checks)\b/;
+    // D1 fails such a statement when it runs, not when it is prepared.
+    const failing = (table: string) => {
+      const fail = () => Promise.reject(new Error(`D1_ERROR: no such table: ${table}`));
+      const statement = { bind: () => statement, all: fail, first: fail, run: fail };
+      return statement as unknown as ReturnType<D1Like["prepare"]>;
+    };
+    const unmigrated: D1Like = {
+      prepare: (sql: string) => (missing.test(sql) ? failing(sql.match(missing)![1]!) : db.prepare(sql)),
+      batch: (statements) => db.batch!(statements),
+    };
+    const results = await loadResults(unmigrated, site);
+    assert.equal(results.links.own, null);
   });
 });

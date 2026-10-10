@@ -30,3 +30,12 @@ export function countryName(code: string): string {
 export function countryNumeric(code: string): number | null {
   return COUNTRIES.find((country) => country.code === code.toLowerCase())?.numeric ?? null;
 }
+
+/** ISO 3166-1 alpha-2 for a market (alpha-3), for APIs that take two letters (Perplexity's web search country). */
+const ALPHA2: Record<string, string> = {
+  idn: "ID", mys: "MY", sgp: "SG", tha: "TH", vnm: "VN", phl: "PH", brn: "BN", khm: "KH", mmr: "MM", lao: "LA", chn: "CN", hkg: "HK", twn: "TW", jpn: "JP", kor: "KR",
+  ind: "IN", pak: "PK", bgd: "BD", lka: "LK", npl: "NP", aus: "AU", nzl: "NZ", usa: "US", can: "CA", mex: "MX", bra: "BR", arg: "AR", col: "CO", chl: "CL", gbr: "GB",
+  irl: "IE", deu: "DE", fra: "FR", esp: "ES", ita: "IT", nld: "NL", bel: "BE", che: "CH", aut: "AT", swe: "SE", nor: "NO", dnk: "DK", fin: "FI", pol: "PL", prt: "PT",
+  tur: "TR", rus: "RU", ukr: "UA", are: "AE", sau: "SA", qat: "QA", kwt: "KW", omn: "OM", egy: "EG", nga: "NG", ken: "KE", zaf: "ZA", isr: "IL",
+};
+export const countryAlpha2 = (code: string): string | null => ALPHA2[code.toLowerCase()] ?? null;

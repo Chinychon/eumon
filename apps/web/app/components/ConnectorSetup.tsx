@@ -171,7 +171,7 @@ export function ConnectorSetup({ siteId }: { siteId: string }) {
         <div className="grow">
           <h3>Search results, search competitors and backlinks</h3>
           <p>{connectors.dataForSeo
-            ? "Google's first page for your biggest searches (10 a day), the domains that win them, and link profiles with the link gap, each refreshed monthly. Daily positions for the keywords you track on the Keywords tab. Backlinks need the Backlinks API active on the DataForSEO account."
+            ? "Google's first page for your biggest searches (10 a day), the domains that win them, your referring domains with new, lost and spam links, and link profiles with the link gap, each refreshed monthly. Daily positions for the keywords you track on the Keywords tab. Weekly answers from ChatGPT, Gemini, Google AI Mode and Perplexity to the questions you track on the AI visibility tab. Backlinks need the Backlinks API active on the DataForSEO account."
             : "Set DATAFORSEO_LOGIN and DATAFORSEO_PASSWORD (app.dataforseo.com → API Access). The same account prices your keywords."}</p>
         </div>
       </div>

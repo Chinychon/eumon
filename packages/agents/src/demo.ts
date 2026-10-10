@@ -1,10 +1,10 @@
-import type { ContentGradeRow, DataRecord, Dataset, Finding, KeywordsInput, PageTemplate, RankCheck, RankedKeyword, SearchMetricRow } from "@organic-growth/core";
-import { addDays, keyOf, REF_ALPHABET, REF_LENGTH, slugify, suggestRedirect } from "@organic-growth/core";
+import type { AiAnswerCheck, ContentGradeRow, DataRecord, Dataset, Finding, KeywordsInput, PageTemplate, RankCheck, RankedKeyword, SearchMetricRow } from "@organic-growth/core";
+import { addDays, aiAnswerPoints, keyOf, REF_ALPHABET, REF_LENGTH, slugify, suggestRedirect } from "@organic-growth/core";
 import { crawlGooglebotBatch, probeAiCrawlers, probeHost, probeNotFound, researchSite, type Fetcher, type SiteResearch } from "@organic-growth/crawler";
 import {
   chunks, getSnapshot, createAnalysis, createLead, recordLeadClick, updateLead, defaultPageSettings, recordSyncRun, recountCrawl, upsertPageSettings, datasetCoverage, deleteSite, getAnalysisJob, getCrawlCoverage, getCrawlProgress, importSearchConsoleUrls, insertChange, insertConversionEvent, listAllRecords,
-  listCrawlLogDays, listCrawlPageResults, listPendingCrawlUrls, probePages, recordLandingSession, replaceCurrentSearchMetrics, replacePageSearchMetrics, runStatements, saveAnalysisReport, saveCrawlBatch,
-  saveIndexStatus, saveRankChecks, setTrackedKeywords, saveSearchConsoleChart, saveSearchConsoleChecks, saveSearchConsoleSummary, saveSiteScope, saveSnapshot, searchConsoleReconciliation, saveTopQueriesSnapshot, saveUrlIndexStatus, listSiteCompetitorDomains, setSiteCompetitorDomains, syncFirstPartyResults, updateSiteGa4Property, upsertMetricPoints, type MetricPoint, setSiteMarkets, setTemplatePublication, syncTemplatePages, updateAnalysisProgress,
+  listCrawlLogDays, loadReferringLists, listCrawlPageResults, listPendingCrawlUrls, probePages, recordLandingSession, replaceCurrentSearchMetrics, replacePageSearchMetrics, runStatements, saveAnalysisReport, saveCrawlBatch,
+  saveAiAnswerChecks, setAiBrandNames, setAiPrompts, saveIndexStatus, saveRankChecks, setTrackedKeywords, saveSearchConsoleChart, saveSearchConsoleChecks, saveSearchConsoleSummary, saveSiteScope, saveSnapshot, searchConsoleReconciliation, saveTopQueriesSnapshot, saveUrlIndexStatus, listSiteCompetitorDomains, setSiteCompetitorDomains, syncFirstPartyResults, updateSiteGa4Property, upsertMetricPoints, type MetricPoint, setSiteMarkets, setTemplatePublication, syncTemplatePages, updateAnalysisProgress,
   updateAnalysisStatus, upsertDataset, upsertRecords, upsertSite, upsertTemplate, type D1Like,
 } from "@organic-growth/db";
 import { generatePages } from "@organic-growth/pages";
@@ -12,6 +12,7 @@ import { demoLinks, demoSerpLists, demoSuggestions, seedDemoConnectors } from ".
 import { crawlLogCoverage } from "./log-coverage.js";
 import { queueFullCrawl, runFullAnalysis } from "./pipeline.js";
 import { probeTitleForCoverage } from "./not-found-probe.js";
+import { loadAiAnswerSignals } from "./ai-answer-findings.js";
 import { loadRankSignals } from "./rank-findings.js";
 import { loadTrendSignals } from "./trend-signals.js";
 import { loadInventories } from "./inventory-data.js";
@@ -409,6 +410,51 @@ async function seedDemoRanks(db: D1Like, now: number): Promise<void> {
   await saveRankChecks(db, DEMO_SITE_ID, checks);
 }
 
+/**
+ * Six questions, four engines, eight weekly checks. Perplexity and AI Mode cite the clinic for the first two
+ * questions and a rival for the rest; ChatGPT mentions it for three, lost its citations for two two weeks ago and
+ * names a rival elsewhere; Gemini never names it. That gives the growth plan all three AI-answer kinds.
+ */
+async function seedDemoAiAnswers(db: D1Like, now: number): Promise<void> {
+  const today = new Date(now).toISOString().slice(0, 10);
+  const market = "mys"; // the AI-question demo covers Malaysia only; Singapore's cells stay "not checked yet" (seeding it would duplicate the findings and could push the Malaysia opportunity out of the top five)
+  const prompts = [
+    ...TREATMENTS.slice(0, 4).map((slug) => `How much does ${slug.replace(/-/g, " ")} cost in Kuala Lumpur?`),
+    "Which dental clinic in Kuala Lumpur is best for families?",
+    "Where can I get emergency dental care in Kuala Lumpur?",
+  ];
+  await setAiPrompts(db, DEMO_SITE_ID, prompts);
+  await setAiBrandNames(db, DEMO_SITE_ID, ["Demo Dental Clinic"]);
+  const checks: AiAnswerCheck[] = [];
+  prompts.forEach((prompt, q) => {
+    const rival = COMPETITORS[q % COMPETITORS.length]!;
+    for (const engine of ["perplexity", "ai_mode", "chatgpt", "gemini"] as const) {
+      for (let k = 0; k < 8; k++) {
+        const cited = engine === "gemini" ? false
+          : engine === "chatgpt" ? (q === 3 || q === 4) && k >= 2
+          : q < 2;
+        const mentioned = cited || (engine === "chatgpt" && q < 3);
+        const rivalCited = !cited && (engine === "gemini" ? q >= 2 : engine !== "chatgpt" || q >= 2);
+        const rivalMentioned = !mentioned && (rivalCited || engine === "chatgpt" || engine === "gemini");
+        const sources = [
+          ...(cited ? [
+            { domain: "dentalhealth-info.example", url: `https://dentalhealth-info.example/guides/${slugify(prompt)}` },
+            { domain: new URL(ORIGIN).hostname, url: `${ORIGIN}/treatments/${TREATMENTS[q % TREATMENTS.length]}` },
+          ] : []),
+          ...(rivalCited ? [{ domain: rival, url: `https://${rival}/` }] : []),
+        ];
+        checks.push({
+          prompt, market, engine, day: addDays(today, -7 * k), answered: true, mentioned, cited, citedRank: cited ? 2 : null, sources,
+          rivals: rivalCited || rivalMentioned ? [{ domain: rival, mentioned: rivalMentioned || rivalCited, cited: rivalCited }] : [],
+          excerpt: `${prompt.replace(/\?$/, "")}: ${mentioned ? "Demo Dental Clinic is one option" : `${rival} is the name that comes up most`}.`,
+        });
+      }
+    }
+  });
+  await saveAiAnswerChecks(db, DEMO_SITE_ID, checks);
+  await upsertMetricPoints(db, DEMO_SITE_ID, aiAnswerPoints(checks, prompts, ["mys"], COMPETITORS, today));
+}
+
 /** The demo's keyword lists, as the analysis and the view read them. */
 export function demoKeywords(today: string): KeywordsInput {
   return {
@@ -502,6 +548,8 @@ async function analyzeDemo(db: D1Like, input: { analysisId: string; version: num
       trends: await loadTrendSignals(db, DEMO_SITE_ID, await listCrawlLogDays(db, DEMO_SITE_ID, addDays(new Date(input.now).toISOString().slice(0, 10), -182)), new Date(input.now).toISOString().slice(0, 10)),
       inventory: await loadInventories(db, DEMO_SITE_ID, { analysisId: input.analysisId }),
       ranks: await loadRankSignals(db, DEMO_SITE_ID, new Date(input.now).toISOString().slice(0, 10)),
+      aiAnswers: await loadAiAnswerSignals(db, DEMO_SITE_ID, new Date(input.now).toISOString().slice(0, 10)),
+      referring: await loadReferringLists(db, DEMO_SITE_ID, own, new Date(input.now).toISOString().slice(0, 10)),
       contentGrades: (await getSnapshot<ContentGradeRow>(db, DEMO_SITE_ID, "content_grades", "demo-clinic.example"))?.rows ?? [],
     },
     crawlCoverage: { coverage, examples },
@@ -787,6 +835,7 @@ export async function seedDemoSite(db: D1Like, now = Date.now()): Promise<{ site
   // Before the analyses, which read the crawl log.
   await seedDemoConnectors(db, demoConnectorInput(), now);
   await seedDemoRanks(db, now);
+  await seedDemoAiAnswers(db, now);
   await completedAnalysis(db, "analysis_demo_1", 1, now - 30 * DAY);
   await seedDemoSearchConsole(db, now);
   await completedAnalysis(db, "analysis_demo_2", 2, now - 2 * DAY);

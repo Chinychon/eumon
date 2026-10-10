@@ -20,6 +20,7 @@ import { linkGapOpportunity, withSerpContext, type ConnectorSignals } from "./co
 import { estimateDemand } from "./demand.js";
 import { contentOpportunities } from "./content-findings.js";
 import { rankOpportunities } from "./rank-findings.js";
+import { aiAnswerOpportunities } from "./ai-answer-findings.js";
 import { analyzeSearch, searchOpportunities, type SearchInsights } from "./search.js";
 
 export interface AnalysisBundle {
@@ -126,8 +127,9 @@ export function buildOpportunities(bundle: AnalysisBundle): Opportunity[] {
   const links = linkGapOpportunity(bundle.connectors?.links, bundle.siteId, bundle.analysisId);
   const base = [...technical, ...fromSearch, ...contentGaps, ...unpublishedData, ...gaps, ...(links ? [links] : [])];
   const tracked = rankOpportunities({ siteId: bundle.siteId, analysisId: bundle.analysisId, ranks: bundle.connectors?.ranks, searchMetrics: bundle.searchMetrics, existing: base, demand });
-  const withTracked = [...base, ...tracked];
-  const graded = contentOpportunities({ siteId: bundle.siteId, analysisId: bundle.analysisId, grades: bundle.connectors?.contentGrades, existing: withTracked, demand });
+  const aiAnswers = aiAnswerOpportunities({ siteId: bundle.siteId, analysisId: bundle.analysisId, signals: bundle.connectors?.aiAnswers, existing: [...base, ...tracked] });
+  // `graded.existing` is base + tracked + aiAnswers, with content-gap notes added to matching "Move" opportunities.
+  const graded = contentOpportunities({ siteId: bundle.siteId, analysisId: bundle.analysisId, grades: bundle.connectors?.contentGrades, existing: [...base, ...tracked, ...aiAnswers], demand });
   return withSerpContext([...graded.existing, ...graded.made], bundle.connectors?.serp)
     .sort((a, b) => b.priorityScore - a.priorityScore);
 }
@@ -447,6 +449,8 @@ export * from "./connector-findings.js";
 export * from "./log-coverage.js";
 export * from "./trend-signals.js";
 export * from "./rank-findings.js";
+export * from "./ai-answer-findings.js";
+export * from "./link-findings.js";
 export * from "./not-found-probe.js";
 export * from "./fix-text.js";
 export * from "./content-targets.js";

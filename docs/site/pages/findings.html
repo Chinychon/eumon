@@ -129,6 +129,21 @@
         <td>"N of M &lt;entities&gt; have no &lt;field&gt;"; "N &lt;entities&gt; are listed more than once"; "N &lt;type&gt; pages have almost no content"</td>
       </tr>
       <tr>
+        <td><code>findingsFromRanks</code><br><code class="path">packages/agents/src/rank-findings.ts:59</code></td>
+        <td>Tracked keywords' daily rank checks over 90 days in the target markets (<code>loadRankSignals</code>)</td>
+        <td>"“&lt;keyword&gt;” fell from N to M in &lt;market&gt; since &lt;day&gt;"; "“&lt;keyword&gt;” dropped out of the top 10 in &lt;market&gt; since &lt;day&gt;"</td>
+      </tr>
+      <tr>
+        <td><code>findingsFromAiAnswers</code><br><code class="path">packages/agents/src/ai-answer-findings.ts:62</code></td>
+        <td>Tracked questions' AI answer checks over 90 days in the target markets, with today's competitors (<code>loadAiAnswerSignals</code>)</td>
+        <td>"AI assistants name competitors but not you for N of M questions"; "&lt;engine&gt; stopped citing you for N questions since &lt;day&gt;"</td>
+      </tr>
+      <tr>
+        <td><code>findingsFromReferring</code><br><code class="path">packages/agents/src/link-findings.ts:23</code></td>
+        <td>The site's referring domains: counts and short lists (<code>loadReferringLists</code>)</td>
+        <td>"N sites link to pages on your site that are missing"; "You lost links from N sites in 30 days"; "N spam sites started linking to you in 30 days"</td>
+      </tr>
+      <tr>
         <td><code>findingsFromContentGrades</code><br><code class="path">packages/agents/src/content-findings.ts</code></td>
         <td>Content grades from the last 35 days (snapshot <code>content_grades</code>; targets that could not be graded wait a week in <code>content_skips</code>): the AI-verified topics the top results cover that the site's page does not</td>
         <td>"N pages cover less than half of what the top results cover"; opportunity "Cover what the top results cover for “&lt;query&gt;”: &lt;topics&gt;" (grade C or worse)</td>

@@ -35,6 +35,8 @@ export type TrendSignals = {
 };
 
 import type { RankSignals } from "./rank-findings.js";
+import type { AiAnswerSignals } from "./ai-answer-findings.js";
+import type { BacklinksInput } from "@organic-growth/core";
 
 export type ConnectorSignals = {
   serp?: SerpResult[];
@@ -47,6 +49,8 @@ export type ConnectorSignals = {
   ranks?: RankSignals | null;
   /** The latest grade per graded search, from the `content_grades` snapshot. */
   contentGrades?: ContentGradeRow[];
+  aiAnswers?: AiAnswerSignals | null;
+  referring?: BacklinksInput | null;
 };
 
 /** Fewer days of logs than this say nothing about what Googlebot skips. */

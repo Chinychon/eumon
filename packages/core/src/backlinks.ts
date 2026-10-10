@@ -48,31 +48,27 @@ const SALES_METRIC = /\b(DA|DR|PA) ?\d{1,2}\b/;
 const isSales = (anchor: string) => SALES.test(anchor) || SALES_METRIC.test(anchor);
 
 const REASON = { anchor: "Same anchor on", path: "Same page path on", sales: "Link-selling anchor", score: "Spam score" };
+/** A domain label this long found anywhere in an anchor names the business; a shorter one ("x" of x.com) is in too many words. */
+const BRAND_INSIDE_AT_LEAST = 4;
 const alnum = (text: string) => text.toLowerCase().replace(/[^a-z0-9]/g, "");
 
 const squash = (text: string) => text.toLowerCase().replace(/\s+/g, " ").trim();
 
-/** The path key, only for page paths that look generated (a digit, or the site's domain); "/", "/about", "/blog" are shared by honest sites. */
-const networkPath = (urlFrom: string, own: string) => {
-  const path = pathOf(urlFrom);
-  if (path === null || path === "") return null;
-  const full = path + (urlSearch(urlFrom) ?? "");
-  return /\d/.test(full) || full.toLowerCase().includes(own) ? path : null;
-};
-const urlSearch = (urlFrom: string) => {
+/** A linking page's path and query, without a trailing slash: "/viewtopic.php?f=2&t=9" on ten forums is ten threads, not one page. */
+const pathKey = (urlFrom: string) => {
   try {
-    return new URL(urlFrom).search;
+    const url = new URL(urlFrom);
+    return url.pathname.replace(/\/+$/, "") + url.search;
   } catch {
     return null;
   }
 };
 
-const pathOf = (urlFrom: string) => {
-  try {
-    return new URL(urlFrom).pathname.replace(/\/+$/, "");
-  } catch {
-    return null;
-  }
+/** The path key, only for page paths that look generated (a digit, or the site's domain); "/", "/about", "/blog" are shared by honest sites. */
+const networkPath = (urlFrom: string, own: string) => {
+  const key = pathKey(urlFrom);
+  if (key === null || key === "") return null;
+  return /\d/.test(key) || key.toLowerCase().includes(own) ? key : null;
 };
 
 /** Real or spam, by the first rule that applies: network, then sales anchor, then spam score. */
@@ -86,8 +82,8 @@ export function classifyReferringDomains(rows: Omit<ReferringDomain, "spam" | "s
   const keyed = rows.map((row) => {
     const plain = bare(row.anchor);
     const anchor = plain.split(own).join("{site}").trim();
-    // Brand-like anchors (the domain, the business name) and short generic ones ("Website") are never a network by anchor.
-    const brand = anchor === "" || anchor === "{site}" || (label !== "" && alnum(plain).startsWith(label));
+    // Brand-like anchors (the domain, the business name, or one naming it that sells no links) and short generic ones ("Website") are never a network by anchor.
+    const brand = anchor === "" || anchor === "{site}" || (label !== "" && (alnum(plain).startsWith(label) || (label.length >= BRAND_INSIDE_AT_LEAST && alnum(plain).includes(label) && !isSales(row.anchor))));
     const anchorKey = brand || anchor.split(" ").length < 4 ? null : anchor;
     const path = networkPath(row.urlFrom, own);
     if (anchorKey) add(anchors, anchorKey, row.domain);
@@ -118,7 +114,7 @@ export function spamNetworks(rows: ReferringDomain[]): SpamNetwork[] {
     const reason = row.spamReason ?? "";
     const kind: SpamNetwork["kind"] = reason.startsWith(REASON.anchor) ? "anchor" : reason.startsWith(REASON.path) ? "path" : reason.startsWith(REASON.sales) ? "sales" : "score";
     const grouped = kind === "sales" || kind === "score";
-    const label = kind === "path" ? pathOf(row.urlFrom) ?? row.urlFrom : kind === "score" ? "High spam score" : kind === "sales" ? "Link-selling anchors" : row.anchor;
+    const label = kind === "path" ? pathKey(row.urlFrom) ?? row.urlFrom : kind === "score" ? "High spam score" : kind === "sales" ? "Link-selling anchors" : row.anchor;
     const key = `${kind}:${grouped ? "" : kind === "path" ? label : squash(label)}`;
     const group = groups.get(key) ?? { kind, label, rows: [] };
     group.rows.push(row);

@@ -69,8 +69,19 @@ describe("classifyReferringDomains", () => {
       const o = classifyReferringDomains(many(10, (i) => ({ urlFrom: `https://s${i}.com${path}` })), "medbaycare.com");
       assert.ok(o.every((r) => r.spamReason === "Same page path on 10 sites"), path);
     }
-    const q = classifyReferringDomains(many(10, (i) => ({ urlFrom: `https://s${i}.com/list.php?part=${i}` })), "medbaycare.com");
-    assert.ok(q.every((r) => r.spam));
+    const q = classifyReferringDomains(many(12, (i) => ({ urlFrom: `https://s${i}.com/list.php?part=5` })), "medbaycare.com");
+    assert.ok(q.every((r) => r.spamReason === "Same page path on 12 sites"));
+    assert.deepEqual(spamNetworks(q).map((n) => [n.label, n.domains]), [["/list.php?part=5", 12]]);
+  });
+
+  it("forum threads on ten sites aren't a network: the query is part of the path", () => {
+    const forums = many(10, (i) => ({ urlFrom: `https://forum${i}.com/viewtopic.php?f=2&t=${1000 + i * 37}` }));
+    assert.ok(verdicts(forums).every((v) => v === null));
+  });
+
+  it("an anchor containing the business name isn't a network, unless it sells links", () => {
+    const powered = classifyReferringDomains(many(15, () => ({ anchor: "Powered by Acme Booking Software" })), "acmebooking.example");
+    assert.ok(powered.every((r) => !r.spam));
   });
 
   it("a trailing slash doesn't split a path", () => {

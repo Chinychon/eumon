@@ -1,9 +1,10 @@
 import { env } from "cloudflare:workers";
 import { indexNowKey } from "@organic-growth/agents";
-import { firstCrawlLogDay, getSite, lastMetricDay, listCrawlLogDays } from "@organic-growth/db";
+import { firstCrawlLogDay, lastMetricDay, listCrawlLogDays } from "@organic-growth/db";
 import { bingSiteUrl } from "../../../../../src/connector-sources";
 import { logToken } from "../../../../../src/crawl-logs";
 import { signalKeys } from "../../../../../src/results-access";
+import { requireSite } from "../../../../../src/guard";
 import { fail, json, settingsFor } from "../../../../../src/server";
 
 /**
@@ -14,8 +15,9 @@ import { fail, json, settingsFor } from "../../../../../src/server";
  */
 export async function GET(request: Request, context: { params: Promise<{ siteId: string }> }) {
   const { siteId } = await context.params;
-  const site = await getSite(env.DB, siteId);
-  if (!site) return fail("Site not found.", 404);
+  const access = await requireSite(request, siteId, "write");
+  if (access instanceof Response) return access;
+  const { site } = access;
   const keys = signalKeys(env);
   const settings = await settingsFor(site);
   const origin = new URL(request.url).origin;

@@ -1,8 +1,9 @@
 import { env } from "cloudflare:workers";
 import { createSpreadsheet, type SheetTable } from "@organic-growth/agents";
-import { getSite } from "@organic-growth/db";
 import { DRIVE_FILE_SCOPE, googleScopes } from "../../../../../../src/gsc-auth";
 import { googleAccess } from "../../../../../../src/results-access";
+import { requireSite } from "../../../../../../src/guard";
+import { featureRefusal } from "../../../../../../src/limits";
 import { fail, json, readJson } from "../../../../../../src/server";
 
 /** Big enough for any report, small enough to stay one quick request. */
@@ -11,7 +12,11 @@ const MAX_CELLS = 200_000;
 /** Creates a Google Sheet from an export, with the site's Google connection; 403 only when there is no connection or it lacks the Sheets permission, 502 when Google doesn't answer. */
 export async function POST(request: Request, context: { params: Promise<{ siteId: string }> }) {
   const { siteId } = await context.params;
-  if (!(await getSite(env.DB, siteId))) return fail("Site not found.", 404);
+  const access = await requireSite(request, siteId, "write");
+  if (access instanceof Response) return access;
+  const { site } = access;
+  const refusal = await featureRefusal(env.DB, site.workspaceId!, "sheetsExport");
+  if (refusal) return fail(refusal, 403);
   const body = await readJson<{ title?: unknown; sheets?: unknown }>(request, 8_000_000);
   const sheets = Array.isArray(body?.sheets) ? (body!.sheets as SheetTable[]).filter((sheet) => sheet && typeof sheet.name === "string" && Array.isArray(sheet.columns) && Array.isArray(sheet.rows)) : [];
   if (!sheets.length || sheets.length > 40) return fail("Send between 1 and 40 tables.", 400);

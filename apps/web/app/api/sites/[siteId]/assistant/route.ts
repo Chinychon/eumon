@@ -2,7 +2,9 @@ import { env, waitUntil } from "cloudflare:workers";
 import { describeModelError, LlmError, type LlmEnv } from "@organic-growth/ai";
 import { historyMessages, runAssistantTurn } from "@organic-growth/agents";
 import { createId } from "@organic-growth/core";
-import { appendAssistantMessage, createAssistantThread, getAssistantThread, getSite, listAssistantMessages } from "@organic-growth/db";
+import { appendAssistantMessage, createAssistantThread, getAssistantThread, listAssistantMessages } from "@organic-growth/db";
+import { requireSite } from "../../../../../src/guard";
+import { charge } from "../../../../../src/limits";
 import { fail, readJson } from "../../../../../src/server";
 
 /**
@@ -13,8 +15,11 @@ import { fail, readJson } from "../../../../../src/server";
  */
 export async function POST(request: Request, context: { params: Promise<{ siteId: string }> }) {
   const { siteId } = await context.params;
-  const site = await getSite(env.DB, siteId);
-  if (!site) return fail("Site not found.", 404);
+  const access = await requireSite(request, siteId, "write");
+  if (access instanceof Response) return access;
+  const { site } = access;
+  const refusal = await charge(env.DB, site.workspaceId!, "askPerDay");
+  if (refusal) return fail(refusal, 429);
   const body = await readJson<{ message?: unknown; threadId?: unknown; view?: unknown }>(request);
   const question = typeof body?.message === "string" ? body.message.trim().slice(0, 4000) : "";
   if (!question) return fail("Ask a question first.");

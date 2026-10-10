@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { createId, findRef } from "@organic-growth/core";
-import { createLead, getLead, getLeadByRef, getSite, listLeads, syncLeadOutcomes } from "@organic-growth/db";
+import { createLead, getLead, getLeadByRef, listLeads, syncLeadOutcomes } from "@organic-growth/db";
+import { requireSite } from "../../../../../src/guard";
 import { fail, json, readJson, settingsFor } from "../../../../../src/server";
 
 type Context = { params: Promise<{ siteId: string }> };
@@ -12,8 +13,9 @@ type Context = { params: Promise<{ siteId: string }> };
  */
 export async function GET(request: Request, context: Context) {
   const { siteId } = await context.params;
-  const site = await getSite(env.DB, siteId);
-  if (!site) return fail("Site not found.", 404);
+  const access = await requireSite(request, siteId, "read");
+  if (access instanceof Response) return access;
+  const { site } = access;
   const params = new URL(request.url).searchParams;
   const find = params.get("find");
   if (find !== null) {
@@ -31,7 +33,8 @@ const CHANNELS = new Set(["whatsapp", "phone", "email", "form", "walk-in", "othe
 /** An enquiry without a code, entered by hand: it starts as a chat. */
 export async function POST(request: Request, context: Context) {
   const { siteId } = await context.params;
-  if (!(await getSite(env.DB, siteId))) return fail("Site not found.", 404);
+  const access = await requireSite(request, siteId, "write");
+  if (access instanceof Response) return access;
   const body = await readJson<{ channel?: unknown; note?: unknown }>(request);
   const channel = typeof body?.channel === "string" && CHANNELS.has(body.channel) ? body.channel : null;
   if (!channel) return fail(`Choose a channel: ${[...CHANNELS].join(", ")}.`);

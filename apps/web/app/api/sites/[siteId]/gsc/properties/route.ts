@@ -1,13 +1,15 @@
 import { env } from "cloudflare:workers";
 import { METRICS } from "@organic-growth/core";
-import { clearMetricPoints, getSite, listRecordKeys, listSiteMarkets, replaceCurrentSearchMetrics, setLatestReportSearch, updateSiteGscProperty } from "@organic-growth/db";
+import { clearMetricPoints, listRecordKeys, listSiteMarkets, replaceCurrentSearchMetrics, setLatestReportSearch, updateSiteGscProperty } from "@organic-growth/db";
 import { analyzeSearch, fetchSearchConsoleMetrics, listSearchConsoleProperties, siteBrandTerms } from "@organic-growth/agents";
 import { googleAccessToken } from "../../../../../../src/gsc-auth";
+import { requireSite } from "../../../../../../src/guard";
 
-export async function GET(_request: Request, context: { params: Promise<{ siteId: string }> }) {
+export async function GET(request: Request, context: { params: Promise<{ siteId: string }> }) {
   const { siteId } = await context.params;
-  const site = await getSite(env.DB, siteId);
-  if (!site) return Response.json({ error: "Site not found." }, { status: 404 });
+  const access = await requireSite(request, siteId, "write");
+  if (access instanceof Response) return access;
+  const { site } = access;
   try {
     const token = await googleAccessToken(env.DB, siteId, env.GOOGLE_CLIENT_ID, env.GOOGLE_CLIENT_SECRET, env.OAUTH_ENCRYPTION_KEY);
     const properties = await listSearchConsoleProperties(token);
@@ -19,8 +21,9 @@ export async function GET(_request: Request, context: { params: Promise<{ siteId
 
 export async function POST(request: Request, context: { params: Promise<{ siteId: string }> }) {
   const { siteId } = await context.params;
-  const site = await getSite(env.DB, siteId);
-  if (!site) return Response.json({ error: "Site not found." }, { status: 404 });
+  const access = await requireSite(request, siteId, "write");
+  if (access instanceof Response) return access;
+  const { site } = access;
   let property: unknown;
   try { property = (await request.json() as { property?: unknown }).property; } catch { return Response.json({ error: "Choose a Search Console property." }, { status: 400 }); }
   if (typeof property !== "string" || property.length > 2048) return Response.json({ error: "Choose a valid property." }, { status: 400 });

@@ -1,11 +1,15 @@
 import { env } from "cloudflare:workers";
 import { LEAD_STATUSES, type LeadStatus } from "@organic-growth/core";
 import { getLead, syncLeadOutcomes, updateLead } from "@organic-growth/db";
+import { requireSite } from "../../../../../../src/guard";
 import { fail, json, readJson } from "../../../../../../src/server";
 
 /** Moves a lead on (chat, qualified, customer, lost), and sets its value or note; the ledger follows at once. */
 export async function PATCH(request: Request, context: { params: Promise<{ siteId: string; leadId: string }> }) {
   const { siteId, leadId } = await context.params;
+  const access = await requireSite(request, siteId, "write");
+  if (access instanceof Response) return access;
+  const { site } = access;
   if (!(await getLead(env.DB, siteId, leadId))) return fail("Lead not found.", 404);
   const body = await readJson<{ status?: unknown; value?: unknown; note?: unknown }>(request);
   if (!body) return fail("Send the change as JSON.");

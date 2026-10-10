@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { getSite } from "@organic-growth/db";
+import { requireSite } from "../../../../../../src/guard";
 import { fail, json } from "../../../../../../src/server";
 import { startSync } from "../../../../../../src/sync-steps";
 
@@ -9,9 +9,11 @@ import { startSync } from "../../../../../../src/sync-steps";
  * Setup → Sync history when it finishes; the dashboard waits for a manual run
  * started at or after `startedAt`, and asks GET for the instance's status.
  */
-export async function POST(_request: Request, context: { params: Promise<{ siteId: string }> }) {
+export async function POST(request: Request, context: { params: Promise<{ siteId: string }> }) {
   const { siteId } = await context.params;
-  if (!(await getSite(env.DB, siteId))) return fail("Site not found.", 404);
+  const access = await requireSite(request, siteId, "write");
+  if (access instanceof Response) return access;
+  const { site } = access;
   try {
     const result = await startSync(env, { siteId, trigger: "manual" });
     if (result.running) return fail("Today's daily sync for this site is running; its result lands in Setup → Sync history shortly.", 409);
@@ -24,6 +26,9 @@ export async function POST(_request: Request, context: { params: Promise<{ siteI
 /** The status of one of this site's sync instances, so the dashboard stops waiting on a run that failed. */
 export async function GET(request: Request, context: { params: Promise<{ siteId: string }> }) {
   const { siteId } = await context.params;
+  const access = await requireSite(request, siteId, "read");
+  if (access instanceof Response) return access;
+  const { site } = access;
   const id = new URL(request.url).searchParams.get("id") ?? "";
   if (!id.startsWith(`manual-${siteId}-`) && !id.endsWith(`-${siteId}`)) return fail("Not this site's sync.", 404);
   try {

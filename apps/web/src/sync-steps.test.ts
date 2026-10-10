@@ -268,7 +268,6 @@ describe("subrequests per step", () => {
     const keys = { googleApiKey: "g", openPageRankKey: "o", dataForSeo: { login: "l", password: "p" }, bingApiKey: "b", indexNowSecret: "x".repeat(40) };
     const notes = await syncSite({ db, keys, now: () => monday, google }, step, "s", "daily");
     const fetches = Object.fromEntries(steps.map((entry) => [entry.name, entry.inspections]));
-    console.log("fetches per step:", JSON.stringify(fetches));
     for (const [name, made] of Object.entries(fetches)) assert.ok(made <= 50, `${name} made ${made} fetches`);
     assert.ok(fetches["s/sources"]! > 0 && fetches["s/dataforseo"]! > 0, JSON.stringify(fetches));
     assert.ok(notes.some((note) => note.startsWith("speed:")) && notes.some((note) => note.startsWith("search results:")), notes.join("; "));

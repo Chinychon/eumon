@@ -114,12 +114,15 @@ describe("results payload", () => {
     const site = (await getSite(db, "s"))!;
     // A deploy goes out on merge; its migrations are applied by hand afterwards.
     const missing = /\b(referring_domains|tracked_keywords|rank_checks|ai_prompts|ai_answer_checks)\b/;
+    // D1 fails such a statement when it runs, not when it is prepared.
+    const failing = (table: string) => {
+      const fail = () => Promise.reject(new Error(`D1_ERROR: no such table: ${table}`));
+      const statement = { bind: () => statement, all: fail, first: fail, run: fail };
+      return statement as unknown as ReturnType<D1Like["prepare"]>;
+    };
     const unmigrated: D1Like = {
-      prepare: (sql: string) => {
-        if (missing.test(sql)) throw new Error(`D1_ERROR: no such table (${sql.match(missing)![1]})`);
-        return db.prepare(sql);
-      },
-      batch: (statements) => db.batch(statements),
+      prepare: (sql: string) => (missing.test(sql) ? failing(sql.match(missing)![1]!) : db.prepare(sql)),
+      batch: (statements) => db.batch!(statements),
     };
     const results = await loadResults(unmigrated, site);
     assert.equal(results.links.own, null);

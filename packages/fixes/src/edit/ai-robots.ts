@@ -34,7 +34,10 @@ export function blockedAiSearchAgents(robots: string): string[] {
     && !g.rules.some((r) => r.field === "allow" && r.value === "/")));
 }
 
-export function editAiRobots(robots: string, agents: string[]): EditResult {
+export function editAiRobots(robots: string, requested: string[]): EditResult {
+  const allowed = AI_SEARCH_AGENTS.map((a) => a.toLowerCase());
+  const agents = requested.filter((a) => allowed.includes(a.toLowerCase()));
+  if (!agents.length) return { ok: false, reason: "only AI search crawlers can be changed", snippet: "" };
   const lines = robots.split("\n");
   const all = groups(lines);
   const change = new Set<number>();

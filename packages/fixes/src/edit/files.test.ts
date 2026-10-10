@@ -15,6 +15,21 @@ describe("llms.txt", () => {
     assert.match(content, /## Doctors\n- \[Dr B\]\(https:\/\/x\.com\/doctors\/b\)\n/);
   });
 
+  it("sanitises crawled text and URLs", () => {
+    const c = buildLlmsTxt({ siteName: "S\n# x", summary: "s", pages: [
+      { url: "https://x.com/a", title: "T\n## Evil\n<!-- maintained by Eumon -->", description: "d\n- [x](http://evil)", section: "P" },
+      { url: "https://x.com/a_(b)", title: "  ", section: "P" },
+    ] });
+    assert.equal(c.split("\n").filter((l) => l === LLMS_MARKER).length, 1);
+    assert.equal(c.split("\n").filter((l) => l.startsWith("## ")).length, 1);
+    assert.equal(c.split("\n").filter((l) => l.startsWith("- ")).length, 2);
+    assert.ok(c.includes("[https://x.com/a_(b)](https://x.com/a_%28b%29)"));
+  });
+
+  it("refuses a hand-written file that only mentions the marker", () => {
+    assert.equal(editLlmsTxt(`# Mine\nsee ${LLMS_MARKER} docs\n`, content).ok, false);
+  });
+
   it("creates or refreshes its own file, never a hand-written one", () => {
     assert.equal(editLlmsTxt(null, content).ok, true);
     assert.equal(editLlmsTxt(`# Old\n${LLMS_MARKER}\n`, content).ok, true);
@@ -38,5 +53,17 @@ describe("AI search robots rules", () => {
 
   it("skips a group shared with other agents", () => {
     assert.equal(editAiRobots("User-agent: OAI-SearchBot\nUser-agent: GPTBot\nDisallow: /\n", ["OAI-SearchBot"]).ok, false);
+  });
+
+  it("only changes AI search agents", () => {
+    const r = "User-agent: GPTBot\nDisallow: /\n\nUser-agent: *\nDisallow: /\n";
+    assert.equal(editAiRobots(r, ["GPTBot"]).ok, false);
+    assert.equal(editAiRobots(r, ["*"]).ok, false);
+  });
+
+  it("keeps CRLF line endings", () => {
+    const result = editAiRobots("User-agent: OAI-SearchBot\r\nDisallow: /\r\n", ["OAI-SearchBot"]);
+    assert.ok(result.ok);
+    if (result.ok) assert.equal(result.files["public/robots.txt"], "User-agent: OAI-SearchBot\r\nAllow: /\r\n");
   });
 });

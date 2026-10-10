@@ -20,7 +20,7 @@
     "audit": "npm run build:packages && node --disable-warning=ExperimentalWarning scripts/audit-site.mjs"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22.5"
   },
   "license": "MIT"
 }

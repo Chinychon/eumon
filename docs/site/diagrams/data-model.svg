@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 600" role="img" aria-labelledby="dg-data-model-title dg-data-model-desc">
+  <title id="dg-data-model-title">D1 data model by domain</title>
+  <desc id="dg-data-model-desc">Every domain hangs off the sites table and is deleted with it: analyses and crawl, the Results ledger, the landing-page engine, measurement, and Ask threads, with pages and crawl_counts cascading through analyses and generated_pages through page_templates.</desc>
+  <defs>
+    <marker id="dg-data-model-arrow" viewBox="0 0 8 6" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,3 L0,6 Z" class="d-arrowhead"/></marker>
+  </defs>
+
+  <rect x="0" y="0" width="960" height="600" class="d-paper"/>
+
+  <!-- Ownership: ON DELETE CASCADE from sites -->
+  <path d="M400,264 H180 Q172,264 172,256 V152" class="d-arrow" marker-end="url(#dg-data-model-arrow)"/>
+  <path d="M400,288 H180 Q172,288 172,296 V392" class="d-arrow" marker-end="url(#dg-data-model-arrow)"/>
+  <path d="M560,264 H780 Q788,264 788,256 V168" class="d-arrow" marker-end="url(#dg-data-model-arrow)"/>
+  <path d="M560,288 H780 Q788,288 788,296 V392" class="d-arrow" marker-end="url(#dg-data-model-arrow)"/>
+  <line x1="480" y1="240" x2="480" y2="136" class="d-arrow" marker-end="url(#dg-data-model-arrow)"/>
+
+
+  <!-- Analyses & crawl -->
+  <rect x="24" y="40" width="296" height="112" rx="0" class="d-node"/>
+  <text x="40" y="64" font-size="13" class="d-name d-ink">Analyses &amp; crawl</text>
+  <text x="40" y="88" font-size="10" class="d-mono d-ink">analyses</text>
+  <text x="40" y="104" font-size="10" class="d-mono d-muted">└ pages, crawl_counts</text>
+  <text x="40" y="120" font-size="10" class="d-mono d-ink">page_links</text>
+  <text x="40" y="136" font-size="10" class="d-mono d-soft">one run; crawl rows; link graph</text>
+
+  <!-- Ask -->
+  <rect x="384" y="40" width="192" height="96" rx="0" class="d-node"/>
+  <text x="400" y="64" font-size="13" class="d-name d-ink">Ask</text>
+  <text x="400" y="88" font-size="10" class="d-mono d-ink">assistant_threads</text>
+  <text x="400" y="104" font-size="10" class="d-mono d-muted">└ assistant_messages</text>
+  <text x="400" y="120" font-size="10" class="d-mono d-soft">saved conversations</text>
+
+  <!-- Results ledger -->
+  <rect x="640" y="40" width="296" height="128" rx="0" class="d-node"/>
+  <text x="656" y="64" font-size="13" class="d-name d-ink">Results ledger</text>
+  <text x="656" y="88" font-size="10" class="d-mono d-ink">metric_points</text>
+  <text x="656" y="104" font-size="10" class="d-mono d-ink">url_index_status</text>
+  <text x="656" y="120" font-size="10" class="d-mono d-ink">sync_runs</text>
+  <text x="656" y="136" font-size="10" class="d-mono d-ink">site_snapshots</text>
+  <text x="656" y="152" font-size="10" class="d-mono d-soft">metric × day; verdicts; runs; History</text>
+
+  <!-- Root -->
+  <rect x="400" y="240" width="160" height="72" rx="0" class="d-paper"/>
+  <rect x="400" y="240" width="160" height="72" rx="0" class="d-node-focal"/>
+  <text x="480" y="266" font-size="14" text-anchor="middle" class="d-name d-accent">sites</text>
+  <text x="480" y="284" font-size="10" text-anchor="middle" class="d-mono d-muted">base_url, gsc_property</text>
+  <text x="480" y="299" font-size="10" text-anchor="middle" class="d-mono d-muted">GitHub repo</text>
+
+  <!-- Landing-page engine -->
+  <rect x="24" y="392" width="296" height="128" rx="0" class="d-node"/>
+  <text x="40" y="416" font-size="13" class="d-name d-ink">Landing-page engine</text>
+  <text x="40" y="440" font-size="10" class="d-mono d-ink">datasets</text>
+  <text x="40" y="456" font-size="10" class="d-mono d-muted">└ data_sources, data_records</text>
+  <text x="40" y="472" font-size="10" class="d-mono d-muted">└ page_templates</text>
+  <text x="56" y="488" font-size="10" class="d-mono d-muted">└ generated_pages</text>
+  <text x="40" y="504" font-size="10" class="d-mono d-soft">records in, published pages out</text>
+
+  <!-- Measurement -->
+  <rect x="640" y="392" width="296" height="112" rx="0" class="d-node"/>
+  <text x="656" y="416" font-size="13" class="d-name d-ink">Measurement</text>
+  <text x="656" y="440" font-size="10" class="d-mono d-ink">page_sessions</text>
+  <text x="656" y="456" font-size="10" class="d-mono d-ink">conversion_events</text>
+  <text x="656" y="472" font-size="10" class="d-mono d-ink">leads</text>
+  <text x="656" y="488" font-size="10" class="d-mono d-soft">beacons from served pages</text>
+
+  <!-- Legend -->
+  <line x1="24" y1="544" x2="936" y2="544" class="d-zone"/>
+  <text x="24" y="567" font-size="9" letter-spacing="0.14em" class="d-mono d-soft">LEGEND</text>
+  <rect x="96" y="558" width="16" height="10" rx="0" class="d-node-focal"/>
+  <text x="120" y="567" font-size="9" class="d-mono d-muted">root table</text>
+  <rect x="212" y="558" width="16" height="10" rx="0" class="d-node"/>
+  <text x="236" y="567" font-size="9" class="d-mono d-muted">domain</text>
+  <line x1="304" y1="563" x2="332" y2="563" class="d-arrow" marker-end="url(#dg-data-model-arrow)"/>
+  <text x="340" y="567" font-size="9" class="d-mono d-muted">owns: ON DELETE CASCADE</text>
+  <text x="512" y="567" font-size="9" class="d-mono d-muted">└ cascades from the row above</text>
+  <text x="24" y="587" font-size="9" class="d-mono d-soft">18 more tables (settings, CTA variants, jobs, OAuth, daily rollups, crawl logs, index status of Eumon pages…) not drawn.</text>
+</svg>

@@ -1,0 +1,105 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 624" role="img" aria-labelledby="dg-package-deps-title dg-package-deps-desc">
+  <title id="dg-package-deps-title">Workspace package dependencies</title>
+  <desc id="dg-package-deps-desc">The web app depends on agents and scraper; agents orchestrates crawler, pages, db, repo-analyzer and ai; scraper uses crawler and ai; pages uses ai; every workspace except ai depends on core.</desc>
+  <defs>
+    <marker id="dg-package-deps-arrow" viewBox="0 0 8 6" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,3 L0,6 Z" class="d-arrowhead"/></marker>
+  </defs>
+
+  <rect x="0" y="0" width="960" height="624" class="d-paper"/>
+
+  <!-- Edges: "A → B" means A lists B in package.json dependencies -->
+  <!-- web → agents, web → scraper -->
+  <line x1="520" y1="96" x2="520" y2="160" class="d-arrow" marker-end="url(#dg-package-deps-arrow)"/>
+  <path d="M440,68 H128 Q120,68 120,76 V160" class="d-arrow" marker-end="url(#dg-package-deps-arrow)"/>
+  <!-- scraper → crawler, scraper → ai -->
+  <line x1="96" y1="216" x2="96" y2="280" class="d-arrow" marker-end="url(#dg-package-deps-arrow)"/>
+  <path d="M40,188 H32 Q24,188 24,196 V432 Q24,440 32,440 H440" class="d-arrow" marker-end="url(#dg-package-deps-arrow)"/>
+  <!-- agents → crawler, pages, db, repo-analyzer, ai -->
+  <path d="M480,216 V224 Q480,232 472,232 H152 Q144,232 144,240 V280" class="d-arrow" marker-end="url(#dg-package-deps-arrow)"/>
+  <path d="M520,216 V248 Q520,256 512,256 H328 Q320,256 320,264 V280" class="d-arrow" marker-end="url(#dg-package-deps-arrow)"/>
+  <line x1="560" y1="216" x2="560" y2="280" class="d-arrow" marker-end="url(#dg-package-deps-arrow)"/>
+  <path d="M600,200 H712 Q720,200 720,208 V280" class="d-arrow" marker-end="url(#dg-package-deps-arrow)"/>
+  <path d="M600,176 H832 Q840,176 840,184 V420 Q840,428 832,428 H600" class="d-arrow" marker-end="url(#dg-package-deps-arrow)"/>
+  <!-- pages → ai -->
+  <path d="M320,336 V408 Q320,416 328,416 H440" class="d-arrow" marker-end="url(#dg-package-deps-arrow)"/>
+
+  <!-- Rank 0: entry points -->
+  <rect x="440" y="40" width="160" height="56" rx="0" class="d-node"/>
+  <text x="452" y="66" font-size="13" class="d-name d-ink">web</text>
+  <text x="452" y="83" font-size="10" class="d-mono d-muted">apps/web</text>
+  <rect x="556" y="46" width="36" height="12" rx="2" class="d-node"/>
+  <text x="574" y="55" font-size="8" text-anchor="middle" class="d-mono d-muted">0 in</text>
+
+  <rect x="640" y="40" width="160" height="56" rx="0" class="d-node"/>
+  <text x="652" y="66" font-size="13" class="d-name d-ink">sdk</text>
+  <text x="652" y="83" font-size="10" class="d-mono d-muted">core only</text>
+  <rect x="756" y="46" width="36" height="12" rx="2" class="d-node"/>
+  <text x="774" y="55" font-size="8" text-anchor="middle" class="d-mono d-muted">0 in</text>
+
+  <!-- Rank 1 -->
+  <rect x="40" y="160" width="160" height="56" rx="0" class="d-node"/>
+  <text x="52" y="186" font-size="13" class="d-name d-ink">scraper</text>
+  <text x="52" y="203" font-size="10" class="d-mono d-muted">dataset pulls</text>
+  <rect x="156" y="166" width="36" height="12" rx="2" class="d-node"/>
+  <text x="174" y="175" font-size="8" text-anchor="middle" class="d-mono d-muted">1 in</text>
+
+  <rect x="440" y="160" width="160" height="56" rx="0" class="d-paper"/>
+  <rect x="440" y="160" width="160" height="56" rx="0" class="d-node-focal"/>
+  <text x="452" y="186" font-size="13" class="d-name d-accent">agents</text>
+  <text x="452" y="203" font-size="10" class="d-mono d-muted">orchestrator</text>
+  <rect x="556" y="166" width="36" height="12" rx="2" class="d-node"/>
+  <text x="574" y="175" font-size="8" text-anchor="middle" class="d-mono d-muted">1 in</text>
+
+  <!-- Rank 2 -->
+  <rect x="40" y="280" width="160" height="56" rx="0" class="d-node"/>
+  <text x="52" y="306" font-size="13" class="d-name d-ink">crawler</text>
+  <text x="52" y="323" font-size="10" class="d-mono d-muted">fetch as Googlebot</text>
+  <rect x="156" y="286" width="36" height="12" rx="2" class="d-node"/>
+  <text x="174" y="295" font-size="8" text-anchor="middle" class="d-mono d-muted">3 in</text>
+
+  <rect x="240" y="280" width="160" height="56" rx="0" class="d-node"/>
+  <text x="252" y="306" font-size="13" class="d-name d-ink">pages</text>
+  <text x="252" y="323" font-size="10" class="d-mono d-muted">generate, render</text>
+  <rect x="356" y="286" width="36" height="12" rx="2" class="d-node"/>
+  <text x="374" y="295" font-size="8" text-anchor="middle" class="d-mono d-muted">2 in</text>
+
+  <rect x="440" y="280" width="160" height="56" rx="0" class="d-node"/>
+  <text x="452" y="306" font-size="13" class="d-name d-ink">db</text>
+  <text x="452" y="323" font-size="10" class="d-mono d-muted">D1 queries</text>
+  <rect x="556" y="286" width="36" height="12" rx="2" class="d-node"/>
+  <text x="574" y="295" font-size="8" text-anchor="middle" class="d-mono d-muted">2 in</text>
+
+  <rect x="640" y="280" width="160" height="56" rx="0" class="d-node"/>
+  <text x="652" y="306" font-size="13" class="d-name d-ink">repo-analyzer</text>
+  <text x="652" y="323" font-size="10" class="d-mono d-muted">GitHub snapshot</text>
+  <rect x="756" y="286" width="36" height="12" rx="2" class="d-node"/>
+  <text x="774" y="295" font-size="8" text-anchor="middle" class="d-mono d-muted">2 in</text>
+
+  <!-- Rank 3 -->
+  <rect x="440" y="400" width="160" height="56" rx="0" class="d-node"/>
+  <text x="452" y="426" font-size="13" class="d-name d-ink">ai</text>
+  <text x="452" y="443" font-size="10" class="d-mono d-muted">LLM client, no deps</text>
+  <rect x="556" y="406" width="36" height="12" rx="2" class="d-node"/>
+  <text x="574" y="415" font-size="8" text-anchor="middle" class="d-mono d-muted">4 in</text>
+
+  <!-- Foundation -->
+  <rect x="24" y="496" width="912" height="48" rx="0" class="d-store"/>
+  <text x="40" y="525" font-size="13" class="d-name d-ink">core</text>
+  <text x="84" y="525" font-size="10" class="d-mono d-muted">shared types and helpers · every workspace above except ai depends on it (edges not drawn)</text>
+  <rect x="892" y="502" width="36" height="12" rx="2" class="d-node"/>
+  <text x="910" y="511" font-size="8" text-anchor="middle" class="d-mono d-muted">8 in</text>
+
+  <!-- Legend -->
+  <line x1="24" y1="568" x2="936" y2="568" class="d-zone"/>
+  <text x="24" y="591" font-size="9" letter-spacing="0.14em" class="d-mono d-soft">LEGEND</text>
+  <rect x="96" y="582" width="16" height="10" rx="0" class="d-node-focal"/>
+  <text x="120" y="591" font-size="9" class="d-mono d-muted">orchestrator</text>
+  <rect x="216" y="582" width="16" height="10" rx="0" class="d-node"/>
+  <text x="240" y="591" font-size="9" class="d-mono d-muted">workspace</text>
+  <rect x="324" y="582" width="16" height="10" rx="0" class="d-store"/>
+  <text x="348" y="591" font-size="9" class="d-mono d-muted">foundation</text>
+  <line x1="440" y1="587" x2="468" y2="587" class="d-arrow" marker-end="url(#dg-package-deps-arrow)"/>
+  <text x="476" y="591" font-size="9" class="d-mono d-muted">depends on</text>
+  <text x="580" y="591" font-size="9" class="d-mono d-muted">N in = dependents</text>
+  <text x="24" y="611" font-size="9" class="d-mono d-soft">web also lists ai, crawler, db, pages and repo-analyzer directly; those five edges are not drawn.</text>
+</svg>

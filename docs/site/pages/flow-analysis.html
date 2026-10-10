@@ -1,0 +1,152 @@
+<article id="flow-analysis" data-title="Site analysis" data-group="How it works">
+  <h1>Site analysis, end to end</h1>
+  <p class="lede">What happens between pressing "Run analysis" and a finished report: the API route, every step of the Cloudflare Workflow in order, what each step reads and writes, and how progress, cancellation and crawl cost are handled. Read this before changing <code class="path">apps/web/src/analysis-workflow.ts</code> or the crawl queue in <code class="path">packages/db/src/index.ts</code>.</p>
+
+  <figure data-diagram="analysis-flow"><figcaption>One analysis: the POST route creates the run, the Workflow crawls the sitemap in batches, researches competitors, loads the inventory, then analyses and saves the report in one final step.</figcaption></figure>
+
+  <dl class="facts">
+    <dt>Workflow class</dt><dd><code>SiteAnalysisWorkflow</code> in <code class="path">apps/web/src/analysis-workflow.ts:55</code></dd>
+    <dt>Binding</dt><dd><code>ANALYSIS_WORKFLOW</code> (Workflow name <code>site-analysis</code>), declared in <code class="path">apps/web/cloudflare.config.ts:27</code></dd>
+    <dt>Payload</dt><dd><code>{ analysisId, siteId, full? }</code></dd>
+    <dt>Main tables</dt><dd><code>analyses</code>, <code>pages</code>, <code>crawl_counts</code>, <code>page_links</code>, <code>search_metrics</code>, <code>metric_points</code>, <code>site_snapshots</code>, <code>sites</code> (see <a href="#data-model">Data model</a>)</dd>
+  </dl>
+
+  <h2 id="starting-a-run">Starting a run: the POST route</h2>
+  <p><code>POST /api/sites/[siteId]/analyses</code> lives in <code class="path">apps/web/app/api/sites/[siteId]/analyses/route.ts:27</code>. In order, it:</p>
+  <ol>
+    <li>Reads the JSON body. <code>full</code> is true only when the body has <code>full: true</code>; otherwise the run reuses crawl results that still stand (see <a href="#flow-analysis--workflow-steps">step 2, enqueue-full-crawl</a>).</li>
+    <li>Loads the site with <code>getSite</code>; 404 if it does not exist.</li>
+    <li>Looks at the latest analysis for the site (<code>getLatestAnalysisForSite</code>). If it is <code>queued</code> or <code>running</code>:
+      <ul>
+        <li>if <code>analysisStalled(latest)</code> is false, it answers 409 "An analysis is already running for this site.";</li>
+        <li>if it is stalled, it terminates that Workflow instance (errors ignored) and marks the old run <code>failed</code> with "It stopped making progress, so a new run replaced it." before starting the new one, so the old run cannot come back and write alongside it.</li>
+      </ul>
+    </li>
+    <li>Creates an id with <code>createId("analysis")</code>.</li>
+    <li><strong>Demo branch.</strong> If <code>siteId === DEMO_SITE_ID</code>, it calls <code>startDemoRun</code> and returns 202 with status <code>running</code>. No Workflow is created: the demo site is served from memory and its run is simulated as the progress view polls (the progress route calls <code>advanceDemoRun</code>).</li>
+    <li>Otherwise it inserts the <code>analyses</code> row with <code>createAnalysis</code> (status <code>queued</code>), then calls <code>env.ANALYSIS_WORKFLOW.create({ id: analysisId, params: { analysisId, siteId, full } })</code>. The Workflow instance id is the analysis id, which is how the cancel route and the stalled-run handling find it again.</li>
+    <li>If <code>create</code> throws, the row is marked <code>failed</code> with the error and the route answers 503. On success it answers 202 with status <code>queued</code>.</li>
+  </ol>
+  <p><code>analysisStalled</code> (<code class="path">packages/db/src/index.ts:209</code>) is true when a queued or running analysis has had no progress update for more than 45 minutes (<code>STALL_MS</code>), measured from <code>progress.updatedAt</code>, or from <code>created_at</code> if it never reported progress. A restarted local dev server ends Workflow runs without telling the database, which is what this catches.</p>
+
+  <h2 id="workflow-steps">The Workflow, step by step</h2>
+  <p>Each <code>step.do(name, ...)</code> is a durable step: its return value is stored, and if the Workflow resumes, finished steps are not run again. That shapes two rules visible throughout the file. Step outputs stay small (only plain fields cross a step boundary, and the large report is written to D1 inside the step rather than returned). And work that can fail on its own (one crawl batch, one competitor) gets its own step, so a retry repeats only that piece.</p>
+  <p>The whole <code>run</code> body sits in one <code>try</code>. Any error that escapes marks the analysis <code>failed</code> with the error message and <code>completed_at</code>, then rethrows (<code class="path">apps/web/src/analysis-workflow.ts:207</code>).</p>
+
+  <h3 id="load-site">1. load-site</h3>
+  <ul>
+    <li><strong>Writes:</strong> <code>analyses.status = 'running'</code> (<code>updateAnalysisStatus</code>), then progress stage <code>sitemap</code>, "Reading the sitemap".</li>
+    <li><strong>Reads:</strong> the <code>sites</code> row (<code>getSite</code>). A missing site throws <code>NonRetryableError("The site no longer exists.")</code>.</li>
+    <li><strong>Returns:</strong> only plain connection fields: <code>name</code>, <code>baseUrl</code>, <code>githubOwner</code>, <code>githubRepo</code>, <code>githubInstallationId</code>, <code>defaultBranch</code>, <code>gscProperty</code>.</li>
+    <li><strong>Retries:</strong> Workflow defaults (no retry config is passed).</li>
+  </ul>
+
+  <h3 id="enqueue-full-crawl">2. enqueue-full-crawl</h3>
+  <p>Calls <code>queueFullCrawl(db, { analysisId, siteId, baseUrl, maxUrls: MAX_FULL_CRAWL_URLS, full })</code> from <code class="path">packages/agents/src/pipeline.ts:85</code>, then sets progress stage <code>crawl</code>, "Crawling N sitemap URLs as Googlebot". <code>queueFullCrawl</code>:</p>
+  <ol>
+    <li>Reads every sitemap URL and its <code>lastmod</code> with <code>auditSitemap</code>, and robots.txt as it applies to Googlebot with <code>fetchRobots</code> (a failed fetch counts as no robots.txt).</li>
+    <li>Unless <code>full</code>, lists the runs it may reuse from with <code>listReusableAnalyses</code>: the last completed analysis, plus up to three newer runs that were cancelled or failed part-way. For each, <code>listCrawlStates</code> reads the per-URL state in pages of 5,000 rows. For each URL the newest fetch wins.</li>
+    <li>For each URL, up to <code>maxUrls</code>: a URL robots.txt blocks for Googlebot is queued as <code>blocked</code> and never fetched. Otherwise, if <code>shouldReuse</code> says the earlier result still stands, it is copied; else it is queued for fetching.</li>
+    <li>Copies reusable results with <code>reuseCrawlResults</code> (an <code>INSERT ... SELECT</code> into <code>pages</code> that keeps the original <code>crawled_at</code> and sets <code>reused_from</code>), then queues the rest with <code>enqueueAnalysisCrawlUrls</code> (rows in <code>pages</code> with <code>crawl_state</code> <code>pending</code> or <code>blocked</code>). Both finish with <code>recountCrawl</code>, which rebuilds the <code>crawl_counts</code> rows from scratch.</li>
+  </ol>
+  <p><code>shouldReuse</code> (<code class="path">packages/agents/src/pipeline.ts:68</code>) only carries over successful fetches (<code>crawl_state = 'complete'</code>). With a sitemap <code>lastmod</code>, a page changed on or after the day it was crawled is fetched again, and results older than 30 days are refreshed anyway. Without a <code>lastmod</code>, results older than 7 days are refreshed.</p>
+  <p>The step returns <code>{ declared, queued, reused, reusedFrom? }</code>. <code>queued</code> counts URLs to fetch, excluding blocked ones; it drives the batch loop. <code>declared</code> and <code>reused</code> end up in the saved report.</p>
+
+  <h3 id="crawl-batches">3. crawl-batch-0, crawl-batch-1, ...</h3>
+  <dl class="facts">
+    <dt><code>CRAWL_BATCH_SIZE</code></dt><dd>100 URLs per step</dd>
+    <dt><code>CRAWL_CONCURRENCY</code></dt><dd>6 fetches in flight within a batch</dd>
+    <dt><code>MAX_FULL_CRAWL_URLS</code></dt><dd>25,000 sitemap URLs per analysis (the comment puts that at about 250 Workflow steps)</dd>
+    <dt>Retries</dt><dd><code>limit: 2, delay: "10 seconds", backoff: "exponential"</code></dd>
+  </dl>
+  <p>Constants are at <code class="path">apps/web/src/analysis-workflow.ts:51</code>. The loop runs while <code>batch * 100 &lt; queued + 100</code>, one iteration more than the queue needs, and stops early when a batch returns 0. Each step:</p>
+  <ol>
+    <li><code>listPendingCrawlUrls(db, analysisId, 100)</code>: the next 100 rows of this analysis with <code>crawl_state = 'pending'</code>. If there are none, the step returns 0 and the loop ends.</li>
+    <li><code>crawlGooglebotBatch(urls, undefined, 6)</code> (<code class="path">packages/crawler/src/index.ts:379</code>): fetches each URL as Googlebot with six workers. A fetch that throws becomes an outcome with an <code>error</code> instead of failing the batch.</li>
+    <li><code>saveCrawlBatch</code> (<code class="path">packages/db/src/index.ts:542</code>): each fetched page becomes <code>crawl_state = 'complete'</code> with its status, title, empty-shell flag and a <code>result_json</code> of the page's signals; each error becomes <code>crawl_state = 'failed'</code> with the error in <code>result_json</code>. It updates <code>crawl_counts</code> by delta, sets <code>analyses.crawl_recent</code>, and replaces each fetched page's outgoing links in <code>page_links</code>. See <a href="#flow-analysis--crawl-cost">Crawl cost</a>.</li>
+    <li>Progress: "Crawled X of N sitemap URLs as Googlebot", where X is <code>min((batch + 1) * 100, queued)</code>. That message is an estimate; the exact numbers come from <code>crawl_counts</code>.</li>
+  </ol>
+  <p>Because the step reads its URLs from the database instead of from a list fixed earlier, a retry picks up whatever is still pending. Every update in <code>saveCrawlBatch</code> is guarded by <code>crawl_state = 'pending'</code>, so a retried save cannot change a row or a counter twice. Failed URLs stay <code>failed</code>; they are not fetched again in the same run.</p>
+
+  <h3 id="competitors">4. list-competitors and research-&lt;domain&gt;</h3>
+  <ul>
+    <li><strong>list-competitors</strong> sets progress stage <code>competitors</code> and returns the site's competitor domains from <code>site_competitor_domains</code> (<code>listSiteCompetitorDomains</code>), capped at <code>MAX_COMPETITORS</code> (5, <code class="path">packages/agents/src/pipeline.ts:167</code>).</li>
+    <li><strong>research-&lt;domain&gt;</strong>, one step per competitor, with <code>retries: { limit: 1, delay: "10 seconds" }</code>. It reports progress with <code>{ competitor, done, of }</code> in <code>detail</code>, then calls <code>researchSite(domain, undefined, { maxFiles: 15, maxUrls: 50_000 })</code>: the competitor's sitemaps and a few sample pages, fetched as EumonBot. The result's sitemap families are cut to the 40 largest before returning, to keep the step output small.</li>
+  </ul>
+  <p>One slow or failing competitor retries on its own and does not repeat the others. Nothing is written to D1 here; the research is passed in memory to the last step.</p>
+
+  <h3 id="inventory">5. inventory</h3>
+  <p><code>loadInventories(db, siteId, { analysisId })</code> (<code class="path">packages/agents/src/inventory-data.ts:12</code>) reads up to three of the site's datasets with records (largest first) and computes each one's inventory: fill per field, duplicate records, and thin record pages in the crawl. Any error returns <code>[]</code>. It is its own step so its queries have their own budget and a failure costs only the inventory findings. Read-only.</p>
+
+  <h3 id="analyze">6. analyze-repository-and-site</h3>
+  <p>The last step, with <code>retries: { limit: 2, delay: "5 seconds", backoff: "exponential" }</code>. It sets progress stage <code>analysis</code>, "Checking rendering, indexing, and search data", then gathers inputs:</p>
+  <ul>
+    <li><strong>Repository snapshot.</strong> Only when the site has a GitHub installation, owner and repo: <code>createInstallationToken</code> (with <code>GITHUB_APP_ID</code> and <code>GITHUB_APP_PRIVATE_KEY</code>), <code>createGitHubApiClient</code>, then <code>buildRepoSnapshotFromGitHub</code> on <code>defaultBranch</code> (default <code>main</code>), from <code>@organic-growth/repo-analyzer</code>.</li>
+    <li><strong>LLM.</strong> <code>createLlm(env)</code> picks DeepSeek, Anthropic, or Workers AI depending on what is configured (<code class="path">packages/ai/src/index.ts:50</code>). If none is, it throws and the step carries on without one: content types are then matched by name and the plan text stays deterministic.</li>
+    <li><strong>Search Console.</strong> Only when <code>gscProperty</code> is set: <code>googleAccessToken</code> (<code class="path">apps/web/src/gsc-auth.ts:40</code>, reads the encrypted Google credential from <code>oauth_credentials</code>), <code>fetchSearchConsoleMetrics</code>, then <code>replaceCurrentSearchMetrics</code>, which replaces the site's rows in <code>search_metrics</code>. An error here fails the step (it is not caught).</li>
+    <li><strong>Not-found probe.</strong> <code>probeNotFound(baseUrl, analysisId)</code> fetches one URL that cannot exist. Its title, if the site answers under 400, tells the coverage query which page titles are soft 404s.</li>
+    <li><strong>Crawl results and site data</strong>, in parallel: <code>getCrawlCoverage</code> (aggregate counts and issue examples over every crawl row), <code>listCrawlPageResults(db, analysisId, 50)</code>, <code>datasetCoverage</code>, <code>listSiteMarkets</code>, <code>listRecordKeys</code>, <code>listSiteCompetitorDomains</code>.</li>
+    <li><strong>Keywords.</strong> <code>loadKeywords</code> (<code class="path">apps/web/src/keywords-data.ts</code>): the keyword lists from the Performance sync. An enrichment only: on error it is <code>undefined</code>.</li>
+    <li><strong>Connector signals.</strong> <code>loadConnectorLists</code> (search results pages, suggested competitors, backlinks and link gap from <code>site_snapshots</code>, and six months of crawl-log days), <code>crawlLogCoverage</code>, and <code>searchConsoleReconciliation</code>, then <code>loadTrendSignals</code> (daily series from <code>metric_points</code>); <code>connectorSignals</code> combines them with the inventory. If anything in that chain throws, it falls back to empty lists plus the inventory, so connectors never fail an analysis.</li>
+  </ul>
+  <p>Then <code>runFullAnalysis</code> (<code class="path">packages/agents/src/pipeline.ts:169</code>) runs with <code>maxPages: 25</code>. It analyses the repository snapshot; samples up to 25 sitemap URLs and fetches each as a browser and as Googlebot; renders one page per template (up to six) in a real browser through the <code>renderPages</code> callback; refetches a sample three times to catch intermittent failures; compares competitors (using the LLM to label content types when there is one); and produces the findings, opportunities and growth plan. How findings are produced and ranked is on <a href="#findings">Findings</a>.</p>
+  <p><code>renderPages</code> (<code class="path">apps/web/src/analysis-workflow.ts:215</code>) uses Browser Rendering through <code>@cloudflare/puppeteer</code> and the <code>BROWSER</code> binding. It intercepts requests, letting through only safe public URLs and same-origin navigations, waits for <code>networkidle2</code> (20 s timeout, then whatever has rendered), and keeps a page's HTML only if it ended on the same origin. A page that fails is skipped; the others are kept.</p>
+  <p>After <code>runFullAnalysis</code>:</p>
+  <ol>
+    <li>With an LLM, <code>synthesizePlanNarrative</code> rewrites the plan's headline text for a business owner; the evidence-derived priorities are not changed.</li>
+    <li>If the repository gave a framework fingerprint, <code>updateSiteFingerprint</code> writes it to <code>sites.fingerprint_json</code>.</li>
+    <li>Progress stage <code>saving</code>, "Saving findings and growth plan".</li>
+    <li><code>saveAnalysisReport</code> (<code class="path">packages/db/src/index.ts:355</code>) with the report plus <code>sitemapUrlsDeclared</code> and, when results were reused, <code>crawlReuse</code>.</li>
+    <li>The step returns <code>plan.highestImpactOpportunity</code>, a single string. The full report can exceed the Workflow step-output size limit, which is why it is saved inside the step and not returned.</li>
+  </ol>
+
+  <h3 id="saving-the-report">What saveAnalysisReport writes</h3>
+  <ul>
+    <li><code>analyses</code>: <code>report_json</code> (passed through <code>compactReport</code>, which keeps it under 1,500,000 bytes by dropping sampled pages, then evidence beyond the top 10 findings, then repository route lists, then all evidence), <code>summary</code>, <code>status = 'completed'</code>, <code>completed_at</code>. The update only applies while the run is still queued or running, so a cancelled run is never turned into a completed one.</li>
+    <li><code>metric_points</code>: the site-health points for Results (<code>analysisHealthPoints</code>: crawl coverage counts and AI crawler access).</li>
+    <li><code>site_snapshots</code>: the run's finding key list (<code>saveFindingKeys</code>, kind <code>finding_keys</code>) for the History tab. It runs before pruning because it needs the previous crawl's rows to decide which findings vanished. See <a href="#findings--history">Findings: History</a>.</li>
+    <li><code>pages</code>: <code>pruneCrawlResults</code> deletes the crawl rows of older analyses, keeping the latest two completed runs (<code>KEPT_CRAWLS</code>) and anything newer than the latest completed run. Reports and <code>crawl_counts</code> stay.</li>
+  </ul>
+  <p>The last three are each wrapped in their own <code>try</code>: a missing table (code deployed before its migration) costs only that extra, never the report.</p>
+
+  <h2 id="progress">Progress reporting</h2>
+  <p>Inside the Workflow, every stage change goes through a local <code>progress(stage, message, detail?)</code> helper that calls <code>updateAnalysisProgress</code> (<code class="path">packages/db/src/index.ts:219</code>). That function writes <code>analyses.progress_json</code>:</p>
+  <ul>
+    <li><code>stage</code> and <code>message</code>: the current stage (<code>sitemap</code>, <code>crawl</code>, <code>competitors</code>, <code>analysis</code>, <code>saving</code>) and its text;</li>
+    <li><code>detail</code>: stage-specific facts, such as the competitor being read;</li>
+    <li><code>history</code>: when each stage began, appended only when the stage changes, last 12 kept, so the dashboard can time stages;</li>
+    <li><code>updatedAt</code>: the time of this update, which <code>analysisStalled</code> reads.</li>
+  </ul>
+  <p>The crawl's own numbers do not come from <code>progress_json</code>. They come from two places kept up to date by <code>saveCrawlBatch</code>:</p>
+  <ul>
+    <li><code>crawl_counts</code> (migration <code class="path">packages/db/migrations/0020_crawl_counts.sql</code>): one row per analysis and page type (route family) with counters <code>total</code>, <code>pending</code>, <code>blocked</code>, <code>fetched</code>, <code>failed</code>, <code>reused</code>, <code>ok</code>, <code>http_errors</code>, <code>empty_shells</code>, <code>noindex</code>, <code>challenges</code>, plus <code>first_at</code> and <code>last_at</code> of this run's own fetches. The progress view reads these few rows instead of counting a 25,000-row crawl every poll.</li>
+    <li><code>analyses.crawl_recent</code>: the last eight URLs of the latest saved batch, newest first, for the "just fetched" list.</li>
+  </ul>
+  <p><code>GET /api/analyses/[analysisId]/progress</code> (<code class="path">apps/web/app/api/analyses/[analysisId]/progress/route.ts</code>) returns the job's status, <code>progress</code>, error, summary, <code>stalled: analysisStalled(job)</code>, and <code>crawl</code>: <code>getCrawlProgress</code> (<code class="path">packages/db/src/index.ts:1054</code>) merged with <code>estimateCrawl</code>. <code>getCrawlProgress</code> sums the <code>crawl_counts</code> rows, lists up to 40 page types by size, and looks up the <code>crawl_recent</code> URLs in <code>pages</code> (this run's own fetches only). <code>estimateCrawl</code> gives pages per minute and seconds left, and leaves both out until a minute and 100 pages have passed.</p>
+
+  <h2 id="cancellation">Cancellation</h2>
+  <p><code>POST /api/analyses/[analysisId]/cancel</code> (<code class="path">apps/web/app/api/analyses/[analysisId]/cancel/route.ts</code>) answers 404 for an unknown analysis and 409 if it is not queued or running. Otherwise it terminates the Workflow instance (errors ignored: a restarted dev server may already have ended it) and sets the row to <code>cancelled</code> with <code>completed_at</code>.</p>
+  <p>Terminating the instance is not relied on alone. <code>updateAnalysisProgress</code> updates with <code>WHERE id = ? AND status IN ('queued', 'running') RETURNING id</code> and returns false when no row matched. The Workflow's <code>progress</code> helper turns false into <code>NonRetryableError("The analysis was cancelled.")</code>, so a run whose instance kept going stops at its next progress update without retrying. The <code>catch</code> then tries to mark it failed, but <code>updateAnalysisStatus</code> has the same open-status guard, so the row stays <code>cancelled</code>.</p>
+  <div class="callout note"><p>A crawl batch reports progress after it saves, so a run cancelled mid-batch still writes that batch's rows before it stops. Rows written by a cancelled run are useful: <code>listReusableAnalyses</code> lets the next run reuse them.</p></div>
+
+  <h2 id="crawl-cost">Crawl cost</h2>
+  <p>D1 counts rows read against a daily budget. A crawl runs up to about 250 batches, so any query in the batch loop that touches every row of the analysis costs one row read per sitemap URL per batch. The test comment in <code class="path">packages/db/src/crawl.test.ts:343</code> records that both crawl queue queries once did exactly that, and on a 23,000-URL site one crawl used D1's daily row budget. Two details in <code class="path">packages/db/src/index.ts</code> prevent it.</p>
+
+  <h3 id="no-order-by">listPendingCrawlUrls has no ORDER BY</h3>
+  <pre><code>SELECT url FROM pages
+WHERE analysis_id = ? AND crawl_state = 'pending'
+LIMIT ?</code></pre>
+  <p><code>pages</code> has primary key <code>(analysis_id, url)</code> and an index <code>idx_pages_analysis_crawl_state</code> on <code>(analysis_id, crawl_state)</code>. With <code>ORDER BY url</code>, SQLite walks the primary key in URL order and reads past every already-crawled row to find pending ones, so later batches read almost the whole analysis. Without it, SQLite reads the next pending rows straight off the crawl-state index. The order of the crawl does not matter, so the query leaves it out on purpose (<code class="path">packages/db/src/index.ts:527</code>).</p>
+
+  <h3 id="counter-deltas">saveCrawlBatch updates counters by delta</h3>
+  <p>Counting the crawl after every batch would read every row. Instead, <code>saveCrawlBatch</code> works in groups of 40 outcomes, each group one D1 batch of statements:</p>
+  <ol>
+    <li><code>countDelta(-1)</code> over the group's URLs that are still pending: their current contribution comes off <code>crawl_counts</code>;</li>
+    <li>the row updates, each guarded by <code>crawl_state = 'pending'</code>;</li>
+    <li><code>countDelta(+1)</code> over the group's URLs whose <code>crawled_at</code> equals this save's timestamp: their new contribution goes on, and <code>first_at</code>/<code>last_at</code> widen.</li>
+  </ol>
+  <p>A retried save finds no pending rows and no rows with its new timestamp, so nothing moves twice. <code>countDelta</code> (<code class="path">packages/db/src/index.ts:1031</code>) is an <code>INSERT ... SELECT ... GROUP BY route_family ... ON CONFLICT DO UPDATE</code> that adds each counter's condition, signed, to the existing row.</p>
+  <p>The subtract statement's filter is written <code>+crawl_state = 'pending' AND url IN (...)</code>. The unary <code>+</code> stops SQLite from using the crawl-state index for that term, so it looks the batch's rows up by primary key (<code>analysis_id=? AND url=?</code>) instead of scanning every pending row of the analysis. The second test in the <code>crawl queue query plans</code> suite asserts that plan, and the first asserts that <code>listPendingCrawlUrls</code> uses <code>idx_pages_analysis_crawl_state</code> (<code class="path">packages/db/src/crawl.test.ts:342</code>).</p>
+  <div class="callout trap"><p>Adding an <code>ORDER BY</code> to <code>listPendingCrawlUrls</code>, or dropping the <code>+</code> in front of <code>crawl_state</code>, passes every functional test and still turns each batch into a full-analysis scan. Change either query only with the query-plan tests running. See <a href="#gotchas">Gotchas</a>.</p></div>
+  <p><code>recountCrawl</code>, which deletes and rebuilds an analysis's counters with a full count, runs only after queueing and after reuse, never inside the batch loop.</p>
+</article>

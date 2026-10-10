@@ -2,7 +2,7 @@ import { createLlm, type JsonLlm } from "@organic-growth/ai";
 import type { SiteRecord } from "@organic-growth/core";
 import { defaultFetcher } from "@organic-growth/crawler";
 import { getAnalysisJob, getFixSettings, getSite, listPageHeads, listTopQueries, type D1Like } from "@organic-growth/db";
-import { blockedAiSearchAgents, detect, LLMS_MARKER, type FixCandidate, type RouteRef } from "@organic-growth/fixes";
+import { blockedAiSearchAgents, detect, LLMS_MARKER, ROOT_LAYOUTS, type FixCandidate, type RouteRef } from "@organic-growth/fixes";
 import type { AppEnv } from "../cloudflare.config";
 import { fixRepoFor } from "./fix-github.ts";
 import { checkMergedFixes, openStagedFixes, stageCandidates, type FixDeps } from "./fix-run.ts";
@@ -52,7 +52,7 @@ export async function runFixSteps(env: AppEnv, step: FixStep, siteId: string, an
     const { repo } = await fixRepoFor(env, site);
     const settings = await settingsFor(site);
     const fixSettings = await getFixSettings(db, siteId);
-    const layoutPath = ["app/layout.tsx", "src/app/layout.tsx", "app/layout.jsx", "src/app/layout.jsx"].find((p) => repo.treePaths.includes(p));
+    const layoutPath = ROOT_LAYOUTS.find((p) => repo.treePaths.includes(p));
     const layout = layoutPath ? await readOrNull(repo, layoutPath) : null;
     const llms = repo.treePaths.includes("public/llms.txt") ? await readOrNull(repo, "public/llms.txt") : null;
     const robots = repo.treePaths.includes("public/robots.txt") ? await readOrNull(repo, "public/robots.txt") : null;

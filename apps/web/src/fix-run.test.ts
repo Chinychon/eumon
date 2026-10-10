@@ -330,3 +330,44 @@ describe("parseFixSettings", () => {
     assert.equal(typeof parseFixSettings(null), "string");
   });
 });
+
+const aboutFile = `export const metadata = {\n  title: "About us",\n};\nexport default function Page() { return <main><h1>About</h1></main>; }\n`;
+const about: FixCandidate = {
+  kind: "head", file: "app/about/page.tsx",
+  route: { pathPattern: "/about", source: "app/about/page.tsx", dynamic: false, rendering: "static", metadata: "server" },
+  problems: ["hreflang-missing"], urls: ["https://x.com/about", "https://x.com/id/about"], pageCount: 2, score: 6, pathLocales: { "/about": ["default", "id"] },
+};
+
+describe("hreflang and alternates (I1)", () => {
+  it("leaves hreflang to a snippet on a route under a [locale] segment", async () => {
+    const { db, deps, files } = await setup();
+    files["app/[locale]/about/page.tsx"] = { content: aboutFile, sha: "a1" };
+    const route = { ...about.route!, pathPattern: "/:locale/about", source: "app/[locale]/about/page.tsx", dynamic: true };
+    await stageCandidates(deps, { ...input, candidates: [{ ...about, file: route.source, route }] });
+    const [fix] = await listFixes(db, "s");
+    assert.equal(fix?.status, "skipped");
+    assert.deepEqual(fix?.files, {});
+    assert.match(fix?.snippet ?? "", /languages/);
+  });
+
+  it("builds languages only from the locales the path exists in", async () => {
+    const { db, deps, files } = await setup();
+    files["app/about/page.tsx"] = { content: aboutFile, sha: "a1" };
+    await stageCandidates(deps, { ...input, candidates: [about] });
+    const [fix] = await listFixes(db, "s");
+    assert.equal(fix?.status, "staged", fix?.result ?? "");
+    assert.match(fix!.files["app/about/page.tsx"]!, /languages: \{ "x-default": "\/about", "en": "\/about", "id": "\/id\/about" \}/);
+    assert.doesNotMatch(fix!.files["app/about/page.tsx"]!, /zh/);
+  });
+
+  it("skips a canonical-only alternates when the crawled pages already have hreflang", async () => {
+    const { db, deps, files } = await setup();
+    files["app/about/page.tsx"] = { content: aboutFile, sha: "a1" };
+    const pages = [{ url: "https://x.com/about", status: 200, title: "About", hreflang: [{ lang: "id", href: "https://x.com/id/about" }], jsonLdTypes: [] }];
+    await stageCandidates(deps, { ...input, pages, candidates: [{ ...about, problems: ["canonical-missing"], urls: ["https://x.com/about"], pathLocales: undefined }] });
+    const [fix] = await listFixes(db, "s");
+    assert.equal(fix?.status, "skipped");
+    assert.match(fix?.result ?? "", /replace/);
+    assert.match(fix?.snippet ?? "", /canonical: "\/about"/);
+  });
+});

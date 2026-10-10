@@ -37,8 +37,8 @@ export type FixCandidate = {
   pageCount: number;
   score: number;
   schemaType?: string;
-  /** Locale prefixes seen on the site (e.g. ["id", "zh"]), for hreflang. */
-  locales?: string[];
+  /** For hreflang: each affected path without its locale prefix → the locales it exists in ("default" = unprefixed), e.g. { "/a": ["default", "id"] }. */
+  pathLocales?: Record<string, string[]>;
 };
 
 export type Edit = { start: number; end: number; text: string };

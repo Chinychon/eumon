@@ -5,7 +5,7 @@ import { parseHtmlSignals, visibleText } from "@organic-growth/crawler";
 import { countOpenFixes, hasLiveFix, listFixes, stageFix, updateFix, type D1Like, type FixRecord, type FixSettings } from "@organic-growth/db";
 import {
   blockedAiSearchAgents, buildLlmsTxt, componentPath, editAiRobots, editJsonLd, editLlmsTxt, editMetadata, editMetadataBase, findMetadata, findPage,
-  JSON_LD_COMPONENT, jsonLdCode, jsonLdSnippet, memberPaths, metadataSnippet, parseModule, pathOf, routeForPath, stripLocale, urlTemplate, validateEdit, validateFile,
+  JSON_LD_COMPONENT, jsonLdCode, jsonLdSnippet, memberPaths, metadataSnippet, parseModule, pathOf, propertyNamed, routeForPath, stripLocale, urlTemplate, validateEdit, validateFile,
   type AstNode, type Edit, type EditResult, type FixCandidate, type MetadataPlan, type PageHead, type Range, type RouteRef,
 } from "@organic-growth/fixes";
 
@@ -19,7 +19,7 @@ export type StageInput = {
 export type PrOps = { createPr(input: { branch: string; title: string; body: string; files: Record<string, string> }): Promise<{ number: number; url: string; nodeId: string; headSha: string }> };
 
 /** What one candidate became; the loop adds the shared fields. */
-type Outcome = Pick<FixRecord, "title" | "reason"> & Partial<Pick<FixRecord, "status" | "files" | "original" | "fileSha" | "snippet" | "beforeSnippet" | "afterSnippet" | "promptSha" | "warnings" | "result">>;
+type Outcome = Pick<FixRecord, "title" | "reason"> & Partial<Pick<FixRecord, "status" | "problems" | "files" | "original" | "fileSha" | "snippet" | "beforeSnippet" | "afterSnippet" | "promptSha" | "warnings" | "result">>;
 type Ctx = { deps: FixDeps; input: StageInput; c: FixCandidate };
 
 const sentence = (reason: string, snippet: string) => /^[A-Z].*\.$/.test(reason)
@@ -87,6 +87,15 @@ const HEAD_LABELS: Array<[string, string]> = [["title", "titles"], ["description
 const listOf = (words: string[]) => (words.length > 1 ? `${words.slice(0, -1).join(", ")} and ${words.at(-1)}` : words[0] ?? "head tags");
 const headTitle = (keys: string[], route: string) => `Set ${listOf(HEAD_LABELS.filter(([k]) => keys.some((x) => x.startsWith(k))).map(([, label]) => label))} on ${route}`;
 
+/** hreflang for one route: x-default and the default language on the unprefixed path, plus the locales every affected path exists in. Null when fewer than two languages remain. */
+function languagesFor(tpl: string, pathLocales: Record<string, string[]>, language: string): Record<string, string> | null {
+  const sets = Object.values(pathLocales);
+  const common = sets.length ? sets.reduce((a, b) => a.filter((l) => b.includes(l))) : [];
+  const prefixed = common.filter((l) => l !== "default").map((l) => [l, tpl === "/" ? `/${l}` : `/${l}${tpl}`] as const);
+  const languages = { ...(common.includes("default") ? { [language]: tpl } : {}), ...Object.fromEntries(prefixed) };
+  return Object.keys(languages).length >= 2 ? { "x-default": tpl, ...languages } : null;
+}
+
 async function stageHead(ctx: Ctx): Promise<Outcome> {
   const { deps, input, c } = ctx;
   const route = c.route!;
@@ -99,13 +108,31 @@ async function stageHead(ctx: Ctx): Promise<Outcome> {
   const names = site.kind === "object" || site.kind === "function" ? site.names : [];
   const paths = memberPaths(program, names);
   const tpl = urlTemplate(route.pathPattern, names, file.content);
+  // `wanted` is the whole change, for the snippet; `plan` is the part Eumon can safely edit.
+  const wanted: MetadataPlan = {};
   const plan: MetadataPlan = {};
-  if (c.problems.includes("canonical-missing") && tpl) plan.canonical = tpl;
-  if (c.problems.includes("hreflang-missing") && tpl) {
-    plan.languages = { "x-default": tpl, [input.language]: tpl, ...Object.fromEntries((c.locales ?? []).map((l) => [l, `/${l}${tpl}`])) };
+  const held: string[] = [];
+  const first = route.pathPattern.split("/").filter(Boolean)[0] ?? "";
+  if (c.problems.includes("hreflang-missing") && (first.startsWith(":") || stripLocale(route.pathPattern).locale)) {
+    const pattern = tpl ?? route.pathPattern.replace(/:(\w+)/g, "{$1}");
+    wanted.languages = { "x-default": pattern };
+    held.push("the route sits under a locale segment, so its hreflang tags belong where the locales are defined");
+  } else if (c.problems.includes("hreflang-missing") && tpl) {
+    const languages = languagesFor(tpl, c.pathLocales ?? {}, input.language);
+    if (!languages) held.push("the affected pages don't exist in the same locales");
+    else plan.languages = wanted.languages = languages;
+  }
+  if (c.problems.includes("canonical-missing") && tpl) {
+    wanted.canonical = tpl;
+    const hasAlternates = (site.kind === "object" || site.kind === "function") && Boolean(propertyNamed(site.object, "alternates"));
+    const crawled = new Map(input.pages.map((p) => [p.url, p]));
+    // Next.js replaces a parent's `alternates` wholesale, so a canonical-only one would drop hreflang set higher up.
+    if (!plan.languages && !hasAlternates && c.urls.some((u) => crawled.get(u)?.hreflang.length)) {
+      held.push("the pages get hreflang tags from a layout, and a new `alternates` here would replace them");
+    } else plan.canonical = tpl;
   }
   const wantsTitle = c.problems.some((p) => p.startsWith("title-")), wantsDescription = c.problems.some((p) => p.startsWith("description-"));
-  const placeholder = { ...plan, ...(wantsTitle ? { title: `Page title | ${input.siteName}` } : {}), ...(wantsDescription ? { description: "One or two sentences on what this page offers." } : {}) };
+  const placeholder = { ...wanted, ...(wantsTitle ? { title: `Page title | ${input.siteName}` } : {}), ...(wantsDescription ? { description: "One or two sentences on what this page offers." } : {}) };
   if (site.kind === "unsupported") return skip(title, site.reason, metadataSnippet(placeholder, route.dynamic));
 
   let aiReason: string | null = null, warnings: string[] = [], promptSha: string | undefined;
@@ -126,10 +153,14 @@ async function stageHead(ctx: Ctx): Promise<Outcome> {
       }
     }
   }
-  if (!Object.keys(plan).length) return skip(title, aiReason ?? "there's nothing to change", metadataSnippet(placeholder, route.dynamic));
+  if (!Object.keys(plan).length) return skip(title, aiReason ?? held[0] ?? "there's nothing to change", metadataSnippet(placeholder, route.dynamic));
   if (aiReason) warnings = [...warnings, aiReason];
+  warnings = [...warnings, ...held.map((why) => `This pull request leaves out part of the fix because ${why}; make that part by hand.`)];
+  // Only what the edit sets is checked on the preview and after merging.
+  const fixed = c.problems.filter((p) => (p.startsWith("title-") && plan.title) || (p.startsWith("description-") && plan.description)
+    || (p === "canonical-missing" && plan.canonical) || (p === "hreflang-missing" && plan.languages));
   const out = staged(ctx, headTitle(Object.keys(plan).map((k) => (k === "languages" ? "hreflang" : k)), route.pathPattern), { path: c.file, ...file }, editMetadata(file.content, plan, route.dynamic), rootsOf(paths));
-  return out.status === "staged" ? { ...out, warnings, ...(promptSha ? { promptSha } : {}) } : out;
+  return out.status === "staged" ? { ...out, problems: fixed, warnings, ...(promptSha ? { promptSha } : {}) } : out;
 }
 
 async function stageMetadataBase(ctx: Ctx): Promise<Outcome> {
@@ -213,7 +244,7 @@ export async function stageCandidates(deps: FixDeps, input: StageInput): Promise
       const at = deps.now().toISOString();
       await stageFix(deps.db, {
         id: createId("fix"), siteId: input.siteId, analysisId: input.analysisId, kind: c.kind, route, filePath: c.file,
-        files: {}, original: {}, warnings: [], status: "skipped", ...outcome, urls: c.urls, problems: c.problems, score: c.score, createdAt: at, updatedAt: at,
+        files: {}, original: {}, warnings: [], status: "skipped", problems: c.problems, ...outcome, urls: c.urls, score: c.score, createdAt: at, updatedAt: at,
       });
       counts[outcome.status === "staged" ? "staged" : "skipped"]++;
     } catch (error) {

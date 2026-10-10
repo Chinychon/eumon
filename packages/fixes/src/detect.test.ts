@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { detect, schemaTypeFor } from "./detect.js";
+import { detect, ROOT_LAYOUTS, schemaTypeFor } from "./detect.js";
 import { routeForPath, stripLocale } from "./match.js";
 import type { DetectInput, PageHead, RouteRef } from "./types.js";
 
@@ -60,7 +60,24 @@ describe("detect", () => {
     const head = detect({ ...base, pages }).find((c) => c.kind === "head");
     assert.deepEqual(head?.problems, ["hreflang-missing"]);
     assert.deepEqual(head?.urls.sort(), ["https://x.com/id/procedures/a", "https://x.com/procedures/a"]);
-    assert.deepEqual(head?.locales, ["id"]);
+    assert.deepEqual(head?.pathLocales, { "/procedures/a": ["default", "id"] });
+  });
+
+  it("proposes nothing for canonicals and hreflang while the root layout is unknown (C1)", () => {
+    const pages = [page("https://x.com/procedures/a", { canonical: undefined }), page("https://x.com/id/procedures/a", { canonical: undefined })];
+    const out = detect({ ...base, pages, rootLayout: undefined });
+    assert.equal(out.find((c) => c.kind === "head"), undefined);
+    assert.equal(out.find((c) => c.kind === "metadata-base"), undefined);
+  });
+
+  it("defers hreflang like canonicals and proposes metadataBase for a .js layout (C1)", () => {
+    const pages = [page("https://x.com/procedures/a"), page("https://x.com/id/procedures/a")];
+    const out = detect({ ...base, pages, rootLayout: { path: "app/layout.js", hasMetadataBase: false } });
+    assert.equal(out.find((c) => c.kind === "head"), undefined);
+    const fix = out.find((c) => c.kind === "metadata-base");
+    assert.equal(fix?.file, "app/layout.js");
+    assert.deepEqual(fix?.problems, ["hreflang-missing"]);
+    assert.ok(ROOT_LAYOUTS.includes("app/layout.js") && ROOT_LAYOUTS.includes("src/app/layout.ts"));
   });
 
   it("proposes JSON-LD for dynamic routes mostly without it, plus llms.txt and AI robots when allowed", () => {

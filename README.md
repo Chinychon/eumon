@@ -10,7 +10,7 @@ Scope → Find sources → Collect → Generate → Serve on your domain → Mea
 
 Eumon also compares the site with the competitors you name — which kinds of pages they publish that you don't (and which of those you already have data for), plus how their pages convert — and analyzes the existing site the way Google sees it — every sitemap URL fetched as Googlebot and broken down by page template, the HTML compared with what a browser renders, repeated fetches to catch intermittent empty pages, and ranked technical findings — and, when a GitHub repository is connected, proposes safe fixes as draft pull requests.
 
-> **Status:** early MVP. Works with any website stack (Next.js, WordPress, Drupal, Webflow, custom); a GitHub repository is optional.
+> **Status:** early MVP. Works with any website stack (Next.js, WordPress, Drupal, Webflow, custom); a GitHub repository is optional. Production runs on the Workers Free plan, whose per-invocation and D1 daily limits large crawls can hit; see the developer docs' *Limits and gotchas*.
 
 ## How it works
 
@@ -22,9 +22,11 @@ Eumon also compares the site with the competitors you name — which kinds of pa
 6. **Measure.** Page views, CTA clicks, Googlebot fetches, Search Console impressions and clicks per page, and conversions on the main site attributed to the landing page a visitor arrived on. WhatsApp links get a short code in the visitor's message, so staff can match each chat to the visit and mark what it became (a customer, and its value). Optional sources add Bing, Google's results pages for your searches, backlinks, and what crawlers request in your own server or CDN logs; new pages are announced through IndexNow.
 7. **Optimize.** Ranked suggestions (titles that under-perform their ranking, near-miss queries, pages Google ignores, weak CTAs), AI title rewrites, automatic CTA testing, and a before/after record of every change.
 
+Once a site is connected, a daily sync (04:15 UTC, or **Sync now**) pulls Search Console, Google Analytics, URL inspection and the optional sources into one ledger. The Dashboard reads it one tab per question (Overview, Technical, Search, Enquiries, Keywords, Competitors, AI visibility), **History** lists the problems that went away and what fixed them, and **Ask Eumon** answers questions about the site from the same data. A signed, revocable link (`/r/<token>`) shows a client their results without an account.
+
 ## Quick start
 
-Requirements: Node.js 20+ and npm 10. Local development runs entirely on Miniflare; a Cloudflare account is only needed to deploy.
+Requirements: Node.js 22.5+ (local dev and the database tests use `node:sqlite`) and npm 10. Local development runs entirely on Miniflare; a Cloudflare account is only needed to deploy.
 
 ```sh
 npm install
@@ -39,7 +41,7 @@ What each setting in `.dev.vars` unlocks (details in [apps/web/README.md](apps/w
 | Setting | Unlocks |
 |---|---|
 | nothing | Site analysis, CSV import, page generation, publishing, analytics |
-| `DEEPSEEK_API_KEY` or `ANTHROPIC_API_KEY` | AI scoping, data extraction from web pages, page copy, title suggestions |
+| `DEEPSEEK_API_KEY` | AI scoping, data extraction from web pages, page copy, title suggestions. `ANTHROPIC_API_KEY` and `LLM_MODEL` also work once declared in `apps/web/cloudflare.config.ts` (see the note there); without a key, Workers AI is used in production |
 | `DATAFORSEO_LOGIN`, `DATAFORSEO_PASSWORD` | Keyword volumes and gaps, Google results pages for your searches, the domains that win them, backlinks and the link gap |
 | `BING_WEBMASTER_API_KEY` | Bing clicks, impressions and crawl counts |
 | `SESSION_SECRET` (32+ characters) | Also derives each site's IndexNow key and server-log token |
@@ -74,12 +76,18 @@ npm run typecheck   # every workspace
 npm run build       # packages + production Worker bundle
 npm run audit -- https://example.com --max 300   # site analysis from the command line
 npm run eval        # end-to-end collection quality on a real site (calls the model; a few cents)
-npm run db:migrate:remote && npm run deploy   # deploy (after `npm exec -w @organic-growth/web -- cf auth login`)
+npm run db:migrate:remote   # apply new migrations to production by hand, before the deploy
 ```
+
+Production deploys through Cloudflare Workers Builds on every merge to `main` (deploy command `npm run deploy -w @organic-growth/web -- --skip-build`). Workers Builds does not run migrations, so apply them first. To deploy by hand: `npm exec -w @organic-growth/web -- cf auth login`, then `npm run deploy`.
 
 `npm run audit` runs the same steps as the analysis Workflow — sitemap, robots.txt, a Googlebot crawl of every sitemap URL (up to `--max`), per-template coverage, sampled checks, findings, and the growth plan — with an in-memory SQLite database in place of D1. Add `--competitor other.com` (repeatable) to include competitors, `--market idn` (repeatable, Search Console country codes) for target markets, and `--json` for the full report. With Playwright installed (`npm i -D playwright`), it also renders one page per template in Chromium for the source-vs-render comparison. Behind an HTTPS proxy, run it with `NODE_USE_ENV_PROXY=1`.
 
 `npm run eval` runs the real collection pipeline (pagination, extraction, merging, duplicate resolution) against a live website and grades it against an answer key parsed from the same pages without AI: how many collected records are real, how many published facts the site actually states, and how many of the site's facts were captured. Run it before and after changing prompts or merge logic.
+
+## Documentation
+
+The [developer docs](https://claude.ai/artifact/96Bbrh2aPtYBp1ozKx82Pd) (a private Claude artifact) explain the architecture, the analysis, sync and landing-page flows, the data model, every package and route, operations, and the known limits, plus a codebase map: an interactive graph of every source file and its dependencies, reduced from a [graphify](https://github.com/safishamsi/graphify) graph (`/graphify .` writes `graphify-out/`; the build saves the reduced map to `docs/site/codebase-map.json`). Their source is `docs/site/` (one HTML fragment per page plus SVG diagrams); `node docs/site/build.mjs` builds them into one browsable page (`docs/site/dist/`, ignored by git) and fails on a broken link, a duplicate id or a missing diagram; republish that page to the same artifact after changing a page. Also in the repo: `CONTEXT.md` (glossary), `apps/web/DESIGN.md` (design system), and `docs/superpowers/specs/` (one design record per feature).
 
 ## Principles
 

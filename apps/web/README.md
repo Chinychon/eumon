@@ -66,7 +66,7 @@ Each user may own one workspace. Workspace deletion is disabled in the API, and 
 - `/p/*` — landing pages, sitemap, and the analytics beacon
 - `/api/sites/:id/events` — conversion events from customer sites
 - `/r/*` and `/api/r/*` — client Results links (signed, revocable tokens)
-- `/api/logs/*` — log ingest, authenticated by a per-site token
+- `/api/logs/*` — server and CDN logs pushed by Logpush, Vercel, or a script, authenticated by a per-site token
 - `/api/auth/*` — Better Auth's own endpoints (rate limited per IP)
 - `/sign-in` and `/invite/*`
 - static files: `/manifest.json`, `/sw.js`, `/sw-register.js`, `/favicon.ico`, `/robots.txt`, `/icon-*.png`, `/assets/*`

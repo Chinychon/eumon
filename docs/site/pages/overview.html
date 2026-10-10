@@ -1,0 +1,67 @@
+<article id="overview" data-title="Overview" data-group="Start here">
+  <h1>Eumon overview</h1>
+  <p class="lede">What Eumon does, who uses it, and how the monorepo is laid out. Read this first, then follow the pointers at the bottom.</p>
+
+  <figure data-diagram="architecture"><figcaption>One Cloudflare Worker serves the dashboard, the API and the public landing pages, and runs three Workflows against one D1 database.</figcaption></figure>
+
+  <h2 id="what-it-is">What Eumon is</h2>
+  <p>Eumon is an organic growth engine for businesses of any size, from a single-location business to a large company running many sites. It has two halves that share one site record, one database and one dashboard.</p>
+
+  <h3>Site analysis, Results and History</h3>
+  <p>Given only a website URL, Eumon analyses the site the way Google sees it. The analysis Workflow (<code>SiteAnalysisWorkflow</code>, <code class="path">apps/web/src/analysis-workflow.ts</code>) reads the sitemap and robots.txt, fetches every sitemap URL as Googlebot, groups the results by page type, compares the server HTML with what a browser renders, and turns all of that into ranked technical findings and a growth plan of prioritised opportunities. Competitors you name are compared by the kinds of pages they publish. When a GitHub repository is connected, Eumon inspects the code per route and can propose fixes as draft pull requests.</p>
+  <p>Around the analysis sit two longer-running views:</p>
+  <ul>
+    <li><strong>Results</strong>: numbers synced once a day per site by <code>SearchSyncWorkflow</code> (Search Console, GA4, URL inspection, speed, authority, keywords, and optional connectors such as DataForSEO and Bing). They are stored as one value per site, metric and day in the <code>metric_points</code> ledger. See <a href="#flow-sync">the sync flow</a>.</li>
+    <li><strong>History</strong>: each finished analysis saves the keys of its findings, so the next one can say which problems were resolved, and whether a Eumon change (a merged pull request, a page edit) did it.</li>
+  </ul>
+
+  <h3>The landing-page engine</h3>
+  <p>The core of the product is a programmatic landing-page engine. It breaks a business into the things people search for (doctors, procedures, malls, products), collects structured facts for each, and publishes one crawlable page per unit on the business's own domain:</p>
+  <pre><code>Scope → Find sources → Collect → Generate → Serve on your domain → Measure → Optimize</code></pre>
+  <ul>
+    <li><strong>Scope</strong>: an AI analyst reads the site, its sitemap and Search Console queries, and proposes datasets with fields to collect.</li>
+    <li><strong>Collect</strong>: <code>ScrapeWorkflow</code> pulls records from the site's own pages, directories, sitemaps, a CSV import, or a Supabase table. The collector identifies as EumonBot and obeys robots.txt.</li>
+    <li><strong>Generate</strong>: a template turns each record into a page. The model writes copy patterns once per template, pages are filled from data, and thin or duplicate pages are held back.</li>
+    <li><strong>Serve</strong>: complete HTML at <code>/p/:siteId/*</code>, reached through one proxy rule on the customer's site (for example <code>/guides</code>).</li>
+    <li><strong>Measure and optimize</strong>: page views, CTA clicks, Googlebot fetches, Search Console data per page, and leads attributed to the page a visitor first landed on.</li>
+  </ul>
+  <p>The full pipeline is on <a href="#flow-pages">the landing-page flow</a> page.</p>
+
+  <h2 id="who-uses-it">Who uses it</h2>
+  <ul>
+    <li><strong>Dashboard users</strong>: analyse a site, connect its data sources, collect data, publish pages, and watch which pages bring customers. A user can manage one site or many.</li>
+    <li><strong>Read-only viewers</strong>: see a site's numbers through a read-only client link (<code>/r/&lt;token&gt;</code>), a signed and revocable token that stacks every Results section into one report.</li>
+  </ul>
+  <div class="callout note"><p>For now, sign-in is handled outside the app: the hostname goes behind Cloudflare Access, with the public paths excluded (<a href="#web-app--access-control">Web app: access control</a>). Built-in accounts and roles are on the way, and this section will change when they land.</p></div>
+  <p>The engine stays generic: nothing about any one business or industry is hard-coded. Datasets, fields and page ideas come from each site's own pages and search data.</p>
+
+  <h2 id="monorepo-map">Monorepo map</h2>
+  <p>An npm workspace (<code class="path">package.json</code>) with one app and nine packages. The packages compile with <code>tsc</code> to <code>dist/</code>, and the web app imports those built copies.</p>
+  <table>
+    <thead><tr><th>Workspace</th><th>Job</th></tr></thead>
+    <tbody>
+      <tr><td><a href="#web-app"><code>apps/web</code></a></td><td>The Cloudflare Worker: dashboard, API routes, public landing pages, the client link, and the three Workflows.</td></tr>
+      <tr><td><a href="#packages--core"><code>packages/core</code></a></td><td>Shared types and pure helpers used by every other package: IDs, signed tokens, metric definitions, trends, text fingerprints, WhatsApp reference codes.</td></tr>
+      <tr><td><a href="#packages--ai"><code>packages/ai</code></a></td><td>One JSON-output interface over DeepSeek, Claude and Workers AI.</td></tr>
+      <tr><td><a href="#packages--db"><code>packages/db</code></a></td><td>D1 queries and the SQL migrations, plus a <code>node:sqlite</code> adapter for tests and the CLIs.</td></tr>
+      <tr><td><a href="#packages--crawler"><code>packages/crawler</code></a></td><td>Sitemap discovery, Googlebot crawling, rendering checks and technical SEO findings.</td></tr>
+      <tr><td><a href="#packages--scraper"><code>packages/scraper</code></a></td><td>The scoping analyst, robots.txt-aware collection, structured extraction and CSV import.</td></tr>
+      <tr><td><a href="#packages--pages"><code>packages/pages</code></a></td><td>Page generation with quality gates, HTML rendering, CTA testing and performance insights.</td></tr>
+      <tr><td><a href="#packages--repo-analyzer"><code>packages/repo-analyzer</code></a></td><td>Stack detection and per-route code inspection of a connected repository.</td></tr>
+      <tr><td><a href="#packages--agents"><code>packages/agents</code></a></td><td>The analysis pipeline, growth plan, search and competitor analysis, connector clients (Search Console, GA4, DataForSEO, Bing), pull request generation, and the demo site.</td></tr>
+      <tr><td><a href="#packages--sdk"><code>packages/sdk</code></a></td><td>Browser conversion tracker for JavaScript sites; reads the same <code>eumon_sid</code> cookie as the landing pages.</td></tr>
+    </tbody>
+  </table>
+  <p>Outside the workspaces: <code class="path">evals/</code> (a collection quality eval) and <code class="path">scripts/audit-site.mjs</code> (site analysis from the command line). Both are covered in <a href="#getting-started--evals-and-audit">Getting started</a>.</p>
+
+  <h2 id="where-next">Where to go next</h2>
+  <ul>
+    <li>Run it locally: <a href="#getting-started">Getting started</a>.</li>
+    <li>How the pieces fit: <a href="#architecture">Architecture</a>.</li>
+    <li>The three main flows: <a href="#flow-analysis">site analysis</a>, <a href="#flow-sync">the daily Results sync</a>, <a href="#flow-pages">the landing-page engine</a>.</li>
+    <li>Tables and ownership: <a href="#data-model">Data model</a>. What each finding means: <a href="#findings">Findings</a>.</li>
+    <li>Per-package detail: <a href="#packages">Packages</a> and <a href="#web-app">Web app</a>.</li>
+    <li>Deploying and running it: <a href="#ops">Operations</a>. Things that have bitten us: <a href="#gotchas">Gotchas</a>.</li>
+    <li>Domain words (ledger, snapshot, marker, refusal): <a href="#glossary">Glossary</a>.</li>
+  </ul>
+</article>

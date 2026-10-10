@@ -1,0 +1,120 @@
+<article id="codebase-map" data-title="Codebase map" data-group="Reference">
+  <h1>Codebase map</h1>
+  <p class="lede">Every source file in the monorepo and what it depends on, drawn from a <a href="https://github.com/safishamsi/graphify">graphify</a> knowledge graph. Use it to see what a file touches, and what touches it, before you change it.</p>
+
+  <div class="map">
+    <div class="map-tools">
+      <input id="map-find" list="map-files" placeholder="Find a file, e.g. analysis-workflow.ts" aria-label="Find a file" autocomplete="off">
+      <datalist id="map-files"></datalist>
+      <div class="map-legend" id="map-legend"></div>
+    </div>
+    <div class="map-canvas" id="map-canvas" role="img" aria-label="Graph of source files and their dependencies. The Areas table below lists the same files as text."></div>
+    <div class="map-info" id="map-info" aria-live="polite">Loading the graph…</div>
+  </div>
+  <!--MAP-DATA-->
+
+  <h2 id="reading">How to read it</h2>
+  <ul>
+    <li><strong>A square is a source file</strong>, coloured by workspace. Its size grows with the number of files it uses or is used by. Tests, build output and config files are left out.</li>
+    <li><strong>An arrow means "uses"</strong>: an import, a call or a re-export from one file to another. Imports of another workspace's built <code>dist/</code> copy are traced back to the source file that defines the symbol, so <code>apps/web</code> routes point straight at <code class="path">packages/db/src/index.ts</code>.</li>
+    <li><strong>Files that sit close together</strong> are tightly linked. Zoom in to read file names. Click a square to list what it uses and what uses it; click a name in that list to jump to it.</li>
+  </ul>
+  <p>The map shows <!--MAP-STATS-->.</p>
+  <div class="callout note"><p>The graph is a snapshot, not live. A file added since the commit above is missing until the map is regenerated (<a href="#codebase-map--regenerate">below</a>).</p></div>
+
+  <h2 id="areas">Areas</h2>
+  <p>graphify splits the symbol graph into communities: groups of functions, types and modules that call and import each other more than they touch the rest. Each file is listed under the community most of its symbols belong to. The names are graphify's, written from the code, so treat them as a guide to where things live rather than a design.</p>
+  <!--MAP-AREAS-->
+
+  <h2 id="regenerate">Regenerating it</h2>
+  <pre><code>/graphify .                 # in Claude Code, at the repo root; writes graphify-out/ (gitignored)
+node docs/site/build.mjs    # reduces graphify-out/graph.json into docs/site/codebase-map.json, rebuilds the docs</code></pre>
+  <p>Commit <code class="path">docs/site/codebase-map.json</code> with the docs, so they build without a local graph. graphify also writes three files worth opening on their own:</p>
+  <dl class="facts">
+    <dt><code>graphify-out/graph.html</code></dt><dd>The full graph at symbol level (functions, types, constants), with search. Open it in a browser.</dd>
+    <dt><code>graphify-out/GRAPH_REPORT.md</code></dt><dd>The most connected symbols, every community with its members, and links graphify thinks are surprising.</dd>
+    <dt><code>graphify-out/graph.json</code></dt><dd>The raw graph, for questions like <code>/graphify query "what calls saveCrawlBatch"</code> or <code>/graphify path "ScrapeWorkflow" "D1"</code>.</dd>
+  </dl>
+
+  <script>
+  (() => {
+    const article = document.getElementById("codebase-map");
+    article.addEventListener("show", () => {
+      const info = document.getElementById("map-info");
+      const dataEl = document.getElementById("map-data");
+      if (!dataEl) { info.textContent = "No map data in this build."; return; }
+      const data = JSON.parse(dataEl.textContent);
+      const s = document.createElement("script");
+      s.src = "https://unpkg.com/vis-network@9.1.6/standalone/umd/vis-network.min.js";
+      s.integrity = "sha384-Ux6phic9PEHJ38YtrijhkzyJ8yQlH8i/+buBR8s3mAZOJrP1gwyvAcIYl3GWtpX1";
+      s.crossOrigin = "anonymous";
+      s.onerror = () => { info.textContent = "The graph library did not load. The Areas table below lists the same files."; };
+      s.onload = () => draw(data, info);
+      document.head.append(s);
+    }, { once: true });
+
+    function draw(data, info) {
+      const root = document.documentElement;
+      const css = (v) => getComputedStyle(root).getPropertyValue(v).trim();
+      const workspace = (path) => path.match(/^packages\/([^/]+)/)?.[1] ?? (path.startsWith("apps/web") ? "web" : "scripts");
+      const spaces = [...new Set(data.files.map(([p]) => workspace(p)))];
+      const colour = (w) => {
+        const dark = root.dataset.theme === "dark" || (!root.dataset.theme && matchMedia("(prefers-color-scheme: dark)").matches);
+        const h = (Math.round(spaces.indexOf(w) * 360 / spaces.length) + 145) % 360;
+        return dark ? `hsl(${h} 45% 66%)` : `hsl(${h} 50% 36%)`;
+      };
+      const uses = data.files.map(() => []), usedBy = data.files.map(() => []);
+      for (const [a, b] of data.edges) { uses[a].push(b); usedBy[b].push(a); }
+
+      const nodes = new vis.DataSet(data.files.map(([path, , degree], id) => ({ id, label: path.split("/").pop(), value: degree + 1 })));
+      const edges = new vis.DataSet(data.edges.map(([from, to], id) => ({ id, from, to })));
+      const canvas = document.getElementById("map-canvas");
+      const net = new vis.Network(canvas, { nodes, edges }, {
+        nodes: { shape: "square", borderWidth: 0, scaling: { min: 4, max: 22, label: { enabled: true, min: 10, max: 14, drawThreshold: 9 } } },
+        edges: { width: 0.6, selectionWidth: 1.2, smooth: false, arrows: { to: { enabled: true, scaleFactor: 0.35 } } },
+        physics: { solver: "forceAtlas2Based", forceAtlas2Based: { gravitationalConstant: -45, springLength: 70 }, stabilization: { iterations: 400 } },
+        interaction: { hover: true },
+      });
+      net.once("stabilizationIterationsDone", () => net.setOptions({ physics: false }));
+
+      const paint = () => {
+        const ink = css("--ink");
+        nodes.update(data.files.map(([path], id) => {
+          const c = colour(workspace(path));
+          return { id, color: { background: c, border: c, highlight: { background: ink, border: ink }, hover: { background: ink, border: ink } } };
+        }));
+        net.setOptions({
+          nodes: { font: { color: css("--muted"), face: "Geist Mono, ui-monospace, monospace", size: 11 } },
+          edges: { color: { color: css("--line-strong"), highlight: css("--green"), hover: css("--green") } },
+        });
+        document.getElementById("map-legend").innerHTML = spaces.map((w) => `<span><i style="background:${colour(w)}"></i>${w}</span>`).join("");
+      };
+      paint();
+      new MutationObserver(paint).observe(root, { attributes: true, attributeFilter: ["data-theme"] });
+      matchMedia("(prefers-color-scheme: dark)").addEventListener("change", paint);
+
+      const hint = "Click a square to see its area, what it uses and what uses it.";
+      const list = (ids) => ids.length
+        ? `<div class="list">${ids.map((i) => `<button type="button" data-node="${i}">${data.files[i][0]}</button>`).join("")}</div>`
+        : "<div>Nothing.</div>";
+      const pick = (id) => {
+        if (id === undefined) { info.textContent = hint; return; }
+        const [path, area] = data.files[id];
+        info.innerHTML = `<code class="path">${path}</code> · ${data.areas[area].replace(/&/g, "&amp;")}`
+          + `<h4>Uses (${uses[id].length})</h4>${list(uses[id])}<h4>Used by (${usedBy[id].length})</h4>${list(usedBy[id])}`;
+      };
+      const focus = (id) => { net.selectNodes([id]); net.focus(id, { scale: 1.2, animation: true }); pick(id); };
+      net.on("click", (e) => pick(e.nodes[0]));
+      info.addEventListener("click", (e) => { const b = e.target.closest("[data-node]"); if (b) focus(Number(b.dataset.node)); });
+      document.getElementById("map-files").innerHTML = data.files.map(([p]) => `<option value="${p}">`).join("");
+      const find = document.getElementById("map-find");
+      find.addEventListener("change", () => {
+        const q = find.value.trim();
+        const i = data.files.findIndex(([p]) => p === q || p.endsWith(`/${q}`));
+        if (i >= 0) focus(i);
+      });
+      pick();
+    }
+  })();
+  </script>
+</article>

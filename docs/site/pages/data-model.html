@@ -1,0 +1,199 @@
+<article id="data-model" data-title="Data model" data-group="How it works">
+  <h1>Data model</h1>
+  <p class="lede">Every table in the D1 database as it stands after the last migration, grouped by what it serves, with the functions in <code>packages/db/src</code> that write and read it. Read this before adding a column, a table, or a query.</p>
+
+  <figure data-diagram="data-model"><figcaption>Every table hangs off <code>sites</code>; crawl rows and changes also belong to an analysis, and landing-page counters to a generated page.</figcaption></figure>
+
+  <h2 id="where-the-schema-lives">Where the schema lives</h2>
+  <p>The schema is the sum of the SQL files in <code class="path">packages/db/migrations/</code>, applied in file-name order (<code>0001_init.sql</code> to <code>0023_search_console_import.sql</code>). There is no separate schema file. Later migrations add columns, drop tables, and rebuild tables through <code>*_new</code> copies, so reading one early migration on its own gives a wrong picture. The tables below are the result of applying all 23.</p>
+  <p>All SQL lives in <code>@organic-growth/db</code>: <code class="path">packages/db/src/index.ts</code> (sites, analyses, crawl, changes, search metrics) re-exports the domain modules <code>page-engine.ts</code>, <code>metrics.ts</code>, <code>coverage.ts</code>, <code>snapshots.ts</code>, <code>activity.ts</code>, <code>assistant.ts</code>, <code>leads.ts</code>, <code>server-logs.ts</code>, <code>history.ts</code> and <code>search-console.ts</code>. Every function takes a <code>D1Like</code> (<code class="path">packages/db/src/d1.ts</code>), the subset of the D1 binding the code uses, so the same functions run against D1 in the Worker and against Node's SQLite in tests. The one exception is the demo seeder in <code class="path">packages/agents/src/demo.ts</code>, which writes some rows with its own SQL.</p>
+  <dl class="facts">
+    <dt>Binding</dt><dd><code>DB</code>, database id <code>591e4045-cbff-4ef4-a894-cbe4ece424ec</code> (<code class="path">apps/web/cloudflare.config.ts</code>)</dd>
+    <dt>Migrations</dt><dd><code class="path">packages/db/migrations/</code>, 23 files</dd>
+    <dt>Keys and times</dt><dd>Ids are <code>TEXT</code> (<code>createId</code> in <code class="path">packages/core/src/ids.ts</code>: a prefix plus a UUID); timestamps are ISO strings in <code>TEXT</code>; days are <code>YYYY-MM-DD</code></dd>
+    <dt>JSON columns</dt><dd>Columns ending <code>_json</code> hold JSON text, queried with <code>json_extract</code> and <code>json_each</code> where needed</dd>
+  </dl>
+
+  <h2 id="sites-and-ownership">Sites and their settings</h2>
+  <p>A site is one customer website. Everything else in the database belongs to a site.</p>
+  <table>
+    <thead><tr><th>Table</th><th>Primary key</th><th>Written by</th><th>Read by</th></tr></thead>
+    <tbody>
+      <tr><td><code>sites</code></td><td><code>id</code></td><td><code>upsertSite</code>, <code>updateSiteGscProperty</code>, <code>updateSiteFingerprint</code>, <code>deleteSite</code> (index.ts); <code>updateSiteGa4Property</code>, <code>bumpReportShareVersion</code> (metrics.ts)</td><td><code>getSite</code>, <code>listSites</code> (index.ts); <code>listSitesForResults</code> (metrics.ts)</td></tr>
+      <tr><td><code>site_scopes</code></td><td><code>site_id</code></td><td><code>saveSiteScope</code> (page-engine.ts)</td><td><code>getSiteScope</code> (page-engine.ts)</td></tr>
+      <tr><td><code>site_markets</code></td><td><code>(site_id, country)</code></td><td><code>setSiteMarkets</code> (index.ts)</td><td><code>listSiteMarkets</code> (index.ts)</td></tr>
+      <tr><td><code>site_competitor_domains</code></td><td><code>(site_id, domain)</code></td><td><code>setSiteCompetitorDomains</code> (index.ts)</td><td><code>listSiteCompetitorDomains</code> (index.ts)</td></tr>
+      <tr><td><code>oauth_credentials</code></td><td><code>id</code>, unique <code>(site_id, provider)</code></td><td><code>upsertOAuthCredential</code>, <code>deleteOAuthCredential</code> (index.ts); <code>deleteDataset</code> removes a dataset's <code>supabase:&lt;source id&gt;</code> credentials (page-engine.ts)</td><td><code>getOAuthCredential</code> (index.ts)</td></tr>
+    </tbody>
+  </table>
+  <p>Notes:</p>
+  <ul>
+    <li><code>sites</code> carries the GitHub connection (<code>github_owner</code>, <code>github_repo</code>, <code>github_installation_id</code>, <code>default_branch</code>), the detected framework (<code>fingerprint_json</code>), the Search Console property (<code>gsc_property</code>), the GA4 property (<code>ga4_property</code>, added in 0012) and <code>report_share_version</code> (0012), which <code>bumpReportShareVersion</code> increments to revoke every client link issued so far.</li>
+    <li><code>site_scopes</code> is the scoping agent's read of the business (summary, goal, conversion goal), reused when designing templates.</li>
+    <li><code>site_markets</code> holds Search Console alpha-3 country codes; <code>site_competitor_domains</code> the competitor domains the user confirmed.</li>
+    <li><code>oauth_credentials.encrypted_blob</code> is the encrypted token. Since 0019 the Google connection's provider is <code>google</code>, covering Search Console, Analytics and Sheets.</li>
+  </ul>
+
+  <h2 id="analyses-and-crawl">Analyses and crawl</h2>
+  <p>An analysis is one run of the pipeline (<a href="#flow-analysis">Flow: analysis</a>). Its report, including findings, opportunities, competitors and the growth plan, is one JSON document in <code>analyses.report_json</code>; the crawl's per-page rows live in <code>pages</code>.</p>
+  <table>
+    <thead><tr><th>Table</th><th>Primary key</th><th>Written by</th><th>Read by</th></tr></thead>
+    <tbody>
+      <tr><td><code>analyses</code></td><td><code>id</code></td><td><code>createAnalysis</code>, <code>updateAnalysisProgress</code>, <code>updateAnalysisStatus</code>, <code>saveAnalysisReport</code>, <code>setLatestReportSearch</code>, <code>saveCrawlBatch</code> (sets <code>crawl_recent</code>) (index.ts)</td><td><code>getAnalysisJob</code>, <code>getLatestAnalysisForSite</code>, <code>getPreviousCompletedAnalysis</code>, <code>listReusableAnalyses</code>, <code>getCrawlProgress</code>, <code>crawlPace</code> (index.ts); <code>listCompletedAnalyses</code>, <code>historyRuns</code> (history.ts)</td></tr>
+      <tr><td><code>pages</code></td><td><code>(analysis_id, url)</code></td><td><code>enqueueAnalysisCrawlUrls</code>, <code>saveCrawlBatch</code>, <code>reuseCrawlResults</code>, <code>pruneCrawlResults</code>, <code>deleteSite</code> (index.ts)</td><td><code>listPendingCrawlUrls</code>, <code>listCrawlStates</code>, <code>getCrawlCoverage</code>, <code>listCrawlPageResults</code>, <code>getLinkGraph</code>, <code>getLinkFamily</code> (index.ts); <code>vanishedPages</code> (history.ts); <code>datasetInventoryRows</code> (page-engine.ts); the search-console.ts reconciliation functions</td></tr>
+      <tr><td><code>crawl_counts</code></td><td><code>(analysis_id, family)</code>, WITHOUT ROWID</td><td><code>saveCrawlBatch</code> and <code>recountCrawl</code> through the private <code>countDelta</code> (index.ts)</td><td><code>getCrawlProgress</code>, <code>crawlPace</code> (index.ts)</td></tr>
+      <tr><td><code>page_links</code></td><td><code>(site_id, source_url, target_path)</code>, WITHOUT ROWID</td><td><code>saveCrawlBatch</code>, <code>deleteSite</code> (index.ts)</td><td><code>getLinkGraph</code>, <code>getLinkFamily</code>, <code>getCrawlCoverage</code> (index.ts)</td></tr>
+      <tr><td><code>changes</code></td><td><code>id</code></td><td><code>insertChange</code>, <code>updateChangeStatus</code> (index.ts)</td><td><code>getChange</code>, <code>listChanges</code> (index.ts)</td></tr>
+    </tbody>
+  </table>
+  <p>Notes:</p>
+  <ul>
+    <li><code>analyses.status</code> is <code>queued</code> or <code>running</code> while open; <code>updateAnalysisStatus</code> and <code>saveAnalysisReport</code> only touch an open analysis (the <code>OPEN</code> guard in <code class="path">packages/db/src/index.ts:213</code>). <code>progress_json</code> is the live progress, <code>report_json</code> the finished report, <code>crawl_recent</code> (0020) the latest batch's URLs for the progress view.</li>
+    <li>A <code>pages</code> row is one sitemap URL in one analysis. <code>crawl_state</code> is <code>pending</code>, <code>blocked</code> (robots.txt disallows Googlebot), <code>complete</code> or <code>failed</code>. <code>route_family</code> is the page type and <code>reused_from</code> the analysis a row was copied from by <code>reuseCrawlResults</code>; both became real columns in 0019. Everything else the crawler measured is in <code>result_json</code>.</li>
+    <li><code>crawl_counts</code> (0020) keeps per-type counters so the progress view, polled every few seconds, reads a few rows instead of counting <code>pages</code>. Anything that edits <code>pages</code> outside <code>saveCrawlBatch</code> must call <code>recountCrawl</code> (<code class="path">packages/db/src/index.ts:1046</code>).</li>
+    <li><code>page_links</code> (0011) is per site, not per analysis: a fetched page's links replace the ones it had, and pages reused from an earlier crawl keep theirs. It powers orphan detection and the link map. The index <code>idx_page_links_target_source</code> (0013) keeps the orphan lookup an index seek.</li>
+    <li><code>changes</code> are proposed code changes (a patch, the files and pages affected, a PR URL once opened). <code>opportunity_id</code> and <code>finding_id</code> are plain text pointing into the report JSON, not foreign keys.</li>
+  </ul>
+
+  <h2 id="results-ledger">Results ledger and search data</h2>
+  <p>The tables behind the Results view (<a href="#flow-sync">Flow: sync</a>): numbers over time, lists that replace themselves, Google's index verdicts, server-log crawler hits, and a record of every sync.</p>
+  <table>
+    <thead><tr><th>Table</th><th>Primary key</th><th>Written by</th><th>Read by</th></tr></thead>
+    <tbody>
+      <tr><td><code>metric_points</code></td><td><code>(site_id, metric, day)</code>, WITHOUT ROWID</td><td><code>upsertMetricPoints</code>, <code>clearMetricPoints</code> (metrics.ts); callers include <code>syncFirstPartyResults</code>, <code>syncLeadOutcomes</code>, <code>syncAiResults</code>, <code>saveAnalysisReport</code>, <code>saveSearchConsoleChart</code></td><td><code>listMetricSeries</code>, <code>firstMetricDay</code>, <code>lastMetricDay</code> (metrics.ts); <code>searchConsoleReconciliation</code> (search-console.ts)</td></tr>
+      <tr><td><code>site_snapshots</code></td><td><code>(site_id, kind, scope)</code></td><td><code>snapshotStatement</code>, <code>saveSnapshot</code>, <code>saveTopQueriesSnapshot</code> (snapshots.ts); <code>saveFindingKeys</code>, <code>historyRuns</code> (history.ts); <code>saveSearchConsoleSummary</code> (search-console.ts)</td><td><code>getSnapshot</code>, <code>listSnapshots</code>, <code>listSnapshotDates</code>, <code>getTopQueriesSnapshot</code> (snapshots.ts); <code>historyRuns</code> (history.ts)</td></tr>
+      <tr><td><code>search_metrics</code></td><td><code>id</code></td><td><code>replaceCurrentSearchMetrics</code> (index.ts)</td><td><code>listTopQueries</code> (index.ts)</td></tr>
+      <tr><td><code>page_search_metrics</code></td><td><code>(site_id, page_url, query)</code></td><td><code>replacePageSearchMetrics</code> (page-engine.ts)</td><td><code>getPagePerformance</code>, <code>listPageQueries</code> (page-engine.ts)</td></tr>
+      <tr><td><code>url_index_status</code></td><td><code>(site_id, url)</code>, WITHOUT ROWID</td><td><code>saveUrlIndexStatus</code> (coverage.ts)</td><td><code>urlsToInspect</code>, <code>indexCoverage</code>, <code>countInspectionsSince</code> (coverage.ts)</td></tr>
+      <tr><td><code>page_index_status</code></td><td><code>page_id</code></td><td><code>saveIndexStatus</code> (metrics.ts)</td><td><code>pagesToInspect</code>, <code>indexStatusCounts</code> (metrics.ts); <code>countInspectionsSince</code> (coverage.ts)</td></tr>
+      <tr><td><code>search_console_urls</code></td><td><code>(site_id, url)</code>, WITHOUT ROWID</td><td><code>importSearchConsoleUrls</code>, <code>saveSearchConsoleChecks</code>, <code>saveSearchConsoleSuggestions</code> (search-console.ts)</td><td><code>searchConsoleUrlsToCheck</code>, <code>searchConsoleChecksRemaining</code>, <code>searchConsoleGoneUnsuggested</code>, <code>searchConsoleReconciliation</code> (search-console.ts)</td></tr>
+      <tr><td><code>crawl_log_daily</code></td><td><code>(site_id, day, bot, family, status_class, query)</code>, WITHOUT ROWID</td><td><code>recordCrawlLog</code>, <code>pruneCrawlLog</code> (server-logs.ts)</td><td><code>listCrawlLogDays</code>, <code>firstCrawlLogDay</code> (server-logs.ts)</td></tr>
+      <tr><td><code>crawl_log_paths</code></td><td><code>(site_id, grp, path)</code></td><td><code>recordCrawlLog</code>, <code>pruneCrawlLog</code> (server-logs.ts)</td><td><code>crawledPathsSince</code> (server-logs.ts)</td></tr>
+      <tr><td><code>sync_runs</code></td><td><code>id</code></td><td><code>recordSyncRun</code> (activity.ts)</td><td><code>listSyncRuns</code> (activity.ts)</td></tr>
+    </tbody>
+  </table>
+  <p>Notes:</p>
+  <ul>
+    <li><code>site_snapshots</code> (0016) holds "latest lists": one JSON list per site, kind and scope, replaced on each save. The scope records what produced the list (a property, a market set, a competitor domain, an analysis id), so a list fetched for something else is never read. Kinds in use include <code>top_queries</code>, <code>finding_keys</code> (History's per-run key lists, scope = analysis id) and <code>search_console_summary</code>.</li>
+    <li><code>search_metrics</code> is the latest Search Console window for the whole site (query, page, country, device); <code>replaceCurrentSearchMetrics</code> replaces it. <code>page_search_metrics</code> is the same for Eumon's generated pages only, page by query.</li>
+    <li><code>url_index_status</code> (0015) is URL Inspection for the site's own sitemap URLs; <code>page_index_status</code> (0012) is the same for published generated pages and cascades from <code>generated_pages</code>.</li>
+    <li><code>search_console_urls</code> (0023) holds URLs from Search Console's Page indexing exports, with Google's reason, and for URLs the crawl doesn't know, what a live fetch found and a suggested redirect target.</li>
+    <li><code>crawl_log_daily</code> and <code>crawl_log_paths</code> (0022) come from server or CDN logs; only crawler requests are kept. <code>grp</code> is <code>google</code> or <code>bing</code>.</li>
+    <li><code>sync_runs</code> (0018) records each Results sync: its trigger and the note every source left (<code>notes_json</code>).</li>
+  </ul>
+
+  <h2 id="landing-page-engine">Landing-page engine</h2>
+  <p>The programmatic page engine (<a href="#flow-pages">Flow: pages</a>), created in 0005: datasets of structured records, the sources they are scraped from, templates, the pages generated from them, and those pages' performance.</p>
+  <table>
+    <thead><tr><th>Table</th><th>Primary key</th><th>Written by</th><th>Read by</th></tr></thead>
+    <tbody>
+      <tr><td><code>datasets</code></td><td><code>id</code></td><td><code>upsertDataset</code>, <code>deleteDataset</code>, <code>deleteUnusedProposedDatasets</code></td><td><code>getDataset</code>, <code>listDatasets</code>, <code>datasetCoverage</code>; <code>listRecordKeys</code> (index.ts)</td></tr>
+      <tr><td><code>data_sources</code></td><td><code>id</code></td><td><code>upsertSource</code>, <code>deleteSource</code>, <code>refreshSourceRecordCount</code>, <code>deleteDataset</code></td><td><code>getSource</code>, <code>listSources</code></td></tr>
+      <tr><td><code>data_records</code></td><td><code>id</code>, unique <code>(dataset_id, record_key)</code></td><td><code>upsertRecords</code>, <code>replaceRecords</code>, <code>mergeRecords</code>, <code>deleteRecord</code>, <code>deleteStaleRecords</code>, <code>deleteDataset</code></td><td><code>listRecords</code>, <code>listAllRecords</code>, <code>listDatasets</code>, <code>datasetCoverage</code>, <code>datasetInventoryRows</code>; <code>listRecordKeys</code> (index.ts)</td></tr>
+      <tr><td><code>jobs</code></td><td><code>id</code></td><td><code>createJob</code>, <code>updateJob</code></td><td><code>getJob</code>, <code>getLatestJob</code></td></tr>
+      <tr><td><code>scrape_queue</code></td><td><code>(job_id, url)</code></td><td><code>enqueueScrapeUrls</code>, <code>markScrapeResults</code></td><td><code>nextScrapeBatch</code>, <code>scrapeQueueCounts</code>, <code>listScrapeFailures</code></td></tr>
+      <tr><td><code>page_templates</code></td><td><code>id</code></td><td><code>upsertTemplate</code>, <code>deleteTemplate</code>, <code>deleteDataset</code></td><td><code>getTemplate</code>, <code>listTemplates</code>, <code>listPublications</code></td></tr>
+      <tr><td><code>generated_pages</code></td><td><code>id</code>, unique <code>(site_id, path)</code> and <code>(template_id, group_key)</code></td><td><code>syncTemplatePages</code>, <code>setTemplatePublication</code>, <code>updatePageFields</code>, <code>clearPageOverrides</code>, <code>deleteDataset</code></td><td><code>listPages</code>, <code>getPage</code>, <code>getPageByPath</code>, <code>listPublishedPaths</code>, <code>changedPagePaths</code>, <code>mapPageIdsByPath</code>, <code>getPagePerformance</code>; <code>publishedPages</code>, <code>pagesToInspect</code> (metrics.ts); <code>getLinkGraph</code> (index.ts)</td></tr>
+      <tr><td><code>page_settings</code></td><td><code>site_id</code></td><td><code>upsertPageSettings</code></td><td><code>getPageSettings</code></td></tr>
+      <tr><td><code>page_revisions</code></td><td><code>id</code></td><td><code>updatePageFields</code></td><td><code>listPageRevisions</code></td></tr>
+      <tr><td><code>cta_variants</code></td><td><code>id</code></td><td><code>insertCtaVariant</code>, <code>setCtaVariantActive</code>, <code>incrementPageMetric</code></td><td><code>listCtaVariants</code></td></tr>
+      <tr><td><code>page_sessions</code></td><td><code>(site_id, session_id)</code>, WITHOUT ROWID</td><td><code>recordLandingSession</code></td><td><code>getPagePerformance</code>; <code>dailyLeads</code> (metrics.ts); <code>outcomesByPageType</code>, lead reads (leads.ts); <code>listRecentEvents</code> (activity.ts)</td></tr>
+      <tr><td><code>page_metrics_daily</code></td><td><code>(page_id, day)</code>, WITHOUT ROWID</td><td><code>incrementPageMetric</code>, <code>upsertPageSearchDaily</code></td><td><code>getPagePerformance</code>, <code>getDailyTotals</code>, <code>listPageRevisions</code>; <code>syncFirstPartyResults</code>, <code>topEumonPage</code> (metrics.ts)</td></tr>
+      <tr><td><code>conversion_events</code></td><td><code>id</code></td><td><code>insertConversionEvent</code> (index.ts)</td><td><code>getConversionSummary</code> (index.ts); <code>conversionCounts</code> (assistant.ts); <code>dailyLeads</code>, <code>syncFirstPartyResults</code> (metrics.ts); <code>listRecentEvents</code> (activity.ts); <code>getPagePerformance</code></td></tr>
+      <tr><td><code>ai_page_daily</code></td><td><code>(page_id, day, signal, name)</code>, WITHOUT ROWID</td><td><code>recordAiSignal</code></td><td><code>syncAiResults</code> (metrics.ts)</td></tr>
+    </tbody>
+  </table>
+  <p>Functions without a file are in <code class="path">packages/db/src/page-engine.ts</code>. Notes:</p>
+  <ul>
+    <li><code>datasets.fields_json</code> describes the record fields and <code>key_field</code> which one names the entity; each <code>data_records</code> row stores its values in <code>data_json</code>. A record's <code>source_id</code> is set to null when its source is deleted (<code>ON DELETE SET NULL</code>, 0019).</li>
+    <li><code>jobs</code> is a generic background-job status row (scrapes today); <code>scrape_queue</code> holds the URLs a scrape job will visit, so a large source never passes through one Workflow step result.</li>
+    <li><code>generated_pages.status</code> drives publication; <code>quality_score</code> and <code>quality_issues_json</code> are the quality gate's verdict. <code>page_revisions</code> is a before/after record of every field change to a page, for impact measurement.</li>
+    <li><code>page_settings</code> is one row per site: the public origin and mount path the pages are served under, branding, the default CTA, <code>verified_at</code> (0006, when the live setup check last confirmed Googlebot receives the pages), <code>language</code> (0007) and <code>currency</code> (0021).</li>
+    <li><code>page_metrics_daily</code> counters: <code>googlebot_hits</code> from server renders, <code>views</code> and <code>cta_clicks</code> from the in-page beacon, <code>search_clicks</code> and <code>search_impressions</code> overwritten by Search Console syncs.</li>
+    <li><code>page_sessions</code> records the first Eumon page an anonymous session landed on, and <code>source</code> (0017: <code>search</code>, <code>ai:&lt;assistant&gt;</code> or <code>other</code>). Its <code>page_id</code> has no foreign key on purpose, so a session still counts as having landed on an Eumon page after the page is removed.</li>
+    <li><code>ai_page_daily</code> (0017) counts per page and day: <code>signal</code> <code>fetch</code> (an AI agent requested the page, <code>name</code> is its token) or <code>referral</code> (a person arrived from an assistant).</li>
+    <li><code>conversion_events</code> are the tracking script's and SDK's events (<a href="#packages--sdk">sdk</a>), joined to <code>page_sessions</code> by <code>session_id</code> for attribution.</li>
+  </ul>
+
+  <h2 id="leads-and-assistant">Leads and Ask Eumon threads</h2>
+  <table>
+    <thead><tr><th>Table</th><th>Primary key</th><th>Written by</th><th>Read by</th></tr></thead>
+    <tbody>
+      <tr><td><code>leads</code></td><td><code>id</code>, unique <code>(site_id, ref)</code> where <code>ref</code> is not null</td><td><code>recordLeadClick</code>, <code>createLead</code>, <code>updateLead</code> (leads.ts)</td><td><code>getLead</code>, <code>getLeadByRef</code>, <code>listLeads</code>, <code>dailyLeadOutcomes</code>, <code>outcomesByPageType</code> (leads.ts); <code>syncLeadOutcomes</code> (metrics.ts)</td></tr>
+      <tr><td><code>assistant_threads</code></td><td><code>id</code></td><td><code>createAssistantThread</code>, <code>appendAssistantMessage</code> (bumps <code>updated_at</code>), <code>deleteAssistantThread</code> (assistant.ts)</td><td><code>listAssistantThreads</code>, <code>getAssistantThread</code> (assistant.ts)</td></tr>
+      <tr><td><code>assistant_messages</code></td><td><code>id</code></td><td><code>appendAssistantMessage</code>, <code>deleteAssistantThread</code> (assistant.ts)</td><td><code>listAssistantMessages</code> (assistant.ts)</td></tr>
+    </tbody>
+  </table>
+  <ul>
+    <li><code>leads</code> (0021): one row per WhatsApp reference code, or entered by hand. <code>status</code> moves through <code>clicked</code>, <code>chat</code>, <code>qualified</code>, <code>won</code> or <code>lost</code>, and each stage keeps the time it was reached (<code>clicked_at</code> … <code>lost_at</code>). No phone number or message is stored. See <a href="#glossary">Glossary</a> for reference codes.</li>
+    <li><code>assistant_messages.content_json</code> holds a message's text and, for answers, the blocks it drew with a snapshot of their rows and the tools it called, so a reopened thread looks the same (0010). Messages cascade from their thread.</li>
+  </ul>
+
+  <h2 id="dropped-tables">Tables that no longer exist</h2>
+  <p>Older code, branches and notes may mention these. None exist after the last migration:</p>
+  <table>
+    <thead><tr><th>Table</th><th>Created</th><th>Dropped</th><th>Where the data lives now</th></tr></thead>
+    <tbody>
+      <tr><td><code>findings</code>, <code>opportunities</code>, <code>competitors</code>, <code>growth_plans</code></td><td>0001</td><td>0009</td><td>Inside <code>analyses.report_json</code></td></tr>
+      <tr><td><code>crawl_snapshots</code></td><td>0001</td><td>0009</td><td>Crawl rows are in <code>pages</code></td></tr>
+      <tr><td><code>audit_logs</code></td><td>0001</td><td>0009</td><td>Nothing read or wrote it</td></tr>
+      <tr><td><code>search_top_queries</code></td><td>0014</td><td>0016</td><td><code>site_snapshots</code>, kind <code>top_queries</code></td></tr>
+    </tbody>
+  </table>
+  <p>Competitor domains a user confirms are in <code>site_competitor_domains</code> (0003), which is unrelated to the dropped <code>competitors</code> table. 0019 also dropped columns nothing read, among them <code>pages.crawl_error</code>, <code>search_metrics.analysis_id</code>, <code>oauth_credentials.expires_at</code>, and <code>page_metrics_daily.other_bot_hits</code> and <code>search_position</code>.</p>
+
+  <h2 id="ownership-and-cascades">Ownership: everything cascades from sites</h2>
+  <p>Migration 0019 (<code class="path">packages/db/migrations/0019_ownership_and_indexes.sql</code>) set one rule: every table with a <code>site_id</code> has <code>REFERENCES sites(id) ON DELETE CASCADE</code>. Inside a site, ownership is narrower:</p>
+  <ul>
+    <li><code>pages</code>, <code>crawl_counts</code> and <code>changes</code> cascade from <code>analyses</code>.</li>
+    <li><code>page_metrics_daily</code>, <code>ai_page_daily</code>, <code>page_index_status</code> and <code>page_revisions</code> cascade from <code>generated_pages</code>, which cascades from <code>page_templates</code>, which cascades from <code>datasets</code>.</li>
+    <li><code>data_sources</code> and <code>data_records</code> cascade from <code>datasets</code>; <code>scrape_queue</code> from <code>jobs</code>; <code>assistant_messages</code> from <code>assistant_threads</code>.</li>
+  </ul>
+  <p>So deleting a site is a single <code>DELETE FROM sites</code>. <code>deleteSite</code> (<code class="path">packages/db/src/index.ts:94</code>) clears <code>page_links</code> and the site's <code>pages</code> rows first, so no single statement carries the whole cascade of the two largest tables. 0019 also keyed <code>page_sessions</code> by <code>(site_id, session_id)</code>: the session id comes from the browser, so one site can't claim another's.</p>
+  <div class="callout note"><p>D1 enforces foreign keys, and so does the test shim (Node's <code>DatabaseSync</code> turns <code>foreign_keys</code> on by default). A cascade that works in tests works in production, and an insert with a missing parent fails in both.</p></div>
+
+  <h2 id="metric-points-ledger">The metric_points ledger</h2>
+  <p><code>metric_points</code> stores one number per site, metric and day. Results reads its time series from it.</p>
+  <ul>
+    <li><strong>Values are additive components.</strong> A point is either a daily sum (clicks, impressions, leads, page views) or the value on that day (published pages). Ratios are never stored: they are derived at read time from their parts. Search Console position, for example, is stored as <code>search_position_weight</code> (position times impressions) beside <code>search_impressions</code>, and <code>resultsView</code> computes CTR and average position over any window (<code class="path">packages/core/src/results.ts:288</code>). That makes weekly and windowed comparisons correct by summing.</li>
+    <li><strong>Writes overwrite.</strong> <code>upsertMetricPoints</code> (<code class="path">packages/db/src/metrics.ts:13</code>) is <code>ON CONFLICT … DO UPDATE SET value = excluded.value</code>, so a re-run or a Search Console revision replaces a day instead of double counting.</li>
+    <li><strong>Metric names are declared once</strong> in <code>METRICS</code> (<code class="path">packages/core/src/results.ts:90</code>), grouped by the source that writes them. A group is what that source's sync may write and what a changed property clears (<code>clearMetricPoints</code>).</li>
+  </ul>
+  <p>Writers: the first-party, lead-outcome and AI syncs in <code>metrics.ts</code>, every finished analysis (a site-health point from <code>analysisHealthPoints</code>), the Search Console import chart (<code>gsc_indexed</code>, <code>gsc_not_indexed</code>), and the connector syncs in <code class="path">apps/web/src/results-sync.ts</code> and <code class="path">apps/web/src/sync-steps.ts</code>.</p>
+
+  <h2 id="retention-and-pruning">Retention and pruning</h2>
+  <p>A 25,000-page crawl is tens of MB and a D1 database on the Free plan holds 500 MB, so crawl rows are not kept forever.</p>
+  <ul>
+    <li><strong>Crawl rows.</strong> When an analysis finishes, <code>saveAnalysisReport</code> calls <code>pruneCrawlResults</code> (<code class="path">packages/db/src/index.ts:393</code>). It deletes the <code>pages</code> rows of every older analysis except the latest <code>KEPT_CRAWLS</code> (2) finished ones and any run newer than the latest finished one, which a re-run may still reuse. Reports and <code>crawl_counts</code> stay, so History and crawl pace are unaffected; drill-downs read only the latest crawl.</li>
+    <li><strong>Reports.</strong> <code>compactReport</code> keeps <code>report_json</code> under 1.5 MB (UTF-8 bytes), under D1's row limit, by dropping sampled pages, then evidence beyond the top findings, then route lists.</li>
+    <li><strong>Finding keys before pruning.</strong> <code>saveFindingKeys</code> runs before pruning so History can still tell which pages vanished.</li>
+    <li><strong>Server logs.</strong> <code>pruneCrawlLog</code>, called from <code class="path">apps/web/src/connector-sources.ts:290</code>, drops <code>crawl_log_paths</code> rows not seen for 120 days and <code>crawl_log_daily</code> rows older than 486 days.</li>
+    <li><strong>Replaced, not appended.</strong> <code>search_metrics</code>, <code>page_search_metrics</code> and every <code>site_snapshots</code> list are replaced on each sync.</li>
+  </ul>
+
+  <h2 id="without-rowid">WITHOUT ROWID tables</h2>
+  <p>Small, write-heavy tables keyed by a composite primary key are declared <code>WITHOUT ROWID</code>: <code>metric_points</code>, <code>page_links</code>, <code>url_index_status</code>, <code>page_metrics_daily</code>, <code>ai_page_daily</code>, <code>page_sessions</code> (all from 0019), <code>crawl_counts</code> (0020), <code>crawl_log_daily</code> (0022) and <code>search_console_urls</code> (0023). The row is stored in the primary-key B-tree itself, so each upsert writes one row instead of a row plus an index entry. Use it for a new table when the key is the natural lookup and rows are small; keep the default for tables with large JSON payloads.</p>
+
+  <h2 id="applying-migrations">Applying migrations</h2>
+  <p><strong>Locally.</strong> <code>npm run dev</code> runs <code class="path">apps/web/scripts/predev.mjs</code> first. It builds the shared packages, reads the local D1 file under <code>apps/web/.cloudflare/state</code> to see which migrations are unapplied, and if any are, runs <code>npm run db:migrate:local</code> (stopped after two minutes, since the <code>cf</code> CLI sometimes never exits). If migrations are still pending afterwards it prints which ones. You can run it yourself:</p>
+  <pre><code>npm run db:migrate:local    # root script, delegates to apps/web
+# = cf d1 migrations apply &lt;db id&gt; --local --persist-to ./.cloudflare/state --dir ../../packages/db/migrations</code></pre>
+  <p><strong>Remotely.</strong> <code>npm run db:migrate:remote</code> applies the same directory to the production database. The owner runs it on deploy; merging a migration does not apply it. See <a href="#ops">Operating it</a>.</p>
+  <div class="callout warn"><p>Code can reach production before its migration. Where that would break something important, the code tolerates the missing table: <code>saveAnalysisReport</code> wraps the ledger point, the finding keys and pruning in <code>try</code>/<code>catch</code> so the report is still saved. Do the same when a new write is secondary to the request.</p></div>
+
+  <h2 id="test-shim">The SQLite test shim</h2>
+  <p><code>openSqliteD1</code> (<code class="path">packages/db/src/sqlite.ts:12</code>, exported as <code>@organic-growth/db/sqlite</code>) opens Node's built-in <code>node:sqlite</code> (in memory by default), applies every <code>.sql</code> file in <code>packages/db/migrations</code> in order, and returns a <code>D1Like</code>. Every test that touches the database uses it: the <code>packages/db/src/*.test.ts</code> files and agents tests such as <code>pipeline.test.ts</code> and <code>assistant.test.ts</code>. <code class="path">scripts/audit-site.mjs</code> (<code>npm run audit</code>) uses it too. It is not for use inside Workers.</p>
+  <p>Because it runs the real migrations, a new migration is tested the moment you run <code>npm test -w @organic-growth/db</code>, and a migration that fails on SQLite fails there first. It needs Node 22 (<code>node:sqlite</code>).</p>
+
+  <h2 id="table-rebuild">The table rebuild rule</h2>
+  <p>SQLite can't add a foreign key or change a column constraint on an existing table, so a migration that needs to rebuilds it: create <code>x_new</code> with the new shape, copy the rows that still have an owner, drop <code>x</code>, rename <code>x_new</code> to <code>x</code>. 0019 does this for fifteen tables.</p>
+  <div class="callout trap"><p>Dropping a table deletes its rows, and with foreign keys enforced that delete cascades into every table that already references it. Rebuild a parent (say <code>analyses</code>) while new children point at it and the drop empties them. 0019 sets <code>pages</code> and <code>changes</code> aside first (<code>pages_kept</code>, <code>changes_kept</code>), drops the old children, then drops and replaces <code>analyses</code>, then creates the new children and copies the kept rows back. Rebuilding <code>sites</code> or <code>generated_pages</code> the same way without that order would wipe most of the database. See the "Table rebuild" entry in <code class="path">CONTEXT.md</code>.</p></div>
+  <p>Checklist for a new migration:</p>
+  <ol>
+    <li>Add the next numbered file to <code class="path">packages/db/migrations/</code>; never edit an applied one.</li>
+    <li>Give new site-owned tables <code>site_id TEXT NOT NULL REFERENCES sites(id) ON DELETE CASCADE</code>.</li>
+    <li>If you rebuild a table, set its children aside before dropping it, as above.</li>
+    <li>Put the SQL that reads and writes it in <code>packages/db/src</code>, and test it with <code>openSqliteD1</code>.</li>
+    <li>Keep requests to a fixed number of queries (batch with <code>json_each</code>, not one query per item): the Workers Free plan allows 50 D1 queries per request (<code class="path">CONTEXT.md</code>, "Query budget"; <a href="#gotchas">Gotchas</a>).</li>
+  </ol>
+</article>

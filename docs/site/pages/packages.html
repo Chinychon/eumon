@@ -1,0 +1,220 @@
+<article id="packages" data-title="Packages" data-group="Reference">
+  <h1>Packages</h1>
+  <p class="lede">What each workspace in the monorepo does, what it depends on, what it exports, its main modules and tests, and what to know before changing it. Use it to find where a piece of logic lives.</p>
+
+  <figure data-diagram="package-deps"><figcaption>Workspace dependencies from each <code>package.json</code>: <code>core</code> sits at the bottom, <code>agents</code> pulls the analysis together, and <code>apps/web</code> uses everything except <code>sdk</code>.</figcaption></figure>
+
+  <p>The npm workspaces are <code>apps/*</code> and <code>packages/*</code> (root <code class="path">package.json</code>). Every package is ESM, named <code>@organic-growth/&lt;name&gt;</code>, written in TypeScript, and compiled by <code>tsc</code> from <code>src/</code> to <code>dist/</code>. Its <code>package.json</code> points <code>main</code>, <code>types</code> and <code>exports</code> at <code>dist/</code>, so every other workspace, including the web app, imports the <strong>built</strong> copy, never the source.</p>
+  <table>
+    <thead><tr><th>Command</th><th>What it does</th></tr></thead>
+    <tbody>
+      <tr><td><code>npm run build:packages</code></td><td>Builds every package in dependency order: core, ai, db, repo-analyzer, crawler, scraper, pages, agents, sdk</td></tr>
+      <tr><td><code>npm test</code></td><td>Builds the packages, then runs every workspace's <code>test</code> script</td></tr>
+      <tr><td><code>npm test -w @organic-growth/&lt;name&gt;</code></td><td>One package's tests: <code>tsc -p tsconfig.test.json</code> compiles <code>src</code> (tests included) to <code>dist-test/</code>, then <code>node --test "dist-test/**/*.test.js"</code></td></tr>
+      <tr><td><code>npm run typecheck</code></td><td>Builds the packages, then type-checks every workspace</td></tr>
+    </tbody>
+  </table>
+  <div class="callout trap"><p>After changing a package, run <code>npm run build:packages</code> before using it from anywhere else. Until you do, the web app and the other packages' tests keep running the old <code>dist/</code>. <code>npm run dev</code> rebuilds the packages on start (<code class="path">apps/web/scripts/predev.mjs</code>), but a running dev server does not pick up package changes. A single package's <code>npm test -w</code> does not rebuild the packages it depends on either.</p></div>
+  <p>Tests use Node's built-in runner (<code>node:test</code>, <code>node:assert/strict</code>); there is no test framework dependency. Tests that need a database use the in-memory SQLite shim from <code>@organic-growth/db/sqlite</code> (<a href="#data-model--test-shim">Data model: the SQLite test shim</a>).</p>
+
+  <h2 id="core">core</h2>
+  <p>Shared types and pure functions. <code>@organic-growth/core</code> holds the domain types every other workspace uses (<code>SiteRecord</code>, <code>Finding</code>, <code>CrawlPageResult</code>, <code>Dataset</code>, <code>GeneratedPage</code>, <code>PageSettings</code> and the rest in <code>types.ts</code>) and the logic that must give the same answer wherever it runs: the Results math, keyword and backlink views, AI agent classification, WhatsApp reference codes, signed tokens. Nothing in it does I/O, so the API, the client link, the analysis and the tests compute the same numbers.</p>
+  <dl class="facts">
+    <dt>Dependencies</dt><dd>None (dev: <code>typescript</code>, <code>@types/node</code>)</dd>
+    <dt>Entry</dt><dd><code class="path">packages/core/src/index.ts</code>, re-exports every module; package export <code>.</code> only</dd>
+  </dl>
+  <table>
+    <thead><tr><th>Module</th><th>What it does</th></tr></thead>
+    <tbody>
+      <tr><td><code>types.ts</code></td><td>Domain types shared by every workspace: JSON values, findings and severities, crawl results, sites, datasets, templates, generated pages, page settings, conversion event names</td></tr>
+      <tr><td><code>results.ts</code></td><td>Results math over ledger series: <code>addDays</code>, <code>weekly</code>, comparisons, the <code>METRICS</code> list grouped by source, and <code>resultsView</code></td></tr>
+      <tr><td><code>ai-agents.ts</code></td><td>The one table of AI engines, crawlers and assistants: <code>classifyUserAgent</code>, <code>aiAssistantFrom</code>, <code>landingSource</code>, robots.txt tokens</td></tr>
+      <tr><td><code>keywords.ts</code>, <code>links.ts</code>, <code>serp.ts</code></td><td>DataForSEO keyword lists and gaps, backlink profiles and the link gap, search results pages and suggested competitors, as pure views</td></tr>
+      <tr><td><code>search-console.ts</code></td><td>Parses Search Console Page indexing exports, names Google's reasons, <code>todayStatus</code> and <code>suggestRedirect</code></td></tr>
+      <tr><td><code>server-logs.ts</code></td><td>Parses server and CDN log formats, keeps crawler requests only, aggregates them into day and path rows (<code>aggregateHits</code>, <code>crawlLogView</code>)</td></tr>
+      <tr><td><code>history.ts</code></td><td>Finding keys per run and which problems were resolved between runs (<code>findingKey</code>, <code>runKeys</code>, <code>resolutions</code>)</td></tr>
+      <tr><td><code>trends.ts</code></td><td>Averages, fall from a peak, and Googlebot's pace through a sitemap, over day series</td></tr>
+      <tr><td><code>fingerprint.ts</code></td><td>64-bit simhash of page text and Hamming distance, for near-duplicate pages</td></tr>
+      <tr><td><code>whatsapp.ts</code></td><td>WhatsApp reference codes (alphabet, length, the browser snippet), lead statuses, <code>findRef</code></td></tr>
+      <tr><td><code>tokens.ts</code></td><td>Base64url, <code>signToken</code>/<code>verifyToken</code>, <code>derivedKey</code>, constant-time <code>sameSecret</code></td></tr>
+      <tr><td><code>signals.ts</code></td><td>Core Web Vitals thresholds (<code>speedRating</code>) and URL Inspection coverage classes</td></tr>
+      <tr><td><code>records.ts</code></td><td><code>mergeRecordData</code> (combine one entity's facts from several records) and <code>slugify</code></td></tr>
+      <tr><td><code>severity.ts</code></td><td><code>severityFromImpact</code> and <code>organicImpactScore</code></td></tr>
+      <tr><td><code>countries.ts</code>, <code>ids.ts</code>, <code>sheet-titles.ts</code>, <code>sync-notes.ts</code></td><td>Country codes and names, <code>createId</code>, spreadsheet-safe sheet names, <code>isProblemNote</code></td></tr>
+    </tbody>
+  </table>
+  <p><strong>Tests</strong> (<code>npm test -w @organic-growth/core</code>): <code>ai-agents</code>, <code>connectors</code> (links, serp and results views), <code>countries</code>, <code>fingerprint</code>, <code>history</code>, <code>keywords</code>, <code>results</code>, <code>search-console</code>, <code>sheet-titles</code>, <code>signals</code>, <code>tokens</code>, <code>trends</code>, <code>whatsapp</code> (all <code>*.test.ts</code> in <code class="path">packages/core/src/</code>).</p>
+  <div class="callout warn"><p>Every workspace imports these types. Changing a type in <code>types.ts</code> can break any package and the web app; run <code>npm run typecheck</code> from the root, which builds the packages first.</p></div>
+
+  <h2 id="ai">ai</h2>
+  <p>The language-model client. <code>createLlm</code> returns a <code>JsonLlm</code> that answers a system and user prompt with JSON matching a schema. It picks the provider from the environment: DeepSeek if <code>DEEPSEEK_API_KEY</code> is set, then Claude if <code>ANTHROPIC_API_KEY</code> is set, then the Workers AI binding <code>AI</code>; <code>LLM_MODEL</code> overrides the model. <code>streamChat</code> streams one DeepSeek chat turn with tool calls, for Ask Eumon.</p>
+  <dl class="facts">
+    <dt>Dependencies</dt><dd><code>@anthropic-ai/sdk</code>; no workspace packages</dd>
+    <dt>Entry</dt><dd><code class="path">packages/ai/src/index.ts</code> (the whole package is this one file); export <code>.</code></dd>
+    <dt>Main exports</dt><dd><code>createLlm</code>, <code>JsonLlm</code>, <code>LlmEnv</code>, <code>streamChat</code>, <code>schema</code> (helpers that build strict JSON schemas), <code>LlmError</code>, <code>LlmHttpError</code>, <code>describeModelError</code>, the default model constants</dd>
+  </dl>
+  <p><strong>Tests</strong> (<code>npm test -w @organic-growth/ai</code>): <code>ai.test.ts</code>.</p>
+  <p>Schemas must list every property in <code>required</code> and set <code>additionalProperties: false</code>; optional values are <code>nullable</code>. Use the <code>schema</code> helpers so a prompt works on every provider. Workers AI does not run locally (<a href="#gotchas">Gotchas</a>).</p>
+
+  <h2 id="db">db</h2>
+  <p>Every SQL statement against D1, and the migrations. Functions take a <code>D1Like</code> (<code class="path">packages/db/src/d1.ts</code>) so they run on the D1 binding in the Worker and on Node's SQLite in tests. The schema and which function touches which table are on <a href="#data-model">Data model</a>.</p>
+  <dl class="facts">
+    <dt>Dependencies</dt><dd><code>@organic-growth/core</code></dd>
+    <dt>Entry</dt><dd><code class="path">packages/db/src/index.ts</code>; exports <code>.</code> and <code>./sqlite</code> (<code>openSqliteD1</code>, Node only)</dd>
+    <dt>Migrations</dt><dd><code class="path">packages/db/migrations/</code></dd>
+  </dl>
+  <table>
+    <thead><tr><th>Module</th><th>What it does</th></tr></thead>
+    <tbody>
+      <tr><td><code>index.ts</code></td><td>Sites, analyses, crawl queue and batches, crawl counters and coverage, link graph, retention (<code>pruneCrawlResults</code>), OAuth credentials, markets and competitor domains, changes, Search Console rows, conversion events; re-exports the modules below</td></tr>
+      <tr><td><code>d1.ts</code></td><td><code>D1Like</code>, <code>runStatements</code> (uses <code>batch</code> when the binding has it), <code>chunks</code>, <code>nowIso</code></td></tr>
+      <tr><td><code>page-engine.ts</code></td><td>Datasets, sources, records, jobs and the scrape queue, templates, generated pages and revisions, page settings, CTA variants, landing sessions, page counters and performance</td></tr>
+      <tr><td><code>metrics.ts</code></td><td>The <code>metric_points</code> ledger and the syncs that fill it from first-party data, lead outcomes and AI signals; page index status</td></tr>
+      <tr><td><code>snapshots.ts</code></td><td>Latest lists in <code>site_snapshots</code></td></tr>
+      <tr><td><code>coverage.ts</code></td><td>URL Inspection status of sitemap URLs (<code>urlsToInspect</code>, <code>indexCoverage</code>)</td></tr>
+      <tr><td><code>search-console.ts</code></td><td>Search Console export imports, live checks and the reconciliation view</td></tr>
+      <tr><td><code>server-logs.ts</code></td><td>Crawler hits from server logs: record, list, prune</td></tr>
+      <tr><td><code>history.ts</code></td><td>Per-run finding keys and the History tab's runs</td></tr>
+      <tr><td><code>leads.ts</code></td><td>Leads: record a click, create, update status, daily outcomes, outcomes by page type</td></tr>
+      <tr><td><code>activity.ts</code></td><td>Sync runs and the recent-events feed</td></tr>
+      <tr><td><code>assistant.ts</code></td><td>Ask Eumon threads and messages</td></tr>
+      <tr><td><code>sqlite.ts</code></td><td><code>openSqliteD1</code>: in-memory SQLite with every migration applied</td></tr>
+    </tbody>
+  </table>
+  <p><strong>Tests</strong> (<code>npm test -w @organic-growth/db</code>, needs Node 22 for <code>node:sqlite</code>): <code>activity</code>, <code>assistant</code>, <code>coverage</code>, <code>crawl</code>, <code>history</code>, <code>inventory</code>, <code>leads</code>, <code>links</code>, <code>metrics</code>, <code>page-engine</code>, <code>search-console</code>, <code>server-logs</code>, <code>snapshots</code> (<code>*.test.ts</code> in <code class="path">packages/db/src/</code>). They run against the real migrations.</p>
+  <ul>
+    <li>Keep SQL in this package. The only other place that writes SQL is the demo seeder in <code class="path">packages/agents/src/demo.ts</code>.</li>
+    <li>A request on the Workers Free plan may make 50 D1 queries: write functions that do a fixed number of queries (batch over <code>json_each</code>), never one per item.</li>
+    <li>A new table or column needs a new migration file; see <a href="#data-model--table-rebuild">the table rebuild rule</a> before rebuilding one.</li>
+  </ul>
+
+  <h2 id="crawler">crawler</h2>
+  <p>Fetches and audits a site the way Googlebot sees it: robots.txt, sitemaps, page fetches with the Googlebot user agent, HTML signals (title, canonical, robots, hreflang, JSON-LD, headings, links, text), empty shells and bot challenges, rendering comparisons, and competitor research as EumonBot. It also turns what it measured into findings. HTML is parsed with string scanning in <code>html.ts</code>; there is no DOM library.</p>
+  <dl class="facts">
+    <dt>Dependencies</dt><dd><code>@organic-growth/core</code></dd>
+    <dt>Entry</dt><dd><code class="path">packages/crawler/src/index.ts</code>, which defines the fetch and sitemap functions and re-exports the other modules; export <code>.</code></dd>
+  </dl>
+  <table>
+    <thead><tr><th>Module</th><th>What it does</th></tr></thead>
+    <tbody>
+      <tr><td><code>index.ts</code></td><td>User agents, <code>isSafePublicUrl</code>, <code>defaultFetcher</code>, <code>fetchRobots</code>, <code>parseHtmlSignals</code>, <code>isEmptyShell</code>, <code>fetchPageAudit</code>, <code>isBotChallenge</code>, <code>probeNotFound</code>, <code>fetchGooglebotPage</code>, <code>crawlGooglebotBatch</code>, <code>auditSitemap</code>, <code>sitemapEntries</code>, <code>collectSitemapUrls</code>, <code>selectRepresentativeSample</code>, <code>findingsFromCrawl</code></td></tr>
+      <tr><td><code>robots.ts</code></td><td><code>parseRobots</code> into a <code>RobotsPolicy</code> (allow, crawl delay, sitemaps)</td></tr>
+      <tr><td><code>html.ts</code></td><td>Entity decoding, attributes, tag and element spans, visible text</td></tr>
+      <tr><td><code>urls.ts</code></td><td><code>classifyUrlType</code>, <code>classifyLanguage</code>, <code>isSameSite</code>, <code>sameDocument</code></td></tr>
+      <tr><td><code>coverage-findings.ts</code></td><td><code>findingsFromCrawlCoverage</code>: findings from a full crawl's coverage</td></tr>
+      <tr><td><code>tech-seo.ts</code></td><td><code>runTechnicalSeoAudit</code>: technical SEO rules ranked by organic impact</td></tr>
+      <tr><td><code>rendering.ts</code></td><td>Raw versus rendered HTML (<code>compareRendering</code>), repeat fetches (<code>testRepeatability</code>), <code>findingsFromRendering</code>, <code>samplePerFamily</code></td></tr>
+      <tr><td><code>competitors.ts</code></td><td>Competitor research as EumonBot: sitemap profiles, page inspection, tracker detection, <code>researchSite</code></td></tr>
+      <tr><td><code>ai-readiness.ts</code></td><td>robots.txt verdicts per AI crawler, llms.txt, question-and-answer markup</td></tr>
+    </tbody>
+  </table>
+  <p><strong>Tests</strong> (<code>npm test -w @organic-growth/crawler</code>): <code>competitors.test.ts</code>, <code>crawler.test.ts</code>, <code>rendering.test.ts</code>.</p>
+  <p>Fetching goes through a <code>Fetcher</code> parameter (default <code>defaultFetcher</code>), so tests and the demo site pass their own. Competitor research identifies itself as <code>RESEARCH_USER_AGENT</code> and never impersonates a search engine.</p>
+
+  <h2 id="scraper">scraper</h2>
+  <p>Collects structured records for the landing-page engine. It proposes what to collect from a site (<code>proposeScope</code>), expands a source into detail-page URLs (<code>expandSource</code>), fetches politely as EumonBot with robots.txt enforced, extracts records from HTML with the language model or from CSV, and finds duplicate records.</p>
+  <dl class="facts">
+    <dt>Dependencies</dt><dd><code>@organic-growth/ai</code>, <code>@organic-growth/core</code>, <code>@organic-growth/crawler</code></dd>
+    <dt>Entry</dt><dd><code class="path">packages/scraper/src/index.ts</code>, re-exports every module; export <code>.</code></dd>
+  </dl>
+  <table>
+    <thead><tr><th>Module</th><th>What it does</th></tr></thead>
+    <tbody>
+      <tr><td><code>scope.ts</code></td><td><code>proposeScope</code> (model call over site evidence) and <code>validateProposal</code>: proposed datasets and sources</td></tr>
+      <tr><td><code>discover.ts</code></td><td><code>expandSource</code>: detail-page URLs from a sitemap or list pages, filtered by pattern and robots.txt</td></tr>
+      <tr><td><code>fetch.ts</code></td><td><code>PoliteFetcher</code> (robots.txt per origin, one instance per scrape step), <code>RobotsBlockedError</code></td></tr>
+      <tr><td><code>extract.ts</code></td><td><code>recordSchema</code>, <code>extractRecordsFromHtml</code>, <code>normalizeRecords</code>, <code>coerceField</code>, <code>parseCsv</code>, <code>mapCsvRows</code></td></tr>
+      <tr><td><code>html.ts</code></td><td>JSON-LD, meta tags, page text, links, next-page detection</td></tr>
+      <tr><td><code>resolve.ts</code></td><td><code>findDuplicateRecords</code>: model-assisted duplicate clusters over sorted, overlapping windows of names</td></tr>
+      <tr><td><code>url-pattern.ts</code></td><td><code>compilePathPattern</code> (<code>*</code> one segment, <code>**</code> any) and <code>summarizeRoutePatterns</code></td></tr>
+    </tbody>
+  </table>
+  <p><strong>Tests</strong> (<code>npm test -w @organic-growth/scraper</code>): <code>scraper.test.ts</code>.</p>
+
+  <h2 id="pages">pages</h2>
+  <p>Turns records into landing pages and serves them as HTML. It proposes a template for a dataset, generates pages from records (grouping, placeholders, quality checks), renders landing pages, hub pages and the sitemap, picks a CTA variant with Thompson sampling, and builds the performance report and snippet suggestions. See <a href="#flow-pages">Flow: pages</a>.</p>
+  <dl class="facts">
+    <dt>Dependencies</dt><dd><code>@organic-growth/ai</code>, <code>@organic-growth/core</code></dd>
+    <dt>Entry</dt><dd><code class="path">packages/pages/src/index.ts</code>; exports <code>.</code> and <code>./labels</code></dd>
+  </dl>
+  <table>
+    <thead><tr><th>Module</th><th>What it does</th></tr></thead>
+    <tbody>
+      <tr><td><code>templates.ts</code></td><td><code>defaultTemplate</code>, <code>proposeTemplate</code> (model call), <code>unknownPlaceholders</code></td></tr>
+      <tr><td><code>generate.ts</code></td><td><code>generatePages</code>, <code>groupRecords</code>, <code>fieldCoverage</code>, <code>normalizeMountPath</code></td></tr>
+      <tr><td><code>patterns.ts</code></td><td>Placeholder filling in titles and prose (<code>fillPattern</code>, <code>fillProse</code>, <code>formatValue</code>)</td></tr>
+      <tr><td><code>render.ts</code></td><td><code>renderLandingPage</code>, <code>renderHubPage</code>, <code>renderSitemap</code>, <code>trackingScript</code>, <code>escapeHtml</code>, <code>publicUrl</code></td></tr>
+      <tr><td><code>labels.ts</code></td><td>Interface text on generated pages per language (<code>labelsFor</code>, <code>PAGE_LANGUAGES</code>, <code>htmlLang</code>)</td></tr>
+      <tr><td><code>bandit.ts</code></td><td>Thompson sampling over CTA variants (<code>chooseArm</code>, <code>probabilityBest</code>)</td></tr>
+      <tr><td><code>insights.ts</code></td><td><code>buildPerformanceReport</code>, <code>expectedCtr</code>: per-page and per-template performance and suggestions</td></tr>
+      <tr><td><code>snippets.ts</code></td><td><code>suggestSnippets</code>: model-written title and description options</td></tr>
+      <tr><td><code>potential.ts</code></td><td><code>estimatePagePotential</code>: how many pages a page idea supports with the data collected</td></tr>
+      <tr><td><code>inventory.ts</code></td><td>Field fill, duplicate names and page outcomes for a dataset (<code>inventoryFromRows</code>)</td></tr>
+    </tbody>
+  </table>
+  <p><strong>Tests</strong> (<code>npm test -w @organic-growth/pages</code>): <code>inventory.test.ts</code>, <code>pages.test.ts</code>, <code>potential.test.ts</code>, <code>render.test.ts</code>.</p>
+  <p><code>labels.ts</code> imports nothing, and the <code>./labels</code> export lets a client component (<code class="path">apps/web/app/components/SetupView.tsx</code>) use it without pulling in the rest of the package.</p>
+
+  <h2 id="agents">agents</h2>
+  <p>The analysis and everything that joins sources together. <code>runFullAnalysis</code> (<code>pipeline.ts</code>) runs the crawl, repository, search, competition and connector analyses and builds the report; <code>index.ts</code> turns findings into opportunities and a growth plan. It also holds the clients for Google, Bing, DataForSEO and the speed and authority APIs, the Ask Eumon agent loop, and the demo site seeder. See <a href="#flow-analysis">Flow: analysis</a>.</p>
+  <dl class="facts">
+    <dt>Dependencies</dt><dd><code>@organic-growth/ai</code>, <code>core</code>, <code>crawler</code>, <code>db</code>, <code>repo-analyzer</code>, <code>pages</code></dd>
+    <dt>Entry</dt><dd><code class="path">packages/agents/src/index.ts</code>, which defines <code>buildOpportunities</code>, <code>gapOpportunities</code>, <code>synthesizeGrowthPlan</code>, <code>analyzeSearchTraffic</code> and re-exports the modules; export <code>.</code></dd>
+  </dl>
+  <table>
+    <thead><tr><th>Module</th><th>What it does</th></tr></thead>
+    <tbody>
+      <tr><td><code>pipeline.ts</code></td><td><code>runFullAnalysis</code>, <code>queueFullCrawl</code>, <code>shouldReuse</code> (whether an earlier crawl result still stands), <code>siteBrandTerms</code></td></tr>
+      <tr><td><code>search.ts</code></td><td><code>analyzeSearch</code>, <code>findingsFromSearch</code>, <code>searchOpportunities</code> from Search Console rows</td></tr>
+      <tr><td><code>competition.ts</code></td><td>Content types compared with competitors, competition opportunities</td></tr>
+      <tr><td><code>code-findings.ts</code></td><td><code>findingsFromCode</code>: findings from the repository analysis</td></tr>
+      <tr><td><code>conversion.ts</code></td><td><code>auditConversion</code>, <code>findingsFromConversion</code>: how templates let a visitor become a lead</td></tr>
+      <tr><td><code>connector-findings.ts</code></td><td>Findings and opportunities from crawl logs, the link gap, SERPs and Search Console imports</td></tr>
+      <tr><td><code>demand.ts</code></td><td><code>estimateDemand</code>: volume and difficulty for an opportunity, real or estimated</td></tr>
+      <tr><td><code>ai-plan.ts</code></td><td><code>synthesizePlanNarrative</code>: the growth plan's model-written narrative</td></tr>
+      <tr><td><code>assistant.ts</code></td><td>Ask Eumon: typed read-only tools over the site's data and <code>show</code> blocks drawn from their rows</td></tr>
+      <tr><td><code>google-search-console.ts</code>, <code>google-analytics.ts</code>, <code>google-sheets.ts</code></td><td>Search Console metrics and URL Inspection, GA4 daily sessions and AI referrals, spreadsheet export</td></tr>
+      <tr><td><code>bing.ts</code>, <code>dataforseo.ts</code>, <code>site-signals.ts</code></td><td>Bing Webmaster and IndexNow; DataForSEO Labs, SERP and Backlinks; CrUX, PageSpeed and Open PageRank</td></tr>
+      <tr><td><code>results-points.ts</code></td><td>Search Console rows as ledger points, ranking buckets, top queries</td></tr>
+      <tr><td><code>log-coverage.ts</code>, <code>trend-signals.ts</code>, <code>inventory-data.ts</code></td><td>Database reads that feed an analysis: crawl-log coverage, ledger trends, dataset inventories</td></tr>
+      <tr><td><code>not-found-probe.ts</code></td><td>Soft-404 finding from the crawler's <code>probeNotFound</code></td></tr>
+      <tr><td><code>change-generator.ts</code>, <code>github-pr.ts</code></td><td>Proposed changes limited to <code>SAFE_SEO_CONFIG_PATHS</code>, and opening a GitHub pull request</td></tr>
+      <tr><td><code>demo.ts</code>, <code>demo-connectors.ts</code></td><td>The fictional demo clinic: <code>seedDemoSite</code>, simulated runs, demo connector data</td></tr>
+    </tbody>
+  </table>
+  <p><strong>Tests</strong> (<code>npm test -w @organic-growth/agents</code>): <code>assistant</code>, <code>code-findings</code>, <code>competition</code>, <code>connector-findings</code>, <code>connectors</code>, <code>conversion</code>, <code>dataforseo</code>, <code>demand</code>, <code>demo</code>, <code>google-clients</code>, <code>inventory-data</code>, <code>not-found-probe</code>, <code>opportunities</code>, <code>pipeline</code>, <code>results-points</code>, <code>search</code>, <code>site-signals</code>, <code>trend-signals</code> (<code>*.test.ts</code> in <code class="path">packages/agents/src/</code>). The pipeline, assistant, inventory and trend tests use <code>openSqliteD1</code>.</p>
+  <p>This package sits at the top of the package graph, so its tests run against the built <code>dist/</code> of six other packages: rebuild them after changing any of those.</p>
+
+  <h2 id="repo-analyzer">repo-analyzer</h2>
+  <p>Reads a customer's repository through the GitHub API and works out the framework, its routes, and what each route's source says about the HTML it produces (rendering, data fetching, metadata, unbounded queries), plus how the sitemap is generated and which paths are sensitive. Conclusions are inferred from code patterns and carry the evidence.</p>
+  <dl class="facts">
+    <dt>Dependencies</dt><dd><code>@organic-growth/core</code></dd>
+    <dt>Entry</dt><dd><code class="path">packages/repo-analyzer/src/index.ts</code>, re-exports every module; export <code>.</code></dd>
+  </dl>
+  <table>
+    <thead><tr><th>Module</th><th>What it does</th></tr></thead>
+    <tbody>
+      <tr><td><code>analyze.ts</code></td><td><code>analyzeRepository</code> (fingerprint, routes, route inspections, sitemap code, sensitive paths), <code>routeSourceCandidates</code>, <code>parseReactRouterRoutes</code></td></tr>
+      <tr><td><code>routes.ts</code></td><td><code>inspectRouteSource</code>, <code>findUnboundedQueries</code>, <code>routeFamily</code></td></tr>
+      <tr><td><code>github.ts</code></td><td><code>createGitHubApiClient</code>, <code>buildRepoSnapshotFromGitHub</code></td></tr>
+      <tr><td><code>github-app.ts</code></td><td>GitHub App installation tokens and repository lists</td></tr>
+    </tbody>
+  </table>
+  <p><strong>Tests</strong> (<code>npm test -w @organic-growth/repo-analyzer</code>): <code>analyze.test.ts</code>.</p>
+
+  <h2 id="sdk">sdk</h2>
+  <p>A browser tracker for a customer's JavaScript app. <code>createOrganicGrowthTracker({ siteId, endpoint })</code> returns <code>track(event, { destination })</code>, which posts the event to <code>&lt;endpoint&gt;/&lt;siteId&gt;/events</code> with the page URL and a session id. It reads the landing pages' <code>eumon_sid</code> cookie at send time, so a conversion is credited to the Eumon page the visitor first landed on, and falls back to a session id in <code>sessionStorage</code>. Failures are swallowed so tracking never affects the host app.</p>
+  <dl class="facts">
+    <dt>Dependencies</dt><dd><code>@organic-growth/core</code> (type import of <code>ConversionEventName</code>)</dd>
+    <dt>Entry</dt><dd><code class="path">packages/sdk/src/index.ts</code>, the only file; export <code>.</code></dd>
+  </dl>
+  <p><strong>Tests</strong>: none; the package has no <code>test</code> script. No workspace imports it. <code class="path">apps/web/README.md</code> documents it as the alternative to the dependency-free tracking script for JavaScript apps. Events land in <code>conversion_events</code> (<a href="#data-model--landing-page-engine">Data model</a>).</p>
+
+  <h2 id="web">web (apps/web)</h2>
+  <p><code>@organic-growth/web</code> is the deployed app: a vinext (React Server Components on Vite) app running as a Cloudflare Worker, with the dashboard UI, the API routes, the public landing pages, and the Workflows that run analyses, scrapes and search syncs. It depends on every package except <code>sdk</code>. It is not built to <code>dist/</code> for other workspaces; it is the consumer. Details are on <a href="#web-app">Web app</a>.</p>
+  <dl class="facts">
+    <dt>Worker entry</dt><dd><code class="path">apps/web/worker.ts</code> (exports the Workflow classes <code>SiteAnalysisWorkflow</code>, <code>ScrapeWorkflow</code>, <code>SearchSyncWorkflow</code>)</dd>
+    <dt>Dev</dt><dd><code>npm run dev</code>, port 5174, after <code>predev.mjs</code> builds the packages and applies local migrations</dd>
+    <dt>Tests</dt><dd><code>npm test -w @organic-growth/web</code>: <code>node --test</code> over <code>app/**/*.test.ts</code> and <code>src/**/*.test.ts</code></dd>
+  </dl>
+</article>

@@ -20,3 +20,7 @@ dist-test
 
 # Impeccable review captures (regenerated on every review)
 **/.impeccable/review/
+
+# graphify knowledge-graph output
+graphify-out/
+docs/site/dist/

@@ -1,0 +1,135 @@
+<article id="architecture" data-title="Architecture" data-group="How it works">
+  <h1>Architecture</h1>
+  <p class="lede">How Eumon runs: one Cloudflare Worker serves the dashboard, the API, the public landing pages and the background Workflows, on top of a stack of TypeScript packages. Read this before changing bindings, adding a route, or moving code between packages.</p>
+
+  <figure data-diagram="architecture"><figcaption>One Worker handles browser requests, the daily cron trigger and three Workflows, and talks to D1, Browser Rendering, Workers AI and outside APIs.</figcaption></figure>
+
+  <h2 id="one-worker">One Worker does everything</h2>
+  <p>There is a single deployable: the <code>apps/web</code> workspace (<code>@organic-growth/web</code>), deployed as the Worker named <code>eumon</code>. The same Worker:</p>
+  <ul>
+    <li>renders the dashboard at <code>/</code>,</li>
+    <li>answers the JSON API under <code>/api/*</code>,</li>
+    <li>serves published landing pages under <code>/p/&lt;siteId&gt;/…</code> and the client share link under <code>/r/&lt;token&gt;</code>,</li>
+    <li>runs the daily cron trigger,</li>
+    <li>and hosts the three Workflow classes that do long work (analysis, data collection, Results sync).</li>
+  </ul>
+  <p>There is no separate API server, queue consumer or second Worker. The older diagram at <code class="path">docs/architecture.html</code> shows the same system from an earlier point; this page is the current description.</p>
+
+  <h2 id="build-and-serve">Build and serve</h2>
+  <p>The app is written with the Next.js App Router conventions (<code>app/page.tsx</code>, <code>app/layout.tsx</code>, <code>app/**/route.ts</code>) but is built by <strong>vinext</strong>, a Vite-based implementation of those conventions, not by Next.js. <code class="path">apps/web/vite.config.ts</code> loads two plugins: <code>vinext()</code> and <code>@cloudflare/vite-plugin</code> with <code>remoteBindings: false</code> and the <code>rsc</code> environment (with <code>ssr</code> as a child).</p>
+  <dl class="facts">
+    <dt>Worker settings and bindings</dt>
+    <dd><code class="path">apps/web/cloudflare.config.ts</code>, written with the <code>cf/config</code> helpers (<code>defineWorker</code>, <code>bindings</code>, <code>triggers</code>, <code>exports</code>). There is no <code>wrangler.jsonc</code>. The <code>AppEnv</code> type is inferred from this file, so a binding added here is typed everywhere.</dd>
+    <dt>Worker entry</dt>
+    <dd><code class="path">apps/web/worker.ts</code> (the <code>entrypoint</code> in the config). It wraps vinext's fetch handler, re-exports the three Workflow classes, and adds the <code>scheduled</code> handler.</dd>
+    <dt>Compatibility</dt>
+    <dd><code>compatibilityDate: "2026-10-05"</code>, flag <code>nodejs_compat</code>.</dd>
+    <dt>Static files</dt>
+    <dd><code>apps/web/public/</code>, served through the <code>ASSETS</code> binding with <code>notFoundHandling: "none"</code>.</dd>
+    <dt>Dev server</dt>
+    <dd><code>vite dev --port 5174 --strictPort</code>. The <code>predev</code> script (<code class="path">apps/web/scripts/predev.mjs</code>) rebuilds the shared packages and applies pending local migrations first.</dd>
+    <dt>Deploy</dt>
+    <dd><code>vinext-cloudflare deploy</code> (the CLI from <code>@vinext/cloudflare</code>), run by <code>npm run deploy</code> in <code>apps/web</code>. See <a href="#ops">Operating it</a>.</dd>
+  </dl>
+  <p>Route code reads bindings with <code>import { env } from "cloudflare:workers"</code> rather than from a handler argument. Workflow classes read them from <code>this.env</code>.</p>
+  <div class="callout warn"><p>The web app imports the shared packages' <em>built</em> output, not their sources. After editing anything in <code>packages/*</code>, run <code>npm run build:packages</code> (or restart <code>npm run dev</code>, which does it) or the app keeps running the old code.</p></div>
+
+  <h2 id="bindings">Bindings</h2>
+  <p>Everything the Worker can reach is declared in <code class="path">apps/web/cloudflare.config.ts</code>.</p>
+  <table>
+    <thead><tr><th>Binding</th><th>Kind</th><th>Used for</th></tr></thead>
+    <tbody>
+      <tr><td><code>DB</code></td><td>D1 database, bound by ID (default <code>591e4045-…</code>, overridable with <code>CF_D1_DATABASE_ID</code>)</td><td>All persistent state. Schema in <code>packages/db/migrations</code>; see <a href="#data-model">Data model</a>.</td></tr>
+      <tr><td><code>ANALYSIS_WORKFLOW</code></td><td>Workflow <code>site-analysis</code>, class <code>SiteAnalysisWorkflow</code> (<code class="path">apps/web/src/analysis-workflow.ts</code>)</td><td>A site analysis: sitemap, crawl in batches, competitor research, report. Started by <code>POST /api/sites/:siteId/analyses</code>. See <a href="#flow-analysis">Analysis flow</a>.</td></tr>
+      <tr><td><code>SCRAPE_WORKFLOW</code></td><td>Workflow <code>dataset-scrape</code>, class <code>ScrapeWorkflow</code> (<code class="path">apps/web/src/scrape-workflow.ts</code>)</td><td>Collecting dataset records from approved sources. Started by <code>POST /api/datasets/:datasetId/scrape</code>. See <a href="#flow-pages">Landing page flow</a>.</td></tr>
+      <tr><td><code>SEARCH_SYNC_WORKFLOW</code></td><td>Workflow <code>search-sync</code>, class <code>SearchSyncWorkflow</code> (<code class="path">apps/web/src/search-sync-workflow.ts</code>)</td><td>One site's Results sync. Started by the cron trigger or by <code>POST /api/sites/:siteId/results/sync</code>. See <a href="#flow-sync">Results sync flow</a>.</td></tr>
+      <tr><td><code>BROWSER</code></td><td>Browser Rendering</td><td>The analysis workflow launches it through <code>@cloudflare/puppeteer</code> to render one page per template, so raw HTML can be compared with the rendered DOM (<code class="path">apps/web/src/analysis-workflow.ts:214</code>).</td></tr>
+      <tr><td><code>AI</code></td><td>Workers AI</td><td>The last-resort language model (see <a href="#architecture--external-services">External services</a>).</td></tr>
+      <tr><td><code>ASSETS</code></td><td>Static assets</td><td>Files in <code>apps/web/public/</code>.</td></tr>
+    </tbody>
+  </table>
+  <p>Each Workflow binding names <code>worker: "eumon"</code>, so the Worker creates instances of its own exported classes.</p>
+
+  <h3>Secrets</h3>
+  <table>
+    <thead><tr><th>Secret</th><th>Purpose</th></tr></thead>
+    <tbody>
+      <tr><td><code>SESSION_SECRET</code></td><td>Signs the GitHub install cookie, Google OAuth state and client share tokens; also the base of the per-site crawl-log token and IndexNow key. Needs at least 32 characters.</td></tr>
+      <tr><td><code>OAUTH_ENCRYPTION_KEY</code></td><td>Encrypts stored Google refresh tokens.</td></tr>
+      <tr><td><code>GOOGLE_CLIENT_ID</code>, <code>GOOGLE_CLIENT_SECRET</code></td><td>Google OAuth client (Search Console, GA4, Sheets).</td></tr>
+      <tr><td><code>GITHUB_APP_ID</code>, <code>GITHUB_APP_SLUG</code>, <code>GITHUB_APP_PRIVATE_KEY</code></td><td>The GitHub App for repository analysis and draft pull requests.</td></tr>
+      <tr><td><code>GOOGLE_API_KEY</code></td><td>PageSpeed Insights and CrUX.</td></tr>
+      <tr><td><code>OPEN_PAGERANK_KEY</code></td><td>Open PageRank authority scores.</td></tr>
+      <tr><td><code>DATAFORSEO_LOGIN</code>, <code>DATAFORSEO_PASSWORD</code></td><td>DataForSEO (keyword volume, competitor keywords, results pages, backlinks).</td></tr>
+      <tr><td><code>BING_WEBMASTER_API_KEY</code></td><td>Bing Webmaster Tools.</td></tr>
+      <tr><td><code>DEEPSEEK_API_KEY</code></td><td>DeepSeek, the first-choice language model.</td></tr>
+    </tbody>
+  </table>
+  <div class="callout trap"><p>Cloudflare has no optional secrets: every secret declared in <code>cloudflare.config.ts</code> must be set on the Worker before a deploy. That is why <code>ANTHROPIC_API_KEY</code> and <code>LLM_MODEL</code> are deliberately left out of the config. Set them with <code>wrangler secret put</code> in production; to use them in local dev, declare them in the config again. Keep settings in the config and not in the Cloudflare dashboard, or a Workers Builds deploy (strict mode) aborts on the difference. See <a href="#gotchas">Gotchas</a>.</p></div>
+  <div class="callout warn"><p><code>remoteBindings</code> is <code>false</code> in <code>vite.config.ts</code>, so the <code>AI</code> binding does not work in local dev. Set <code>DEEPSEEK_API_KEY</code> or <code>ANTHROPIC_API_KEY</code> in <code>apps/web/.dev.vars</code> to use the AI steps locally.</p></div>
+
+  <h2 id="cron">The cron trigger</h2>
+  <p>The config declares one trigger, <code>triggers.scheduled({ schedule: "15 4 * * *" })</code>: every day at 04:15 UTC (<code class="path">apps/web/cloudflare.config.ts:10</code>). Cloudflare calls the <code>scheduled</code> handler in <code class="path">apps/web/worker.ts:15</code>, which calls <code>startDailySyncs</code> (<code class="path">apps/web/src/sync-steps.ts:208</code>) inside <code>ctx.waitUntil</code>.</p>
+  <ol>
+    <li><code>startDailySyncs</code> lists every site (<code>listSitesForResults</code> in <code class="path">packages/db/src/metrics.ts:283</code>).</li>
+    <li>For each site it calls <code>startSync</code> with <code>trigger: "daily"</code>, which creates a <code>SearchSyncWorkflow</code> instance with the ID <code>daily-&lt;YYYY-MM-DD&gt;-&lt;siteId&gt;</code>.</li>
+    <li>Because the ID is fixed per site and day, a second firing on the same day creates nothing new.</li>
+  </ol>
+  <p>"Sync now" in the dashboard uses the same <code>startSync</code> with <code>trigger: "manual"</code> and the ID <code>manual-&lt;siteId&gt;-&lt;10-minute window&gt;</code>, so repeated clicks within ten minutes join one run, and a manual sync is refused (409) while that site's daily run is in flight.</p>
+  <div class="callout note"><p>A cron trigger is used instead of Workflow schedules because schedules need the paid plan. The sync workflow runs a site's sources in one step and URL inspections in steps of 40 to stay within the Free plan's 50 subrequests per step. See <a href="#flow-sync">Results sync flow</a>.</p></div>
+
+  <h2 id="request-routing">How requests are handled</h2>
+  <p>vinext maps URLs to files under <code>apps/web/app/</code>. There is no middleware file; every request goes straight to its page or route handler.</p>
+  <table>
+    <thead><tr><th>Path</th><th>File</th><th>What it is</th></tr></thead>
+    <tbody>
+      <tr><td><code>/</code></td><td><code class="path">apps/web/app/page.tsx</code></td><td>The dashboard, a single client component that switches views in place and keeps the view in the query string. See <a href="#web-app">Web app</a>.</td></tr>
+      <tr><td><code>/api/*</code></td><td><code>apps/web/app/api/**/route.ts</code></td><td>JSON route handlers, one file per path, exporting <code>GET</code>, <code>POST</code>, <code>PATCH</code>, <code>PUT</code>, <code>DELETE</code> or <code>OPTIONS</code>. Full list in <a href="#web-app--api-routes">Web app: API routes</a>.</td></tr>
+      <tr><td><code>/p/:siteId/…</code></td><td><code class="path">apps/web/app/p/[siteId]/[[...path]]/route.ts</code></td><td>Public landing pages, hub page, sitemap, IndexNow key file and the analytics beacon. Rendering is in <code class="path">apps/web/src/public-pages.ts</code>.</td></tr>
+      <tr><td><code>/r/:token</code></td><td><code class="path">apps/web/app/r/[token]/page.tsx</code></td><td>The client's read-only Results page, fed by <code>GET /api/r/:token</code>.</td></tr>
+      <tr><td>anything in <code>public/</code></td><td><code>apps/web/public/</code></td><td>Icons, <code>manifest.json</code>, and a retired <code>sw.js</code>.</td></tr>
+    </tbody>
+  </table>
+  <p>The customer's own domain forwards a path (by default <code>/guides</code>) to <code>/p/&lt;siteId&gt;/…</code>. Pages are indexable only when the request comes through that proxy (header <code>X-Eumon-Proxy: 1</code>, or an <code>X-Forwarded-Host</code> equal to the site's public host); direct hits on the app host get <code>X-Robots-Tag: noindex</code> (<code class="path">apps/web/src/public-pages.ts:31</code>).</p>
+
+  <h2 id="package-layers">How the packages layer</h2>
+  <p>Shared code lives in nine workspaces under <code>packages/</code>, all named <code>@organic-growth/*</code>. The root <code>build:packages</code> script builds them in dependency order: core, ai, db, repo-analyzer, crawler, scraper, pages, agents, sdk.</p>
+  <figure data-diagram="package-deps"><figcaption>Internal dependencies between the packages and the web app, from each <code>package.json</code>; arrows point at the package being used.</figcaption></figure>
+  <table>
+    <thead><tr><th>Package</th><th>Depends on</th><th>Touches</th></tr></thead>
+    <tbody>
+      <tr><td><code>core</code></td><td>nothing</td><td>No I/O. Types, IDs, signed tokens, keyword, trend, history and Results logic.</td></tr>
+      <tr><td><code>ai</code></td><td><code>@anthropic-ai/sdk</code> only</td><td>Network: DeepSeek over <code>fetch</code>, Anthropic through the SDK, Workers AI through the <code>AI</code> binding passed in.</td></tr>
+      <tr><td><code>db</code></td><td>core</td><td>D1, through a small <code>D1Like</code> interface (<code class="path">packages/db/src/d1.ts</code>). Tests run against <code>openSqliteD1</code>, Node's built-in SQLite with every migration applied (<code class="path">packages/db/src/sqlite.ts</code>).</td></tr>
+      <tr><td><code>crawler</code></td><td>core</td><td>Network: fetches pages, sitemaps and robots.txt through an injectable <code>fetcher</code>.</td></tr>
+      <tr><td><code>repo-analyzer</code></td><td>core</td><td>Network: GitHub API and GitHub App installation tokens.</td></tr>
+      <tr><td><code>sdk</code></td><td>core</td><td>Browser <code>fetch</code> to <code>/api/sites/:siteId/events</code>. For customers' JavaScript apps; the web app does not import it.</td></tr>
+      <tr><td><code>pages</code></td><td>ai, core</td><td>No I/O. Renders landing-page HTML, sitemaps and templates. Model calls go through a <code>JsonLlm</code> passed in.</td></tr>
+      <tr><td><code>scraper</code></td><td>ai, core, crawler</td><td>Network: discovers and fetches source pages; extraction uses a <code>JsonLlm</code> passed in.</td></tr>
+      <tr><td><code>agents</code></td><td>ai, core, crawler, db, repo-analyzer, pages</td><td>Both D1 and network: the analysis pipeline, Ask Eumon, Google, Bing, DataForSEO and PageSpeed clients, the demo site.</td></tr>
+      <tr><td><code>@organic-growth/web</code></td><td>agents, ai, core, crawler, db, pages, repo-analyzer, scraper</td><td>Everything: routes, Workflows, bindings.</td></tr>
+    </tbody>
+  </table>
+  <p>Every package except <code>sdk</code> has a <code>test</code> script that compiles with <code>tsconfig.test.json</code> and runs <code>node --test</code>, so all of them are tested in plain Node, not in a Worker runtime. Code that needs D1 is tested against <code>openSqliteD1</code>; model calls go through a <code>JsonLlm</code> argument, and the crawler and <code>createLlm</code> accept a <code>fetcher</code> argument. More per package in <a href="#packages">Packages</a>.</p>
+
+  <h2 id="external-services">External services</h2>
+  <p>Each of these is called from code in the repo. The DataForSEO, Bing, PageSpeed/CrUX, Open PageRank and IndexNow keys are read by <code>signalKeys()</code> (<code class="path">apps/web/src/results-access.ts:9</code>), which treats an empty value as not configured. The GitHub App is optional for sites without a repository.</p>
+  <table>
+    <thead><tr><th>Service</th><th>Used for</th><th>Where</th></tr></thead>
+    <tbody>
+      <tr><td>Google OAuth</td><td>Connecting a site's Google account. Scopes: <code>webmasters.readonly</code>, <code>analytics.readonly</code>, <code>drive.file</code>.</td><td><code class="path">apps/web/src/gsc-auth.ts</code>, <code>/api/sites/:siteId/gsc/connect</code>, <code>/api/google/callback</code></td></tr>
+      <tr><td>Google Search Console</td><td>Clicks, impressions, queries per page; property list.</td><td><code class="path">packages/agents/src/google-search-console.ts</code></td></tr>
+      <tr><td>URL Inspection API</td><td>Whether Google indexed each sitemap URL.</td><td><code class="path">packages/agents/src/google-search-console.ts</code>, <code class="path">apps/web/src/url-inspection.ts</code></td></tr>
+      <tr><td>Google Analytics 4</td><td>Property list (Admin API) and organic sessions (Data API).</td><td><code class="path">packages/agents/src/google-analytics.ts</code></td></tr>
+      <tr><td>Google Sheets</td><td>"Google Sheets" export from report cards.</td><td><code class="path">packages/agents/src/google-sheets.ts</code></td></tr>
+      <tr><td>PageSpeed Insights, CrUX</td><td>Lab and real-user speed scores (<code>GOOGLE_API_KEY</code>).</td><td><code class="path">packages/agents/src/site-signals.ts</code></td></tr>
+      <tr><td>Open PageRank</td><td>Authority estimate for the site and its competitors.</td><td><code class="path">packages/agents/src/site-signals.ts</code></td></tr>
+      <tr><td>GitHub App</td><td>Repository list, code analysis, draft pull requests for safe SEO config changes.</td><td><code class="path">packages/repo-analyzer/src/github-app.ts</code>, <code class="path">packages/agents/src/github-pr.ts</code></td></tr>
+      <tr><td>DataForSEO</td><td>Keyword volume and difficulty, competitor keywords, search results pages, backlinks.</td><td><code class="path">packages/agents/src/dataforseo.ts</code></td></tr>
+      <tr><td>Bing Webmaster Tools</td><td>Bing clicks, impressions and crawl counts.</td><td><code class="path">packages/agents/src/bing.ts</code></td></tr>
+      <tr><td>IndexNow</td><td>Submitting changed landing-page URLs. The key file is served from the site's mount path; the key is derived from <code>SESSION_SECRET</code>.</td><td><code class="path">packages/agents/src/bing.ts</code>, <code class="path">apps/web/src/public-pages.ts</code></td></tr>
+      <tr><td>Language models</td><td>Scoping, extraction, page copy patterns, snippets, Ask Eumon. <code>createLlm</code> picks DeepSeek if <code>DEEPSEEK_API_KEY</code> is set, else Anthropic if <code>ANTHROPIC_API_KEY</code> is set, else Workers AI. <code>LLM_MODEL</code> overrides the model.</td><td><code class="path">packages/ai/src/index.ts:50</code></td></tr>
+    </tbody>
+  </table>
+  <p>Which background job calls which service, and how failures are recorded, is covered in <a href="#flow-sync">Results sync flow</a> and <a href="#flow-analysis">Analysis flow</a>.</p>
+</article>

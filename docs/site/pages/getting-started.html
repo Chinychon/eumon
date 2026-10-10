@@ -1,0 +1,103 @@
+<article id="getting-started" data-title="Getting started" data-group="Start here">
+  <h1>Getting started</h1>
+  <p class="lede">From a fresh clone to the app running on localhost, with the demo site loaded and the tests passing. Local development runs entirely on Miniflare; a Cloudflare account is only needed to deploy.</p>
+
+  <h2 id="requirements">Requirements</h2>
+  <dl class="facts">
+    <dt>Node.js</dt><dd>22 or later in practice. <code class="path">package.json</code> says <code>&gt;=20</code>, but the <code>db</code> and <code>agents</code> tests and <code>npm run audit</code> import <code>node:sqlite</code> (<code class="path">packages/db/src/sqlite.ts</code>), which Node 20 does not have.</dd>
+    <dt>npm</dt><dd>10 (<code>packageManager</code> in <code class="path">apps/web/package.json</code> pins <code>npm@10.9.7</code>).</dd>
+    <dt>Cloudflare account</dt><dd>Not needed locally. Deploying is covered in <a href="#ops">Operations</a>.</dd>
+  </dl>
+
+  <h2 id="install">Install and build the packages</h2>
+  <pre><code>npm install
+npm run build:packages</code></pre>
+  <p><code>build:packages</code> compiles every package under <code>packages/</code> with <code>tsc</code>, in dependency order (<code class="path">package.json</code>). The web app imports the built <code>dist/</code> copies, not the sources, so a stale build shows old features and old demo data. <code>npm run dev</code>, <code>npm test</code>, <code>npm run typecheck</code>, <code>npm run eval</code> and <code>npm run audit</code> all run it first.</p>
+
+  <h2 id="dev-vars">Configure <code>.dev.vars</code></h2>
+  <pre><code>cp apps/web/.dev.vars.example apps/web/.dev.vars</code></pre>
+  <p>Nothing in it is required to run locally. With no settings at all, site analysis, CSV import, page generation, publishing and analytics work. Each setting below unlocks one more feature. On a deployed Worker the rule is different: every secret declared in <code class="path">apps/web/cloudflare.config.ts</code> must be set, because Cloudflare has no optional secrets.</p>
+  <table>
+    <thead><tr><th>Setting</th><th>What it unlocks</th></tr></thead>
+    <tbody>
+      <tr><td><code>SESSION_SECRET</code></td><td>At least 32 characters (<code>openssl rand -hex 32</code>); shorter values are rejected (<code class="path">packages/core/src/tokens.ts:20</code>). Signs the GitHub install cookie, the Google OAuth state and client Results links (<code>/r/&lt;token&gt;</code>). Also derives each site's IndexNow key and server-log token.</td></tr>
+      <tr><td><code>OAUTH_ENCRYPTION_KEY</code></td><td>Base64url of exactly 32 random bytes (<code>node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"</code>). Encrypts stored Google refresh tokens with AES-GCM (<code class="path">apps/web/src/gsc-auth.ts:4</code>).</td></tr>
+      <tr><td><code>GOOGLE_CLIENT_ID</code>, <code>GOOGLE_CLIENT_SECRET</code></td><td>The Google connection: Search Console, GA4 and the Sheets export, requested as one consent. Needs a Google OAuth web client with redirect URI <code>http://localhost:5174/api/google/callback</code> and the Search Console API enabled. Also needs <code>SESSION_SECRET</code> and <code>OAUTH_ENCRYPTION_KEY</code>.</td></tr>
+      <tr><td><code>GITHUB_APP_ID</code>, <code>GITHUB_APP_SLUG</code>, <code>GITHUB_APP_PRIVATE_KEY</code></td><td>Repository analysis and draft fix pull requests. A GitHub App with Setup URL <code>http://localhost:5174/api/github/callback</code> and permissions Metadata read, Contents read/write, Pull requests read/write. Needs <code>SESSION_SECRET</code>. Sites without a repository work without it.</td></tr>
+      <tr><td><code>GOOGLE_API_KEY</code></td><td>Real-user speed (Chrome UX Report) and lab scores (PageSpeed Insights). A Google Cloud API key restricted to those two APIs.</td></tr>
+      <tr><td><code>OPEN_PAGERANK_KEY</code></td><td>The authority estimate (Open PageRank, free key).</td></tr>
+      <tr><td><code>DATAFORSEO_LOGIN</code>, <code>DATAFORSEO_PASSWORD</code></td><td>DataForSEO API login and password: keyword volume and difficulty, competitor keywords, Google results pages and search competitors, and backlinks (the Backlinks API must be active on the account).</td></tr>
+      <tr><td><code>BING_WEBMASTER_API_KEY</code></td><td>Bing clicks, impressions and crawl counts. The site must be verified in the same Bing account.</td></tr>
+      <tr><td><code>DEEPSEEK_API_KEY</code></td><td>The language model for scoping, extraction, page copy and title suggestions. Ask Eumon only works with this key (<code class="path">packages/ai/src/index.ts:242</code>).</td></tr>
+      <tr><td><code>ANTHROPIC_API_KEY</code></td><td>Claude as the language model when no DeepSeek key is set. Not declared in <code class="path">apps/web/cloudflare.config.ts</code>, so it is ignored locally until you declare it there (see the callout below).</td></tr>
+      <tr><td><code>LLM_MODEL</code></td><td>Overrides the model of whichever provider is active, for example <code>deepseek-v4-pro</code>. Undeclared, like <code>ANTHROPIC_API_KEY</code>.</td></tr>
+    </tbody>
+  </table>
+  <p>One more setting is read by the config file itself rather than the Worker: <code>CF_D1_DATABASE_ID</code>, an environment variable that points the <code>DB</code> binding at your own D1 database when you deploy a copy. It defaults to the project's database ID and does nothing locally.</p>
+
+  <div class="callout trap"><p>Only bindings declared in <code class="path">apps/web/cloudflare.config.ts</code> reach the Worker. A <code>.dev.vars</code> entry that is not declared there is silently ignored. <code>ANTHROPIC_API_KEY</code> and <code>LLM_MODEL</code> are left undeclared on purpose so a deploy does not require them; to use them locally, add <code>ANTHROPIC_API_KEY: bindings.secret()</code> (and <code>LLM_MODEL</code>) to the <code>env</code> block. Restart the dev server after changing either file.</p></div>
+
+  <h3>Which language model runs</h3>
+  <p><code>createLlm</code> in <code class="path">packages/ai/src/index.ts:50</code> picks the first available provider:</p>
+  <ol>
+    <li><code>DEEPSEEK_API_KEY</code>, default model <code>deepseek-flash</code>.</li>
+    <li><code>ANTHROPIC_API_KEY</code>, default model <code>claude-opus-5-5</code>.</li>
+    <li>The Workers AI binding <code>AI</code>, default model <code>@cf/google/gemma-4-26b-a4b-it</code>.</li>
+  </ol>
+  <p><code>LLM_MODEL</code> replaces the default model of the chosen provider. Scoping, extraction, page copy, title suggestions and Ask Eumon need a model; every other step works without one.</p>
+  <div class="callout warn"><p>Workers AI does not work locally. <code class="path">apps/web/vite.config.ts</code> sets <code>remoteBindings: false</code>, and the <code>AI</code> binding needs to run remotely. Set <code>DEEPSEEK_API_KEY</code> to use the AI steps in local development.</p></div>
+
+  <h2 id="migrations">Apply the local migrations</h2>
+  <pre><code>npm run db:migrate:local</code></pre>
+  <p>This runs <code>cf d1 migrations apply … --local --persist-to ./.cloudflare/state</code> in <code>apps/web</code> against the SQL files in <code class="path">packages/db/migrations</code>. The local database lives under <code class="path">apps/web/.cloudflare/state</code>. You rarely need to run it by hand: <code>npm run dev</code> applies any pending migration first.</p>
+
+  <h2 id="dev-server">Start the dev server</h2>
+  <pre><code>npm run dev</code></pre>
+  <p>Run it from the repository root or from <code>apps/web</code>. It serves <code>http://localhost:5174</code> with <code>--strictPort</code>, so it fails rather than moving to another port. Before Vite starts, <code class="path">apps/web/scripts/predev.mjs</code> runs:</p>
+  <ol>
+    <li><code>npm run build:packages</code>, stopping if the build fails.</li>
+    <li>A check of the local D1 file for migrations it has not applied (read with <code>node:sqlite</code>; on Node 20 it cannot read the file and just runs the migrate command).</li>
+    <li><code>npm run db:migrate:local</code> when anything is pending, killed after two minutes because the beta <code>cf</code> CLI sometimes prints its result and never exits. Anything still unapplied is printed with the command to run.</li>
+  </ol>
+
+  <div class="callout trap"><p>vinext allows one dev server per directory. A second <code>npm run dev</code> in the same checkout refuses to start unless <code>VINEXT_NO_DEV_LOCK=1</code> is set (<code class="path">apps/web/node_modules/vinext/dist/cli-dev-config.js</code>). If you need a second, isolated server, give it its own Vite config with a separate <code>persistState</code> path and <code>cacheDir</code>, so it does not share the first server's D1 state.</p></div>
+  <div class="callout trap"><p>Local D1 runs one query at a time: it is a single SQLite file behind one Miniflare Durable Object (<code class="path">apps/web/.cloudflare/state/v3/d1/miniflare-D1DatabaseObject/</code>). One slow query, such as a scan with no covering index, stalls every other request, and only a dev-server restart recovers. Check a suspect query with <code>EXPLAIN QUERY PLAN</code> on the SQLite file, read-only, before sending it through the server.</p></div>
+
+  <h2 id="demo-site">Load the demo site</h2>
+  <p>The welcome page has an <strong>Explore the demo</strong> button, and Add website has <strong>Load demo site</strong>. Both call <code>POST /api/dev/demo-site</code> (<code class="path">apps/web/app/api/dev/demo-site/route.ts</code>), which runs <code>seedDemoSite</code> in <code class="path">packages/agents/src/demo.ts:722</code>. The route answers on the dev server at any address, and on a production build only to requests addressed to <code>localhost</code>, <code>127.0.0.1</code> or <code>::1</code>.</p>
+  <p>It deletes and rebuilds <code>site_demo_clinic</code>, "Demo Dental Clinic (demo data)" at <code>https://demo-clinic.example</code>, a fictional dental clinic group with about 1,800 sitemap URLs across page types (dentists, treatments, clinics, prices, blog). The pages are served from memory, but the real crawler and pipeline analyse them. The seed writes:</p>
+  <ul>
+    <li>markets (<code>mys</code>, <code>sgp</code>) and two competitor domains;</li>
+    <li>the page engine: datasets with records, templates and published pages;</li>
+    <li>connector data: results pages, search competitors, backlinks, the link gap, Bing and IndexNow markers;</li>
+    <li>two finished analyses, one a month old and one two days old, built from different versions of the site so History shows changes, with a Search Console import and a merged fix between them;</li>
+    <li>about 16 months of fictional Results history (Search Console, GA4, AI referrals) with growth after a go-live 80 days ago.</li>
+  </ul>
+  <p>Analyses you start on the demo site are simulated. <code>POST /api/sites/:siteId/analyses</code> calls <code>startDemoRun</code> instead of creating a Workflow, and each poll of the progress route calls <code>advanceDemoRun</code>, which moves the run forward to where it would be by now: a few seconds on the sitemap, the crawl at 8 URLs a second, each competitor, then the report. Click the demo button again to reset everything.</p>
+
+  <h2 id="tests">Run the tests</h2>
+  <pre><code>npm test                              # build:packages, then every workspace's test script
+npm test -w @organic-growth/db        # one workspace</code></pre>
+  <p>Tests use <code>node:test</code>, no framework. Each package compiles its sources and tests with <code>tsconfig.test.json</code> into <code>dist-test/</code>, then runs <code>node --test "dist-test/**/*.test.js"</code>. The web app runs <code>node --test</code> directly on <code>app/**/*.test.ts</code> and <code>src/**/*.test.ts</code>. <code>packages/sdk</code> has no tests. Database tests run against an in-memory SQLite database through <code class="path">packages/db/src/sqlite.ts</code>, not Miniflare.</p>
+
+  <h2 id="typecheck-build">Typecheck and build</h2>
+  <pre><code>npm run typecheck   # build:packages, then tsc --noEmit in every workspace
+npm run build       # build:packages, then the production Worker bundle (vite build)</code></pre>
+  <p>The web app's typecheck first runs <code>cf workers types -q</code>, which generates the Worker binding types from <code class="path">apps/web/cloudflare.config.ts</code>.</p>
+
+  <h2 id="evals-and-audit">The eval and audit CLIs</h2>
+  <h3><code>npm run eval</code></h3>
+  <p>The eval in <code class="path">evals/</code> runs the real collection pipeline (list discovery with pagination, extraction with the configured model, merging repeated mentions, duplicate resolution) against a public directory site, then grades it against an answer key parsed from the same pages without AI. It reports entity precision, claim precision and claim recall, and exits with status 1 below the thresholds (0.95, 0.98, 0.9). Run it before and after changing extraction prompts or merge logic.</p>
+  <p>It needs <code>DEEPSEEK_API_KEY</code> or <code>ANTHROPIC_API_KEY</code>, from the environment or read directly from <code class="path">apps/web/.dev.vars</code> (so the declaration rule above does not apply). A run makes about 30 model calls, a few US cents, and fetches about 30 public pages.</p>
+
+  <h3><code>npm run audit</code></h3>
+  <pre><code>npm run audit -- https://example.com [--max 500] [--competitor other.com] [--market idn] [--json]</code></pre>
+  <p><code class="path">scripts/audit-site.mjs</code> runs the same steps as <code>SiteAnalysisWorkflow</code> (sitemap, robots.txt, a Googlebot crawl of up to <code>--max</code> sitemap URLs, default 500, coverage, sampled checks, findings, growth plan) with an in-memory SQLite database in place of D1. <code>--competitor</code> and <code>--market</code> repeat; <code>--json</code> prints the full report. Fetches go to the live site, so keep <code>--max</code> modest on sites you do not own.</p>
+  <ul>
+    <li>A model key in the environment (not <code>.dev.vars</code>) lets it match competitor content types and write the plan narrative; without one, competitor sections are matched by URL name.</li>
+    <li>With Playwright installed (<code>npm i -D playwright</code>), it renders pages in Chromium for the source-versus-render comparison; otherwise that check is skipped.</li>
+    <li>Behind an HTTPS proxy, run it with <code>NODE_USE_ENV_PROXY=1</code>.</li>
+  </ul>
+
+  <p>Next: <a href="#architecture">Architecture</a> for how the pieces fit, or <a href="#gotchas">Gotchas</a> for the traps beyond local setup.</p>
+</article>

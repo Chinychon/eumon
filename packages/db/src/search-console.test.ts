@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { CrawlPageResult } from "@organic-growth/core";
 import {
-  createAnalysis, enqueueAnalysisCrawlUrls, getSnapshot, importSearchConsoleUrls, listMetricSeries, liveUrlsOfFamily, saveAnalysisReport, saveCrawlBatch,
-  saveSearchConsoleChart, saveSearchConsoleChecks, saveSearchConsoleSuggestions, saveSearchConsoleSummary, searchConsoleGoneUnsuggested, searchConsoleReconciliation, searchConsoleUrlsToCheck, upsertSite, type D1Like,
+  createAnalysis, enqueueAnalysisCrawlUrls, getSnapshot, importSearchConsoleUrls, listCurrentSearchMetrics, listMetricSeries, liveUrlsOfFamily, saveAnalysisReport, saveCrawlBatch,
+  saveSearchConsoleChart, saveSearchConsoleChecks, saveSearchConsoleSuggestions, saveSearchConsoleSummary, replaceCurrentSearchMetrics, searchConsoleGoneUnsuggested, searchConsoleReconciliation, searchConsoleUrlsToCheck, upsertSite, type D1Like,
 } from "./index.js";
 import { openSqliteD1 } from "./sqlite.js";
 
@@ -111,5 +111,15 @@ describe("Search Console import", () => {
     await saveSearchConsoleSuggestions(db, "s", [{ url: u("/doctors/dr-d"), suggestedUrl: u("/doctors/dr-a") }]);
     assert.deepEqual(await searchConsoleGoneUnsuggested(db, "s", undefined, 10), []);
     assert.deepEqual((await searchConsoleReconciliation(db, "s")).suggestions, [{ url: u("/doctors/dr-d"), suggestedUrl: u("/doctors/dr-a") }]);
+  });
+
+  it("reads back the current Search Console rows replaceCurrentSearchMetrics wrote, for this site only", async () => {
+    const db = await siteWithCrawl();
+    await upsertSite(db, { id: "t", name: "y.com", baseUrl: "https://y.com", createdAt: AT, updatedAt: AT });
+    const row = { query: "lasik", page: u("/lasik"), country: "mys", device: "MOBILE", impressions: 120, clicks: 4, ctr: 0.033, position: 6.5 };
+    await replaceCurrentSearchMetrics(db, "s", [row, { ...row, device: "DESKTOP", periodStart: "2026-09-01", periodEnd: "2026-09-28" }]);
+    await replaceCurrentSearchMetrics(db, "t", [{ ...row, query: "other" }]);
+    assert.deepEqual(await listCurrentSearchMetrics(db, "s"), [row, { ...row, device: "DESKTOP", periodStart: "2026-09-01", periodEnd: "2026-09-28" }]);
+    assert.deepEqual(await listCurrentSearchMetrics(db, "nobody"), []);
   });
 });

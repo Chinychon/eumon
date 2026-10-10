@@ -1483,6 +1483,19 @@ export async function replaceCurrentSearchMetrics(
   }
 }
 
+/** The rows `replaceCurrentSearchMetrics` last wrote for the site. */
+export async function listCurrentSearchMetrics(db: D1Like, siteId: string): Promise<SearchMetricRow[]> {
+  const { results } = await db.prepare(
+    `SELECT query, page, country, device, impressions, clicks, ctr, position, period_start, period_end FROM search_metrics WHERE site_id = ? ORDER BY rowid`,
+  ).bind(siteId).all<Record<string, unknown>>();
+  return results.map((row) => ({
+    query: String(row.query), page: String(row.page), country: String(row.country), device: String(row.device),
+    impressions: Number(row.impressions), clicks: Number(row.clicks), ctr: Number(row.ctr), position: Number(row.position),
+    ...(row.period_start != null ? { periodStart: String(row.period_start) } : {}),
+    ...(row.period_end != null ? { periodEnd: String(row.period_end) } : {}),
+  }));
+}
+
 export async function insertConversionEvent(
   db: D1Like,
   event: {

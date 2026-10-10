@@ -446,3 +446,4 @@ export * from "./trend-signals.js";
 export * from "./rank-findings.js";
 export * from "./not-found-probe.js";
 export * from "./fix-text.js";
+export * from "./content-targets.js";

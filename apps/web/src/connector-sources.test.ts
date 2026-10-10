@@ -176,10 +176,10 @@ describe("server and CDN logs", () => {
   it("checks the site's token, from a bearer header or the address", async () => {
     const token = await logToken(SECRET, "s");
     assert.match(token, /^[0-9a-f]{32}$/);
-    assert.ok(await tokenMatches(new Request("https://eumon.example/api/logs/s", { headers: { Authorization: `Bearer ${token}` } }), SECRET, "s"));
-    assert.ok(await tokenMatches(new Request(`https://eumon.example/api/logs/s?token=${token}`), SECRET, "s"));
-    assert.equal(await tokenMatches(new Request(`https://eumon.example/api/logs/s?token=${token}`), SECRET, "other"), false, "one site's token opens no other");
-    assert.equal(await tokenMatches(new Request("https://eumon.example/api/logs/s"), SECRET, "s"), false);
+    assert.ok(await tokenMatches(new Request("https://eumon.example/api/logs/s", { headers: { Authorization: `Bearer ${token}` } }), SECRET, "s", null));
+    assert.ok(await tokenMatches(new Request(`https://eumon.example/api/logs/s?token=${token}`), SECRET, "s", null));
+    assert.equal(await tokenMatches(new Request(`https://eumon.example/api/logs/s?token=${token}`), SECRET, "other", null), false, "one site's token opens no other");
+    assert.equal(await tokenMatches(new Request("https://eumon.example/api/logs/s"), SECRET, "s", null), false);
   });
 
   it("reads gzipped and plain deliveries and stores only crawler requests for the site's host", async () => {

@@ -30,6 +30,8 @@ describe("fix storage", () => {
     assert.equal(await findFixByHeadSha(db, "abc", "other"), null, "scoped to the site");
     await updateFix(db, "f1", { status: "merged" });
     assert.equal(await hasLiveFix(db, "s", "/procedures/:slug", "head"), false, "merged fixes don't block a new one");
+    await updateFix(db, "f1", { status: "reverted" });
+    assert.equal(await hasLiveFix(db, "s", "/procedures/:slug", "head"), true, "a reverted fix isn't tried again");
   });
 
   it("keeps settings with defaults", async () => {

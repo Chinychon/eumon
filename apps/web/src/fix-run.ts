@@ -5,7 +5,7 @@ import { parseHtmlSignals, visibleText } from "@organic-growth/crawler";
 import { countOpenFixes, hasLiveFix, listFixes, stageFix, updateFix, type D1Like, type FixRecord } from "@organic-growth/db";
 import {
   blockedAiSearchAgents, buildLlmsTxt, componentPath, editAiRobots, editJsonLd, editLlmsTxt, editMetadata, editMetadataBase, findMetadata, findPage,
-  JSON_LD_COMPONENT, memberPaths, metadataSnippet, parseModule, pathOf, routeForPath, stripLocale, urlTemplate, validateEdit, validateFile,
+  JSON_LD_COMPONENT, jsonLdCode, jsonLdSnippet, memberPaths, metadataSnippet, parseModule, pathOf, routeForPath, stripLocale, urlTemplate, validateEdit, validateFile,
   type AstNode, type Edit, type EditResult, type FixCandidate, type MetadataPlan, type PageHead, type Range, type RouteRef,
 } from "@organic-growth/fixes";
 
@@ -71,7 +71,7 @@ function staged(ctx: Ctx, title: string, file: { path: string; content: string |
 }
 
 async function samplesFor(deps: FixDeps, urls: string[]): Promise<FixSample[]> {
-  const pages = await Promise.all(urls.slice(0, 3).map(async (url) => ({ url, page: await deps.fetchPage(url) })));
+  const pages = await Promise.all(urls.slice(0, 3).map(async (url) => ({ url, page: await deps.fetchPage(url).catch(() => null) })));
   return pages.filter(({ page }) => page?.status === 200).map(({ url, page }) => {
     const signals = parseHtmlSignals(page!.body, url);
     const h1 = signals.headingOutline.find((h) => h.startsWith("h1:"))?.slice(3);
@@ -111,6 +111,7 @@ async function stageHead(ctx: Ctx): Promise<Outcome> {
   let aiReason: string | null = null, warnings: string[] = [], promptSha: string | undefined;
   if (wantsTitle || wantsDescription) {
     if (!deps.llm) aiReason = "No AI is set up to write the title and description, so they're offered as a snippet instead.";
+    else if (deps.budget.calls <= 0) aiReason = "The AI budget for this analysis is used up, so the title and description are offered as a snippet instead.";
     else {
       const samples = await samplesFor(deps, c.urls);
       const written = await writeFixText(deps.llm, { kind: "head", siteName: input.siteName, language: input.language, problems: c.problems, paths, dynamic: route.dynamic, samples, queries: input.queries }, deps.budget);
@@ -146,10 +147,11 @@ async function stageJsonLd(ctx: Ctx): Promise<Outcome> {
   const title = `Add ${schemaType} structured data to ${route.pathPattern}`;
   const { treePaths } = deps.repo;
   if (!treePaths.includes("tsconfig.json")) return skip(title, "the site doesn't use TypeScript, so Eumon can't add its .tsx component");
+  // The listed tree can be truncated, so ask for the component itself.
   const component = componentPath(treePaths);
-  if (treePaths.includes(component) && (await deps.repo.getFile(component))?.content !== JSON_LD_COMPONENT) {
-    return skip(title, `${component} already exists with other content, so Eumon won't overwrite it`);
-  }
+  const existing = await deps.repo.getFile(component);
+  if (existing && existing.content !== JSON_LD_COMPONENT) return skip(title, `${component} already exists with other content, so Eumon won't overwrite it`);
+  const tree = existing ? [...treePaths, component] : treePaths.filter((p) => p !== component);
   const file = await deps.repo.getFile(c.file);
   if (!file) return skip(title, "the file isn't on the default branch");
   const program = parsed(file.content);
@@ -159,11 +161,13 @@ async function stageJsonLd(ctx: Ctx): Promise<Outcome> {
   const paths = memberPaths(program, page.names);
   const url = urlTemplate(route.pathPattern, page.names, file.content);
   if (url === null) return skip(title, "a route parameter isn't available inside the page component");
-  if (!deps.llm) return skip(title, "No AI is set up to map the page's data to structured data, so Eumon will try again on a run with AI.");
+  const manual = jsonLdSnippet(jsonLdCode({ schemaType, fields: [{ field: "name", path: "page.name" }], url, origin: input.origin }));
+  if (!deps.llm) return skip(title, "No AI is set up to map the page's data to structured data, so the markup is offered as a snippet instead.", manual);
+  if (deps.budget.calls <= 0) return skip(title, "The AI budget for this analysis is used up, so the markup is offered as a snippet instead.", manual);
   const samples = await samplesFor(deps, c.urls);
   const written = await writeFixText(deps.llm, { kind: "jsonld", siteName: input.siteName, language: input.language, problems: c.problems, paths, dynamic: route.dynamic, schemaType, samples, queries: input.queries }, deps.budget);
-  if (!written.ok) return skip(title, written.reason);
-  const out = staged(ctx, title, { path: c.file, ...file }, editJsonLd(c.file, file.content, { schemaType, fields: written.text.schema, url, origin: input.origin }, treePaths), rootsOf(paths));
+  if (!written.ok) return skip(title, written.reason, manual);
+  const out = staged(ctx, title, { path: c.file, ...file }, editJsonLd(c.file, file.content, { schemaType, fields: written.text.schema, url, origin: input.origin }, tree), rootsOf(paths));
   return out.status === "staged" ? { ...out, warnings: written.warnings, promptSha: FIX_PROMPT_VERSION } : out;
 }
 
@@ -198,22 +202,40 @@ export async function stageCandidates(deps: FixDeps, input: StageInput): Promise
   const counts = { staged: 0, skipped: 0 };
   for (const c of input.candidates) {
     const route = c.route?.pathPattern ?? c.file;
-    if (await hasLiveFix(deps.db, input.siteId, route, c.kind)) continue;
-    let outcome: Outcome;
     try {
-      outcome = await STAGERS[c.kind]({ deps, input, c });
+      if (await hasLiveFix(deps.db, input.siteId, route, c.kind)) continue;
+      let outcome: Outcome;
+      try {
+        outcome = await STAGERS[c.kind]({ deps, input, c });
+      } catch (error) {
+        outcome = { title: `Fix ${c.kind} on ${route}`, reason: `Fix ${c.kind} on ${route}`, status: "skipped", result: `Eumon couldn't prepare this fix: ${messageOf(error)}. It will try again on the next run.` };
+      }
+      const at = deps.now().toISOString();
+      await stageFix(deps.db, {
+        id: createId("fix"), siteId: input.siteId, analysisId: input.analysisId, kind: c.kind, route, filePath: c.file,
+        files: {}, original: {}, warnings: [], status: "skipped", ...outcome, urls: c.urls, problems: c.problems, score: c.score, createdAt: at, updatedAt: at,
+      });
+      counts[outcome.status === "staged" ? "staged" : "skipped"]++;
     } catch (error) {
-      const message = (error instanceof Error ? error.message : String(error)).replace(/\.$/, "");
-      outcome = { title: `Fix ${c.kind} on ${route}`, reason: `Fix ${c.kind} on ${route}`, status: "skipped", result: `Eumon couldn't prepare this fix: ${message}. It will try again on the next run.` };
+      console.error(`fix-run: couldn't save the ${c.kind} fix for ${route}`, error);
     }
-    const at = deps.now().toISOString();
-    await stageFix(deps.db, {
-      id: createId("fix"), siteId: input.siteId, analysisId: input.analysisId, kind: c.kind, route, filePath: c.file,
-      files: {}, original: {}, warnings: [], status: "skipped", ...outcome, urls: c.urls, problems: c.problems, score: c.score, createdAt: at, updatedAt: at,
-    });
-    counts[outcome.status === "staged" ? "staged" : "skipped"]++;
   }
   return counts;
+}
+
+const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error)).replace(/\.$/, "");
+const CHANGED = "The file changed after the analysis; Eumon will check it again on the next run.";
+
+/** True when the main file's SHA moved, or a file the fix adds now exists with other content. */
+async function changedSince(repo: FixRepo, fix: FixRecord): Promise<boolean> {
+  const fresh = await repo.getFile(fix.filePath);
+  if (fresh ? fresh.sha !== fix.fileSha : fix.fileSha !== "new") return true;
+  for (const [path, content] of Object.entries(fix.files)) {
+    if (path === fix.filePath) continue;
+    const now = await repo.getFile(path);
+    if (now && now.content !== content) return true;
+  }
+  return false;
 }
 
 const slug = (route: string) => route.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40).replace(/-+$/, "") || "root";
@@ -224,19 +246,23 @@ export async function openStagedFixes(deps: FixDeps, pr: PrOps, input: { siteId:
   let opened = 0;
   for (const fix of fixes) {
     if (opened >= limit) break;
-    const fresh = await deps.repo.getFile(fix.filePath);
-    if (fresh ? fresh.sha !== fix.fileSha : fix.fileSha !== "new") {
-      await updateFix(deps.db, fix.id, { status: "closed", result: "The file changed after the analysis; Eumon will check it again on the next run." });
-      continue;
-    }
-    const branch = `eumon/${fix.kind}-${slug(fix.route)}`;
     try {
-      const made = await pr.createPr({ branch, title: fix.title, body: fixPrBody(fix, input.origin), files: fix.files });
-      await updateFix(deps.db, fix.id, { status: "draft", prNumber: made.number, prUrl: made.url, branch, headSha: made.headSha, prNodeId: made.nodeId });
-      opened++;
+      const changed = await changedSince(deps.repo, fix).catch((error: unknown) => new Error(messageOf(error)));
+      if (changed) {
+        const result = changed instanceof Error ? `Eumon couldn't read the files from GitHub (${changed.message}); it will check them again on the next run.` : CHANGED;
+        await updateFix(deps.db, fix.id, { status: "closed", result });
+        continue;
+      }
+      const branch = `eumon/${fix.kind}-${slug(fix.route)}-${fix.id.slice(-6)}`;
+      try {
+        const made = await pr.createPr({ branch, title: fix.title, body: fixPrBody(fix, input.origin), files: fix.files });
+        await updateFix(deps.db, fix.id, { status: "draft", prNumber: made.number, prUrl: made.url, branch, headSha: made.headSha, prNodeId: made.nodeId });
+        opened++;
+      } catch (error) {
+        await updateFix(deps.db, fix.id, { status: "failed", result: `Eumon couldn't open the pull request: ${messageOf(error)}. It will prepare the fix again on the next run.` });
+      }
     } catch (error) {
-      const message = (error instanceof Error ? error.message : String(error)).replace(/\.$/, "");
-      await updateFix(deps.db, fix.id, { status: "failed", result: `Eumon couldn't open the pull request: ${message}. It will prepare the fix again on the next run.` });
+      console.error(`fix-run: couldn't open fix ${fix.id}`, error);
     }
   }
   return opened;
@@ -267,24 +293,46 @@ export async function checkMergedFixes(deps: FixDeps, pr: PrOps, input: { siteId
   let reverted = 0;
   for (const fix of await listFixes(deps.db, input.siteId, ["merged"])) {
     if (fix.verification) continue;
-    const seen = fix.urls.flatMap((u) => byUrl.get(u) ?? []);
-    const errors = seen.filter((p) => p.status >= 400);
-    const untitled = seen.filter((p) => !p.title?.trim()).length;
-    const what = errors.length
-      ? `${errors.length} of its page${errors.length === 1 ? "" : "s"} returning errors (${errors[0]!.url} returned ${errors[0]!.status})`
-      : fix.kind === "head" && fix.problems.some((p) => p.startsWith("title-")) && untitled * 2 > seen.length
-        ? `${untitled} of its ${seen.length} pages without a title`
-        : null;
-    if (!what) {
-      await updateFix(deps.db, fix.id, { verification: { recrawl: "ok", pages: seen.length, checkedAt: deps.now().toISOString() } });
-      continue;
+    try {
+      const seen = fix.urls.flatMap((u) => byUrl.get(u) ?? []);
+      // Page-level fixes wait for a recrawl that includes their pages.
+      if ((fix.kind === "head" || fix.kind === "jsonld") && !seen.length) continue;
+      const checkedAt = deps.now().toISOString();
+      const errors = seen.filter((p) => p.status >= 400);
+      const untitled = seen.filter((p) => !p.title?.trim()).length;
+      const what = errors.length
+        ? `${errors.length} of its page${errors.length === 1 ? "" : "s"} returning errors (${errors[0]!.url} returned ${errors[0]!.status})`
+        : fix.kind === "head" && fix.problems.some((p) => p.startsWith("title-")) && untitled * 2 > seen.length
+          ? `${untitled} of its ${seen.length} pages without a title`
+          : null;
+      if (!what) {
+        await updateFix(deps.db, fix.id, { verification: { recrawl: "ok", pages: seen.length, checkedAt } });
+        continue;
+      }
+      const paths = Object.keys(fix.original);
+      const current = await Promise.all(paths.map(async (path) => (await deps.repo.getFile(path))?.content));
+      if (!paths.length || paths.some((path, i) => current[i] !== fix.files[path])) {
+        await updateFix(deps.db, fix.id, {
+          verification: { recrawl: "broken", revert: "manual", checkedAt },
+          result: `The recrawl found ${what} after this fix, but the file has changed since, so Eumon didn't open a revert. Use GitHub's Revert button on the merged PR.`,
+        });
+        continue;
+      }
+      const added = Object.keys(fix.files).filter((path) => !(path in fix.original));
+      const body = `Eumon's recrawl after this fix found ${what}. This restores the previous version.${added.length ? ` Files the fix added (${added.join(", ")}) are left in place; nothing uses them after this revert, so you can delete them.` : ""}`;
+      try {
+        const made = await pr.createPr({ branch: `eumon/revert-${fix.id.slice(-6)}-${deps.now().getTime().toString(36)}`, title: `Revert: ${fix.title}`, body, files: fix.original });
+        await updateFix(deps.db, fix.id, { status: "reverted", result: `Eumon's recrawl found ${what}, so it opened a pull request to undo this fix: ${made.url}. Merge it to restore the previous version.` });
+        reverted++;
+      } catch (error) {
+        await updateFix(deps.db, fix.id, {
+          verification: { recrawl: "broken", revert: "failed", checkedAt },
+          result: `The recrawl found ${what} after this fix, but Eumon couldn't open a revert pull request (${messageOf(error)}). Use GitHub's Revert button on the merged PR.`,
+        });
+      }
+    } catch (error) {
+      console.error(`fix-run: couldn't check merged fix ${fix.id}`, error);
     }
-    const made = await pr.createPr({
-      branch: `eumon/revert-${fix.id.slice(-8)}`, title: `Revert: ${fix.title}`,
-      body: `Eumon's recrawl after this fix found ${what}. This restores the previous version.`, files: fix.original,
-    });
-    await updateFix(deps.db, fix.id, { status: "reverted", result: `Eumon's recrawl found ${what}, so it opened a pull request to undo this fix: ${made.url}. Merge it to restore the previous version.` });
-    reverted++;
   }
   return reverted;
 }

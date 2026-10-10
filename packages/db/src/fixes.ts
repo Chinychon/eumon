@@ -91,7 +91,7 @@ export async function updateFix(db: D1Like, id: string, patch: Partial<Pick<FixR
 }
 
 export async function hasLiveFix(db: D1Like, siteId: string, route: string, kind: string): Promise<boolean> {
-  const row = await db.prepare("SELECT 1 AS yes FROM changes WHERE site_id = ? AND route = ? AND fix_kind = ? AND status IN ('staged', 'draft', 'ready', 'rejected') LIMIT 1")
+  const row = await db.prepare("SELECT 1 AS yes FROM changes WHERE site_id = ? AND route = ? AND fix_kind = ? AND status IN ('staged', 'draft', 'ready', 'rejected', 'reverted') LIMIT 1")
     .bind(siteId, route, kind).first();
   return Boolean(row);
 }

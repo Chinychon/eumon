@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { JsonLlm } from "@organic-growth/ai";
-import { getFix, listFixes, updateFix, upsertSite, type D1Like } from "@organic-growth/db";
+import { getFix, listFixes, stageFix, updateFix, upsertSite, type D1Like } from "@organic-growth/db";
 import { openSqliteD1 } from "@organic-growth/db/sqlite";
 import { JSON_LD_COMPONENT, type FixCandidate } from "@organic-growth/fixes";
 import { checkMergedFixes, openStagedFixes, stageCandidates, type FixDeps } from "./fix-run.ts";
@@ -42,7 +42,8 @@ describe("fix run", () => {
     assert.match(fix!.files["app/procedures/[slug]/page.tsx"]!, /canonical: `\/procedures\/\$\{slug\}`/);
     const { opened, ops } = prs();
     assert.equal(await openStagedFixes(deps, ops, { siteId: "s", origin: "https://x.com", budget: 3 }), 1);
-    assert.equal(opened[0]!.branch, "eumon/head-procedures-slug");
+    assert.equal(opened[0]!.branch, `eumon/head-procedures-slug-${fix!.id.slice(-6)}`);
+    assert.match(opened[0]!.branch, /^eumon\/head-procedures-slug-.{6}$/);
     assert.match(opened[0]!.body, /## After\n\n```\n[^`]*canonical: `\/procedures\/\$\{slug\}`[\s\S]*revert this PR's single commit[\s\S]*Opened by Eumon's fix engine\.$/);
     assert.equal((await getFix(db, fix!.id))?.status, "draft");
   });
@@ -71,15 +72,17 @@ describe("fix run", () => {
   });
 
   it("opens a revert PR when the recrawl finds merged pages broken", async () => {
-    const { db, deps } = await setup();
+    const { db, deps, files } = await setup();
     await stageCandidates(deps, { ...input, candidates: [head] });
     const [fix] = await listFixes(db, "s");
     await updateFix(db, fix!.id, { status: "merged" });
+    files["app/procedures/[slug]/page.tsx"] = { content: fix!.files["app/procedures/[slug]/page.tsx"]!, sha: "merged" };
     const { opened, ops } = prs();
     const pages = [{ url: "https://x.com/procedures/acl", status: 500, hreflang: [], jsonLdTypes: [] }];
     assert.equal(await checkMergedFixes(deps, ops, { siteId: "s", pages }), 1);
     assert.equal(opened[0]!.files["app/procedures/[slug]/page.tsx"], pageFile);
     assert.equal((await getFix(db, fix!.id))?.status, "reverted");
+    assert.match(opened[0]!.branch, new RegExp(`^eumon/revert-${fix!.id.slice(-6)}-`));
   });
 });
 
@@ -122,7 +125,7 @@ describe("fix run rulings", () => {
   it("skips structured data when the component file exists with other content", async () => {
     const { db, deps, files } = await setup();
     files["components/eumon-json-ld.tsx"] = { content: "export const x = 1;\n", sha: "c1" };
-    deps.repo.treePaths = [...Object.keys(files), "tsconfig.json"];
+    deps.repo.treePaths = ["app/procedures/[slug]/page.tsx", "tsconfig.json"]; // a truncated tree that misses the component
     deps.llm = fakeLlm([]);
     await stageCandidates(deps, { ...input, candidates: [jsonld] });
     const [fix] = await listFixes(db, "s");
@@ -172,5 +175,131 @@ describe("fix run rulings", () => {
     assert.equal(await openStagedFixes(deps, ops, { siteId: "s", origin: "https://x.com", budget: 3 }), 0);
     assert.equal(opened.length, 0);
     assert.equal((await getFix(db, fix!.id))?.status, "closed");
+  });
+});
+
+async function stageJsonLdFix() {
+  const ctx = await setup();
+  ctx.files["app/procedures/[slug]/page.tsx"] = { content: pageWithData, sha: "sha1" };
+  ctx.deps.repo.treePaths = ["app/procedures/[slug]/page.tsx", "tsconfig.json"];
+  ctx.deps.llm = fakeLlm([{ skip: false, reason: "", facts: [], titleSubject: null, titleQualifier: null, description: null, schema: [{ field: "name", path: "procedure.name" }], examples }]);
+  return ctx;
+}
+const mergedHead = async () => {
+  const ctx = await setup();
+  await stageCandidates(ctx.deps, { ...input, candidates: [head] });
+  const [fix] = await listFixes(ctx.db, "s");
+  await updateFix(ctx.db, fix!.id, { status: "merged" });
+  return { ...ctx, fix: fix! };
+};
+
+describe("fix run guards", () => {
+  it("reuses Eumon's component when it's already there, even outside the listed tree", async () => {
+    const { db, deps, files } = await stageJsonLdFix();
+    files["components/eumon-json-ld.tsx"] = { content: JSON_LD_COMPONENT, sha: "c1" };
+    await stageCandidates(deps, { ...input, candidates: [jsonld] });
+    const [fix] = await listFixes(db, "s");
+    assert.equal(fix?.status, "staged", fix?.result ?? "");
+    assert.deepEqual(Object.keys(fix!.files), ["app/procedures/[slug]/page.tsx"]);
+  });
+
+  it("closes a fix when a file it adds appeared with other content before the PR", async () => {
+    const { db, deps, files } = await stageJsonLdFix();
+    await stageCandidates(deps, { ...input, candidates: [jsonld] });
+    const [fix] = await listFixes(db, "s");
+    assert.ok(fix!.files["components/eumon-json-ld.tsx"]);
+    files["components/eumon-json-ld.tsx"] = { content: "export const mine = 1;\n", sha: "c2" };
+    const { opened, ops } = prs();
+    assert.equal(await openStagedFixes(deps, ops, { siteId: "s", origin: "https://x.com", budget: 3 }), 0);
+    assert.equal(opened.length, 0);
+    assert.equal((await getFix(db, fix!.id))?.status, "closed");
+  });
+
+  it("stores a snippet when the AI can't write structured data", async () => {
+    const { db, deps } = await stageJsonLdFix();
+    deps.llm = fakeLlm([{ skip: true, reason: "The pages don't name the procedure." }]);
+    await stageCandidates(deps, { ...input, candidates: [jsonld] });
+    const [fix] = await listFixes(db, "s");
+    assert.equal(fix?.status, "skipped");
+    assert.match(fix!.snippet ?? "", /application\/ld\+json/);
+  });
+
+  it("doesn't fetch samples when the AI budget is used up", async () => {
+    const { db, deps } = await stageJsonLdFix();
+    deps.budget.calls = 0;
+    let fetched = 0;
+    deps.fetchPage = async () => { fetched++; return null; };
+    await stageCandidates(deps, { ...input, candidates: [jsonld] });
+    assert.equal(fetched, 0);
+    assert.equal((await listFixes(db, "s"))[0]?.status, "skipped");
+  });
+
+  it("drops a sample page whose fetch throws", async () => {
+    const { db, deps } = await stageJsonLdFix();
+    const fetchPage = deps.fetchPage;
+    deps.fetchPage = async (url) => { if (url.endsWith("mri")) throw new Error("timeout"); return fetchPage(url); };
+    deps.llm = fakeLlm([{ skip: false, reason: "", facts: [], titleSubject: null, titleQualifier: null, description: null, schema: [{ field: "name", path: "procedure.name" }], examples: [examples[0]] }]);
+    await stageCandidates(deps, { ...input, candidates: [jsonld] });
+    assert.equal((await listFixes(db, "s"))[0]?.status, "staged");
+  });
+
+  it("logs and skips a candidate whose row can't be saved", async () => {
+    const { db, deps } = await setup();
+    const prepare = db.prepare.bind(db);
+    deps.db = { prepare: (sql: string) => { if (sql.startsWith("INSERT INTO changes")) throw new Error("D1 is down"); return prepare(sql); } } as unknown as D1Like;
+    const errors = console.error;
+    console.error = () => {};
+    try { assert.deepEqual(await stageCandidates(deps, { ...input, candidates: [head] }), { staged: 0, skipped: 0 }); } finally { console.error = errors; }
+  });
+
+  it("keeps opening the next fix when reading the top one throws", async () => {
+    const { db, deps, files } = await setup();
+    files["app/layout.tsx"] = { content: layout, sha: "l1" };
+    const base: FixCandidate = { kind: "metadata-base", file: "app/layout.tsx", problems: ["canonical-missing"], urls: [], pageCount: 4, score: 20 };
+    await stageCandidates(deps, { ...input, candidates: [base, head] });
+    const getFile = deps.repo.getFile;
+    deps.repo.getFile = async (p) => { if (p === "app/layout.tsx") throw new Error("GitHub said 502"); return getFile(p); };
+    const { opened, ops } = prs();
+    assert.equal(await openStagedFixes(deps, ops, { siteId: "s", origin: "https://x.com", budget: 3 }), 1);
+    assert.match(opened[0]!.branch, /^eumon\/head-/);
+    const layoutFix = (await listFixes(db, "s")).find((f) => f.kind === "metadata-base");
+    assert.equal(layoutFix?.status, "closed");
+    assert.match(layoutFix?.result ?? "", /next run/);
+  });
+
+  it("waits for a recrawl that includes a head fix's pages, but verifies url-less fixes", async () => {
+    const { db, deps, fix } = await mergedHead();
+    const llms = { ...fix, id: "llms1", kind: "llms-txt", route: "public/llms.txt", filePath: "public/llms.txt", urls: [], problems: [] };
+    await stageFix(db, { ...llms, status: "merged" });
+    const { opened, ops } = prs();
+    assert.equal(await checkMergedFixes(deps, ops, { siteId: "s", pages: [] }), 0);
+    assert.equal(opened.length, 0);
+    assert.equal((await getFix(db, fix.id))?.verification, undefined);
+    assert.equal((await getFix(db, "llms1"))?.verification?.recrawl, "ok");
+  });
+
+  it("leaves the revert to the user when the file changed after the merge", async () => {
+    const { db, deps, files, fix } = await mergedHead();
+    files["app/procedures/[slug]/page.tsx"] = { content: fix.files["app/procedures/[slug]/page.tsx"] + "\n// later work", sha: "later" };
+    const { opened, ops } = prs();
+    const pages = [{ url: "https://x.com/procedures/acl", status: 500, hreflang: [], jsonLdTypes: [] }];
+    assert.equal(await checkMergedFixes(deps, ops, { siteId: "s", pages }), 0);
+    assert.equal(opened.length, 0);
+    const after = await getFix(db, fix.id);
+    assert.equal(after?.status, "merged");
+    assert.deepEqual({ recrawl: after?.verification?.recrawl, revert: after?.verification?.revert }, { recrawl: "broken", revert: "manual" });
+    assert.match(after?.result ?? "", /Revert button/);
+  });
+
+  it("keeps checking merged fixes when a revert PR fails", async () => {
+    const { db, deps, files, fix } = await mergedHead();
+    files["app/procedures/[slug]/page.tsx"] = { content: fix.files["app/procedures/[slug]/page.tsx"]!, sha: "merged" };
+    await stageFix(db, { ...fix, id: "other", route: "/other", urls: ["https://x.com/other"], score: 1, status: "merged" });
+    const pages = [{ url: "https://x.com/procedures/acl", status: 500, hreflang: [], jsonLdTypes: [] }, { url: "https://x.com/other", status: 200, title: "Other", hreflang: [], jsonLdTypes: [] }];
+    const ops = { createPr: async () => { throw new Error("reference already exists"); } };
+    assert.equal(await checkMergedFixes(deps, ops, { siteId: "s", pages }), 0);
+    const failed = await getFix(db, fix.id);
+    assert.deepEqual({ recrawl: failed?.verification?.recrawl, revert: failed?.verification?.revert }, { recrawl: "broken", revert: "failed" });
+    assert.equal((await getFix(db, "other"))?.verification?.recrawl, "ok");
   });
 });

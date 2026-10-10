@@ -21,7 +21,7 @@ import {
   updateSiteFingerprint,
 } from "@organic-growth/db";
 import {
-  MAX_COMPETITORS, crawlLogCoverage, fetchSearchConsoleMetrics, loadInventories, loadRankSignals, loadTrendSignals, probeTitleForCoverage, queueFullCrawl, runFullAnalysis, synthesizePlanNarrative,
+  MAX_COMPETITORS, crawlLogCoverage, fetchSearchConsoleMetrics, loadAiAnswerSignals, loadInventories, loadRankSignals, loadTrendSignals, probeTitleForCoverage, queueFullCrawl, runFullAnalysis, synthesizePlanNarrative,
 } from "@organic-growth/agents";
 import {
   buildRepoSnapshotFromGitHub,
@@ -169,7 +169,7 @@ export class SiteAnalysisWorkflow extends WorkflowEntrypoint<AppEnv, AnalysisPay
             loadConnectorLists(db, { id: siteId, baseUrl: site.baseUrl }, { markets: targetMarkets, competitors }),
             crawlLogCoverage(db, siteId, analysisId),
             searchConsoleReconciliation(db, siteId, analysisId).catch(() => null),
-          ]).then(async ([lists, coverage, searchConsole]) => connectorSignals(lists, coverage, searchConsole, await loadTrendSignals(db, siteId, lists.crawlLog).catch(() => null), inventory, await loadRankSignals(db, siteId).catch(() => null))).catch(() => connectorSignals({ serp: { lists: [], suggestions: [] }, links: undefined } as never, null, null, null, inventory, null));
+          ]).then(async ([lists, coverage, searchConsole]) => connectorSignals(lists, coverage, searchConsole, await loadTrendSignals(db, siteId, lists.crawlLog).catch(() => null), inventory, ...await Promise.all([loadRankSignals(db, siteId).catch(() => null), loadAiAnswerSignals(db, siteId).catch(() => null)]))).catch(() => connectorSignals({ serp: { lists: [], suggestions: [] }, links: undefined } as never, null, null, null, inventory, null));
           const raw = await runFullAnalysis({
             analysisId,
             siteId,

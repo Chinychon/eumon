@@ -16,7 +16,9 @@ export type DemandInput =
   /** Records collected but not yet published as pages. */
   | { kind: "unpublished_data" }
   /** A technical fix, scaled by effort (1–4). */
-  | { kind: "technical"; effort: number };
+  | { kind: "technical"; effort: number }
+  /** An AI answer that cites competitors: no search volume exists for it; harder the more engines skip the site. */
+  | { kind: "ai_answer"; engines: number };
 
 export type DemandEstimate = {
   searchDemand: number;
@@ -39,5 +41,6 @@ export function estimateDemand(input: DemandInput, demand?: KeywordDemand): Dema
     case "content_gap": return { searchDemand: 0, estimatedDifficulty: cap(Math.log10(input.competitorPages + 1) * 25), priced: null };
     case "unpublished_data": return { searchDemand: 0, estimatedDifficulty: 20, priced: null };
     case "technical": return { searchDemand: 0, estimatedDifficulty: cap(input.effort * 15), priced: null };
+    case "ai_answer": return { searchDemand: 0, estimatedDifficulty: cap(input.engines * 20), priced: null };
   }
 }

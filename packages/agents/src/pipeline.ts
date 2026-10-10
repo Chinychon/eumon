@@ -48,6 +48,7 @@ import { findingsFromCode } from "./code-findings.js";
 import { findingsFromCrawlLog, findingsFromInventory, findingsFromSearchConsoleImport, findingsFromTrends, type ConnectorSignals } from "./connector-findings.js";
 import { notFoundProbeFinding } from "./not-found-probe.js";
 import { findingsFromRanks } from "./rank-findings.js";
+import { findingsFromAiAnswers } from "./ai-answer-findings.js";
 import { auditConversion, findingsFromConversion } from "./conversion.js";
 import {
   compareCompetition,
@@ -360,6 +361,7 @@ export async function runFullAnalysis(input: RunAnalysisInput) {
   findings.push(...findingsFromSearchConsoleImport({ siteId: input.siteId, analysisId, view: input.connectors?.searchConsole ?? null }));
   findings.push(...findingsFromTrends({ siteId: input.siteId, analysisId, trends: input.connectors?.trends ?? null, sitemapUrls: sitemap.totalUrls ?? null, discovered: input.connectors?.searchConsole?.summary?.rows.find((row) => row.reason === "discovered")?.pages ?? null }));
   findings.push(...findingsFromRanks({ siteId: input.siteId, analysisId, ranks: input.connectors?.ranks }));
+  findings.push(...findingsFromAiAnswers({ siteId: input.siteId, analysisId, signals: input.connectors?.aiAnswers }));
   const probeFinding = input.notFoundProbe ? notFoundProbeFinding(input.notFoundProbe, input.siteId, analysisId) : null;
   if (probeFinding) findings.push(probeFinding);
   findings.push(...findingsFromInventory({ siteId: input.siteId, analysisId, inventories: input.connectors?.inventory ?? [] }));

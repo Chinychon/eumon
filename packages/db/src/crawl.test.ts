@@ -338,3 +338,22 @@ describe("soft 404s, near-duplicates and locales in coverage", () => {
     assert.deepEqual([coverage.issues?.softNotFound, coverage.issues?.nearDuplicate, coverage.locales], [0, 0, undefined]);
   });
 });
+
+describe("crawl queue query plans", () => {
+  // Both queries once chose the index that walks every row of the analysis (one row read per
+  // sitemap URL per batch); on a 23,000-URL site that used D1's daily row budget in one crawl.
+  const db = openSqliteD1();
+  const plan = async (sql: string, ...args: unknown[]) =>
+    (await db.prepare(`EXPLAIN QUERY PLAN ${sql}`).bind(...args).all<{ detail: string }>()).results.map((row) => row.detail).join("; ");
+
+  it("reads the next pending URLs off the crawl-state index, not the whole analysis", async () => {
+    assert.match(await plan("SELECT url FROM pages WHERE analysis_id = ? AND crawl_state = 'pending' LIMIT ?", "a", 100), /idx_pages_analysis_crawl_state/);
+  });
+
+  it("finds a batch's rows by primary key, not by scanning every pending row", async () => {
+    assert.match(
+      await plan("SELECT route_family, SUM(1) FROM pages WHERE analysis_id = ? AND +crawl_state = 'pending' AND url IN (?, ?) GROUP BY route_family", "a", "u1", "u2"),
+      /analysis_id=\? AND url=\?/,
+    );
+  });
+});

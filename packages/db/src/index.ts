@@ -530,9 +530,11 @@ export async function listPendingCrawlUrls(
   limit: number,
 ): Promise<string[]> {
   const { results } = await db.prepare(
+    // No ORDER BY: ordered, SQLite walks the primary key past every crawled row;
+    // unordered, it reads the next pending rows off the crawl-state index.
     `SELECT url FROM pages
      WHERE analysis_id = ? AND crawl_state = 'pending'
-     ORDER BY url LIMIT ?`,
+     LIMIT ?`,
   ).bind(analysisId, limit).all<{ url: string }>();
   return results.map((row) => row.url);
 }
@@ -610,7 +612,8 @@ export async function saveCrawlBatch(
     const list = group.map(() => "?").join(",");
     const groupUrls = group.map((outcome) => outcome.url);
     await runStatements(db, [
-      countDelta(db, input.analysisId, -1, `crawl_state = 'pending' AND url IN (${list})`, groupUrls),
+      // `+crawl_state`: keeps SQLite on the primary key for these URLs instead of scanning every pending row.
+      countDelta(db, input.analysisId, -1, `+crawl_state = 'pending' AND url IN (${list})`, groupUrls),
       ...group.map(save),
       countDelta(db, input.analysisId, 1, `crawled_at = ? AND url IN (${list})`, [crawledAt, ...groupUrls]),
     ]);

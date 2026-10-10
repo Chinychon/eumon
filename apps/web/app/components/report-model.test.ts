@@ -17,7 +17,7 @@ describe("report model", () => {
         { title: "Resolve: A finding from an older run", rationale: "", priorityScore: 10, intent: "technical_enabler" },
         { title: "Publish landing pages from your Dentists data", rationale: "", priorityScore: 5, intent: "unpublished_data" },
       ],
-    }, 6);
+    } as never, 6);
     assert.deepEqual(actions.map((action) => [action.title, action.area]), [
       ["Resolve: Empty prices", "technical"],
       ["Push implants", "search"],
@@ -52,13 +52,13 @@ describe("report model", () => {
   });
 
   it("counts only intact pages as served, and orders gaps by the competitor's lead", () => {
-    assert.equal(servedShare({ totalUrls: 100, completedUrls: 98, emptyShellUrls: 8, httpErrorUrls: 2 }), 0.88);
+    assert.equal(servedShare({ totalUrls: 100, completedUrls: 98, emptyShellUrls: 8, httpErrorUrls: 2 } as never), 0.88);
     assert.equal(servedShare(null), null);
     const rows = gapsFirst({ rows: [
       { key: "blog", label: "Blog", status: "advantage", you: { pages: 900 }, competitors: [{ domain: "a", pages: 400, examples: [] }] },
       { key: "prices", label: "Prices", status: "shared", you: { pages: 660 }, competitors: [{ domain: "a", pages: 1500, examples: [] }] },
       { key: "reviews", label: "Reviews", status: "gap", you: { pages: 0 }, competitors: [{ domain: "b", pages: 400, examples: [] }] },
-    ], competitors: [], insights: [], aiLabels: false });
+    ], competitors: [], insights: [], aiLabels: false } as never);
     assert.deepEqual(rows.map((row) => row.key), ["prices", "reviews", "blog"]);
   });
 });

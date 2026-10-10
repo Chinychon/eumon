@@ -7,7 +7,7 @@ export async function GET(request: Request) {
   const access = await requireWorkspace(request, "write");
   if (access instanceof Response) return access;
   const installations = await listGithubInstallations(env.DB, access.viewer.workspaceId);
-  if (!installations.length) return Response.json({ error: "Install the GitHub App for this workspace first." }, { status: 401, headers: { "Cache-Control": "no-store" } });
+  if (!installations.length) return Response.json({ error: "Install the GitHub App for this workspace first." }, { status: 409, headers: { "Cache-Control": "no-store" } });
   try {
     const repositories = await workspaceRepositories(env.GITHUB_APP_ID, env.GITHUB_APP_PRIVATE_KEY, installations);
     return Response.json({ repositories: repositories.map(({ id, name, full_name, default_branch, owner, private: isPrivate }) => ({

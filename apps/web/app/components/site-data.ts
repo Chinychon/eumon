@@ -14,6 +14,9 @@ import type { Report } from "./report-model";
 export type Payload = { site: { name: string; baseUrl: string; searchConnected: boolean; analytics: "connected" | "reconnect" | "none"; signals: { speed: boolean; authority: boolean; keywords: boolean; bing: boolean } }; results: Results };
 
 /** The synced numbers (Search Console, GA4, speed, authority, keywords). `reload` refetches after a sync. */
+/** A sync this tab started (Sync now, or saving a property) that the Overview waits for. */
+export type PendingSync = { id: string; startedAt: string };
+
 export function useResults(endpoint: string) {
   const [data, setData] = useState<Payload | null>(null);
   const [error, setError] = useState("");

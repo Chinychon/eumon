@@ -10,11 +10,15 @@ import { Badge, Button, Card, CrossIcon, PartHead, ViewHeader } from "./ui";
 const domainsOf = (text: string) => text.split(/[\n,]/).map((value) => value.trim()).filter(Boolean);
 
 /** Everything Eumon reads from: the website, the code, Search Console, the markets you sell to, your competitors, and the optional sources beyond them. */
-export function ConnectionsView({ site, repositories, githubInstalled, onSiteChanged }: {
+import type { PendingSync } from "./site-data";
+
+export function ConnectionsView({ site, repositories, githubInstalled, onSiteChanged, onSyncStarted }: {
   site: SiteRecord;
   repositories: Repository[];
   githubInstalled: boolean;
   onSiteChanged: (site: SiteRecord) => void;
+  /** A sync started by saving a property; the Overview waits for it and refreshes. */
+  onSyncStarted?: (sync: PendingSync) => void;
 }) {
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
@@ -64,9 +68,10 @@ export function ConnectionsView({ site, repositories, githubInstalled, onSiteCha
 
   async function chooseGa4(property: string) {
     try {
-      await api(`/api/sites/${site.id}/ga4/properties`, { method: "POST", json: { property: property || null } });
+      const saved = await api<{ sync: PendingSync | null }>(`/api/sites/${site.id}/ga4/properties`, { method: "POST", json: { property: property || null } });
       setGa4((current) => (current ? { ...current, selected: property || null } : current));
-      setGa4Message(property ? "Google Analytics property saved. Performance fills in on the next sync." : "Google Analytics disconnected.");
+      if (saved.sync) onSyncStarted?.(saved.sync);
+      setGa4Message(!property ? "Google Analytics disconnected." : saved.sync ? "Google Analytics property saved. Syncing now: the Overview fills in when it finishes, usually within a few minutes." : "Google Analytics property saved. It fills in with the sync that is already running.");
       onSiteChanged({ ...site, ga4Property: property || undefined });
     } catch (cause) { setGa4Message(errorMessage(cause)); }
   }
@@ -74,8 +79,9 @@ export function ConnectionsView({ site, repositories, githubInstalled, onSiteCha
   async function chooseProperty(property: string) {
     setGscSelected(property);
     try {
-      await api(`/api/sites/${site.id}/gsc/properties`, { method: "POST", json: { property } });
-      setGscMessage("Search Console property saved. The Search tab now shows the last 28 days.");
+      const saved = await api<{ sync: PendingSync | null }>(`/api/sites/${site.id}/gsc/properties`, { method: "POST", json: { property } });
+      if (saved.sync) onSyncStarted?.(saved.sync);
+      setGscMessage(saved.sync ? "Search Console property saved. Syncing its history now: the Overview and Search tabs fill in when it finishes, usually within a few minutes." : "Search Console property saved. Its history fills in with the sync that is already running.");
       onSiteChanged({ ...site, gscProperty: property });
     } catch (cause) { setGscMessage(errorMessage(cause)); }
   }

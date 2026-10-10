@@ -83,7 +83,8 @@ export async function findFixByHeadSha(db: D1Like, headSha: string, siteId: stri
   return row ? mapFix(row) : null;
 }
 
-type FixPatch = Partial<Pick<FixRecord, "status" | "prUrl" | "prNumber" | "branch" | "headSha" | "prNodeId" | "previewUrl" | "verification" | "result">>;
+/** `result: null` clears the note. */
+type FixPatch = Partial<Pick<FixRecord, "status" | "prUrl" | "prNumber" | "branch" | "headSha" | "prNodeId" | "previewUrl" | "verification">> & { result?: string | null };
 
 function fixUpdate(db: D1Like, id: string, patch: FixPatch, from?: FixStatus[]) {
   const columns: Record<string, unknown> = {

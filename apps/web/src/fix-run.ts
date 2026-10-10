@@ -2,7 +2,7 @@ import { FIX_PROMPT_VERSION, writeFixText, type FixSample } from "@organic-growt
 import type { JsonLlm } from "@organic-growth/ai";
 import { createId } from "@organic-growth/core";
 import { parseHtmlSignals, visibleText } from "@organic-growth/crawler";
-import { countOpenFixes, hasLiveFix, listFixes, stageFix, updateFix, type D1Like, type FixRecord, type FixSettings } from "@organic-growth/db";
+import { countOpenFixes, hasLiveFix, listFixes, stageFix, transitionFix, updateFix, type D1Like, type FixRecord, type FixSettings } from "@organic-growth/db";
 import {
   blockedAiSearchAgents, buildLlmsTxt, componentPath, editAiRobots, editJsonLd, editLlmsTxt, editMetadata, editMetadataBase, findMetadata, findPage,
   JSON_LD_COMPONENT, jsonLdCode, jsonLdSnippet, memberPaths, metadataSnippet, parseModule, pathOf, propertyNamed, routeForPath, stripLocale, urlTemplate, validateEdit, validateFile,
@@ -286,17 +286,23 @@ export async function openStagedFixes(deps: FixDeps, pr: PrOps, input: { siteId:
       const changed = await changedSince(deps.repo, fix).catch((error: unknown) => new Error(messageOf(error)));
       if (changed) {
         const result = changed instanceof Error ? `Eumon couldn't read the files from GitHub (${changed.message}); it will check them again on the next run.` : CHANGED;
-        await updateFix(deps.db, fix.id, { status: "closed", result });
+        await transitionFix(deps.db, fix.id, ["staged"], { status: "closed", result });
         continue;
       }
+      // Claim the fix before calling GitHub, so two runs (or a reject) can't both act on it.
+      if (!(await transitionFix(deps.db, fix.id, ["staged"], { status: "draft" }))) continue;
       const branch = `eumon/${fix.kind}-${slug(fix.route)}-${fix.id.slice(-6)}`;
+      let made: Awaited<ReturnType<PrOps["createPr"]>>;
       try {
-        const made = await pr.createPr({ branch, title: fix.title, body: fixPrBody(fix, input.origin), files: fix.files });
-        await updateFix(deps.db, fix.id, { status: "draft", prNumber: made.number, prUrl: made.url, branch, headSha: made.headSha, prNodeId: made.nodeId });
-        opened++;
+        made = await pr.createPr({ branch, title: fix.title, body: fixPrBody(fix, input.origin), files: fix.files });
       } catch (error) {
-        await updateFix(deps.db, fix.id, { status: "failed", result: `Eumon couldn't open the pull request: ${messageOf(error)}. It will prepare the fix again on the next run.` });
+        await transitionFix(deps.db, fix.id, ["draft"], { status: "failed", result: `Eumon couldn't open the pull request: ${messageOf(error)}. It will prepare the fix again on the next run.` });
+        continue;
       }
+      const fields = { prNumber: made.number, prUrl: made.url, branch, headSha: made.headSha, prNodeId: made.nodeId };
+      if (await transitionFix(deps.db, fix.id, ["draft"], { ...fields, result: null })) opened++;
+      // Rejected while GitHub was opening the PR: keep the rejection, but say where the PR is.
+      else await transitionFix(deps.db, fix.id, ["rejected"], { ...fields, result: `Rejected while Eumon was opening its pull request; close it on GitHub: ${made.url}.` });
     } catch (error) {
       console.error(`fix-run: couldn't open fix ${fix.id}`, error);
     }

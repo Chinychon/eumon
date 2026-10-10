@@ -393,3 +393,44 @@ describe("title template (I2)", () => {
     assert.match(fix!.files["app/procedures/[slug]/page.tsx"]!, /title: `\$\{procedure\.name\}`,/);
   });
 });
+
+import { transitionFix } from "@organic-growth/db";
+
+describe("claim-first open (I5)", () => {
+  it("opens one PR when two runs open the same fix at once", async () => {
+    const { db, deps } = await setup();
+    await stageCandidates(deps, { ...input, candidates: [head] });
+    const { opened, ops } = prs();
+    const runs = await Promise.all([1, 2].map(() => openStagedFixes(deps, ops, { siteId: "s", origin: "https://x.com", budget: 3 })));
+    assert.equal(opened.length, 1);
+    assert.deepEqual(runs.sort(), [0, 1]);
+    assert.equal((await listFixes(db, "s"))[0]?.prNumber, 1);
+  });
+
+  it("keeps a fix rejected while its PR was being opened rejected", async () => {
+    const { db, deps } = await setup();
+    await stageCandidates(deps, { ...input, candidates: [head] });
+    const [fix] = await listFixes(db, "s");
+    const ops = { createPr: async () => {
+      assert.equal(await transitionFix(db, fix!.id, ["staged", "draft", "ready"], { status: "rejected", result: "Rejected in Eumon." }), true);
+      return { number: 9, url: "https://github.com/acme/web/pull/9", nodeId: "N", headSha: "h9" };
+    } };
+    assert.equal(await openStagedFixes(deps, ops, { siteId: "s", origin: "https://x.com", budget: 3 }), 0);
+    const after = await getFix(db, fix!.id);
+    assert.equal(after?.status, "rejected");
+    assert.equal(after?.prUrl, "https://github.com/acme/web/pull/9");
+    assert.match(after?.result ?? "", /close it on GitHub/);
+  });
+
+  it("marks a fix failed when GitHub refuses the PR, and clears a stale result when it opens", async () => {
+    const { db, deps } = await setup();
+    await stageCandidates(deps, { ...input, candidates: [head] });
+    const [fix] = await listFixes(db, "s");
+    await updateFix(db, fix!.id, { result: "old note" });
+    assert.equal(await openStagedFixes(deps, { createPr: async () => { throw new Error("403"); } }, { siteId: "s", origin: "https://x.com", budget: 3 }), 0);
+    assert.equal((await getFix(db, fix!.id))?.status, "failed");
+    await updateFix(db, fix!.id, { status: "staged" });
+    await openStagedFixes(deps, prs().ops, { siteId: "s", origin: "https://x.com", budget: 3 });
+    assert.deepEqual([(await getFix(db, fix!.id))?.status, (await getFix(db, fix!.id))?.result], ["draft", undefined]);
+  });
+});

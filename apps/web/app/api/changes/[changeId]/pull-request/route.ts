@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { getChange, updateChangeStatus, type D1Like } from "@organic-growth/db";
-import { createGitHubPullRequest, MAX_SAFE_FILE_LENGTH, SAFE_SEO_CONFIG_PATHS } from "@organic-growth/agents";
+import { createGitHubPullRequest, isPlainRobotsTxt, MAX_SAFE_FILE_LENGTH, SAFE_SEO_CONFIG_PATHS } from "@organic-growth/agents";
 import { createInstallationToken } from "@organic-growth/repo-analyzer";
 import { featureRefusal } from "../../../../../src/limits";
 import { fail } from "../../../../../src/server";
@@ -16,7 +16,7 @@ export async function POST(request: Request, context: { params: Promise<{ change
   if (change.status !== "proposed") return Response.json({ error: "Only a proposed change can be opened as a draft pull request." }, { status: 409 });
   const evidence = change.evidence as { files?: Record<string, string> };
   const files = evidence.files ?? {};
-  if (!Object.keys(files).length || Object.keys(files).some((path) => !SAFE_SEO_CONFIG_PATHS.has(path)) || Object.values(files).some((content) => typeof content !== "string" || content.length > MAX_SAFE_FILE_LENGTH)) {
+  if (!Object.keys(files).length || Object.keys(files).some((path) => !SAFE_SEO_CONFIG_PATHS.has(path)) || Object.values(files).some((content) => typeof content !== "string" || content.length > MAX_SAFE_FILE_LENGTH || !isPlainRobotsTxt(content))) {
     return Response.json({ error: "The stored change is outside the safe SEO configuration allowlist." }, { status: 422 });
   }
   const { site } = access;

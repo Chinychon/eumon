@@ -1,5 +1,5 @@
 import type { CrawlPageResult, Finding, SitemapAudit } from "@organic-growth/core";
-import { createId, organicImpactScore, severityFromImpact, simhash } from "@organic-growth/core";
+import { CHECKS, finding, organicImpactScore, simhash } from "@organic-growth/core";
 import { contentMarkup, elementSpans, findTags, hasToken, innerText, parseAttributes, stripElements, visibleText } from "./html.js";
 import { GOOGLEBOT_TOKEN, parseRobots, type RobotsPolicy } from "./robots.js";
 import { classifyLanguage, classifyUrlType, isSameSite, sameDocument } from "./urls.js";
@@ -647,12 +647,9 @@ export function findingsFromCrawl(input: {
       isBlockingCrawl: emptyRatio >= 0.5,
       commercialIntent: emptyPages.some((p) => COMMERCIAL_URL_PATTERN.test(p.url)),
     });
-    findings.push({
-      id: createId("finding"),
+    findings.push(finding(CHECKS["render.empty_shell"]!, {
       siteId: input.siteId,
       analysisId: input.analysisId,
-      category: "rendering",
-      severity: severityFromImpact(impact),
       title: "Entity pages return empty or thin HTML shells to crawlers",
       summary: `${emptyPages.length}/${input.pageResults.length} sampled URLs look like empty shells in raw/Googlebot fetches (${Math.round(emptyRatio * 100)}%). Search engines and AI crawlers may not receive meaningful content.`,
       evidence: {
@@ -665,12 +662,11 @@ export function findingsFromCrawl(input: {
         emptyRatio,
         sitemapTotal: input.sitemap.totalUrls,
       },
-      organicImpactScore: impact,
+      impact: impact,
       recommendation:
         "Ensure server/edge-rendered HTML with real title, description, JSON-LD and primary content for entity pages — do not rely on client-only hydration for indexable URLs.",
       pagesAffected: emptyPages.map((p) => p.url),
-      createdAt: new Date().toISOString(),
-    });
+    }));
   }
 
   const soft200 = input.pageResults.filter(
@@ -684,21 +680,17 @@ export function findingsFromCrawl(input: {
       pagesAffected: soft200.length,
       isBlockingCrawl: true,
     });
-    findings.push({
-      id: createId("finding"),
+    findings.push(finding(CHECKS["server.soft_200"]!, {
       siteId: input.siteId,
       analysisId: input.analysisId,
-      category: "indexing",
-      severity: severityFromImpact(impact),
       title: "Soft-200 responses risk indexing junk URLs",
       summary: `${soft200.length} sampled URLs returned HTTP 200 without solid content or with not-found titles. Soft 404s waste crawl budget and dilute index quality.`,
       evidence: { urls: soft200.slice(0, 15).map((p) => p.url) },
-      organicImpactScore: impact,
+      impact: impact,
       recommendation:
         "Return true 404/410 for unknown entity slugs and avoid self-canonicalizing empty shells.",
       pagesAffected: soft200.map((p) => p.url),
-      createdAt: new Date().toISOString(),
-    });
+    }));
   }
 
   if (input.sitemap.totalUrls > 5000 && emptyRatio > 0.2) {
@@ -708,24 +700,20 @@ export function findingsFromCrawl(input: {
       isEmptyShellAtScale: true,
       trafficShareAffected: 0.3,
     });
-    findings.push({
-      id: createId("finding"),
+    findings.push(finding(CHECKS["render.coverage_weak"]!, {
       siteId: input.siteId,
       analysisId: input.analysisId,
-      category: "sitemap",
-      severity: severityFromImpact(impact),
       title: "Large sitemap with weak render coverage",
       summary: `Sitemap declares ~${input.sitemap.totalUrls} URLs, but sampled crawl suggests a large share may not expose meaningful HTML. Indexing of the full set is unlikely until rendering is fixed.`,
       evidence: {
         sitemap: input.sitemap,
         emptyRatio,
       },
-      organicImpactScore: impact,
+      impact: impact,
       recommendation:
         "Prioritize edge/SSR HTML for sitemap-listed entity URLs before expanding programmatic page counts.",
       pagesAffected: [],
-      createdAt: new Date().toISOString(),
-    });
+    }));
   }
 
   // Detail pages (two or more path segments) are where structured data earns rich results.
@@ -737,20 +725,16 @@ export function findingsFromCrawl(input: {
       category: "structured_data",
       pagesAffected: missingJsonLd.length,
     });
-    findings.push({
-      id: createId("finding"),
+    findings.push(finding(CHECKS["schema.missing"]!, {
       siteId: input.siteId,
       analysisId: input.analysisId,
-      category: "structured_data",
-      severity: severityFromImpact(impact),
       title: "Detail pages missing JSON-LD in crawler HTML",
       summary: `${missingJsonLd.length} sampled detail pages had no JSON-LD in the fetched HTML.`,
       evidence: { urls: missingJsonLd.slice(0, 10).map((p) => p.url) },
-      organicImpactScore: impact,
+      impact: impact,
       recommendation: "Emit schema.org markup that matches each template (e.g. Product, LocalBusiness, Person, Article) in the initial HTML.",
       pagesAffected: missingJsonLd.map((p) => p.url),
-      createdAt: new Date().toISOString(),
-    });
+    }));
   }
 
   return findings;

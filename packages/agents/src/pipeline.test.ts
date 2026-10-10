@@ -4,7 +4,29 @@ import type { CrawlPageResult } from "@organic-growth/core";
 import type { Fetcher } from "@organic-growth/crawler";
 import { createAnalysis, getCrawlProgress, reuseCrawlResults, saveCrawlBatch, updateAnalysisStatus, upsertSite, enqueueAnalysisCrawlUrls } from "@organic-growth/db";
 import { openSqliteD1 } from "@organic-growth/db/sqlite";
-import { queueFullCrawl, shouldReuse } from "./pipeline.js";
+import { CHECKS } from "@organic-growth/core";
+import { queueFullCrawl, runFullAnalysis, shouldReuse } from "./pipeline.js";
+
+/** A three-page site for runFullAnalysis: a good homepage, an empty shell, and a page without an H1. */
+export function fixtureSite(): Fetcher {
+  const origin = "https://clinic.example";
+  const html = (title: string, body: string, head = "") => `<!doctype html><html lang="en"><head><title>${title}</title><meta name="viewport" content="width=device-width">${head}</head><body>${body}</body></html>`;
+  const pages: Record<string, string> = {
+    "/": html("Clinic Example | Dental care in Kuala Lumpur", `<main><h1>Dental care</h1><p>${"We treat patients every day. ".repeat(40)}</p><a href="/doctors/a">A</a><a href="/doctors/b">B</a></main>`,
+      `<meta name="description" content="Dental care in Kuala Lumpur with same-week appointments and clear prices."><script type="application/ld+json">{"@context":"https://schema.org","@type":"Dentist","name":"Clinic Example","url":"${origin}/","sameAs":["https://facebook.com/clinic"]}</script>`),
+    "/doctors/a": html("Doctor A", '<div id="root"></div><script src="/app.js"></script>'),
+    "/doctors/b": html("Dr B, orthodontist at Clinic Example", `<main><h2>About</h2><p>${"Dr B fits braces and aligners. ".repeat(30)}</p></main>`),
+  };
+  const files: Record<string, string> = {
+    "/robots.txt": `User-agent: *\nAllow: /\nSitemap: ${origin}/sitemap.xml\n`,
+    "/sitemap.xml": `<urlset>${Object.keys(pages).map((path) => `<url><loc>${origin}${path}</loc></url>`).join("")}</urlset>`,
+  };
+  return async (url) => {
+    const { pathname } = new URL(url);
+    const body = pages[pathname] ?? files[pathname];
+    return { url, finalUrl: url, headers: { "content-type": pages[pathname] ? "text/html" : "text/plain" }, status: body ? 200 : 404, body: body ?? "Not found" };
+  };
+}
 
 const DAY = 86_400_000;
 
@@ -98,5 +120,17 @@ describe("queueFullCrawl", async () => {
     await createAnalysis(db, { id: "third", siteId: "s", status: "running", createdAt: new Date(Date.now() + 2000).toISOString() });
     const queued = await queueFullCrawl(db, { analysisId: "third", siteId: "s", baseUrl: origin, maxUrls: 100, fetcher, full: true });
     assert.deepEqual(queued, { declared: 5, queued: 5, reused: 0 });
+  });
+});
+
+describe("runFullAnalysis", () => {
+  it("produces every finding through a registered check", async () => {
+    const report = await runFullAnalysis({ analysisId: "a", siteId: "s", name: "Clinic", baseUrl: "https://clinic.example", fetcher: fixtureSite(), repeatability: false, maxPages: 5 });
+    assert.ok(report.findings.length >= 3, report.findings.map((f) => f.title).join(" | "));
+    for (const f of report.findings) {
+      assert.ok(f.checkId && CHECKS[f.checkId], `finding "${f.title}" has no registered checkId`);
+      assert.equal(f.category, CHECKS[f.checkId!]!.category, f.title);
+      assert.ok(f.recommendation, `${f.title} has no recommendation`);
+    }
   });
 });

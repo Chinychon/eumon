@@ -1,5 +1,6 @@
 import {
-  createId,
+  CHECKS,
+  finding,
   rankSeverityByOrganicImpact,
   type CrawlCoverage,
   type CrawlPageResult,
@@ -215,18 +216,17 @@ export async function runFullAnalysis(input: RunAnalysisInput) {
         inspectedHtml.set(url, audited.googlebotHtml);
       }
     } catch (err) {
-      findings.push({
-        id: createId("finding"),
+      findings.push(finding(CHECKS["fetch.failed"]!, {
         siteId: input.siteId,
         analysisId,
-        category: "rendering" as const,
-        severity: "MEDIUM" as const,
+        severity: "MEDIUM",
         title: `Failed to fetch ${url}`,
         summary: String(err),
         evidence: { url, error: String(err) },
-        organicImpactScore: 30,
+        impact: 30,
+        scopeKey: url,
         createdAt: now,
-      });
+      }));
     }
   }
 

@@ -1,7 +1,8 @@
 import type { CrawlCoverage, CrawlFamilyStats, CrawlIssue, CrawlLocaleStats, CrawlPageResult, Finding, FindingCategory } from "@organic-growth/core";
-import { createId, organicImpactScore, severityFromImpact } from "@organic-growth/core";
+import { CHECKS, finding, organicImpactScore } from "@organic-growth/core";
 
 type Draft = {
+  checkId: string;
   category: FindingCategory;
   impact: number;
   title: string;
@@ -63,6 +64,7 @@ export function findingsFromCrawlCoverage(input: {
     const where = byFamily(families, (family) => family.emptyShells);
     const shellPages = (input.examples ?? []).filter((page) => page.isEmptyShell).slice(0, 20);
     drafts.push({
+      checkId: "render.empty_shell",
       category: "rendering",
       impact: organicImpactScore({
         category: "rendering",
@@ -85,6 +87,7 @@ export function findingsFromCrawlCoverage(input: {
   const homepageNoindex = (families ?? []).some((family) => family.family === "home" && family.noindex > 0);
   if (homepageNoindex) {
     drafts.push({
+      checkId: "indexing.homepage_noindex",
       category: "indexing",
       impact: 100,
       title: "The homepage is marked noindex",
@@ -99,6 +102,7 @@ export function findingsFromCrawlCoverage(input: {
   if (noindex > (homepageNoindex ? 1 : 0)) {
     const ratio = noindex / served;
     drafts.push({
+      checkId: "sitemap.noindex",
       category: "indexing",
       impact: organicImpactScore({ category: "indexing", pagesAffected: noindex, isBlockingCrawl: ratio >= 0.3, trafficShareAffected: ratio }),
       title: "Sitemap lists pages that are marked noindex",
@@ -112,6 +116,7 @@ export function findingsFromCrawlCoverage(input: {
   const robotsBlocked = issues.robotsBlocked ?? 0;
   if (robotsBlocked > 0) {
     drafts.push({
+      checkId: "sitemap.blocked",
       category: "indexing",
       impact: organicImpactScore({
         category: "indexing",
@@ -133,6 +138,7 @@ export function findingsFromCrawlCoverage(input: {
     const toHome = canonicalExamples.filter((example) => isSiteRoot(example.detail, example.url) && !isSiteRoot(example.url, undefined)).length;
     const homepageCanonical = canonicalExamples.length >= 3 && toHome / canonicalExamples.length >= 0.8;
     drafts.push({
+      checkId: "canonical.mismatch",
       category: "indexing",
       impact: organicImpactScore({
         category: "indexing",
@@ -156,6 +162,7 @@ export function findingsFromCrawlCoverage(input: {
     const affected = coverage.httpErrorUrls + coverage.failedUrls;
     const where = byFamily(families, (family) => family.errors);
     drafts.push({
+      checkId: "http.error",
       category: "indexing",
       impact: organicImpactScore({
         category: "indexing",
@@ -172,6 +179,7 @@ export function findingsFromCrawlCoverage(input: {
   const redirected = issues.redirected ?? 0;
   if (redirected > 0) {
     drafts.push({
+      checkId: "sitemap.redirects",
       category: "sitemap",
       impact: Math.min(organicImpactScore({ category: "sitemap", pagesAffected: redirected }), 45),
       title: "Sitemap lists URLs that redirect",
@@ -184,6 +192,7 @@ export function findingsFromCrawlCoverage(input: {
 
   if (coverage.missingTitleUrls > 0) {
     drafts.push({
+      checkId: "title.weak",
       category: "metadata",
       impact: Math.min(organicImpactScore({ category: "metadata", pagesAffected: coverage.missingTitleUrls }), 65),
       title: "Sitemap URLs are missing useful title tags",
@@ -197,6 +206,7 @@ export function findingsFromCrawlCoverage(input: {
   if (duplicateTitles > 0) {
     const groups = coverage.duplicateTitleGroups ?? [];
     drafts.push({
+      checkId: "title.duplicate",
       category: "metadata",
       impact: Math.min(organicImpactScore({ category: "metadata", pagesAffected: duplicateTitles }), 45),
       title: "Several indexable pages share the same title",
@@ -210,6 +220,7 @@ export function findingsFromCrawlCoverage(input: {
   const missingH1 = issues.missingH1 ?? 0;
   if (missingH1 > 0) {
     drafts.push({
+      checkId: "heading.h1_missing",
       category: "content",
       impact: Math.min(organicImpactScore({ category: "content", pagesAffected: missingH1 }), 45),
       title: "Pages without an H1 heading",
@@ -223,6 +234,7 @@ export function findingsFromCrawlCoverage(input: {
   const multipleH1 = issues.multipleH1 ?? 0;
   if (multipleH1 > 0) {
     drafts.push({
+      checkId: "heading.h1_multiple",
       category: "content",
       impact: Math.min(organicImpactScore({ category: "content", pagesAffected: multipleH1 }), 20),
       title: "Pages with more than one H1 heading",
@@ -236,6 +248,7 @@ export function findingsFromCrawlCoverage(input: {
   const missingDescription = issues.missingDescription ?? 0;
   if (missingDescription > 0) {
     drafts.push({
+      checkId: "description.missing",
       category: "metadata",
       impact: Math.min(organicImpactScore({ category: "metadata", pagesAffected: missingDescription }), 30),
       title: "Missing or very short meta descriptions",
@@ -250,6 +263,7 @@ export function findingsFromCrawlCoverage(input: {
   if (missingSchema > 0) {
     const where = byFamily(families, (family) => family.missingStructuredData, 5);
     drafts.push({
+      checkId: "schema.missing",
       category: "structured_data",
       impact: organicImpactScore({ category: "structured_data", pagesAffected: missingSchema }),
       title: "Detail pages have no structured data",
@@ -263,6 +277,7 @@ export function findingsFromCrawlCoverage(input: {
   const invalidSchema = issues.invalidStructuredData ?? 0;
   if (invalidSchema > 0) {
     drafts.push({
+      checkId: "schema.invalid",
       category: "structured_data",
       impact: Math.min(organicImpactScore({ category: "structured_data", pagesAffected: invalidSchema }) + 10, 50),
       title: "Structured data that fails to parse",
@@ -276,6 +291,7 @@ export function findingsFromCrawlCoverage(input: {
   const challenged = issues.botChallenge ?? 0;
   if (challenged > 0) {
     drafts.push({
+      checkId: "access.bot_challenge",
       category: "indexing",
       impact: challenged / crawled >= 0.5 ? 45 : 30,
       title: "Bot protection blocked part of the crawl",
@@ -289,6 +305,7 @@ export function findingsFromCrawlCoverage(input: {
   const fallback = issues.botFallback ?? 0;
   if (fallback > 0) {
     drafts.push({
+      checkId: "access.googlebot_refused",
       category: "indexing",
       impact: 12,
       title: "Your firewall refuses unverified Googlebot requests",
@@ -303,6 +320,7 @@ export function findingsFromCrawlCoverage(input: {
   const softNotFound = issues.softNotFound ?? 0;
   if (softNotFound > 0) {
     drafts.push({
+      checkId: "content.soft_404",
       category: "indexing",
       impact: Math.min(organicImpactScore({ category: "indexing", pagesAffected: softNotFound }), 60),
       title: "Pages that say not found but answer 200",
@@ -318,6 +336,7 @@ export function findingsFromCrawlCoverage(input: {
     const groups = coverage.nearDuplicateGroups ?? [];
     const suffixed = groups.filter((group) => group.suffixed).length;
     drafts.push({
+      checkId: "content.near_duplicate",
       category: "content",
       impact: Math.min(organicImpactScore({ category: "content", pagesAffected: nearDuplicates }), 55),
       title: "Pages that are the same page twice",
@@ -344,18 +363,8 @@ export function findingsFromCrawlCoverage(input: {
     }
   }
 
-  return drafts.map((draft) => ({
-    id: createId("finding"),
-    siteId: input.siteId,
-    analysisId: input.analysisId,
-    category: draft.category,
-    severity: severityFromImpact(draft.impact),
-    title: draft.title,
-    summary: draft.summary,
-    evidence: draft.evidence,
-    organicImpactScore: draft.impact,
-    recommendation: draft.recommendation,
-    pagesAffected: draft.pagesAffected ?? [],
-    createdAt,
+  return drafts.map((draft) => finding(CHECKS[draft.checkId]!, {
+    siteId: input.siteId, analysisId: input.analysisId, title: draft.title, summary: draft.summary, evidence: draft.evidence,
+    impact: draft.impact, recommendation: draft.recommendation, pagesAffected: draft.pagesAffected ?? [], createdAt,
   }));
 }

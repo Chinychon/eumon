@@ -91,7 +91,7 @@ export const CATALOG: Check[] = [
       what: "A sampled page failed to load at all during the analysis (network error, timeout or an unsafe redirect).",
       why: "If Eumon cannot fetch the page, crawlers may not be able to either, and every other check on that page is unknown.",
       how: "Open the URL from outside your network, check DNS, TLS and redirects, and look for the request in the server logs.",
-      severity: "Fixed at 30 (LOW): the cause is unknown until the URL is opened.",
+      severity: "Fixed at 30 and reported as MEDIUM: the cause is unknown until the URL is opened.",
     } }),
 
   // Sitemap and indexing

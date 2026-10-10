@@ -10,9 +10,11 @@ const check = (keyword: string, position: number | null, extra: Partial<RankChec
   ({ keyword, market: "mys", day: "2026-10-09", position, url: position ? `https://x.com/${keyword.replace(/ /g, "-")}` : null, features: [], ...extra });
 const gsc = (query: string, page: string, impressions: number, position: number, extra: Partial<SearchMetricRow> = {}): SearchMetricRow =>
   ({ query, page: `https://x.com${page}`, country: "mys", device: "MOBILE", impressions, clicks: 1, ctr: 0.01, position, ...extra });
-const graded = (query: string, market: string, checkedAt: string) => ({ query, market, checkedAt }) as ContentGradeRow;
+const graded = (query: string, market: string, checkedAt: string) => ({ query, market, checkedAt, page: `https://x.com/${query}` }) as ContentGradeRow;
 const pick = (input: Partial<Parameters<typeof pickContentTargets>[0]>) =>
-  pickContentTargets({ checks: [], tracked: [], markets: ["mys", "sgp"], searchRows: [], graded: [], today, ...input });
+  pickContentTargets({ checks: [], tracked: [], markets: ["mys", "sgp"], searchRows: [], graded: [], skipped: [], today, ...input });
+const stored = (query: string, checkedAt: string, extra: Partial<ContentGradeRow> = {}) =>
+  ({ query, market: "mys", page: `https://x.com/${query}`, source: "tracked", impressions: null, checkedAt, ...extra }) as ContentGradeRow;
 
 describe("pickContentTargets", () => {
   it("tracked keywords in the top 10 come first, on their latest check's page; then Search Console pairs at 4–15, most impressions first", () => {
@@ -69,6 +71,34 @@ describe("pickContentTargets", () => {
     const targets = pick({ searchRows, graded: [graded("q0", "mys", "2026-09-20T08:00:00.000Z"), graded("q1", "mys", "2026-09-12T08:00:00.000Z"), graded("q2", "sgp", "2026-10-09T08:00:00.000Z")] });
     assert.deepEqual(targets.map((t) => t.query), ["q1", "q2", "q3", "q4", "q5", "q6", "q7", "q8"], "q0 is 20 days old; q1 is 28 days old; q2 was graded in another market");
   });
+
+  it("skips a (query, market) skipped in the last 7 days", () => {
+    const searchRows = ["q0", "q1", "q2"].map((q, i) => gsc(q, `/p${i}`, 1000 - i, 5));
+    const skip = (query: string, checkedAt: string) => ({ query, market: "mys", page: "https://x.com/p", checkedAt, reason: "the page could not be read" });
+    const targets = pick({ searchRows, skipped: [skip("q0", "2026-10-04T08:00:00.000Z"), skip("q1", "2026-10-03T08:00:00.000Z")] });
+    assert.deepEqual(targets.map((t) => t.query), ["q1", "q2"], "q0 was skipped 6 days ago; q1 7 days ago");
+  });
+
+  it("re-grades a stored grade that is due and has left the windows, on its stored page, market and source, after the window targets", () => {
+    const targets = pick({
+      searchRows: [gsc("q0", "/p0", 900, 5)],
+      graded: [
+        stored("old b", "2026-09-01T00:00:00.000Z", { market: "sgp", source: "search", impressions: 30 }),
+        stored("old a", "2026-08-20T00:00:00.000Z"),
+        stored("fresh", "2026-10-01T00:00:00.000Z"),
+        stored("q0", "2026-08-01T00:00:00.000Z", { page: "https://x.com/elsewhere" }), // still in the window: the window's page wins
+        stored("gone market", "2026-08-01T00:00:00.000Z", { market: "usa" }),
+      ],
+    });
+    assert.deepEqual(targets, [
+      { query: "q0", market: "mys", page: "https://x.com/p0", source: "search", impressions: 900 },
+      { query: "old a", market: "mys", page: "https://x.com/old a", source: "tracked", impressions: null },
+      { query: "old b", market: "sgp", page: "https://x.com/old b", source: "search", impressions: 30 },
+    ]);
+    const full = pick({ searchRows: Array.from({ length: 8 }, (_, i) => gsc(`w${i}`, `/w${i}`, 100, 5)), graded: [stored("old a", "2026-08-20T00:00:00.000Z")] });
+    assert.equal(full.length, 8);
+    assert.ok(!full.some((t) => t.query === "old a"), "inside the same cap of 8");
+  });
 });
 
 /* ---------- pages ---------- */
@@ -108,7 +138,7 @@ const TOP3 = ["https://a.com/lasik", "https://b.com/lasik-guide", "https://c.com
 const target: ContentTarget = { query: "lasik malaysia", market: "mys", page: "https://x.com/lasik", source: "search", impressions: 400 };
 
 const PROPOSALS: TopicProposal[] = [
-  { label: "Candidacy", headings: [{ domain: "a.com", heading: "Who is a good candidate" }, { domain: "b.com", heading: "Candidate requirements" }], covered: true, evidence: "adults over 18 with a stable prescription are good candidates" },
+  { label: "Good candidates", headings: [{ domain: "a.com", heading: "Who is a good candidate" }, { domain: "b.com", heading: "Candidate requirements" }], covered: true, evidence: "adults over 18 with a stable prescription are good candidates" },
   { label: "Recovery time", headings: [{ domain: "a.com", heading: "Recovery time after LASIK" }, { domain: "b.com", heading: "Recovery time" }], covered: false, evidence: null },
   { label: "Cost", headings: [{ domain: "a.com", heading: "LASIK cost in Malaysia" }, { domain: "b.com", heading: "How much does LASIK cost?" }], covered: false, evidence: null },
   // A fabricated quote: the page never says this, so the topic counts as missing.
@@ -201,7 +231,7 @@ describe("gradeTarget", () => {
     const result = await gradeTarget(target, { serpRow: serpRow(TOP3), site: "x.com", llm: llm(), fetcher });
     assert.ok("row" in result, JSON.stringify(result));
     const row = result.row;
-    assert.deepEqual(row.topics.map((t) => t.label), ["Candidacy", "Recovery time", "Cost", "Risks and side effects"]);
+    assert.deepEqual(row.topics.map((t) => t.label), ["Good candidates", "Recovery time", "Cost", "Risks and side effects"]);
     assert.deepEqual(row.missing, ["Recovery time", "Cost", "Risks and side effects"]);
     assert.equal(row.covered, 1);
     assert.equal(row.topics[0]!.evidence, "adults over 18 with a stable prescription are good candidates");
@@ -224,9 +254,9 @@ describe("gradeTarget", () => {
   it("skips with a note when the AI can't be reached, so one outage doesn't fail the other targets", async () => {
     const { fetcher } = fakeFetcher(PAGES);
     const http = await gradeTarget(target, { serpRow: serpRow(TOP3), site: "x.com", llm: fakeLlm(() => { throw new LlmHttpError("deepseek", 503, "down"); }), fetcher });
-    assert.deepEqual(http, { skipped: "the AI could not be reached" });
+    assert.deepEqual(http, { skipped: "the AI could not be reached", transient: true });
     const network = await gradeTarget(target, { serpRow: serpRow(TOP3), site: "x.com", llm: fakeLlm(() => { throw new TypeError("fetch failed"); }), fetcher });
-    assert.deepEqual(network, { skipped: "the AI could not be reached" });
+    assert.deepEqual(network, { skipped: "the AI could not be reached", transient: true });
   });
 
   it("fails visibly on a missing or bad AI key, and on a bug in our own code", async () => {
@@ -274,7 +304,7 @@ describe("gradeTarget", () => {
     const one = fakeFetcher({ ...PAGES, "https://b.com/lasik-guide": { status: 500, body: "" }, "https://c.com/eyes/lasik": { status: 403, body: "" } });
     assert.deepEqual(await gradeTarget(target, { serpRow: serpRow(TOP3), site: "x.com", llm: llm(), fetcher: one.fetcher }), { skipped: "fewer than 2 competitor pages could be read" });
     const none = fakeFetcher(PAGES);
-    assert.deepEqual(await gradeTarget(target, { serpRow: serpRow(TOP3), site: "x.com", llm: null, fetcher: none.fetcher }), { skipped: "no AI model configured" });
+    assert.deepEqual(await gradeTarget(target, { serpRow: serpRow(TOP3), site: "x.com", llm: null, fetcher: none.fetcher }), { skipped: "no AI model configured", transient: true });
     assert.deepEqual(none.fetched, [], "no fetches without a model");
     const { fetcher } = fakeFetcher(PAGES);
     assert.deepEqual(await gradeTarget(target, { serpRow: serpRow(TOP3), site: "x.com", llm: fakeLlm(() => ({ nope: 1 })), fetcher }), { skipped: "the AI's topic list could not be read" });

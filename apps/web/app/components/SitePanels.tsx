@@ -69,7 +69,7 @@ export function KeywordsPanel({ site, data, report, onSaved }: { site: SiteRecor
   return (
     <div className="results">
       <RankTrackingCard ranks={results.ranks} siteId={site.id} operator hasCredentials={data.site.signals.keywords} hasMarkets={results.markets.length > 0} markets={results.markets} onSaved={onSaved} />
-      <ContentGradesCard grades={results.contentGrades} operator hasCredentials={data.site.signals.keywords} hasMarkets={results.markets.length > 0} notes={report?.contentGradingNotes} />
+      <ContentGradesCard grades={results.contentGrades} operator hasCredentials={data.site.signals.keywords} notes={report?.contentGradingNotes} />
       <KeywordsCard keywords={results.keywords} host={new URL(site.baseUrl).hostname} operator hasCredentials={data.site.signals.keywords} hasMarkets={results.markets.length > 0}
         searchTop10={results.search?.buckets.find((bucket) => bucket.top === 10)?.queries ?? null} />
       <SearchResultsCard data={data} operator />

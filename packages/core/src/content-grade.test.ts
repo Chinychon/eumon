@@ -25,10 +25,28 @@ describe("verifyTopics citations", () => {
     assert.deepEqual(t, { label: "Recovery", covered: false, coveredBy: ["a.com", "b.com"], evidence: null });
   });
 
-  it("drops a label over 80 characters or carrying a URL: headings are data, not a channel for the AI to pass text through", () => {
+  it("drops a label over 80 characters: headings are data, not a channel for the AI to pass text through", () => {
     const cites: Array<[string, string]> = [["a.com", "Recovery time after LASIK"], ["b.com", "LASIK recovery"]];
-    assert.deepEqual(verify([proposal("R".repeat(81), cites), proposal("Recovery, see https://evil.example", cites), proposal("Visit www.evil.example", cites)]), []);
+    assert.deepEqual(verify([proposal("R".repeat(81), cites)]), []);
     assert.equal(verify([proposal("R".repeat(80), cites)]).length, 1);
+  });
+
+  it("a label must share a content word with its cited headings, and carry no domain or phone number; otherwise it becomes the shortest cited heading", () => {
+    const cites: Array<[string, string]> = [["a.com", "Recovery time after LASIK"], ["b.com", "  LASIK   recovery "]];
+    const label = (text: string) => verify([proposal(text, cites)], { query: "lasik" })[0]?.label;
+    for (const injected of ["Call 0312345678 now", "cheaplasik.my offers 50% off", "Recovery, see https://evil.example", "Visit www.evil.example", "Recovery: call 012-3456789 or 0312345678", "Best prices in town", "LASIK", "Should you do it now?"]) {
+      assert.equal(label(injected), "LASIK recovery", injected);
+    }
+    assert.equal(label("Recovery"), "Recovery");
+    assert.equal(label("Healing and recovery"), "Healing and recovery");
+    // Two labels that fall back to the same heading are one topic.
+    assert.equal(verify([proposal("Best prices", cites), proposal("Cheap deals", cites)], { query: "lasik" }).length, 1);
+  });
+
+  it("a fallback heading is cut to 80 characters", () => {
+    const long = `Recovery ${"x".repeat(100)}`;
+    const wide = [rival("a.com", { headings: [long] }), rival("b.com", { headings: [long] })];
+    assert.equal(verify([proposal("Prices", [["a.com", long], ["b.com", long]])], { competitors: wide })[0]?.label, long.slice(0, 80));
   });
 
   it("ignores a citation to a heading the competitor does not have", () => {

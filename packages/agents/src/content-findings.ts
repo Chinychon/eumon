@@ -1,4 +1,4 @@
-import { CHECKS, countryName, createId, finding, type Finding, type KeywordDemand, type Opportunity } from "@organic-growth/core";
+import { addDays, CHECKS, countryName, createId, finding, type Finding, type KeywordDemand, type Opportunity } from "@organic-growth/core";
 import { expectedCtr } from "@organic-growth/pages";
 import { estimateDemand } from "./demand.js";
 import type { ContentGradeRow } from "./content-targets.js";
@@ -8,11 +8,15 @@ import type { ContentGradeRow } from "./content-targets.js";
 const COVERAGE_UNDER = 0.5;
 const MIN_TOPICS = 3;
 const MAX_OPPORTUNITIES = 5;
+/** A grade older than this no longer speaks for the page (the card still shows it, with its date). */
+const FRESH_DAYS = 35;
 
 const coverage = (row: ContentGradeRow) => row.covered / row.topics.length;
+const fresh = (grades: ContentGradeRow[] | undefined, today = new Date().toISOString().slice(0, 10)) =>
+  (grades ?? []).filter((row) => row.checkedAt.slice(0, 10) >= addDays(today, -FRESH_DAYS));
 
-export function findingsFromContentGrades(input: { siteId: string; analysisId: string; grades: ContentGradeRow[] | undefined }): Finding[] {
-  const weak = (input.grades ?? []).filter((row) => row.topics.length >= MIN_TOPICS && coverage(row) < COVERAGE_UNDER);
+export function findingsFromContentGrades(input: { siteId: string; analysisId: string; grades: ContentGradeRow[] | undefined; today?: string }): Finding[] {
+  const weak = fresh(input.grades, input.today).filter((row) => row.topics.length >= MIN_TOPICS && coverage(row) < COVERAGE_UNDER);
   if (weak.length < 2) return [];
   const worst = [...weak].sort((a, b) => coverage(a) - coverage(b)).slice(0, 3);
   return [finding(CHECKS["content.coverage_gap"]!, {
@@ -29,8 +33,8 @@ export function findingsFromContentGrades(input: { siteId: string; analysisId: s
  * One opportunity per page graded C or below (five at most, weakest first). When an existing
  * “Move …” opportunity already quotes the query, its rationale gains the missing topics instead.
  */
-export function contentOpportunities(input: { siteId: string; analysisId: string; grades: ContentGradeRow[] | undefined; existing: Opportunity[]; demand?: KeywordDemand }): { made: Opportunity[]; existing: Opportunity[] } {
-  const weak = (input.grades ?? []).filter((row) => row.grade >= "C").sort((a, b) => a.score - b.score).slice(0, MAX_OPPORTUNITIES);
+export function contentOpportunities(input: { siteId: string; analysisId: string; grades: ContentGradeRow[] | undefined; existing: Opportunity[]; demand?: KeywordDemand; today?: string }): { made: Opportunity[]; existing: Opportunity[] } {
+  const weak = fresh(input.grades, input.today).filter((row) => row.grade >= "C").sort((a, b) => a.score - b.score).slice(0, MAX_OPPORTUNITIES);
   const existing = [...input.existing];
   const made: Opportunity[] = [];
   for (const row of weak) {

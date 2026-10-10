@@ -9,7 +9,8 @@ const row = (query: string, grade: ContentGradeRow["grade"], score: number, n = 
   query, market: "mys", page: `https://x.com/${query}`, checkedAt: "2026-10-01", source: "search", impressions, competitors: [],
   score, grade, topics: topics(n, covered), covered, missing: topics(n, covered).filter((t) => !t.covered).map((t) => t.label), ownWords: 300, medianWords: 900, structure: [],
 });
-const find = (rows: ContentGradeRow[]) => findingsFromContentGrades({ siteId: "s", analysisId: "a", grades: rows });
+const today = "2026-10-10";
+const find = (rows: ContentGradeRow[], day = today) => findingsFromContentGrades({ siteId: "s", analysisId: "a", grades: rows, today: day });
 
 describe("findingsFromContentGrades", () => {
   it("fires at two weak pages, not at one; fewer than three topics do not count", () => {
@@ -24,6 +25,10 @@ describe("findingsFromContentGrades", () => {
     assert.deepEqual(f!.pagesAffected, ["https://x.com/a", "https://x.com/b"]);
     assert.match(f!.summary, /“a”.*t2/);
   });
+  it("ignores grades checked more than 35 days before the analysis", () => {
+    assert.equal(find([row("a", "D", 30), row("b", "F", 10)], "2026-11-05").length, 1, "35 days old");
+    assert.equal(find([row("a", "D", 30), row("b", "F", 10)], "2026-11-06").length, 0, "36 days old");
+  });
   it("caps the impact at 65", () => {
     const f = find(Array.from({ length: 9 }, (_, i) => row(`q${i}`, "D", 30)))[0]!;
     assert.equal(f.organicImpactScore, 65);
@@ -32,7 +37,7 @@ describe("findingsFromContentGrades", () => {
 
 describe("contentOpportunities", () => {
   const striking: Opportunity = { id: "o", siteId: "s", analysisId: "a", title: "Move “b” onto the first results (now position 12.0)", searchDemand: 1, intent: "x", competitorStrength: 0, estimatedDifficulty: 1, businessValue: 1, conversionPotential: 1, technicalEffort: 1, contentEffort: 1, priorityScore: 1, rationale: "Base." };
-  const run = (grades: ContentGradeRow[], existing: Opportunity[] = []) => contentOpportunities({ siteId: "s", analysisId: "a", grades, existing });
+  const run = (grades: ContentGradeRow[], existing: Opportunity[] = [], day = today) => contentOpportunities({ siteId: "s", analysisId: "a", grades, existing, today: day });
 
   it("makes opportunities for C, D and F, not A or B, at most five", () => {
     const many = ["A", "B", "C", "D", "F"].map((g, i) => row(`q${i}`, g as ContentGradeRow["grade"], 90 - i * 20));
@@ -42,6 +47,11 @@ describe("contentOpportunities", () => {
     assert.equal(made[0]!.intent, "content_coverage");
     assert.equal(made[0]!.currentPage, "https://x.com/q4");
     assert.equal(run(Array.from({ length: 8 }, (_, i) => row(`z${i}`, "F", 10))).made.length, 5);
+  });
+  it("ignores grades checked more than 35 days before the analysis", () => {
+    assert.equal(run([row("q", "F", 10)], [], "2026-11-05").made.length, 1);
+    assert.equal(run([row("q", "F", 10)], [], "2026-11-06").made.length, 0);
+    assert.equal(run([row("b", "D", 30)], [striking], "2026-11-06").existing[0]!.rationale, "Base.");
   });
   it("enriches a striking-distance opportunity instead of adding another", () => {
     const { made, existing } = run([row("b", "D", 30)], [striking]);

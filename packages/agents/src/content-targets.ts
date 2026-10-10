@@ -1,7 +1,7 @@
 import { LlmError, LlmHttpError, type JsonLlm, type JsonRequest } from "@organic-growth/ai";
 import {
   addDays, bareDomain, competitorKind, gradeContent, TOPIC_PROPOSAL_SCHEMA, verifyTopics,
-  type ContentGrade, type ContentGradeRow, type GradedPage, type RankCheck, type SearchMetricRow, type SerpResult, type TopicProposal,
+  type ContentGrade, type ContentGradeRow, type ContentSkipRow, type GradedPage, type RankCheck, type SearchMetricRow, type SerpResult, type TopicProposal,
 } from "@organic-growth/core";
 import { BROWSER_UA, contentMarkup, contentSignals, defaultFetcher, elementSpans, fetchRobots, innerText, isEmptyShell, mainMarkup, parseHtmlSignals, type Fetcher } from "@organic-growth/crawler";
 
@@ -12,7 +12,7 @@ import { BROWSER_UA, contentMarkup, contentSignals, defaultFetcher, elementSpans
  */
 
 export type ContentTarget = { query: string; market: string; page: string; source: "tracked" | "search"; impressions: number | null };
-export type { ContentGradeRow };
+export type { ContentGradeRow, ContentSkipRow };
 
 export const CONTENT_TARGETS = {
   MAX: 8, // per analysis; the rest wait for the next one
@@ -20,6 +20,7 @@ export const CONTENT_TARGETS = {
   SEARCH_MIN: 4, // striking distance: close enough to the top to be worth closing the gap
   SEARCH_MAX: 15,
   SPACING_DAYS: 28, // a search is graded once per four weeks
+  SKIP_DAYS: 7, // a search that could not be graded is tried again a week later
   COMPETITORS: 3,
   MIN_COMPETITORS: 2,
   MIN_WORDS: 100, // less is a stub, not a page to compare
@@ -32,7 +33,10 @@ const key = (query: string, market: string) => `${query.trim().toLowerCase()}|${
 /** A page without its fragment (`#:~:text=` links) or trailing slash. */
 const pageKey = (url: string) => url.split("#")[0]!.replace(/\/+$/, "");
 
-export function pickContentTargets(input: { checks: RankCheck[]; tracked: string[]; markets: string[]; searchRows: SearchMetricRow[]; graded: ContentGradeRow[]; today: string }): ContentTarget[] {
+export function pickContentTargets(input: {
+  checks: RankCheck[]; tracked: string[]; markets: string[]; searchRows: SearchMetricRow[]; graded: ContentGradeRow[];
+  skipped: Array<Pick<ContentSkipRow, "query" | "market" | "checkedAt">>; today: string;
+}): ContentTarget[] {
   const C = CONTENT_TARGETS;
   const candidates: ContentTarget[] = [];
   const queries = new Set<string>();
@@ -77,9 +81,15 @@ export function pickContentTargets(input: { checks: RankCheck[]; tracked: string
     if (market) add({ query: pair.query, market, page: pair.page, source: "search", impressions: pair.impressions });
   }
 
+  // Stored grades that have left the windows, oldest first, so a weak grade is checked again rather than kept forever.
+  for (const row of [...input.graded].sort((a, b) => a.checkedAt.localeCompare(b.checkedAt))) {
+    if (input.markets.includes(row.market)) add({ query: row.query, market: row.market, page: row.page, source: row.source, impressions: row.impressions });
+  }
+
   // Spacing applies after de-duplication: a page graded recently for one search is not re-graded for another.
-  const since = addDays(input.today, -C.SPACING_DAYS);
-  const recent = new Set(input.graded.filter((row) => row.checkedAt.slice(0, 10) > since).map((row) => key(row.query, row.market)));
+  const within = (rows: Array<{ query: string; market: string; checkedAt: string }>, days: number) =>
+    rows.filter((row) => row.checkedAt.slice(0, 10) > addDays(input.today, -days)).map((row) => key(row.query, row.market));
+  const recent = new Set([...within(input.graded, C.SPACING_DAYS), ...within(input.skipped, C.SKIP_DAYS)]);
   return candidates.filter((t) => !recent.has(key(t.query, t.market))).slice(0, C.MAX);
 }
 
@@ -173,9 +183,10 @@ export async function gradeTarget(
   target: ContentTarget,
   /** `beforeAi` runs right before the AI call, once the pages are read; a throw from it propagates (the caller's allowance check). */
   input: { serpRow: SerpResult; site: string; llm: JsonLlm | null; fetcher?: Fetcher; beforeAi?: () => Promise<void> },
-): Promise<{ row: ContentGradeRow } | { skipped: string }> {
+): Promise<{ row: ContentGradeRow } | { skipped: string; transient?: true }> {
   const C = CONTENT_TARGETS;
-  if (!input.llm) return { skipped: "no AI model configured" };
+  // `transient`: not the target's fault, so the skip is not stored and the next analysis tries again.
+  if (!input.llm) return { skipped: "no AI model configured", transient: true };
   const fetcher = input.fetcher ?? defaultFetcher;
   const site = bareDomain(input.site);
   const isSite = (domain: string) => domain === site || domain.endsWith(`.${site}`);
@@ -217,7 +228,7 @@ export async function gradeTarget(
     // An outage skips this target instead of failing the step's others; the provider's detail stays out of the stored note.
     if (error instanceof LlmUnavailableError) {
       console.warn(`content grading: AI unavailable for "${target.query}": ${error.message}`);
-      return { skipped: "the AI could not be reached" };
+      return { skipped: "the AI could not be reached", transient: true };
     }
     throw error;
   }

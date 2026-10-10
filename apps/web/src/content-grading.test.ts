@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { LlmHttpError, type JsonLlm } from "@organic-growth/ai";
-import type { ContentGradeRow } from "@organic-growth/agents";
+import type { ContentGradeRow, ContentSkipRow } from "@organic-growth/agents";
 import type { SerpResult, TopicProposal } from "@organic-growth/core";
 import type { Fetcher, FetchResult } from "@organic-growth/crawler";
 import { getSite, getSnapshot, saveRankChecks, saveSnapshot, setLimitOverrides, setSiteMarkets, setTrackedKeywords, upsertSite, type D1Like } from "@organic-growth/db";
 import { openSqliteD1 } from "@organic-growth/db/sqlite";
-import { CONTENT_STEP, contentTargets, gradeContentSteps, gradeSlice, loadContentGrades, saveContentGrades } from "./content-grading.ts";
+import { CONTENT_STEP, contentTargets, gradeContentSteps, gradeSlice, loadContentGrades, loadContentSkips, saveContentGrades } from "./content-grading.ts";
 import type { StepLike, StepOptions } from "./sync-steps.ts";
 
 const today = "2026-10-10";
@@ -62,7 +62,7 @@ const fetcher: Fetcher = async (url): Promise<FetchResult> => {
   return page ? { url, status: page.status ?? 200, finalUrl: url, headers: { "content-type": "text/html" }, body: page.body } : { url, status: 404, finalUrl: url, headers: {}, body: "" };
 };
 const PROPOSALS: TopicProposal[] = [
-  { label: "Candidacy", headings: [{ domain: "a.com", heading: "Who is a good candidate" }, { domain: "b.com", heading: "Candidate requirements" }], covered: true, evidence: "adults over 18 with a stable prescription are good candidates" },
+  { label: "Good candidates", headings: [{ domain: "a.com", heading: "Who is a good candidate" }, { domain: "b.com", heading: "Candidate requirements" }], covered: true, evidence: "adults over 18 with a stable prescription are good candidates" },
   { label: "Recovery time", headings: [{ domain: "a.com", heading: "Recovery time after LASIK" }, { domain: "b.com", heading: "Recovery time" }], covered: false, evidence: null },
   { label: "Cost", headings: [{ domain: "a.com", heading: "LASIK cost in Malaysia" }, { domain: "b.com", heading: "How much does LASIK cost?" }], covered: false, evidence: null },
 ];
@@ -71,7 +71,8 @@ function fakeLlm(answers: Array<() => unknown> = []): JsonLlm & { calls: number 
   const model = { model: "fake", calls: 0, json: async <T,>() => (answers[model.calls++] ?? (() => ({ topics: PROPOSALS })))() as T };
   return model;
 }
-const row = (query: string, checkedAt: string, score = 50): ContentGradeRow => ({ query, market: "mys", checkedAt, score } as ContentGradeRow);
+const row = (query: string, checkedAt: string, score = 50): ContentGradeRow => ({ query, market: "mys", page: `https://x.com/${query}`, checkedAt, score } as ContentGradeRow);
+const skip = (query: string, checkedAt: string, reason = "the page could not be read"): ContentSkipRow => ({ query, market: "mys", page: `https://x.com/${query}`, checkedAt, reason });
 
 /** A StepLike that runs each step once and records its name, options and output. */
 function recorder(): StepLike & { names: string[]; outputs: unknown[]; options: Array<StepOptions | undefined> } {
@@ -118,6 +119,13 @@ describe("content targets", () => {
     await saveContentGrades(db, site, [row("kw a", "2026-10-01T00:00:00.000Z")], today);
     assert.deepEqual((await contentTargets(db, site, today, {})).targets.map((t) => t.query), ["kw b"]);
   });
+
+  it("leaves out searches skipped in the last 7 days", async () => {
+    const { db, site } = await setup(["kw a", "kw b"]);
+    await saveSnapshot(db, "s", { kind: "serp", scope: "mys", periodEnd: today, rows: [serpRow("kw a", today), serpRow("kw b", today)] });
+    await saveContentGrades(db, site, [], today, [skip("kw a", "2026-10-05T00:00:00.000Z")]);
+    assert.deepEqual((await contentTargets(db, site, today, {})).targets.map((t) => t.query), ["kw b"]);
+  });
 });
 
 describe("gradeSlice", () => {
@@ -129,7 +137,18 @@ describe("gradeSlice", () => {
     const result = await gradeSlice(db, site, [target("kw a"), target("kw z")], { ...serp, "kw z|mys": serpRow("kw z", today) }, fakeLlm(), fetcher);
     assert.deepEqual(result.rows.map((r) => [r.query, r.covered]), [["kw a", 1]]);
     assert.deepEqual(result.notes, ["content grading skipped “kw z”: the page could not be read"]);
+    assert.deepEqual(result.skips.map((s) => [s.query, s.market, s.page, s.reason]), [["kw z", "mys", "https://x.com/kw-z", "the page could not be read"]]);
     assert.equal(result.stop, false);
+  });
+
+  it("does not keep a skip that is not the target's fault: no AI model, an AI outage, the allowance", async () => {
+    const { db, site } = await setup([], true);
+    assert.deepEqual((await gradeSlice(db, site, [target("kw a")], serp, null, fetcher)).skips, []);
+    const down = fakeLlm([() => { throw new LlmHttpError("deepseek", 503, "down"); }]);
+    const outage = await gradeSlice(db, site, [target("kw a")], serp, down, fetcher);
+    assert.deepEqual([outage.notes, outage.skips], [["content grading skipped “kw a”: the AI could not be reached"], []]);
+    await setLimitOverrides(db, "w", { aiRunsPerDay: 0 });
+    assert.deepEqual((await gradeSlice(db, site, [target("kw a")], serp, fakeLlm(), fetcher)).skips, []);
   });
 
   it("ends the slice on a setup error with one note, keeping the grades made before it", async () => {
@@ -206,6 +225,20 @@ describe("gradeContentSteps", () => {
     assert.deepEqual(await gradeContentSteps(demo, { ...deps(db, null), siteId: "site_demo_clinic" }), []);
     assert.deepEqual(demo.names, []);
   });
+
+  it("saves the skips with the grades, so a page that can't be read waits a week", async () => {
+    const { db } = await setup(["kw a", "kw b"]);
+    await saveSnapshot(db, "s", { kind: "serp", scope: "mys", periodEnd: today, rows: ["kw a", "kw b"].map((k) => serpRow(k, today)) });
+    PAGES["https://x.com/kw-b"] = { status: 500, body: "" };
+    try {
+      await gradeContentSteps(recorder(), deps(db, fakeLlm()));
+    } finally {
+      PAGES["https://x.com/kw-b"] = sitePage;
+    }
+    const site = (await getSite(db, "s"))!;
+    assert.deepEqual((await loadContentGrades(db, site)).map((r) => r.query), ["kw a"]);
+    assert.deepEqual((await loadContentSkips(db, site)).map((r) => [r.query, r.reason]), [["kw b", "the page could not be read"]]);
+  });
 });
 
 describe("saveContentGrades", () => {
@@ -217,5 +250,13 @@ describe("saveContentGrades", () => {
     assert.deepEqual(saved.map((r) => [r.query, r.score]), [["KW A", 80], ["kw b", 50]]);
     const snapshot = (await getSnapshot<ContentGradeRow>(db, "s", "content_grades", "x.com"))!;
     assert.equal(snapshot.periodEnd, today);
+  });
+
+  it("keeps the latest skip per search in content_skips, and drops skips older than 90 days", async () => {
+    const { db, site } = await setup([]);
+    await saveContentGrades(db, site, [], "2026-09-01", [skip("kw a", "2026-09-01T00:00:00.000Z", "old reason"), skip("kw b", "2026-09-01T00:00:00.000Z"), skip("kw old", "2026-07-01T00:00:00.000Z")]);
+    await saveContentGrades(db, site, [row("kw b", `${today}T00:00:00.000Z`)], today, [skip("KW A", `${today}T00:00:00.000Z`, "new reason")]);
+    assert.deepEqual((await loadContentSkips(db, site)).map((r) => [r.query, r.reason]), [["KW A", "new reason"], ["kw b", "the page could not be read"]]);
+    assert.equal((await getSnapshot<ContentSkipRow>(db, "s", "content_skips", "x.com"))!.periodEnd, today);
   });
 });

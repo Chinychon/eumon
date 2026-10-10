@@ -3,6 +3,7 @@
 import { countryName, type ContentGradeRow } from "@organic-growth/core";
 import { useState } from "react";
 import { formatDay, formatNumber } from "../api";
+import { contentGradesEmpty } from "../report-model";
 import { Badge, Card } from "../ui";
 
 const tone = (grade: string) => (grade === "A" || grade === "B" ? "green" : grade === "C" ? "amber" : "red");
@@ -40,13 +41,11 @@ function Detail({ row }: { row: ContentGradeRow }) {
  * How each graded page compares with the pages that outrank it: the topics
  * the top results share that the page lacks, length and structure.
  */
-export function ContentGradesCard({ grades, operator, hasMarkets, hasCredentials, notes }: {
-  grades: ContentGradeRow[]; operator: boolean; hasMarkets: boolean; hasCredentials: boolean; notes?: string[];
+export function ContentGradesCard({ grades, operator, hasCredentials, notes }: {
+  grades: ContentGradeRow[]; operator: boolean; hasCredentials: boolean; notes?: string[];
 }) {
   const [open, setOpen] = useState<string | null>(null);
-  const empty = grades.length > 0 ? null
-    : !hasCredentials && !hasMarkets ? (operator ? "Add DataForSEO credentials or track keywords so Eumon knows who ranks." : "Not measured yet.")
-    : "Grades appear after the next analysis, for your tracked keywords and the searches where you rank 4 to 15.";
+  const empty = contentGradesEmpty({ graded: grades.length, operator, hasCredentials });
   return (
     <Card title="Content grades" subtitle="Each page against the pages that outrank it: the topics the top results cover, length and structure.">
       {empty && <p className="empty-state">{empty}</p>}

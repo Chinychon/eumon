@@ -1,5 +1,5 @@
 import type { JsonLlm } from "@organic-growth/ai";
-import { authorityDomain, DEMO_SITE_ID, fetchSerp, gradeTarget, pickContentTargets, type ContentGradeRow, type ContentTarget } from "@organic-growth/agents";
+import { authorityDomain, DEMO_SITE_ID, fetchSerp, gradeTarget, pickContentTargets, type ContentGradeRow, type ContentSkipRow, type ContentTarget } from "@organic-growth/agents";
 import { addDays, type SerpResult, type SiteRecord } from "@organic-growth/core";
 import type { Fetcher } from "@organic-growth/crawler";
 import {
@@ -15,7 +15,8 @@ import type { StepLike, StepOptions } from "./sync-steps.ts";
  * Content grading's analysis steps: pick the searches due and find who ranks
  * for each (the `serp` snapshot, or DataForSEO where the workspace may spend
  * it), grade four a step, then keep the latest grade per search in the
- * `content_grades` snapshot. Per target: 1 own page + 3 robots.txt + 3 rival
+ * `content_grades` snapshot, and the latest skip per search in `content_skips`
+ * (a target that could not be graded waits a week). Per target: 1 own page + 3 robots.txt + 3 rival
  * pages + 1–2 AI calls (DeepSeek retries once on bad JSON), redirect hops
  * extra: about 36 fetches a step at worst, under the Free plan's 50 with room
  * for hops. D1 calls don't count.
@@ -23,9 +24,10 @@ import type { StepLike, StepOptions } from "./sync-steps.ts";
 
 export const CONTENT_STEP = 4;
 const KIND = "content_grades";
+const SKIPS = "content_skips";
 /** A results page older than this is fetched again. */
 const SERP_DAYS = 28;
-/** Grades kept this long after their last check. */
+/** Grades and skips kept this long after their last check. */
 const KEEP_DAYS = 90;
 const RETRY_ONCE: StepOptions = { retries: { limit: 1, delay: 10_000 } };
 const GRADE: StepOptions = { ...RETRY_ONCE, timeout: 10 * 60_000 };
@@ -34,30 +36,39 @@ type Site = Pick<SiteRecord, "id" | "baseUrl" | "workspaceId">;
 const key = (query: string, market: string) => `${query.trim().toLowerCase()}|${market}`;
 const scope = (site: Site) => authorityDomain(site.baseUrl);
 
-export async function loadContentGrades(db: D1Like, site: Site): Promise<ContentGradeRow[]> {
-  return (await getSnapshot<ContentGradeRow>(db, site.id, KIND, scope(site)))?.rows ?? [];
-}
+type Keyed = { query: string; market: string; checkedAt: string };
+const load = async <T,>(db: D1Like, site: Site, kind: string) => (await getSnapshot<T>(db, site.id, kind, scope(site)))?.rows ?? [];
 
-/** The latest grade per (query, market): this run's rows replace theirs, the others stay until they are 90 days old. */
-export async function saveContentGrades(db: D1Like, site: Site, rows: ContentGradeRow[], today: string): Promise<void> {
+export const loadContentGrades = (db: D1Like, site: Site) => load<ContentGradeRow>(db, site, KIND);
+export const loadContentSkips = (db: D1Like, site: Site) => load<ContentSkipRow>(db, site, SKIPS);
+
+/** The latest row per (query, market): this run's rows replace theirs, the others stay until they are 90 days old. */
+async function saveLatest<T extends Keyed>(db: D1Like, site: Site, kind: string, rows: T[], today: string): Promise<void> {
   const fresh = new Set(rows.map((row) => key(row.query, row.market)));
   const since = addDays(today, -KEEP_DAYS);
-  const kept = (await loadContentGrades(db, site)).filter((row) => !fresh.has(key(row.query, row.market)) && row.checkedAt.slice(0, 10) >= since);
-  await saveSnapshot(db, site.id, { kind: KIND, scope: scope(site), periodEnd: today, rows: [...rows, ...kept] });
+  const kept = (await load<T>(db, site, kind)).filter((row) => !fresh.has(key(row.query, row.market)) && row.checkedAt.slice(0, 10) >= since);
+  await saveSnapshot(db, site.id, { kind, scope: scope(site), periodEnd: today, rows: [...rows, ...kept] });
+}
+
+/** This run's grades into `content_grades`, its skips into `content_skips`. */
+export async function saveContentGrades(db: D1Like, site: Site, rows: ContentGradeRow[], today: string, skips: ContentSkipRow[] = []): Promise<void> {
+  await saveLatest(db, site, KIND, rows, today);
+  await saveLatest(db, site, SKIPS, skips, today);
 }
 
 /** The searches due, each with its results page (by `key`); a search without one is skipped with a note. */
 export async function contentTargets(db: D1Like, site: SiteRecord, today: string, keys: Pick<SignalKeys, "dataForSeo">, fetchFn: typeof fetch = fetch): Promise<{ targets: ContentTarget[]; serp: Record<string, SerpResult>; notes: string[] }> {
-  const [checks, tracked, markets, searchRows, graded, lists] = await Promise.all([
+  // The Search Console rows are the previous analysis' (this one refreshes them later, in the analyze step), so striking-distance positions lag one analysis.
+  const [checks, tracked, markets, searchRows, graded, skipped, lists] = await Promise.all([
     listRankChecks(db, site.id, addDays(today, -30)), listTrackedKeywords(db, site.id), listSiteMarkets(db, site.id),
-    listCurrentSearchMetrics(db, site.id), loadContentGrades(db, site), listSnapshots<SerpResult>(db, site.id, "serp"),
+    listCurrentSearchMetrics(db, site.id), loadContentGrades(db, site), loadContentSkips(db, site), listSnapshots<SerpResult>(db, site.id, "serp"),
   ]);
   const since = addDays(today, -SERP_DAYS);
   const stored = new Map(lists.flatMap((list) => list.rows.filter((row) => row.checkedAt.slice(0, 10) >= since).map((row) => [key(row.keyword, list.scope), row] as const)));
   const serp: Record<string, SerpResult> = {};
   const notes: string[] = [];
   const missing: ContentTarget[] = [];
-  const picked = pickContentTargets({ checks, tracked, markets, searchRows, graded, today });
+  const picked = pickContentTargets({ checks, tracked, markets, searchRows, graded, skipped, today });
   for (const target of picked) {
     const row = stored.get(key(target.query, target.market));
     if (row) serp[key(target.query, target.market)] = row;
@@ -90,11 +101,13 @@ export async function contentTargets(db: D1Like, site: SiteRecord, today: string
 class AllowanceRefused extends Error {}
 
 /**
- * One step's targets, in sequence. Skips become notes. A throw (a bad AI key, the allowance used up)
- * ends the slice with one note and `stop`, keeping the grades made before it.
+ * One step's targets, in sequence. Skips become notes, and the target's own (not an AI outage or a
+ * missing model) become `skips` rows. A throw (a bad AI key, the allowance used up) ends the slice
+ * with one note and `stop`, keeping the grades and skips made before it.
  */
-export async function gradeSlice(db: D1Like, site: Site, slice: ContentTarget[], serp: Record<string, SerpResult>, llm: JsonLlm | null, fetcher?: Fetcher): Promise<{ rows: ContentGradeRow[]; notes: string[]; stop: boolean }> {
+export async function gradeSlice(db: D1Like, site: Site, slice: ContentTarget[], serp: Record<string, SerpResult>, llm: JsonLlm | null, fetcher?: Fetcher): Promise<{ rows: ContentGradeRow[]; skips: ContentSkipRow[]; notes: string[]; stop: boolean }> {
   const rows: ContentGradeRow[] = [];
+  const skips: ContentSkipRow[] = [];
   const notes: string[] = [];
   // One AI run per target that reaches the AI; a site outside any workspace has no ledger (and grades at most 8 an analysis).
   // A retried step charges its targets again: the first attempt's charges aren't refunded.
@@ -106,13 +119,16 @@ export async function gradeSlice(db: D1Like, site: Site, slice: ContentTarget[],
     for (const target of slice) {
       const result = await gradeTarget(target, { serpRow: serp[key(target.query, target.market)]!, site: scope(site), llm, fetcher, beforeAi });
       if ("row" in result) rows.push(result.row);
-      else notes.push(`content grading skipped “${target.query}”: ${result.skipped}`);
+      else {
+        notes.push(`content grading skipped “${target.query}”: ${result.skipped}`);
+        if (!result.transient) skips.push({ query: target.query, market: target.market, page: target.page, checkedAt: new Date().toISOString(), reason: result.skipped });
+      }
     }
   } catch (error) {
     notes.push(error instanceof AllowanceRefused ? `content grading: ${error.message}` : `content grading failed: ${said(error)}`);
-    return { rows, notes, stop: true };
+    return { rows, skips, notes, stop: true };
   }
-  return { rows, notes, stop: false };
+  return { rows, skips, notes, stop: false };
 }
 
 export type ContentDeps = { db: D1Like; siteId: string; now: () => Date; keys: SignalKeys; llm: () => JsonLlm | null; fetcher?: Fetcher; fetchFn?: typeof fetch };
@@ -147,16 +163,18 @@ export async function gradeContentSteps(step: StepLike, deps: ContentDeps): Prom
   const { today, targets, serp } = picked.ok;
   const notes = [...picked.ok.notes];
   const rows: ContentGradeRow[] = [];
+  const skips: ContentSkipRow[] = [];
   for (let start = 0, n = 1; start < targets.length; start += CONTENT_STEP, n++) {
     const slice = targets.slice(start, start + CONTENT_STEP);
     const graded = await safe(`content-grades-${n}`, async () => gradeSlice(db, await site(), slice, serp, deps.llm(), deps.fetcher), GRADE);
     if ("error" in graded) { notes.push(`content grading failed: ${graded.error}`); continue; }
     rows.push(...graded.ok.rows);
+    skips.push(...graded.ok.skips);
     notes.push(...graded.ok.notes);
     if (graded.ok.stop) break; // a setup problem or the day's allowance: the next step would hit it too
   }
   if (targets.length) {
-    const saved = await safe("content-save", async () => saveContentGrades(db, await site(), rows, today));
+    const saved = await safe("content-save", async () => saveContentGrades(db, await site(), rows, today, skips));
     if ("error" in saved) notes.push(`content grading failed: ${saved.error}`);
   }
   return notes;

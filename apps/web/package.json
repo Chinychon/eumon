@@ -13,6 +13,7 @@
     "@organic-growth/pages": "*",
     "@organic-growth/repo-analyzer": "*",
     "@organic-growth/scraper": "*",
+    "better-auth": "1.7.7",
     "d3-force": "^3.0.0",
     "fflate": "0.8.2",
     "react": "latest",

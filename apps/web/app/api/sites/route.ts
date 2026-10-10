@@ -6,6 +6,7 @@ import { fail, json, readJson } from "../../../src/server";
 import { requireWorkspace } from "../../../src/guard";
 import { limitsFor } from "../../../src/limits";
 import { workspaceRepositories } from "../../../src/github-install";
+import { startAnalysis } from "../../../src/start-analysis";
 
 /** The refusal message when the workspace is full, else null. */
 async function overLimit(workspaceId: string): Promise<string | null> {
@@ -24,6 +25,12 @@ export async function GET(request: Request) {
   const access = await requireWorkspace(request, "read");
   if (access instanceof Response) return access;
   return json({ sites: await listSitesForUser(env.DB, access.viewer.userId, access.viewer.workspaceId) });
+}
+
+/** A new site's first analysis starts as it is added; when it can't (the daily allowance is used), the site is still added and the Overview offers the run. */
+async function firstAnalysis(site: SiteRecord) {
+  const started = await startAnalysis(env.DB, env.ANALYSIS_WORKFLOW, site, { full: false });
+  return started.ok ? { analysisId: started.analysisId, status: started.status } : { error: started.error };
 }
 
 /**
@@ -54,8 +61,9 @@ export async function POST(request: Request) {
       createdAt: now,
       updatedAt: now,
     };
-    if (!existing) await upsertSite(env.DB, site);
-    return json({ site }, existing ? 200 : 201);
+    if (existing) return json({ site }, 200);
+    await upsertSite(env.DB, site);
+    return json({ site, analysis: await firstAnalysis(site) }, 201);
   }
 
   if (typeof body.repositoryId !== "number" || !Number.isSafeInteger(body.repositoryId)) {
@@ -88,7 +96,7 @@ export async function POST(request: Request) {
       updatedAt: now,
     };
     await upsertSite(env.DB, site);
-    return json({ site }, existing ? 200 : 201);
+    return json(existing ? { site } : { site, analysis: await firstAnalysis(site) }, existing ? 200 : 201);
   } catch (error) {
     return fail(error instanceof Error ? error.message : "Could not connect this repository.", 502);
   }

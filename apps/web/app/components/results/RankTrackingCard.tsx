@@ -46,15 +46,16 @@ export function RankTrackingCard({ ranks, siteId, operator, hasCredentials, hasM
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
-  const current = [...new Set(ranks.rows.map((row) => row.keyword))];
+  const [savedKeywords, setSavedKeywords] = useState(() => [...new Set(ranks.rows.map((row) => row.keyword))]);
+  const current = savedKeywords;
   const draft = text ?? current.join("\n");
   const changed = draft.trim() !== current.join("\n").trim();
 
   async function save() {
     setBusy(true); setError(""); setSaved(false);
     try {
-      await api<{ keywords: string[] }>(`/api/sites/${siteId}/keywords`, { method: "PUT", json: { keywords: draft.split("\n").map((line) => line.trim()).filter(Boolean) } });
-      setText(null); setSaved(true); onSaved?.();
+      const response = await api<{ keywords: string[] }>(`/api/sites/${siteId}/keywords`, { method: "PUT", json: { keywords: draft.split("\n").map((line) => line.trim()).filter(Boolean) } });
+      setSavedKeywords(response.keywords); setText(null); setSaved(true); onSaved?.();
     } catch (caught) { setError(errorMessage(caught)); } finally { setBusy(false); }
   }
 

@@ -39,6 +39,45 @@ describe("classifyReferringDomains", () => {
     assert.ok(empty.every((r) => !r.spam));
   });
 
+  it("shared generic paths are not a network", () => {
+    for (const path of ["/", "/partners", "/about", "/members/directory"]) {
+      assert.ok(verdicts(many(10, (i) => ({ urlFrom: `https://site${i}.com${path}` }))).every((v) => v === null), path);
+    }
+  });
+
+  it("brand and generic anchors are not a network", () => {
+    const med = (anchor: string) => classifyReferringDomains(many(10, () => ({ anchor })), "medbaycare.com").map((r) => r.spamReason);
+    for (const a of ["MedBay Care Clinic", "https://medbaycare.com/", "www.medbaycare.com", "Website", "click here"]) {
+      assert.ok(med(a).every((v) => v === null), a);
+    }
+  });
+
+  it("sales metrics are case-sensitive and short", () => {
+    for (const a of ["Dr 5 Tan", "Prezzi da 30 euro", "45 Harbor Dr 200", "DA 2026 conference", "first page of results"]) {
+      assert.equal(verdicts([row(1, { anchor: a })])[0], null, a);
+    }
+    for (const a of ["🚀DA50🚀", "High Quality Dofollow Backlinks DA 50 PA 40"]) {
+      assert.equal(verdicts([row(1, { anchor: a })])[0], "Link-selling anchor", a);
+    }
+  });
+
+  it("calibration networks stay spam", () => {
+    const anchor = "Premium SEO Authority Backlinks to Help medbaycare.com Websites Rank Higher";
+    const out = classifyReferringDomains(many(687, () => ({ anchor })), "medbaycare.com");
+    assert.ok(out.every((r) => r.spamReason === "Same anchor on 687 sites"));
+    for (const path of ["/dir/seo-growth-backlinks-133226", "/share/134128", "/all/1873/27.html", "/site/medbaycare.com"]) {
+      const o = classifyReferringDomains(many(10, (i) => ({ urlFrom: `https://s${i}.com${path}` })), "medbaycare.com");
+      assert.ok(o.every((r) => r.spamReason === "Same page path on 10 sites"), path);
+    }
+    const q = classifyReferringDomains(many(10, (i) => ({ urlFrom: `https://s${i}.com/list.php?part=${i}` })), "medbaycare.com");
+    assert.ok(q.every((r) => r.spam));
+  });
+
+  it("a trailing slash doesn't split a path", () => {
+    const rows = many(10, (i) => ({ urlFrom: `https://s${i}.com/share/1${i % 2 ? "/" : ""}` }));
+    assert.ok(verdicts(rows).every((v) => v === "Same page path on 10 sites"));
+  });
+
   it("a spam score of 70 or more is spam; 69 isn't", () => {
     const [a, b] = classifyReferringDomains([row(1, { spamScore: 70 }), row(2, { spamScore: 69 })], SITE);
     assert.equal(a.spam, true);
@@ -63,7 +102,7 @@ describe("spamNetworks", () => {
     ], SITE);
     const nets = spamNetworks(rows);
     assert.equal(nets.length, 2);
-    assert.deepEqual([nets[0].kind, nets[0].domains, nets[0].since, nets[0].example], ["anchor", 12, "2026-09-09", "site11.com"]);
+    assert.deepEqual([nets[0].kind, nets[0].domains, nets[0].since, nets[0].example], ["anchor", 12, "2026-09-09", "https://site11.com/page-11"]);
     assert.equal(nets[0].label.toLowerCase(), anchor.toLowerCase());
     assert.deepEqual([nets[1].kind, nets[1].domains, nets[1].label], ["path", 10, "/share/134128"]);
   });

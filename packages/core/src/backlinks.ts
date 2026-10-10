@@ -34,19 +34,40 @@ export type ReferringCounts = {
 export const REFERRING_LIMITS = {
   /** One anchor or page path on this many referring domains is a link network; organic links don't repeat that exactly. */
   NETWORK_AT_LEAST: 10,
-  /** Semrush's own spam score; 70 and up is its "toxic" band. */
+  /** DataForSEO's backlink_spam_score; 70 and up is treated as spam. */
   SPAM_SCORE_AT_LEAST: 70,
   /** "New" and "lost" mean the last 30 days (applied where the rows are loaded). */
   RECENT_DAYS: 30,
 };
 
-const SALES = /\b(back ?links?|pbn|do ?follow|da ?\d+|dr ?\d+|seo authority|link ?building|guest ?posts?|fiverr|rank(ed)? (higher|first)|first page|buy (back)?links?)\b/i;
+const SALES = /\b(back ?links?|pbn|do ?follow|seo authority|link ?building|guest ?posts?|fiverr|buy (back)?links?)\b/i;
+// Case-sensitive so "Dr 5 Tan" and Italian "da 30" aren't caught.
+const SALES_METRIC = /\b(DA|DR|PA) ?\d{1,2}\b/;
+const isSales = (anchor: string) => SALES.test(anchor) || SALES_METRIC.test(anchor);
+
+const REASON = { anchor: "Same anchor on", path: "Same page path on", sales: "Link-selling anchor", score: "Spam score" };
+const alnum = (text: string) => text.toLowerCase().replace(/[^a-z0-9]/g, "");
 
 const squash = (text: string) => text.toLowerCase().replace(/\s+/g, " ").trim();
 
+/** The path key, only for page paths that look generated (a digit, or the site's domain); "/", "/about", "/blog" are shared by honest sites. */
+const networkPath = (urlFrom: string, own: string) => {
+  const path = pathOf(urlFrom);
+  if (path === null || path === "") return null;
+  const full = path + (urlSearch(urlFrom) ?? "");
+  return /\d/.test(full) || full.toLowerCase().includes(own) ? path : null;
+};
+const urlSearch = (urlFrom: string) => {
+  try {
+    return new URL(urlFrom).search;
+  } catch {
+    return null;
+  }
+};
+
 const pathOf = (urlFrom: string) => {
   try {
-    return new URL(urlFrom).pathname;
+    return new URL(urlFrom).pathname.replace(/\/+$/, "");
   } catch {
     return null;
   }
@@ -54,16 +75,19 @@ const pathOf = (urlFrom: string) => {
 
 /** Real or spam, by the first rule that applies: network, then sales anchor, then spam score. */
 export function classifyReferringDomains(rows: Omit<ReferringDomain, "spam" | "spamReason">[], site: string): ReferringDomain[] {
-  const own = bareDomain(site);
-  const label = own.split(".")[0];
-  const normalise = (anchor: string) => squash(anchor).split(own).join("{site}").trim();
+  const own = bareDomain(site.includes("://") ? new URL(site).hostname : site);
+  const label = alnum(own.split(".")[0]);
+  const bare = (anchor: string) => squash(anchor).replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/$/, "");
   const anchors = new Map<string, Set<string>>();
   const paths = new Map<string, Set<string>>();
   const add = (map: Map<string, Set<string>>, key: string, domain: string) => map.set(key, (map.get(key) ?? new Set()).add(domain));
   const keyed = rows.map((row) => {
-    const anchor = normalise(row.anchor);
-    const anchorKey = anchor === "" || anchor === "{site}" || anchor === label ? null : anchor;
-    const path = pathOf(row.urlFrom);
+    const plain = bare(row.anchor);
+    const anchor = plain.split(own).join("{site}").trim();
+    // Brand-like anchors (the domain, the business name) and short generic ones ("Website") are never a network by anchor.
+    const brand = anchor === "" || anchor === "{site}" || (label !== "" && alnum(plain).startsWith(label));
+    const anchorKey = brand || anchor.split(" ").length < 4 ? null : anchor;
+    const path = networkPath(row.urlFrom, own);
     if (anchorKey) add(anchors, anchorKey, row.domain);
     if (path !== null) add(paths, path, row.domain);
     return { row, anchorKey, path };
@@ -73,10 +97,10 @@ export function classifyReferringDomains(rows: Omit<ReferringDomain, "spam" | "s
     const sameAnchor = anchorKey ? anchors.get(anchorKey)!.size : 0;
     const samePath = path !== null ? paths.get(path)!.size : 0;
     const spamReason =
-      sameAnchor >= at ? `Same anchor on ${sameAnchor} sites`
-      : samePath >= at ? `Same page path on ${samePath} sites`
-      : SALES.test(row.anchor) ? "Link-selling anchor"
-      : row.spamScore !== null && row.spamScore >= REFERRING_LIMITS.SPAM_SCORE_AT_LEAST ? `Spam score ${row.spamScore}`
+      sameAnchor >= at ? `${REASON.anchor} ${sameAnchor} sites`
+      : samePath >= at ? `${REASON.path} ${samePath} sites`
+      : isSales(row.anchor) ? REASON.sales
+      : row.spamScore !== null && row.spamScore >= REFERRING_LIMITS.SPAM_SCORE_AT_LEAST ? `${REASON.score} ${row.spamScore}`
       : null;
     return { ...row, spam: spamReason !== null, spamReason };
   });
@@ -90,9 +114,10 @@ export function spamNetworks(rows: ReferringDomain[]): SpamNetwork[] {
   for (const row of rows) {
     if (!row.spam) continue;
     const reason = row.spamReason ?? "";
-    const kind: SpamNetwork["kind"] = reason.startsWith("Same anchor") ? "anchor" : reason.startsWith("Same page") ? "path" : reason.startsWith("Link-selling") ? "sales" : "score";
-    const label = kind === "path" ? pathOf(row.urlFrom) ?? row.urlFrom : kind === "score" ? "High spam score" : row.anchor;
-    const key = `${kind}:${kind === "score" ? "" : kind === "path" ? label : squash(label)}`;
+    const kind: SpamNetwork["kind"] = reason.startsWith(REASON.anchor) ? "anchor" : reason.startsWith(REASON.path) ? "path" : reason.startsWith(REASON.sales) ? "sales" : "score";
+    const grouped = kind === "sales" || kind === "score";
+    const label = kind === "path" ? pathOf(row.urlFrom) ?? row.urlFrom : kind === "score" ? "High spam score" : kind === "sales" ? "Link-selling anchors" : row.anchor;
+    const key = `${kind}:${grouped ? "" : kind === "path" ? label : squash(label)}`;
     const group = groups.get(key) ?? { kind, label, rows: [] };
     group.rows.push(row);
     groups.set(key, group);
@@ -100,7 +125,7 @@ export function spamNetworks(rows: ReferringDomain[]): SpamNetwork[] {
   return [...groups.entries()]
     .map(([key, { kind, label, rows: members }]) => {
       const first = members.reduce((a, b) => (b.firstSeen < a.firstSeen ? b : a));
-      return { key, kind, label, domains: new Set(members.map((m) => m.domain)).size, since: first.firstSeen, example: first.domain };
+      return { key, kind, label, domains: new Set(members.map((m) => m.domain)).size, since: first.firstSeen, example: first.urlFrom };
     })
     .sort((a, b) => b.domains - a.domains);
 }
@@ -133,7 +158,7 @@ export function backlinksView(input: { asOf: string | null; counts: ReferringCou
     counts: input.counts,
     top: input.top.slice(0, LIST_CAP),
     anchors: [...mix.values()].sort((a, b) => b.domains - a.domains).slice(0, ANCHOR_CAP),
-    networks: spamNetworks(input.spamRows),
+    networks: spamNetworks(input.spamRows).slice(0, 5),
     newReal: input.newReal.slice(0, LIST_CAP),
     lostReal: input.lostReal.slice(0, LIST_CAP),
     brokenReal: input.brokenReal.slice(0, LIST_CAP),

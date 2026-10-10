@@ -25,6 +25,16 @@ describe("validateEdit", () => {
     assert.match(String((bad as { reason?: string }).reason), /doctor/);
   });
 
+  it("refuses pure deletions", () => {
+    const start = source.indexOf(`title: "Old",`);
+    assert.match(String((validateEdit({ ...base, edits: [{ start, end: start + `title: "Old",`.length, text: "" }] }) as { reason?: string }).reason), /invalid position|deletes/);
+  });
+
+  it("refuses paths the repo analyzer treats as sensitive, even when the report doesn't list them", () => {
+    assert.match(String((validateEdit({ ...base, filePath: "app/payment/page.tsx", edits: [] }) as { reason?: string }).reason), /sensitive/);
+    assert.equal(validateFile("app/auth/login/page.tsx", "export const a = 1;\n", []).ok, false);
+  });
+
   it("refuses an edit that breaks parsing", () => {
     assert.equal(validateEdit({ ...base, edits: [{ start: insertAt, end: insertAt, text: "\n  description: `${procedure.name" }] }).ok, false);
   });

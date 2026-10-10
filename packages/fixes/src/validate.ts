@@ -9,6 +9,15 @@ export const ALLOWED_FILES: RegExp[] = [
   /^public\/llms\.txt$/,
   /^public\/robots\.txt$/,
 ];
+// Copied from SENSITIVE_PATTERNS in packages/repo-analyzer/src/analyze.ts (not exported there); keep the two in step.
+const SENSITIVE_PATTERNS = [
+  /(^|\/)\.env/,
+  /secrets?\./i,
+  /credentials/i,
+  /(^|\/)auth\//i,
+  /payment/i,
+  /(^|\/)(migrations|prisma\/migrations|supabase\/migrations)\//i,
+];
 const GLOBALS = new Set(["URL", "undefined"]);
 const MAX_INSERTED_CHARS = 8_000;
 const LINE_BREAK = /\r\n|[\r\n\u2028\u2029]/;
@@ -47,7 +56,7 @@ export function applyEdits(source: string, edits: Edit[]): string {
 function fileProblem(path: string, sensitivePaths: string[]): string | null {
   if (/(^|\/)\.\.?(\/|$)/.test(path) || path.startsWith("/") || path.includes("\\")) return `${path} isn't a path Eumon edits`;
   if (!ALLOWED_FILES.some((re) => re.test(path))) return `Eumon doesn't edit ${path}`;
-  if (sensitivePaths.includes(path)) return `${path} is marked sensitive`;
+  if (sensitivePaths.includes(path) || SENSITIVE_PATTERNS.some((re) => re.test(path))) return `${path} is marked sensitive`;
   return null;
 }
 
@@ -77,6 +86,7 @@ export function validateEdit(input: ValidateInput): { ok: true; after: string } 
   if (problem) return { ok: false, reason: problem };
   const len = input.before.length;
   if (input.edits.some((e) => !Number.isInteger(e.start) || !Number.isInteger(e.end) || e.start < 0 || e.start > e.end || e.end > len)) return { ok: false, reason: "an edit has an invalid position" };
+  if (input.edits.some((e) => e.text === "" && e.end > e.start)) return { ok: false, reason: "an edit only deletes code, which Eumon never does" };
   const edits = [...input.edits].sort((a, b) => a.start - b.start);
   for (let i = 0; i < edits.length; i++) {
     const edit = edits[i]!;

@@ -1,4 +1,4 @@
-import { createId, severityFromImpact, type BacklinksInput, type Finding, type ReferringDomain } from "@organic-growth/core";
+import { CHECKS, finding, type BacklinksInput, type Finding, type ReferringDomain } from "@organic-growth/core";
 
 /*
  * What the referring-domains profile adds to an analysis: links to pages that
@@ -24,9 +24,10 @@ export function findingsFromReferring(input: { siteId: string; analysisId: strin
   const r = input.referring;
   if (!r) return [];
   const { brokenReal, lostReal, newSpam } = r.counts;
-  const drafts: Array<{ impact: number; title: string; summary: string; recommendation: string; pagesAffected: string[] }> = [];
+  const drafts: Array<{ checkId: string; impact: number; title: string; summary: string; recommendation: string; pagesAffected: string[] }> = [];
   if (brokenReal >= LINK_FINDINGS.BROKEN_AT_LEAST) {
     drafts.push({
+      checkId: "backlinks.broken_targets",
       impact: Math.min(70, 30 + 4 * brokenReal),
       title: `${brokenReal} sites link to pages on your site that are missing`,
       summary: `Strongest: ${strongest(r.brokenReal).map((row) => `${row.domain} → ${path(row.urlTo)}`).join("; ")}.`,
@@ -36,6 +37,7 @@ export function findingsFromReferring(input: { siteId: string; analysisId: strin
   }
   if (lostReal >= LINK_FINDINGS.LOST_AT_LEAST) {
     drafts.push({
+      checkId: "backlinks.lost",
       impact: Math.min(60, 25 + 3 * lostReal),
       title: `You lost links from ${lostReal} sites in 30 days`,
       summary: `Strongest: ${strongest(r.lostReal).map((row) => `${row.domain} (last seen ${row.lastSeen})`).join("; ")}.`,
@@ -45,6 +47,7 @@ export function findingsFromReferring(input: { siteId: string; analysisId: strin
   }
   if (newSpam >= LINK_FINDINGS.SPAM_WAVE_AT_LEAST) {
     drafts.push({
+      checkId: "backlinks.spam_wave",
       impact: LINK_FINDINGS.SPAM_IMPACT,
       title: `${newSpam} spam sites started linking to you in 30 days`,
       summary: r.networks.length ? `Networks: ${r.networks.map((n) => `${n.label} (${n.domains} sites)`).join("; ")}.` : "No single network stands out.",
@@ -53,9 +56,5 @@ export function findingsFromReferring(input: { siteId: string; analysisId: strin
     });
   }
   const createdAt = new Date().toISOString();
-  return drafts.map((d) => ({
-    id: createId("finding"), siteId: input.siteId, analysisId: input.analysisId, category: "search", severity: severityFromImpact(d.impact),
-    title: d.title, summary: d.summary, evidence: { asOf: r.asOf, ...r.counts }, organicImpactScore: d.impact,
-    recommendation: d.recommendation, pagesAffected: d.pagesAffected, createdAt,
-  }));
+  return drafts.map(({ checkId, ...draft }) => finding(CHECKS[checkId]!, { ...draft, evidence: { asOf: r.asOf, ...r.counts }, siteId: input.siteId, analysisId: input.analysisId, createdAt }));
 }

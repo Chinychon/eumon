@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { findingKey, resolutions, runKeys, type KeyRow } from "./history.js";
+import { findingKey, keyOf, resolutions, runKeys, type KeyRow } from "./history.js";
 import type { Finding } from "./types.js";
 
 const finding = (id: string, title: string, overrides: Partial<Finding> = {}): Finding => ({
@@ -103,5 +103,27 @@ describe("resolutions", () => {
     const { resolved, open } = resolutions([run("a1", "2026-09-01T00:00:00.000Z", [row("f1", "A"), row("f2", "B")]), run("a2", "2026-09-02T00:00:00.000Z", [])]);
     assert.equal(resolved.length, 2);
     assert.equal(open, 0);
+  });
+});
+
+describe("keys by check id", () => {
+  it("keys a finding by check id and scope key, and by the legacy title key without one", () => {
+    assert.equal(keyOf(finding("f", "Slow responses on /doctors/", { category: "rendering", checkId: "server.slow", scopeKey: "doctors" })), "server.slow|doctors");
+    assert.equal(keyOf(finding("f", "3 pages have no H1", { checkId: "heading.h1_missing" })), "heading.h1_missing|");
+    assert.equal(keyOf(finding("f", "Slow responses on /doctors/", { category: "rendering" })), findingKey({ category: "rendering", title: "Slow responses on /doctors/" }));
+  });
+
+  it("writes a legacy row still open under the finding's new key, so it is not resolved", () => {
+    const legacy = row("f1", "3 pages have no H1", ["https://x/a"]);
+    const rows = runKeys({ findings: [finding("f2", "5 pages have no H1", { checkId: "heading.h1_missing", pagesAffected: ["https://x/a"] })] }, [legacy]);
+    assert.deepEqual(rows.map((r) => r.key), ["heading.h1_missing|"]);
+  });
+
+  it("does not resolve a finding when consecutive saved lists switch from title keys to check keys", () => {
+    const before = run("a1", "2026-09-01T00:00:00.000Z", [row("f1", "3 pages have no H1")]);
+    const after = run("a2", "2026-09-08T00:00:00.000Z", [{ ...row("f2", "5 pages have no H1"), key: "heading.h1_missing|" }]);
+    const { resolved, open } = resolutions([before, after]);
+    assert.deepEqual(resolved, []);
+    assert.equal(open, 1);
   });
 });

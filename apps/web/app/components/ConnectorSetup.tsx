@@ -176,11 +176,12 @@ export function ConnectorSetup({ siteId }: { siteId: string }) {
         </div>
       </div>
       <div className="list-row">
-        <Badge tone={bing.lastSync ? "green" : "gray"}>{bing.lastSync ? "Bing" : bing.configured ? "Waiting" : "Optional"}</Badge>
+        {/* Configured means the key is set; whether Bing knows this site shows only when a sync has read it. */}
+        <Badge tone={bing.lastSync ? "green" : bing.configured ? "amber" : "gray"}>{bing.lastSync ? "Bing" : bing.configured ? "Key set" : "Optional"}</Badge>
         <div className="grow">
           <h3>Bing Webmaster Tools</h3>
           <p>{bing.configured || bing.lastSync
-            ? <>Verify <span className="mono">{bing.siteUrl}</span> in the Bing account the key belongs to (Bing can import it from Search Console). {bing.lastSync ? `Last synced ${formatDay(bing.lastSync)}.` : "Clicks appear after the next sync."}</>
+            ? <>Verify <span className="mono">{bing.siteUrl}</span> in the Bing account the key belongs to (Bing can import it from Search Console). {bing.lastSync ? `Last synced ${formatDay(bing.lastSync)}.` : "The key is set; nothing has synced yet. Press Sync now on the Overview, or wait for the daily sync, and Bing's clicks, impressions and crawl counts appear."}</>
             : <>Create an API key in Bing Webmaster Tools (Settings → API access) and set it as BING_WEBMASTER_API_KEY. Bing's clicks, impressions and crawl counts then sync daily.</>}</p>
         </div>
       </div>

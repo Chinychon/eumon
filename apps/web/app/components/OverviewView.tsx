@@ -1,18 +1,19 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { isProblemNote, type SiteRecord } from "@organic-growth/core";
 import { api, errorMessage, formatDay, formatNumber } from "./api";
 import { AnalysisProgress, isFinished, useRun, type RunDelta, type RunProgress } from "./AnalysisProgress";
 import { Heatmap, PairedBars, Scatter } from "./charts";
-import { LeadFunnel, TechnicalTab, searchPoints, type Change } from "./ReportTabs";
+import { LeadFunnel, TechnicalTab, searchPoints } from "./ReportTabs";
 import { AREA_PLACE, doFirst, gapsFirst, HEALTH_COLUMNS, pageTypeHealth, type Navigate, type Place, type Report } from "./report-model";
 import { KeyNumbers, ProofHeadline } from "./results/sections";
+import { HealthTiles } from "./ChecksCard";
 import { AiPanel, CompetitorsPanel, EnquiriesPanel, KeywordsPanel, SearchPanel } from "./SitePanels";
 import { HistoryPanel } from "./HistoryPanel";
 import { ExportContext, ExportMenu } from "./export/ExportMenu";
 import { backlogSheets, pageTypeSheets } from "./export/report-sheets";
-import { useLeads, useResults, type Leads } from "./site-data";
+import { useLeads, useResults, type Leads, type PendingSync } from "./site-data";
 import { Button, Card, ViewHeader } from "./ui";
 
 export type Repository = { id: number; name: string; fullName: string; owner: string; defaultBranch: string; isPrivate: boolean };
@@ -73,11 +74,14 @@ async function waitForSyncRun(siteId: string, id: string, startedAt: string, ali
  * lives in the address (`?tab=`), kept by the shell.
  */
 
-export function OverviewView({ site, tab, onTab, onNavigate }: {
+export function OverviewView({ site, tab, onTab, onNavigate, pendingSync, onSyncDone }: {
   site: SiteRecord;
   tab: string | null;
   onTab: (tab: string | null) => void;
   onNavigate: Navigate;
+  /** A sync started elsewhere in this tab (saving a Search Console or GA4 property): waited for, then the numbers reload. */
+  pendingSync?: PendingSync;
+  onSyncDone?: () => void;
 }) {
   const [report, setReport] = useState<Report | null>(null);
   const [pendingId, setPendingId] = useState("");
@@ -86,7 +90,6 @@ export function OverviewView({ site, tab, onTab, onNavigate }: {
   const [pace, setPace] = useState<{ perMinute: number } | null>(null);
   const [error, setError] = useState("");
   const [failure, setFailure] = useState("");
-  const [changes, setChanges] = useState<Change[]>([]);
   const [busy, setBusy] = useState("");
   /** Whether the latest analysis has been read: until then the tabs say "Loading…", not "Run an analysis". */
   const [loaded, setLoaded] = useState(false);
@@ -102,20 +105,19 @@ export function OverviewView({ site, tab, onTab, onNavigate }: {
   const alive = useRef(true);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, [site.id]);
   const [shared, setShared] = useState(false);
-
-  const loadChanges = useCallback(async (analysisId: string) => {
-    const data = await api<{ changes: Change[] }>(`/api/analyses/${analysisId}/changes`).catch(() => ({ changes: [] }));
-    setChanges(data.changes);
-  }, []);
+  // A sync started by saving a property: wait for it here, so the dashboard fills in without a reload.
+  const followed = useRef("");
+  useEffect(() => {
+    if (!pendingSync || followed.current === pendingSync.id) return;
+    followed.current = pendingSync.id;
+    void follow(pendingSync).finally(() => onSyncDone?.());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingSync?.id]);
 
   useEffect(() => {
     // Switching sites while these requests are in flight must not let the old site's answers land on the new one.
     let active = true;
-    const loadChanges = async (analysisId: string) => {
-      const data = await api<{ changes: Change[] }>(`/api/analyses/${analysisId}/changes`).catch(() => ({ changes: [] }));
-      if (active) setChanges(data.changes);
-    };
-    setReport(null); setPendingId(""); setFinished(null); setNote(""); setError(""); setFailure(""); setChanges([]); setLoaded(false); setCompetitorCount(null);
+    setReport(null); setPendingId(""); setFinished(null); setNote(""); setError(""); setFailure(""); setLoaded(false); setCompetitorCount(null);
     void (async () => {
       try {
         const latest = await api<{
@@ -127,12 +129,10 @@ export function OverviewView({ site, tab, onTab, onNavigate }: {
         setPace(latest.pace);
         if (latest.analysis?.status === "completed" && latest.analysis.report) {
           setReport(latest.analysis.report);
-          void loadChanges(latest.analysis.analysisId);
         } else if (latest.analysis?.status === "queued" || latest.analysis?.status === "running") {
           setPendingId(latest.analysis.analysisId);
           if (latest.previous) {
             setReport(latest.previous.report);
-            void loadChanges(latest.previous.analysisId);
           }
         } else {
           if (latest.analysis?.status === "failed") setFailure(latest.analysis.error ?? "No error was recorded.");
@@ -140,7 +140,6 @@ export function OverviewView({ site, tab, onTab, onNavigate }: {
           // A cancelled or failed run leaves the last finished report in place.
           if (latest.previous) {
             setReport(latest.previous.report);
-            void loadChanges(latest.previous.analysisId);
           }
         }
       } catch (cause) { if (active) setError(errorMessage(cause)); } finally { if (active) setLoaded(true); }
@@ -161,14 +160,13 @@ export function OverviewView({ site, tab, onTab, onNavigate }: {
         // The card stays to say what changed, and the garden blooms; the new report renders below it.
         setFinished({ run, analysisId: pendingId, deltas: deltasBetween(reportBefore.current, job.report), first: !reportBefore.current });
         setReport(job.report);
-        void loadChanges(pendingId);
         // Site health on the Technical tab is written by the analysis.
         void reloadResults();
       } else if (job?.status === "cancelled") setNote(reportBefore.current ? "Analysis cancelled. The last report is still shown below." : "Analysis cancelled.");
       else setFailure(job?.error ?? run.error ?? "No error was recorded.");
       setPendingId("");
     })();
-  }, [pendingId, run, loadChanges, reloadResults]);
+  }, [pendingId, run, reloadResults]);
 
   /** A stalled run no longer blocks the header action, so a new run can replace it. */
   const running = Boolean(pendingId) && !run?.stalled;
@@ -182,23 +180,6 @@ export function OverviewView({ site, tab, onTab, onNavigate }: {
     } catch (cause) { setError(errorMessage(cause)); } finally { setBusy(""); }
   }
 
-  async function generateChange(findingId: string) {
-    if (!report) return;
-    setBusy(findingId); setError("");
-    try {
-      const data = await api<{ change: Change }>(`/api/analyses/${report.analysisId}/changes`, { method: "POST", json: { findingId } });
-      setChanges((items) => [...items, data.change]);
-    } catch (cause) { setError(errorMessage(cause)); } finally { setBusy(""); }
-  }
-
-  async function openPullRequest(change: Change) {
-    setBusy(change.id); setError("");
-    try {
-      const data = await api<{ pullRequest: { url: string } }>(`/api/changes/${change.id}/pull-request`, { method: "POST" });
-      setChanges((items) => items.map((item) => (item.id === change.id ? { ...item, prUrl: data.pullRequest.url } : item)));
-    } catch (cause) { setError(errorMessage(cause)); } finally { setBusy(""); }
-  }
-
   const hasRepo = Boolean(site.githubRepo);
   const openTab = (next: Tab) => onTab(next === "overview" ? null : next);
   /** Opens the tab, or the page, that explains something. */
@@ -209,6 +190,14 @@ export function OverviewView({ site, tab, onTab, onNavigate }: {
     setSyncing(true); setError("");
     try {
       const { id, startedAt } = await api<{ id: string; startedAt: string }>(`/api/sites/${site.id}/results/sync`, { method: "POST" });
+      await follow({ id, startedAt });
+    } catch (cause) { setError(errorMessage(cause)); setSyncing(false); }
+  }
+
+  /** Waits for a sync's run to be recorded, then reloads the numbers and says which sources failed. */
+  async function follow({ id, startedAt }: PendingSync) {
+    setSyncing(true);
+    try {
       const run = await waitForSyncRun(site.id, id, startedAt, () => alive.current);
       if (!alive.current) return;
       if (!run) {
@@ -282,6 +271,7 @@ export function OverviewView({ site, tab, onTab, onNavigate }: {
                     <KeyNumbers data={results.data} operator />
                   </>
                 ) : <Card title="Google clicks per week"><p className="empty-state">{results.error || "Loading…"}</p></Card>}
+                <HealthTiles report={report} scores={results.data?.results.scores} onOpen={openTab} />
               </div>
               <button className="connections-strip" onClick={() => onNavigate("setup")}>
                 <span className="connections-label">Connections</span>
@@ -295,7 +285,7 @@ export function OverviewView({ site, tab, onTab, onNavigate }: {
               <Briefing report={report} running={Boolean(pendingId)} leads={leads} hasSearch={Boolean(site.gscProperty)} competitorCount={competitorCount} onOpen={go} onNavigate={onNavigate} />
               </>
             )}
-            {current === "technical" && <TechnicalTab siteId={site.id} report={report} results={results.data} running={Boolean(pendingId)} changes={changes} busy={busy} hasRepo={hasRepo} onGenerateChange={generateChange} onOpenPullRequest={openPullRequest} onRecrawl={() => runAnalysis(true)} onSetup={() => onNavigate("setup")} />}
+            {current === "technical" && <TechnicalTab siteId={site.id} report={report} results={results.data} running={Boolean(pendingId)} busy={busy} hasRepo={hasRepo} onRecrawl={() => runAnalysis(true)} onSetup={() => onNavigate("setup")} />}
             {results.data && current === "search" && <SearchPanel site={site} data={results.data} report={report} onNavigate={onNavigate} />}
             {results.data && current === "enquiries" && <EnquiriesPanel site={site} data={results.data} report={report} leads={leads} onNavigate={onNavigate} onLeadsChanged={() => void reloadResults()} />}
             {results.data && current === "keywords" && <KeywordsPanel site={site} data={results.data} onSaved={() => void reloadResults()} />}

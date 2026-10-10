@@ -425,11 +425,11 @@ function renderGrowthPlanMarkdown(input: {
 }
 
 export * from "./pipeline.js";
+export * from "./audit.js";
 export * from "./inventory-data.js";
 export * from "./github-pr.js";
 export * from "./ai-plan.js";
 export * from "./google-search-console.js";
-export * from "./change-generator.js";
 export * from "./competition.js";
 export * from "./code-findings.js";
 export * from "./search.js";
@@ -449,3 +449,4 @@ export * from "./rank-findings.js";
 export * from "./ai-answer-findings.js";
 export * from "./link-findings.js";
 export * from "./not-found-probe.js";
+export * from "./fix-text.js";

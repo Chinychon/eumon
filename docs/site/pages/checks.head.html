@@ -1,0 +1,17 @@
+<article id="checks" data-title="Checks" data-group="Reference">
+  <h1>Checks</h1>
+  <p class="lede">Every check the analysis runs, generated from the registry in <code class="path">packages/core/src/checks/catalog.ts</code>, and the checks Eumon deliberately does not run. Each finding names its check with <code>checkId</code>.</p>
+
+  <h2 id="class-and-severity">Class, severity and the health scores</h2>
+  <p>Each check has a <strong>class</strong> (error, warning or notice) and one or two <strong>pillars</strong> (SEO, AI visibility). The class decides whether a failed page counts against the pillar's health score: only error-class page checks do, and only on indexable pages (crawled, not noindex, not canonicalising elsewhere, not a single redirect). Each finding also has a <strong>severity</strong>, CRITICAL to INFORMATIONAL, from its organic impact score, and severity ranks the growth plan.</p>
+  <p>The two are separate on purpose. A warning on ten thousand pages is urgent for the plan, but it does not make the site unhealthy. The health score is the share of indexable pages with no error-class issue in the pillar (<code>healthScore</code> in <code class="path">packages/core/src/checks/health.ts</code>). A site-wide error of the pillar, such as robots.txt blocking Googlebot, makes it zero and the tile says why. A firewall that refuses AI search crawlers zeroes the AI score only when it refuses every one that robots.txt allows. Blocking AI crawlers in robots.txt is a choice and never costs score, and llms.txt is reported but never scored.</p>
+  <p>The page-level error checks behind each score are listed in <code>PAGE_ERROR_CHECKS</code>, and the SQL that counts them is <code>SEO_ERRORS</code> and <code>AI_ERRORS</code> in <code class="path">packages/db/src/index.ts</code>. A test keeps the two in step with the registry.</p>
+
+  <h2 id="adding-a-check">Adding a check</h2>
+  <ol>
+    <li><strong>Register it.</strong> Add an entry to <code class="path">packages/core/src/checks/catalog.ts</code>: a dotted id that is never renamed, a short name, pillars, the finding category, class, scope, sources, fix kind, what it needs (<code>requires</code>), the <code>CrawlIssue</code> key when coverage counts it (<code>issue</code>), and the four docs texts. The registry test and this page's build fail on missing docs.</li>
+    <li><strong>Produce it.</strong> Build the finding with <code>finding(CHECKS["…"], { … })</code>, never by hand. A per-page crawl check is a <code>CRAWL_ISSUES</code> condition guarded by a field the crawler always writes, so rows from older crawls are not counted.</li>
+    <li><strong>Score it, if it is an error on a page.</strong> Add it to <code>PAGE_ERROR_CHECKS</code> and to the matching SQL, or to <code>UNSCORED_PAGE_ERRORS</code> with the reason.</li>
+  </ol>
+  <!--CHECKS-->
+</article>

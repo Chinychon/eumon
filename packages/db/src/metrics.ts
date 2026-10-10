@@ -215,7 +215,21 @@ export async function syncAiResults(db: D1Like, siteId: string, now = new Date()
 
 /** Coverage counts and site health (share of crawled URLs with no error, empty shell, or noindex) from a report. */
 export function analysisHealthPoints(report: unknown, day: string): MetricPoint[] {
-  return [...coveragePoints(report, day), ...aiAccessPoints(report, day)];
+  return [...coveragePoints(report, day), ...aiAccessPoints(report, day), ...auditPoints(report, day)];
+}
+
+/** The two health scores (a null score writes no point), their denominator and unhealthy counts, from the report's audit. */
+function auditPoints(report: unknown, day: string): MetricPoint[] {
+  type Score = { value: number | null; indexable: number; unhealthy: number };
+  const audit = (report as { audit?: { seo?: Score; ai?: Score } } | null)?.audit;
+  if (!audit?.seo || !audit.ai) return [];
+  return [
+    ...(audit.seo.value === null ? [] : [{ metric: "health_seo", day, value: audit.seo.value }]),
+    ...(audit.ai.value === null ? [] : [{ metric: "health_ai", day, value: audit.ai.value }]),
+    { metric: "health_pages", day, value: audit.seo.indexable },
+    { metric: "health_unhealthy_seo", day, value: audit.seo.unhealthy },
+    { metric: "health_unhealthy_ai", day, value: audit.ai.unhealthy },
+  ];
 }
 
 /** How many AI robots.txt tokens the site allows, of how many checked; nothing when robots.txt couldn't be read. */

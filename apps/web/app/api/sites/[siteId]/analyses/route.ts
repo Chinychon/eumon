@@ -1,9 +1,10 @@
 import { env } from "cloudflare:workers";
 import { DEMO_SITE_ID, startDemoRun } from "@organic-growth/agents";
 import { createId } from "@organic-growth/core";
-import { analysisStalled, crawlPace, createAnalysis, getAnalysisJob, getLatestAnalysisForSite, getPreviousCompletedAnalysis, updateAnalysisStatus } from "@organic-growth/db";
+import { analysisStalled, crawlPace, getAnalysisJob, getLatestAnalysisForSite, getPreviousCompletedAnalysis, updateAnalysisStatus } from "@organic-growth/db";
 import { requireSite } from "../../../../../src/guard";
-import { charge, refund } from "../../../../../src/limits";
+import { charge } from "../../../../../src/limits";
+import { startAnalysis } from "../../../../../src/start-analysis";
 import { fail, readJson } from "../../../../../src/server";
 
 export async function GET(request: Request, context: { params: Promise<{ siteId: string }> }) {
@@ -35,36 +36,19 @@ export async function POST(request: Request, context: { params: Promise<{ siteId
   const { site } = access;
   // `full` re-crawls every page; otherwise unchanged results from the last crawl are reused.
   const full = (await readJson<{ full?: unknown }>(request))?.full === true;
-  const latest = await getLatestAnalysisForSite(env.DB, siteId);
-  const active = latest && (latest.status === "queued" || latest.status === "running");
-  if (active && !analysisStalled(latest)) return Response.json({ error: "An analysis is already running for this site." }, { status: 409 });
-  // Charged only once the run will start, so a refused start costs nothing.
-  const refusal = await charge(env.DB, site.workspaceId!, "analysesPerDay");
-  if (refusal) return fail(refusal, 429);
-  if (active) {
-    // A stalled run is closed before the new one starts, so it can't come back and write alongside it.
-    await env.ANALYSIS_WORKFLOW.get(latest.id).then((instance) => instance.terminate()).catch(() => undefined);
-    await updateAnalysisStatus(env.DB, latest.id, "failed", { error: "It stopped making progress, so a new run replaced it.", completedAt: new Date().toISOString() });
-  }
-
-  const analysisId = createId("analysis");
   // The demo site is served from memory, so its run is simulated as the progress view polls.
   if (siteId === DEMO_SITE_ID) {
+    const latest = await getLatestAnalysisForSite(env.DB, siteId);
+    const active = latest && (latest.status === "queued" || latest.status === "running");
+    if (active && !analysisStalled(latest)) return Response.json({ error: "An analysis is already running for this site." }, { status: 409 });
+    const refusal = await charge(env.DB, site.workspaceId!, "analysesPerDay");
+    if (refusal) return fail(refusal, 429);
+    if (active) await updateAnalysisStatus(env.DB, latest.id, "failed", { error: "It stopped making progress, so a new run replaced it.", completedAt: new Date().toISOString() });
+    const analysisId = createId("analysis");
     await startDemoRun(env.DB, { analysisId, full });
     return Response.json({ analysisId, status: "running" }, { status: 202, headers: { "Cache-Control": "no-store" } });
   }
-  const createdAt = new Date().toISOString();
-  await createAnalysis(env.DB, { id: analysisId, siteId, status: "queued", createdAt });
-  try {
-    await env.ANALYSIS_WORKFLOW.create({
-      id: analysisId,
-      params: { analysisId, siteId, full },
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Could not queue analysis.";
-    await updateAnalysisStatus(env.DB, analysisId, "failed", { error: message, completedAt: new Date().toISOString() });
-    await refund(env.DB, site.workspaceId!, "analysesPerDay");
-    return Response.json({ error: message }, { status: 503 });
-  }
-  return Response.json({ analysisId, status: "queued" }, { status: 202, headers: { "Cache-Control": "no-store" } });
+  const started = await startAnalysis(env.DB, env.ANALYSIS_WORKFLOW, site, { full });
+  if (!started.ok) return Response.json({ error: started.error }, { status: started.status });
+  return Response.json({ analysisId: started.analysisId, status: started.status }, { status: 202, headers: { "Cache-Control": "no-store" } });
 }

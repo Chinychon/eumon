@@ -99,7 +99,8 @@ export const METRICS = {
     ...AI_ASSISTANTS.map(({ assistant }) => `ai_referral_visits.${assistant}`),
   ],
   /** Plus how many of the AI robots.txt tokens the site allows, of how many checked. */
-  analysis: ["site_health", "crawl_urls", "crawl_empty_shells", "crawl_http_errors", "crawl_noindex", "ai_crawlers_allowed", "ai_crawlers_checked"],
+  /** Plus the two health scores (`health_seo`, `health_ai`), their denominator and unhealthy counts, from the report's audit. */
+  analysis: ["site_health", "crawl_urls", "crawl_empty_shells", "crawl_http_errors", "crawl_noindex", "ai_crawlers_allowed", "ai_crawlers_checked", "health_seo", "health_ai", "health_pages", "health_unhealthy_seo", "health_unhealthy_ai"],
   /** Search Console: daily series (whole site, Eumon pages, target markets), Monday ranking buckets, index status. */
   search: [
     "sync.search", "sync.search@markets", "sync.rankings",
@@ -218,6 +219,8 @@ export type ResultsView = {
     funnel: Array<{ label: string; value: number }> | null;
   };
   health: { value: number | null; day: string | null };
+  /** Each pillar's health score from the latest analysis, and the latest one on or before 28 days ago. */
+  scores: Record<"seo" | "ai", { value: number | null; before: number | null; day: string | null }>;
   speed: {
     /** Whether CrUX has been asked yet; asked with no values means too few Chrome visits. */
     measured: boolean;
@@ -446,6 +449,10 @@ export function resultsView(input: ResultsInput): ResultsView {
     health: {
       value: latest(series.site_health, today),
       day: series.site_health?.length ? series.site_health[series.site_health.length - 1]!.day : null,
+    },
+    scores: {
+      seo: { value: latest(series.health_seo, today), before: latest(series.health_seo, addDays(today, -28)), day: series.health_seo?.at(-1)?.day ?? null },
+      ai: { value: latest(series.health_ai, today), before: latest(series.health_ai, addDays(today, -28)), day: series.health_ai?.at(-1)?.day ?? null },
     },
     speed, lab, authority, keywords, serp, ranks, links, bing, indexNow, crawlLog, outcomes, ai, aiAnswers,
   };

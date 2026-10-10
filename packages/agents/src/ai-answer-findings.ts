@@ -1,4 +1,4 @@
-import { addDays, AI_ANSWER_ENGINES, bareDomain, countryName, createId, isOrUnder, latestChecks, severityFromImpact, type AiAnswerCheck, type Finding, type JsonObject, type Opportunity } from "@organic-growth/core";
+import { addDays, AI_ANSWER_ENGINES, bareDomain, CHECKS, countryName, createId, finding, isOrUnder, latestChecks, type AiAnswerCheck, type Finding, type JsonObject, type Opportunity } from "@organic-growth/core";
 import { listAiAnswerChecks, listAiPrompts, listSiteCompetitorDomains, listSiteMarkets, type D1Like } from "@organic-growth/db";
 import { estimateDemand } from "./demand.js";
 
@@ -61,7 +61,7 @@ function byQuestion(signals: AiAnswerSignals): Map<string, AiAnswerCheck[]> {
 
 export function findingsFromAiAnswers(input: { siteId: string; analysisId: string; signals: AiAnswerSignals | null | undefined }): Finding[] {
   if (!input.signals) return [];
-  const drafts: Array<{ impact: number; title: string; summary: string; evidence: JsonObject; recommendation: string }> = [];
+  const drafts: Array<{ checkId: string; scopeKey?: string; impact: number; title: string; summary: string; evidence: JsonObject; recommendation: string }> = [];
 
   // Competitors instead of you: rivals named or cited, and the site neither, in two engines or more.
   const questions = byQuestion(input.signals);
@@ -75,6 +75,7 @@ export function findingsFromAiAnswers(input: { siteId: string; analysisId: strin
     const rivals = [...new Set(instead.flatMap((question) => question.rivals))];
     const listed = instead.slice(0, 5).map((question) => `“${question.prompt}” in ${countryName(question.market)}`).join("; ");
     drafts.push({
+      checkId: "answers.competitors_named",
       impact: Math.min(70, 30 + 5 * n),
       title: `AI assistants name competitors but not you for ${n} of ${questions.size} questions`,
       summary: `In ${AI_FINDINGS.ENGINES_AT_LEAST} or more AI assistants, the latest answers name or cite competitors and neither name nor cite the site for: ${listed}${n > 5 ? ` and ${n - 5} more` : ""}. Competitors named: ${rivals.join(", ")}.`,
@@ -103,6 +104,7 @@ export function findingsFromAiAnswers(input: { siteId: string; analysisId: strin
     const label = engineLabel(engine);
     const listed = rows.map((row) => `“${row.prompt}” in ${countryName(row.market)} since ${row.since} (now cites ${row.citesNow.join(", ") || "no sources"})`).join("; ");
     drafts.push({
+      checkId: "answers.citation_lost", scopeKey: engine,
       impact: Math.min(75, 40 + 5 * n),
       title: `${label} stopped citing you for ${n} questions since ${since}`,
       summary: `${label} cited the site for these questions and no longer does: ${listed}.`,
@@ -111,11 +113,7 @@ export function findingsFromAiAnswers(input: { siteId: string; analysisId: strin
   }
 
   const createdAt = new Date().toISOString();
-  return drafts.map((draft) => ({
-    id: createId("finding"), siteId: input.siteId, analysisId: input.analysisId, category: "ai_visibility", severity: severityFromImpact(draft.impact),
-    title: draft.title, summary: draft.summary, evidence: draft.evidence, organicImpactScore: draft.impact,
-    recommendation: draft.recommendation, pagesAffected: [], createdAt,
-  }));
+  return drafts.map(({ checkId, ...draft }) => finding(CHECKS[checkId]!, { ...draft, siteId: input.siteId, analysisId: input.analysisId, createdAt }));
 }
 
 /** Questions where an engine cites competitors and not the site, unless an opportunity already names them; top five. */

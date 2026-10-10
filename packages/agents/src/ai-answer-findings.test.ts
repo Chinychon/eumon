@@ -33,6 +33,7 @@ describe("findingsFromAiAnswers: competitors instead of you", () => {
     assert.match(three[0]!.summary, /“q1” in Malaysia/);
     assert.match(three[0]!.summary, /rival\.example/);
     assert.equal((three[0]!.evidence.questions as unknown[]).length, 3);
+    assert.equal(three[0]!.checkId, "answers.competitors_named");
     assert.equal(three[0]!.evidence.total, 4);
     assert.equal(findings([...instead("q1"), ...instead("q2")]).length, 0);
   });
@@ -68,6 +69,8 @@ describe("findingsFromAiAnswers: lost citations", () => {
     assert.equal(made[0]!.organicImpactScore, 50);
     assert.match(made[0]!.summary, /“q1”/);
     assert.match(made[0]!.summary, /rival\.example/, "who it cites now");
+    assert.equal(made[0]!.checkId, "answers.citation_lost");
+    assert.equal(made[0]!.scopeKey, "chatgpt", "one History key per engine, whatever the count and date in the title");
   });
 
   it("cited again today: not lost", () => {

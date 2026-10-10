@@ -22,6 +22,7 @@ describe("findingsFromReferring", () => {
     const [f] = run(input({ brokenReal: 3, broken }));
     assert.equal(f!.title, "3 sites link to pages on your site that are missing");
     assert.equal(f!.category, "search");
+    assert.equal(f!.checkId, "backlinks.broken_targets");
     assert.equal(f!.organicImpactScore, 42);
     assert.deepEqual(f!.pagesAffected, ["https://x.com/a", "https://x.com/b2", "https://x.com/b3"]);
     assert.match(f!.summary, /d0\.com → \/a/);
@@ -30,6 +31,7 @@ describe("findingsFromReferring", () => {
     assert.equal(run(input({ lostReal: 2 })).length, 0);
     const [f] = run(input({ lostReal: 3, lost: [row(1, { lost: true, lastSeen: "2026-09-20" })] }));
     assert.equal(f!.title, "You lost links from 3 sites in 30 days");
+    assert.equal(f!.checkId, "backlinks.lost");
     assert.equal(f!.organicImpactScore, 34);
     assert.match(f!.summary, /2026-09-20/);
   });
@@ -38,6 +40,7 @@ describe("findingsFromReferring", () => {
     const [f] = run(input({ newSpam: 20 }));
     assert.equal(f!.title, "20 spam sites started linking to you in 30 days");
     assert.equal(f!.organicImpactScore, 15);
+    assert.equal(f!.checkId, "backlinks.spam_wave");
     assert.match(f!.summary, /cheap pills/);
   });
   it("impacts are capped", () => {

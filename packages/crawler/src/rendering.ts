@@ -1,5 +1,5 @@
 import type { CrawlPageResult, Finding } from "@organic-growth/core";
-import { createId, organicImpactScore, severityFromImpact } from "@organic-growth/core";
+import { CHECKS, finding, organicImpactScore } from "@organic-growth/core";
 import { GOOGLEBOT_UA, defaultFetcher, isEmptyShell, parseHtmlSignals, type Fetcher } from "./index.js";
 import { classifyUrlType } from "./urls.js";
 
@@ -128,6 +128,7 @@ export function findingsFromRendering(input: {
     const fully = clientRendered.some((entry) => entry.verdict === "client_rendered");
     const example = [...clientRendered].sort((a, b) => (b.renderedTextLength - b.rawTextLength) - (a.renderedTextLength - a.rawTextLength))[0]!;
     drafts.push({
+      checkId: "render.js_content",
       category: "rendering",
       organicImpactScore: organicImpactScore({
         category: "rendering",
@@ -146,6 +147,7 @@ export function findingsFromRendering(input: {
   if (emptyAfterRender.length) {
     const families = [...new Set(emptyAfterRender.map((entry) => entry.family))];
     drafts.push({
+      checkId: "render.empty_after_js",
       category: "rendering",
       organicImpactScore: organicImpactScore({
         category: "rendering",
@@ -173,6 +175,7 @@ export function findingsFromRendering(input: {
     const families = [...new Set(jsMetadata.map((entry) => entry.family))];
     const example = jsMetadata[0]!;
     drafts.push({
+      checkId: "render.meta_by_js",
       category: "metadata",
       organicImpactScore: Math.min(organicImpactScore({ category: "metadata", pagesAffected: families.reduce((sum, family) => sum + sizeOf(family), 0), commercialIntent: true }) + 15, 60),
       title: "Titles and meta tags are set by JavaScript",
@@ -189,6 +192,7 @@ export function findingsFromRendering(input: {
   const googlebotWorse = pairs.filter((pair) => pair.googlebot.isEmptyShell && !pair.browser.isEmptyShell);
   if (googlebotWorse.length) {
     drafts.push({
+      checkId: "render.googlebot_less",
       category: "rendering",
       organicImpactScore: organicImpactScore({ category: "rendering", pagesAffected: googlebotWorse.length, isEmptyShellAtScale: true }),
       title: "Googlebot receives less content than browsers",
@@ -201,6 +205,7 @@ export function findingsFromRendering(input: {
   const dynamicRendering = pairs.filter((pair) => pair.browser.isEmptyShell && !pair.googlebot.isEmptyShell);
   if (dynamicRendering.length) {
     drafts.push({
+      checkId: "render.prerender_mismatch",
       category: "rendering",
       organicImpactScore: 15,
       title: "Crawlers get pre-rendered HTML that browsers don't",
@@ -231,6 +236,8 @@ export function findingsFromRendering(input: {
       if (bad.some((attempt) => attempt.emptyShell)) causes.push("some responses fell back to an empty client-side shell (often a render timeout or a failed data request during rendering)");
       if (median(bad.map((attempt) => attempt.ms)) > median(good.map((attempt) => attempt.ms)) * 2) causes.push("failed responses were much slower than successful ones");
       drafts.push({
+        checkId: "server.intermittent",
+        scopeKey: family,
         category: "rendering",
         organicImpactScore: organicImpactScore({
           category: "rendering",
@@ -247,6 +254,8 @@ export function findingsFromRendering(input: {
     const latency = median(attempts.filter((attempt) => !attempt.error && attempt.status < 400).map((attempt) => attempt.ms));
     if (latency >= 3000) {
       drafts.push({
+        checkId: "server.slow",
+        scopeKey: family,
         category: "rendering",
         organicImpactScore: Math.min(organicImpactScore({ category: "rendering", pagesAffected: sizeOf(family) }), 45),
         title: `Slow responses on ${familyLabel(family)}`,
@@ -259,14 +268,8 @@ export function findingsFromRendering(input: {
   }
 
   const createdAt = new Date().toISOString();
-  return drafts.map((draft) => ({
-    id: createId("finding"),
-    siteId: input.siteId,
-    analysisId: input.analysisId,
-    ...draft,
-    severity: severityFromImpact(draft.organicImpactScore),
-    createdAt,
-  }));
+  return drafts.map(({ checkId, organicImpactScore: impact, category: _category, severity: _severity, ...rest }) =>
+    finding(CHECKS[checkId!]!, { ...rest, siteId: input.siteId, analysisId: input.analysisId, impact, createdAt }));
 }
 
 /** One URL per route family, most common families first: a small sample that covers every template. */

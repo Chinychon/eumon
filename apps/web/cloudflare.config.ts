@@ -44,6 +44,8 @@ export const worker = defineWorker({
       GITHUB_APP_ID: bindings.secret(),
       GITHUB_APP_SLUG: bindings.secret(),
       GITHUB_APP_PRIVATE_KEY: bindings.secret(),
+      // Verifies GitHub App webhooks (/api/github/webhook).
+      GITHUB_WEBHOOK_SECRET: bindings.secret(),
       SESSION_SECRET: bindings.secret(),
       GOOGLE_CLIENT_ID: bindings.secret(),
       GOOGLE_CLIENT_SECRET: bindings.secret(),

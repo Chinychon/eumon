@@ -1,6 +1,6 @@
 <article id="findings" data-title="Findings" data-group="Reference">
   <h1>Findings</h1>
-  <p class="lede">How an analysis turns crawl, code, search and connector data into ranked findings, how History tracks a finding across runs, and how to add a new one. For where findings are produced in the run, see <a href="#flow-analysis">Site analysis</a>.</p>
+  <p class="lede">How an analysis turns crawl, code, search and connector data into ranked findings, how History tracks a finding across runs, and how to add a new one. Every finding comes from a registered check: <a href="#checks">Checks</a> lists them all with their class, pillar, fix kind and docs. For where findings are produced in the run, see <a href="#flow-analysis">Site analysis</a>.</p>
 
   <h2 id="the-finding-type">The Finding type</h2>
   <p>Defined in <code class="path">packages/core/src/types.ts:96</code>:</p>
@@ -8,7 +8,9 @@
   id: string;                 // createId("finding"), new every run
   siteId: string;
   analysisId: string;
-  category: FindingCategory;
+  category: FindingCategory;  // from the check
+  checkId?: string;           // the registry check; absent in reports from before the registry
+  scopeKey?: string;          // the family, query or dataset when one check reports several findings
   severity: Severity;
   title: string;
   summary: string;
@@ -20,9 +22,10 @@
 }</code></pre>
   <dl class="facts">
     <dt><code>Severity</code></dt><dd><code>CRITICAL</code>, <code>HIGH</code>, <code>MEDIUM</code>, <code>LOW</code>, <code>INFORMATIONAL</code></dd>
-    <dt><code>FindingCategory</code></dt><dd><code>rendering</code>, <code>sitemap</code>, <code>indexing</code>, <code>metadata</code>, <code>structured_data</code>, <code>internal_links</code>, <code>content</code>, <code>conversion</code>, <code>competitors</code>, <code>search</code>, <code>repository</code>, <code>ai_visibility</code></dd>
+    <dt><code>FindingCategory</code></dt><dd><code>rendering</code>, <code>sitemap</code>, <code>indexing</code>, <code>metadata</code>, <code>structured_data</code>, <code>internal_links</code>, <code>content</code>, <code>conversion</code>, <code>competitors</code>, <code>search</code>, <code>repository</code>, <code>ai_visibility</code>, <code>security</code></dd>
   </dl>
-  <p>Findings are not stored in their own table. They live in the report, <code>analyses.report_json</code> under <code>findings</code>. When a report is too big for a D1 row, <code>compactReport</code> drops evidence beyond the top 10 findings first, then all evidence (<code class="path">packages/db/src/index.ts:333</code>). Because <code>id</code> changes every run, anything that needs "the same finding" across runs uses <code>findingKey</code> instead (see <a href="#findings--history">History</a>).</p>
+  <p>Findings are not stored in their own table. They live in the report, <code>analyses.report_json</code> under <code>findings</code>. When a report is too big for a D1 row, <code>compactReport</code> drops evidence beyond the top 10 findings first, then all evidence (<code class="path">packages/db/src/index.ts:333</code>). Because <code>id</code> changes every run, anything that needs "the same finding" across runs uses <code>keyOf</code> instead (see <a href="#findings--history">History</a>).</p>
+  <p>Every producer builds its findings with <code>finding(CHECKS[id], input)</code> (<code class="path">packages/core/src/checks/index.ts</code>), which fills <code>category</code> and <code>checkId</code> from the check, derives severity from the impact unless the producer overrides it, and uses the check's documented fix as the recommendation unless the producer has a more specific one. Each report also carries <code>audit</code>: every registered check as passed, failed or skipped, and the SEO and AI visibility health scores (<code class="path">packages/agents/src/audit.ts</code>).</p>
   <p>The category decides which dashboard area explains the finding: <code>findingArea</code> in <code class="path">apps/web/app/components/report-model.ts:104</code> sends <code>search</code> to Search, <code>competitors</code> to Competitors, <code>conversion</code> to Leads, <code>ai_visibility</code> to AI, and everything else to Technical.</p>
 
   <h2 id="severity-and-impact">Severity and organic impact</h2>
@@ -153,10 +156,11 @@
   <h2 id="history">History</h2>
   <p>The Dashboard's History tab shows which problems the analysis once reported are gone, and when. Three files split the work: pure logic in <code class="path">packages/core/src/history.ts</code>, storage in <code class="path">packages/db/src/history.ts</code>, and assembly for the tab in <code class="path">apps/web/src/history.ts</code>.</p>
 
-  <h3 id="finding-key">findingKey</h3>
-  <pre><code>findingKey = `${category}|${title with every number run replaced by "#", trimmed, lowercased}`</code></pre>
-  <p>Numbers (thousands separators included) are blanked so "waits for 3 requests" and "waits for 4 requests" are the same problem across runs (<code class="path">packages/core/src/history.ts:31</code>).</p>
-  <div class="callout warn"><p>The key is built from the title. Rewording a finding's title, or moving it to another category, makes every earlier occurrence look resolved and the new one look new in History. Changing only the numbers in a title is safe.</p></div>
+  <h3 id="finding-key">keyOf</h3>
+  <pre><code>keyOf = checkId ? `${checkId}|${scopeKey ?? ""}` : findingKey
+findingKey = `${category}|${title with every number run replaced by "#", trimmed, lowercased}`</code></pre>
+  <p>A finding is the same problem across runs when it has the same check and scope (<code class="path">packages/core/src/history.ts</code>), so its title can be reworded freely. Findings from reports saved before the check registry have no <code>checkId</code> and keep the title key, with numbers blanked so "waits for 3 requests" and "waits for 4 requests" match. When a run with check keys follows one with title keys, <code>runKeys</code> and <code>resolutions</code> carry the open problem over to its new key, and History still credits a change made on the old finding.</p>
+  <div class="callout warn"><p>Renaming a check id, or giving a check a scope key it did not have, makes every earlier occurrence look resolved in History. Ids are never renamed.</p></div>
 
   <h3 id="key-lists">Key lists in site_snapshots</h3>
   <p>When an analysis completes, <code>saveAnalysisReport</code> calls <code>saveFindingKeys</code> (<code class="path">packages/db/src/history.ts:39</code>). It writes one <code>site_snapshots</code> row with kind <code>finding_keys</code>, scope the analysis id, and rows from <code>runKeys</code>: one <code>KeyRow</code> per finding (<code>id</code>, <code>key</code>, <code>title</code>, <code>category</code>, <code>severity</code>, up to 50 <code>pages</code>). A list is a few KB, so History can diff runs without parsing reports.</p>
@@ -170,7 +174,7 @@
   <p><code>resolutions(runs)</code> (<code class="path">packages/core/src/history.ts:52</code>) walks the runs oldest to newest. A key that was open and is absent from a run becomes a <code>Resolution</code> with <code>firstSeen</code> (the earliest consecutive run that reported it), <code>resolvedAt</code> and <code>resolvedBy</code> (the first run without it), and <code>vanished</code> if that run carries a vanished row for the key. If a later run reports the key again, the earlier resolution gets <code>reopenedAt</code> and a new open stretch starts. It also returns how many keys are still open.</p>
   <p><code>assembleHistory</code> (<code class="path">apps/web/src/history.ts:23</code>) labels each resolution:</p>
   <ul>
-    <li><code>fixed</code>: a change with status <code>merged</code> or <code>pr_opened</code>, whose <code>findingId</code> maps (through the key lists) to this key, was created between <code>firstSeen</code> and <code>resolvedAt</code>. Changes record the finding id they were generated from (<code class="path">apps/web/app/api/analyses/[analysisId]/changes/route.ts</code>). Only <code>sitemap</code> and <code>indexing</code> findings can get one, the change may only edit <code>public/robots.txt</code>, generating it costs an AI run, and opening its pull request needs the workspace's <code>pullRequests</code> feature (<code class="path">apps/web/app/api/changes/[changeId]/pull-request/route.ts:24</code>), which the free limits leave off.</li>
+    <li><code>fixed</code>: a change with status <code>merged</code> or <code>pr_opened</code>, whose <code>findingId</code> maps (through the key lists) to this key, was created between <code>firstSeen</code> and <code>resolvedAt</code>. Only changes from the retired robots.txt change flow record a finding id. The fix engine's fixes don't name a finding, so a merged fix shows in History as a change but never labels a resolution <code>fixed</code>.</li>
     <li><code>vanished</code>: "Every page it pointed at is gone or erroring, so it no longer applies."</li>
     <li><code>resolved</code>: "The analysis stopped reporting it."</li>
   </ul>
@@ -181,9 +185,9 @@
   <ol>
     <li><strong>Pick the home.</strong> A check on crawl data goes in <code class="path">packages/crawler/src</code> next to the existing crawl producers; a check on connector data goes in <code class="path">packages/agents/src/connector-findings.ts</code>. If an existing producer already reads the data you need, add a draft to it rather than writing a new function.</li>
     <li><strong>Load the input, if it is new.</strong> Write a loader that reads D1 and returns a plain signal type, for example <code>loadTrendSignals</code> in <code class="path">packages/agents/src/trend-signals.ts</code> or <code>loadInventories</code> in <code class="path">packages/agents/src/inventory-data.ts</code>. Add the signal as an optional field on <code>ConnectorSignals</code> (<code class="path">packages/agents/src/connector-findings.ts</code>).</li>
-    <li><strong>Write a pure producer.</strong> <code>findingsFromX(input): Finding[]</code> that returns <code>[]</code> when the input is null. Follow the file's pattern: collect <code>Draft</code>s (category, impact, title, summary, evidence, recommendation, pages), keep thresholds in a named constant with the reason for each (see <code>TREND</code> and <code>INVENTORY</code>), cap impact with <code>Math.min</code>, then map drafts to findings with <code>createId("finding")</code> and <code>severityFromImpact(impact)</code>.</li>
-    <li><strong>Choose the category.</strong> It decides the dashboard area (<code>findingArea</code>) and is part of the History key. A new category means adding it to <code>FindingCategory</code> in <code class="path">packages/core/src/types.ts</code> and to <code>findingArea</code> if it belongs outside Technical.</li>
-    <li><strong>Write the title for History.</strong> Put counts in the title freely (they are blanked in the key), but keep the wording fixed: a title whose words change with the data becomes a different key every run.</li>
+    <li><strong>Register the check.</strong> Add it to <code class="path">packages/core/src/checks/catalog.ts</code> with its docs (see <a href="#checks--adding-a-check">Adding a check</a>). Its category decides the dashboard area (<code>findingArea</code>); a new category means adding it to <code>FindingCategory</code> in <code class="path">packages/core/src/types.ts</code> and to <code>findingArea</code> if it belongs outside Technical.</li>
+    <li><strong>Write a pure producer.</strong> <code>findingsFromX(input): Finding[]</code> that returns <code>[]</code> when the input is null. Follow the file's pattern: collect drafts that name their <code>checkId</code>, keep thresholds in a named constant with the reason for each (see <code>TREND</code>, <code>INVENTORY</code> and <code class="path">packages/core/src/checks/thresholds.ts</code>), cap impact with <code>Math.min</code>, then map drafts through <code>finding(CHECKS[checkId], …)</code>. The pipeline test fails on a finding without a registered check.</li>
+    <li><strong>Set a scope key when one check reports several findings.</strong> A finding per page type or dataset needs <code>scopeKey</code>, or History treats them as one.</li>
     <li><strong>Test it.</strong> Add cases to the sibling test file (for example <code class="path">packages/agents/src/connector-findings.test.ts</code>, <code>node:test</code> with <code>assert/strict</code>): the finding fires above the threshold and stays quiet below it.</li>
     <li><strong>Call it in the pipeline.</strong> Push its findings in <code>runFullAnalysis</code> before <code>rankSeverityByOrganicImpact</code> (<code class="path">packages/agents/src/pipeline.ts:364</code>), reading its input from <code>input.connectors</code> or another <code>RunAnalysisInput</code> field.</li>
     <li><strong>Feed it from the Workflow.</strong> In the <code>analyze-repository-and-site</code> step of <code class="path">apps/web/src/analysis-workflow.ts</code>, load the signal and pass it through <code>connectorSignals</code> (<code class="path">apps/web/src/connectors-data.ts:44</code>). Wrap the load in <code>.catch</code>: connector data is an enrichment and must never fail an analysis. If the load is heavy, give it its own step, as the inventory has.</li>

@@ -15,6 +15,8 @@ export function runTechnicalSeoAudit(input: {
   robotsTxt?: string;
   /** Every sitemap URL was crawled; per-page checks it covers are skipped here to avoid duplicates. */
   fullCrawl?: boolean;
+  /** How the robots.txt response read (`robotsState`); without it the robots.txt notices are skipped. */
+  robotsState?: "read" | "missing" | "unreadable";
 }): Finding[] {
   const findings: Finding[] = [];
   const { pages, sitemap, siteId, analysisId } = input;
@@ -150,6 +152,23 @@ export function runTechnicalSeoAudit(input: {
       impact: impact,
       recommendation: `Replace the Sitemap line in robots.txt with ${new URL(input.baseUrl).origin}/sitemap.xml and submit that sitemap in Search Console.`,
       pagesAffected: [],
+    }));
+  }
+
+  if (input.robotsState === "missing") {
+    findings.push(finding(CHECKS["robots.missing"]!, {
+      siteId, analysisId, impact: 10,
+      title: "The site has no robots.txt",
+      summary: "/robots.txt answers 404, so everything may be crawled. That is allowed, but robots.txt is where the sitemap is declared and where crawl traps such as internal search are kept out.",
+      evidence: { robots: "missing" },
+    }));
+  } else if (input.robotsState === "read" && sitemap.totalUrls > 0 && declaredSitemaps.length === 0) {
+    findings.push(finding(CHECKS["robots.sitemap_undeclared"]!, {
+      siteId, analysisId, impact: 12,
+      title: "robots.txt does not name the sitemap",
+      summary: `The site has a sitemap (${sitemap.totalUrls.toLocaleString("en")} URLs) but robots.txt has no Sitemap line. Bing, and the AI search indexes built on it, find sitemaps through robots.txt.`,
+      evidence: { sitemapUrls: sitemap.totalUrls },
+      recommendation: `Add \`Sitemap: ${new URL(input.baseUrl).origin}/sitemap.xml\` to robots.txt.`,
     }));
   }
 

@@ -1,5 +1,5 @@
 import type { CrawlCoverage, CrawlFamilyStats, CrawlIssue, CrawlLocaleStats, CrawlPageResult, Finding, FindingCategory } from "@organic-growth/core";
-import { CHECKS, finding, organicImpactScore } from "@organic-growth/core";
+import { CHECKS, finding, organicImpactScore, THIN_WORDS, TITLE_LENGTH } from "@organic-growth/core";
 
 type Draft = {
   checkId: string;
@@ -344,6 +344,41 @@ export function findingsFromCrawlCoverage(input: {
       evidence: { nearDuplicateUrls: nearDuplicates, suffixedGroups: suffixed, groups },
       recommendation: "Keep one page per record: merge the duplicates in the data, or give the copies a canonical pointing at the page to keep.",
       pagesAffected: groups.flatMap((group) => group.urls).slice(0, 20),
+    });
+  }
+
+  // Page checks counted in SQL: one finding each, its impact capped where the problem is cosmetic.
+  const counted = (checkId: string, issue: CrawlIssue, cap: number, title: (n: number) => string, summary: (n: number) => string) => {
+    const n = issues[issue] ?? 0;
+    if (n <= 0) return;
+    const category = CHECKS[checkId]!.category;
+    drafts.push({
+      checkId, category, impact: Math.min(organicImpactScore({ category, pagesAffected: n }), cap), title: title(n), summary: summary(n),
+      evidence: { [issue]: n, examples: examples[issue] ?? [] }, recommendation: CHECKS[checkId]!.docs.how, pagesAffected: exampleUrls(issue),
+    });
+  };
+  counted("security.mixed_content", "mixedContent", 70, (n) => `${pages(n)} load images or scripts over HTTP`, (n) => `${pages(n)} on this HTTPS site ${n === 1 ? "references" : "reference"} http:// images, scripts, styles or frames. Browsers block or warn on them, and Google treats mixed content as a security issue.`);
+  counted("http.redirect_chain", "redirectChain", 65, (n) => `${pages(n, "sitemap URL")} reach their page through two or more redirects`, (n) => `${pages(n, "sitemap URL")} redirect twice or more before answering. Each hop costs a crawl and some of the signals the final page receives.`);
+  counted("http.meta_refresh", "metaRefresh", 60, (n) => `${pages(n)} redirect with a meta refresh`, (n) => `${pages(n)} use a <meta http-equiv="refresh"> instead of an HTTP redirect. Search engines treat it as a weak redirect, and AI crawlers do not follow it.`);
+  counted("security.http_links", "httpLinks", 45, (n) => `${pages(n)} link to HTTP versions of this site`, (n) => `${pages(n)} carry links to http:// URLs on this site, so every click and crawl goes through a redirect.`);
+  counted("title.length", "titleLength", 45, (n) => `${pages(n)} have a title under ${TITLE_LENGTH.min} or over ${TITLE_LENGTH.max} characters`, (n) => `${pages(n)} have titles Google will pad or cut: under ${TITLE_LENGTH.min} or over ${TITLE_LENGTH.max} characters.`);
+  counted("description.length", "descriptionLength", 25, (n) => `${pages(n)} have a meta description over 160 characters`, (n) => `${pages(n)} have descriptions longer than Google shows; the end is cut off.`);
+  counted("heading.h1_equals_title", "h1EqualsTitle", 25, (n) => `${pages(n)} repeat the title as the H1`, (n) => `${pages(n)} have an H1 identical to the title tag. A second phrasing would cover another way people search for the page.`);
+  counted("heading.skipped_levels", "headingSkips", 25, (n) => `${pages(n)} skip heading levels`, (n) => `${pages(n)} jump more than one heading level (an H2 followed by an H4). Assistants and screen readers read the outline, and a skipped level breaks it.`);
+  counted("html.lang_missing", "langMissing", 40, (n) => `${pages(n)} declare no language`, (n) => `${pages(n)} have no lang attribute on <html>, so search engines and assistants guess the language.`);
+  counted("html.viewport_missing", "viewportMissing", 45, (n) => `${pages(n)} have no viewport tag`, (n) => `${pages(n)} lack <meta name="viewport">, so phones render the desktop layout and Google's mobile-first index sees a poor page.`);
+  counted("image.alt_missing", "imagesNoAlt", 35, (n) => `${pages(n)} have images without alt text`, (n) => `${pages(n)} carry images with no alt attribute. Image search and assistants cannot read them, and screen readers skip them.`);
+  counted("content.thin", "thinContent", 50, (n) => `${pages(n)} have under ${THIN_WORDS} words`, (n) => `${pages(n)} (detail pages, not empty shells) have fewer than ${THIN_WORDS} words of main content: too little to rank for anything or to be cited.`);
+  counted("url.year_in_slug", "yearInSlug", 20, (n) => `${pages(n, "article")} carry a year in the URL`, (n) => `${pages(n, "article")} have a year in the address. When the year passes, searchers and assistants read them as outdated, and such URLs lose AI citations fastest.`);
+  const sharedDescriptions = coverage.duplicateDescriptionGroups ?? [];
+  if (sharedDescriptions.length) {
+    const n = issues.duplicateDescription ?? sharedDescriptions.reduce((total, group) => total + group.count, 0);
+    drafts.push({
+      checkId: "description.duplicate", category: "metadata", impact: Math.min(organicImpactScore({ category: "metadata", pagesAffected: n }), 40),
+      title: "Several pages share the same meta description",
+      summary: `${pages(n)} share a description with another page (${count(sharedDescriptions.length)} ${sharedDescriptions.length === 1 ? "description" : "descriptions"}). Google ignores a description that does not describe the page and writes its own.`,
+      evidence: { groups: sharedDescriptions.slice(0, 10) }, recommendation: CHECKS["description.duplicate"]!.docs.how,
+      pagesAffected: sharedDescriptions.flatMap((group) => group.examples).slice(0, 20),
     });
   }
 

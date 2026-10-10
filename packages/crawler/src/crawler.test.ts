@@ -488,3 +488,44 @@ describe("redirect hops and HSTS", () => {
     assert.equal(page.viewport, false, "always written, so absence means not checked");
   });
 });
+
+describe("findingsFromCrawlCoverage: on-page and security checks", () => {
+  const coverage: CrawlCoverage = {
+    totalUrls: 1000, completedUrls: 990, failedUrls: 0, pendingUrls: 0, emptyShellUrls: 0, httpErrorUrls: 0, missingTitleUrls: 0, families: [],
+    issues: { mixedContent: 3, redirectChain: 2, metaRefresh: 1, httpLinks: 4, titleLength: 10, descriptionLength: 2, duplicateDescription: 6, h1EqualsTitle: 5, headingSkips: 2, langMissing: 7, viewportMissing: 1, imagesNoAlt: 9, thinContent: 12, yearInSlug: 2 },
+    issueExamples: { mixedContent: [{ url: "https://x.com/a", detail: "2" }] },
+    duplicateDescriptionGroups: [{ description: "Same", count: 6, examples: ["https://x.com/a", "https://x.com/b"] }],
+  };
+
+  it("writes one finding per new SEO page check with its check id", () => {
+    const found = findingsFromCrawlCoverage({ siteId: "s", analysisId: "a", coverage });
+    const ids = found.map((f) => f.checkId);
+    for (const id of ["security.mixed_content", "http.redirect_chain", "http.meta_refresh", "security.http_links", "title.length", "description.length", "description.duplicate", "heading.h1_equals_title", "heading.skipped_levels", "html.lang_missing", "html.viewport_missing", "image.alt_missing", "content.thin", "url.year_in_slug"]) assert.ok(ids.includes(id), id);
+    const mixed = found.find((f) => f.checkId === "security.mixed_content")!;
+    assert.equal(mixed.title, "3 pages load images or scripts over HTTP");
+    assert.deepEqual(mixed.pagesAffected, ["https://x.com/a"]);
+    assert.equal(mixed.category, "security");
+  });
+
+  it("writes nothing for checks with no pages", () => {
+    const ids = findingsFromCrawlCoverage({ siteId: "s", analysisId: "a", coverage: { ...coverage, issues: {}, duplicateDescriptionGroups: [] } }).map((f) => f.checkId);
+    assert.deepEqual(ids, []);
+  });
+});
+
+describe("robots.txt notices", () => {
+  const sitemap = (totalUrls: number) => ({ totalUrls, sampledUrls: 0, indexFiles: [], urlTypes: {}, languages: {}, errors: [] });
+  const ids = (robotsTxt: string | undefined, robotsState: "read" | "missing" | "unreadable", urls = 10) =>
+    runTechnicalSeoAudit({ siteId: "s", analysisId: "a", baseUrl: "https://x.com", sitemap: sitemap(urls), pages: [], robotsTxt, robotsState }).map((f) => f.checkId);
+
+  it("notes a missing robots.txt and a sitemap robots.txt does not name", () => {
+    assert.ok(ids(undefined, "missing").includes("robots.missing"));
+    assert.ok(ids("User-agent: *\nDisallow: /search\n", "read").includes("robots.sitemap_undeclared"));
+  });
+
+  it("says nothing when robots.txt names the sitemap, could not be read, or the site has no sitemap", () => {
+    assert.deepEqual(ids("User-agent: *\nSitemap: https://x.com/sitemap.xml\n", "read"), []);
+    assert.deepEqual(ids(undefined, "unreadable"), []);
+    assert.ok(!ids("User-agent: *\n", "read", 0).includes("robots.sitemap_undeclared"));
+  });
+});

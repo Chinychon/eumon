@@ -134,3 +134,18 @@ describe("runFullAnalysis", () => {
     }
   });
 });
+
+describe("runFullAnalysis with a full crawl", () => {
+  it("adds the link graph and AI content findings, and judges the sampled homepage's entity markup", async () => {
+    const coverage = {
+      totalUrls: 3, completedUrls: 3, failedUrls: 0, pendingUrls: 0, emptyShellUrls: 0, httpErrorUrls: 0, missingTitleUrls: 0, families: [],
+      issues: { stale: 2, mixedContent: 1 }, issueExamples: {},
+      linkGraph: { orphans: { count: 1, examples: ["https://clinic.example/doctors/b"] }, singleInbound: null, brokenLinks: null, depth: null },
+    };
+    const report = await runFullAnalysis({ analysisId: "a", siteId: "s", name: "Clinic", baseUrl: "https://clinic.example", fetcher: fixtureSite(), repeatability: false, maxPages: 5, crawlCoverage: { coverage, examples: [] } });
+    const ids = report.findings.map((f) => f.checkId);
+    for (const id of ["ai.stale", "links.orphan", "security.mixed_content"]) assert.ok(ids.includes(id), `${id} in ${ids.join(", ")}`);
+    assert.ok(!ids.includes("ai.no_entity_schema"), "the fixture homepage has Dentist markup with sameAs");
+    assert.ok(!ids.includes("robots.sitemap_undeclared"), "the fixture robots.txt names its sitemap");
+  });
+});

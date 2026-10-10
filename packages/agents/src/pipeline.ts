@@ -16,8 +16,10 @@ import {
   defaultFetcher,
   fetchPageAudit,
   fetchRobots,
+  findingsFromAiContent,
   findingsFromCrawl,
   findingsFromCrawlCoverage,
+  findingsFromLinkGraph,
   findingsFromRendering,
   inspectPage,
   scriptTrackers,
@@ -274,6 +276,9 @@ export async function runFullAnalysis(input: RunAnalysisInput) {
       coverage: input.crawlCoverage.coverage,
       examples: input.crawlCoverage.examples,
     }));
+    findings.push(...findingsFromLinkGraph({ siteId: input.siteId, analysisId, linkGraph: input.crawlCoverage.coverage.linkGraph }));
+    // The homepage's entity markup comes from the sample, which always includes it; the 50 crawl examples may not.
+    findings.push(...findingsFromAiContent({ siteId: input.siteId, analysisId, coverage: input.crawlCoverage.coverage, homepage: pageResults.find((page) => new URL(page.finalUrl ?? page.url).pathname === "/") }));
   } else {
     findings.push(...sampleFindings);
   }
@@ -311,7 +316,8 @@ export async function runFullAnalysis(input: RunAnalysisInput) {
   // An error page or a challenge page is not robots.txt: only a real one is parsed.
   const [robotsResponse, llmsResponse] = await Promise.all(["/robots.txt", "/llms.txt"].map((path) =>
     fetcher(new URL(path, input.baseUrl).toString(), { maxBytes: 500_000 }).catch(() => null)));
-  const robotsTxt = robotsState(robotsResponse ?? null).body;
+  const robots = robotsState(robotsResponse ?? null);
+  const robotsTxt = robots.body;
   const aiAccess = aiReadiness({ robots: robotsResponse ?? null, llms: llmsResponse ?? null, pages: pageResults });
 
   findings.push(
@@ -322,6 +328,7 @@ export async function runFullAnalysis(input: RunAnalysisInput) {
       sitemap,
       pages: pageResults,
       robotsTxt,
+      robotsState: robots.robots,
       fullCrawl: fullCrawlChecks,
     }),
   );

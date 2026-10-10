@@ -3,12 +3,12 @@ import { addDays, aiAnswerPoints, findingKey, REF_ALPHABET, REF_LENGTH, slugify,
 import { crawlGooglebotBatch, probeNotFound, researchSite, type Fetcher, type SiteResearch } from "@organic-growth/crawler";
 import {
   chunks, createAnalysis, createLead, recordLeadClick, updateLead, defaultPageSettings, recordSyncRun, recountCrawl, upsertPageSettings, datasetCoverage, deleteSite, getAnalysisJob, getCrawlCoverage, getCrawlProgress, importSearchConsoleUrls, insertChange, insertConversionEvent, listAllRecords,
-  listCrawlLogDays, listCrawlPageResults, listPendingCrawlUrls, recordLandingSession, replaceCurrentSearchMetrics, replacePageSearchMetrics, runStatements, saveAnalysisReport, saveCrawlBatch,
+  listCrawlLogDays, loadReferringLists, listCrawlPageResults, listPendingCrawlUrls, recordLandingSession, replaceCurrentSearchMetrics, replacePageSearchMetrics, runStatements, saveAnalysisReport, saveCrawlBatch,
   saveAiAnswerChecks, setAiBrandNames, setAiPrompts, saveIndexStatus, saveRankChecks, setTrackedKeywords, saveSearchConsoleChart, saveSearchConsoleChecks, saveSearchConsoleSummary, saveSiteScope, saveSnapshot, searchConsoleReconciliation, saveTopQueriesSnapshot, saveUrlIndexStatus, listSiteCompetitorDomains, setSiteCompetitorDomains, syncFirstPartyResults, updateSiteGa4Property, upsertMetricPoints, type MetricPoint, setSiteMarkets, setTemplatePublication, syncTemplatePages, updateAnalysisProgress,
   updateAnalysisStatus, upsertDataset, upsertRecords, upsertSite, upsertTemplate, type D1Like,
 } from "@organic-growth/db";
 import { generatePages } from "@organic-growth/pages";
-import { demoLinks, loadDemoReferring, demoSerpLists, demoSuggestions, seedDemoConnectors } from "./demo-connectors.js";
+import { demoLinks, demoSerpLists, demoSuggestions, seedDemoConnectors } from "./demo-connectors.js";
 import { crawlLogCoverage } from "./log-coverage.js";
 import { queueFullCrawl, runFullAnalysis } from "./pipeline.js";
 import { probeTitleForCoverage } from "./not-found-probe.js";
@@ -530,7 +530,7 @@ async function analyzeDemo(db: D1Like, input: { analysisId: string; version: num
       inventory: await loadInventories(db, DEMO_SITE_ID, { analysisId: input.analysisId }),
       ranks: await loadRankSignals(db, DEMO_SITE_ID, new Date(input.now).toISOString().slice(0, 10)),
       aiAnswers: await loadAiAnswerSignals(db, DEMO_SITE_ID, new Date(input.now).toISOString().slice(0, 10)),
-      referring: await loadDemoReferring(db, DEMO_SITE_ID, own, new Date(input.now).toISOString().slice(0, 10)),
+      referring: await loadReferringLists(db, DEMO_SITE_ID, own, new Date(input.now).toISOString().slice(0, 10)),
     },
     crawlCoverage: { coverage, examples },
     renderPages: (urls) => renderDemo(urls, input.version),

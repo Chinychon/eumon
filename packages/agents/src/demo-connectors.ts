@@ -1,6 +1,6 @@
-import { addDays, classifyReferringDomains, spamNetworks, type BacklinkSummary, type BacklinksInput, type ReferringDomain, type SpamNetwork, type CompetitorSuggestion, type LinkGap, type LinksInput, type SerpCompetitor, type SerpFeature, type SerpResult } from "@organic-growth/core";
+import { addDays, classifyReferringDomains, spamNetworks, type BacklinkSummary, type ReferringDomain, type CompetitorSuggestion, type LinkGap, type LinksInput, type SerpCompetitor, type SerpFeature, type SerpResult } from "@organic-growth/core";
 import { classifyUrlType } from "@organic-growth/crawler";
-import { getSnapshot, listReferringDomains, recordCrawlLog, referringDomainCounts, replaceReferringDomains, saveSnapshot, upsertMetricPoints, type D1Like, type MetricPoint } from "@organic-growth/db";
+import { recordCrawlLog, referringDomainCounts, replaceReferringDomains, saveSnapshot, upsertMetricPoints, type D1Like, type MetricPoint } from "@organic-growth/db";
 
 /*
  * The demo clinic's data from the connectors beyond Google: results pages for
@@ -134,20 +134,6 @@ export function demoReferringRows(demo: Demo, today: string): ReferringDomain[] 
     });
   }
   return classifyReferringDomains(rows, demo.own);
-}
-
-/** What the card and findings read, from the same six bounded reads as the web's loadConnectorLists. */
-export async function loadDemoReferring(db: D1Like, siteId: string, own: string, today: string): Promise<BacklinksInput | null> {
-  const month = addDays(today, -30);
-  const [counts, top, newReal, lostReal, brokenReal, networks] = await Promise.all([
-    referringDomainCounts(db, siteId, month),
-    listReferringDomains(db, siteId, { spam: false, limit: 25 }),
-    listReferringDomains(db, siteId, { spam: false, newSince: month, limit: 10 }),
-    listReferringDomains(db, siteId, { spam: false, lostSince: month, limit: 10 }),
-    listReferringDomains(db, siteId, { spam: false, broken: true, limit: 25 }),
-    getSnapshot<SpamNetwork>(db, siteId, "spam_networks", own),
-  ]);
-  return counts.real + counts.spam === 0 ? null : { asOf: networks?.periodEnd ?? null, counts, top, newReal, lostReal, brokenReal, networks: networks?.rows ?? [] };
 }
 
 const DAY_MS = 86_400_000;

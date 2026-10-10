@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { addDays, RESULT_METRICS, resultsView } from "@organic-growth/core";
-import { listSnapshots } from "@organic-growth/db";
+import { getSnapshot, listSnapshots } from "@organic-growth/db";
 import { deleteSite, getAnalysisJob, getCrawlProgress, getLinkGraph, getSite, getTopQueriesSnapshot, indexStatusCounts, listMetricSeries, publishedPages } from "@organic-growth/db";
 import { openSqliteD1 } from "@organic-growth/db/sqlite";
 import { advanceDemoRun, DEMO_SITE_ID, isLocalHost, seedDemoSite, startDemoRun } from "./demo.js";
@@ -123,6 +123,7 @@ describe("demo site", () => {
     await seedDemoSite(db, Date.now());
     const titles = ((await getAnalysisJob(db, "analysis_demo_2"))!.report as { findings: Array<{ title: string }> }).findings.map((finding) => finding.title);
     for (const title of ["3 sites link to pages on your site that are missing", "You lost links from 4 sites in 30 days", "90 spam sites started linking to you in 30 days"]) assert.ok(titles.includes(title), `${title} in ${titles.join(" | ")}`);
+    assert.ok(await getSnapshot(db, "site_demo_clinic", "spam_networks", "demo-clinic.example"), "the spam_networks snapshot is saved for the demo domain");
   });
 
   it("shows a soft 404 and the same dentist listed twice in the latest analysis", async () => {

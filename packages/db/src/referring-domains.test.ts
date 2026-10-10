@@ -3,7 +3,8 @@ import { describe, it } from "node:test";
 import type { ReferringDomain } from "@organic-growth/core";
 import { openSqliteD1 } from "./sqlite.js";
 import { upsertSite } from "./index.js";
-import { listReferringDomains, referringDomainCounts, replaceReferringDomains } from "./referring-domains.js";
+import { saveSnapshot } from "./snapshots.js";
+import { listReferringDomains, loadReferringLists, referringDomainCounts, replaceReferringDomains } from "./referring-domains.js";
 
 const at = "2026-10-10T04:00:00.000Z";
 async function site() {
@@ -75,5 +76,23 @@ describe("referring domains store", () => {
     await replaceReferringDomains(db, "s", [row("a.example")]);
     await db.prepare("DELETE FROM sites WHERE id = ?").bind("s").run();
     assert.deepEqual(await all(db), []);
+  });
+});
+
+describe("loadReferringLists", () => {
+  it("is null with no rows, else bounded lists and the networks from the snapshot", async () => {
+    const db = await site();
+    assert.equal(await loadReferringLists(db, "s", "x.com", "2026-10-10"), null);
+    const rows = [row("a.example", { rank: 90 }), ...Array.from({ length: 30 }, (_, i) => row(`r${i}.example`, { rank: i })), row("lost.example", { lost: true, lastSeen: "2026-10-05" }), row("bad.example", { spam: true, spamReason: "Same anchor on 10 sites" })];
+    await replaceReferringDomains(db, "s", rows);
+    await saveSnapshot(db, "s", { kind: "spam_networks", scope: "x.com", periodEnd: "2026-10-10", rows: [{ key: "k", kind: "anchor", label: "l", domains: 1, since: "2026-10-01", example: "bad.example" }] });
+    const lists = (await loadReferringLists(db, "s", "x.com", "2026-10-10"))!;
+    assert.equal(lists.top.length, 25);
+    assert.equal(lists.top[0]!.domain, "a.example");
+    assert.equal(lists.newReal.length, 10);
+    assert.deepEqual(lists.lostReal.map((r) => r.domain), ["lost.example"]);
+    assert.equal(lists.counts.spam, 1);
+    assert.equal(lists.asOf, "2026-10-10");
+    assert.equal(lists.networks.length, 1);
   });
 });

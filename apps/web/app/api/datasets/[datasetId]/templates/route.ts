@@ -4,6 +4,7 @@ import { getDataset, getSiteScope, listAllRecords, listRecords, upsertTemplate }
 import { defaultTemplate, proposeTemplate } from "@organic-growth/pages";
 import { regenerateTemplate } from "../../../../../src/page-engine";
 import { describeModelError } from "@organic-growth/ai";
+import { charge } from "../../../../../src/limits";
 import { appLlm, fail, json, readJson, settingsFor } from "../../../../../src/server";
 import { requireOwned } from "../../../../../src/guard";
 
@@ -42,6 +43,8 @@ export async function POST(request: Request, context: { params: Promise<{ datase
     if (llm instanceof Response) {
       aiError = "No language model is configured.";
     } else {
+      const refusal = await charge(env.DB, site.workspaceId!, "aiRunsPerDay");
+      if (refusal) return fail(refusal, 429);
       try {
         const scope = await getSiteScope(env.DB, site.id);
         draft = await proposeTemplate({

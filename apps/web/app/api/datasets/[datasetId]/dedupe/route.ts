@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { getDataset } from "@organic-growth/db";
 import { mergeDuplicateRecords } from "../../../../../src/dedupe";
+import { charge } from "../../../../../src/limits";
 import { appLlm, fail, json, llmFailure } from "../../../../../src/server";
 import { requireOwned } from "../../../../../src/guard";
 
@@ -13,6 +14,8 @@ export async function POST(request: Request, context: { params: Promise<{ datase
   if (!dataset) return fail("Dataset not found.", 404);
   const llm = appLlm();
   if (llm instanceof Response) return llm;
+  const refusal = await charge(env.DB, access.site.workspaceId!, "aiRunsPerDay");
+  if (refusal) return fail(refusal, 429);
   try {
     return json({ merges: await mergeDuplicateRecords(env.DB, llm, dataset) });
   } catch (error) {

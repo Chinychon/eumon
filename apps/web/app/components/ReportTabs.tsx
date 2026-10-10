@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
-import { COVERAGE_CLASSES, countryName, type CoverageClass, type SiteRecord } from "@organic-growth/core";
+import { CHECKS, COVERAGE_CLASSES, countryName, type CoverageClass, type SiteRecord } from "@organic-growth/core";
+import { ChecksCard } from "./ChecksCard";
 import type { IndexCoverage } from "@organic-growth/db";
 import { api, formatDay, formatNumber } from "./api";
 import { BarList, Funnel, Heatmap, PairedBars, Scatter } from "./charts";
@@ -43,6 +44,12 @@ export function WhyRow({ lead, title, aside, children }: { lead?: ReactNode; tit
     </details>
   );
 }
+
+/** A finding's title, led by its check's name, and the anchor the Checks card links to. */
+const FindingTitle = ({ finding }: { finding: Finding }) => {
+  const check = finding.checkId ? CHECKS[finding.checkId] : undefined;
+  return <span id={`finding-${finding.id}`}>{check && <span className="small muted">{check.name} · </span>}{finding.title}</span>;
+};
 
 export const Severity = ({ value }: { value: string }) => <span className={`severity ${SEVERITY_CLASS[value] ?? "info"}`}>{value}</span>;
 
@@ -105,6 +112,7 @@ export function TechnicalTab({ siteId, report, results, running, busy, hasRepo, 
       {crawlLog}
       {speed}
       <SiteGraph siteId={siteId} />
+      <ChecksCard report={report} pillar="seo" />
       <FixesPanel siteId={siteId} hasRepo={hasRepo} />
       <Card title="Fixes" actions={<><span className="count-pill">{findings.length} findings</span>{findings.length > 0 && <ExportMenu title="Technical fixes" sheets={() => fixSheets(report, (category) => findingArea(category) === "technical")} />}</>}>
         {findings.length ? findings.map((finding) => (
@@ -142,7 +150,7 @@ function TechnicalNumbers({ report, results, running }: { report: Report | null;
 
 function FindingRow({ finding }: { finding: Finding }) {
   return (
-    <WhyRow lead={<Severity value={finding.severity} />} title={finding.title} aside={<span className="impact">{finding.organicImpactScore}<small>impact</small></span>}>
+    <WhyRow lead={<Severity value={finding.severity} />} title={<FindingTitle finding={finding} />} aside={<span className="impact">{finding.organicImpactScore}<small>impact</small></span>}>
       <p>{finding.summary}</p>
       {finding.recommendation && <p><strong>Next step.</strong> {finding.recommendation}</p>}
     </WhyRow>
@@ -243,7 +251,7 @@ export function SearchAnalysis({ report }: { report: Report }) {
       </Card>
       <Card title="Pages to fix" actions={<ExportMenu title="Pages to fix" sheets={() => [...pick(searchAnalysisSheets(report), "Skipped on page one", "Competing pages"), ...fixSheets(report, (category) => category === "search")]} />}>
         {findings.map((finding) => (
-          <WhyRow key={finding.id} lead={<Severity value={finding.severity} />} title={finding.title}>
+          <WhyRow key={finding.id} lead={<Severity value={finding.severity} />} title={<FindingTitle finding={finding} />}>
             <p>{finding.summary}</p>
             {finding.recommendation && <p><strong>Next step.</strong> {finding.recommendation}</p>}
           </WhyRow>
@@ -426,10 +434,10 @@ export function AiReadinessCard({ report }: { report: Report | null }) {
         <Kpi label="AI agents allowed" value={readiness.robots === "unreadable" ? "—" : `${readiness.crawlers.length - blocked.length} of ${readiness.crawlers.length}`}
           caption={readiness.robots === "missing" ? "No robots.txt: everything is allowed" : readiness.robots === "unreadable" ? "robots.txt couldn't be read" : blocked.length ? `${blocked.length} blocked in robots.txt` : "None blocked"} />
         <Kpi label="llms.txt" value={readiness.llmsTxt ? "Present" : "None"} caption={readiness.llmsTxt ? "A plain-text guide AI tools can read" : "Optional: a short guide to the site for AI tools"} />
-        <Kpi label="Pages with FAQ markup" value={`${readiness.faqPages.pages} of ${readiness.faqPages.of}`} caption="Sampled pages with FAQPage or QAPage data" />
+        <Kpi label="Pages with Q&A markup" value={`${readiness.faqPages.pages} of ${readiness.faqPages.of}`} caption="FAQPage or QAPage data on sampled pages; no longer a Google rich result" />
       </div>
       {findings.map((finding) => (
-        <WhyRow key={finding.id} lead={<Severity value={finding.severity} />} title={finding.title}>
+        <WhyRow key={finding.id} lead={<Severity value={finding.severity} />} title={<FindingTitle finding={finding} />}>
           <p>{finding.summary}</p>
           {finding.recommendation && <p><strong>Next step.</strong> {finding.recommendation}</p>}
         </WhyRow>

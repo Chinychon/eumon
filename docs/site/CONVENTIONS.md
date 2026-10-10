@@ -25,6 +25,8 @@ Allowed markup (the shell styles exactly these):
 
 No inline styles, no classes other than the ones above, no emoji, no images.
 
+**Generated page.** `pages/checks.head.html` is the head of the Checks page; `build.mjs` appends every check from `packages/core/dist/checks/index.js` (build core first), so edit check docs in `packages/core/src/checks/catalog.ts`, not here.
+
 ## Diagrams: `diagrams/<name>.svg`
 
 A bare `<svg>` with `viewBox`, `role="img"`, `aria-labelledby` pointing at its `<title>`/`<desc>` (ids `dg-<name>-title`, `dg-<name>-desc`). Colours come only from classes the shell defines, so diagrams follow light and dark mode:

@@ -4,13 +4,13 @@
 import { execSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const ORDER = [
   "overview", "getting-started",
   "architecture", "flow-analysis", "flow-sync", "flow-fixes", "flow-pages", "data-model",
-  "packages", "codebase-map", "web-app", "findings", "glossary",
+  "packages", "codebase-map", "web-app", "findings", "checks", "glossary",
   "ops", "gotchas",
 ];
 
@@ -72,10 +72,42 @@ function areasTable({ areas, files }) {
     `<tr><td>${esc(a.name)}</td><td>${a.files.map((f) => `<code class="path">${esc(f)}</code>`).join(" ")}</td></tr>`).join("")}</tbody></table>`;
 }
 
+// The Checks page is generated from the check registry, so the docs cannot drift from the code.
+const checksDist = join(here, "../../packages/core/dist/checks/index.js");
+const checks = existsSync(checksDist) ? await import(pathToFileURL(checksDist).href) : null;
+if (!checks) problems.push("missing packages/core/dist: run `npm run build -w @organic-growth/core`, then build again");
+
+function checksPage(head) {
+  if (!checks) return head.replace("<!--CHECKS-->", "");
+  const list = checks.checkList();
+  for (const check of list) {
+    for (const field of ["what", "why", "how", "severity"]) if (!check.docs[field] || check.docs[field].trim().length < 20) problems.push(`check ${check.id} has no docs.${field}`);
+  }
+  const anchor = (id) => `check-${id.replaceAll(".", "-").replaceAll("_", "-")}`;
+  const section = (id, title, items) => {
+    const categories = [...new Set(items.map((check) => check.category))];
+    return `<h2 id="${id}">${esc(title)} (${items.length})</h2>` + categories.map((category) => {
+      const rows = items.filter((check) => check.category === category);
+      return `<h3>${esc(category.replaceAll("_", " "))}</h3>`
+        + `<table><thead><tr><th>Check</th><th>Class</th><th>Scope</th><th>Source</th><th>Fix</th><th>Needs</th></tr></thead><tbody>${rows.map((check) =>
+          `<tr><td><a href="#${anchor(check.id)}">${esc(check.name)}</a><br><code>${esc(check.id)}</code></td><td>${esc(check.class)}${check.docs.unscored ? ", never scored" : ""}</td><td>${esc(check.scope)}</td><td>${esc(check.sources.join(", "))}</td><td>${esc(check.fix)}</td><td>${esc(check.requires ?? "")}</td></tr>`).join("")}</tbody></table>`
+        + `<dl>${rows.map((check) => `<dt id="${anchor(check.id)}">${esc(check.name)} <code>${esc(check.id)}</code></dt><dd><p><strong>What.</strong> ${esc(check.docs.what)}</p><p><strong>Why.</strong> ${esc(check.docs.why)}</p><p><strong>Fix.</strong> ${esc(check.docs.how)}</p><p><strong>Severity.</strong> ${esc(check.docs.severity)}</p></dd>`).join("")}</dl>`;
+    }).join("");
+  };
+  const seo = list.filter((check) => check.pillars.includes("seo"));
+  const ai = list.filter((check) => check.pillars.includes("ai") && !check.pillars.includes("seo"));
+  const none = list.filter((check) => !check.pillars.length);
+  const notRun = `<h2 id="not-run">Checks Eumon does not run</h2><dl>${checks.NOT_RUN.map((entry) => `<dt>${esc(entry.name)}</dt><dd><p>${esc(entry.why)}</p></dd>`).join("")}</dl>`;
+  return head.replace("<!--CHECKS-->",
+    `<p>${list.length} checks: ${seo.length} SEO (some also count for AI visibility), ${ai.length} AI visibility only, ${none.length} shown but never scored.</p>`
+    + section("seo-checks", "SEO", seo) + section("ai-checks", "AI visibility", ai) + section("unscored-checks", "Conversion and data: shown, never scored", none) + notRun);
+}
+
 const pages = ORDER.map((slug) => {
-  const file = join(here, "pages", `${slug}.html`);
+  const file = join(here, "pages", slug === "checks" ? "checks.head.html" : `${slug}.html`);
   if (!existsSync(file)) { problems.push(`missing page: pages/${slug}.html`); return ""; }
   let html = readFileSync(file, "utf8");
+  if (slug === "checks") html = checksPage(html);
   if (!html.includes(`<article id="${slug}"`)) problems.push(`pages/${slug}.html: <article> must have id="${slug}"`);
   if (map) html = html
     .replace("<!--MAP-DATA-->", `<script type="application/json" id="map-data">${JSON.stringify(map).replace(/</g, "\\u003c")}</script>`)

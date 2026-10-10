@@ -4,16 +4,17 @@
  * No React here, so it runs under `node --test`.
  */
 
-import type { runFullAnalysis } from "@organic-growth/agents";
+import type { AuditRow, runFullAnalysis } from "@organic-growth/agents";
+import { CHECKS, type Check } from "@organic-growth/core";
 
-export type Finding = { id: string; category: string; severity: string; title: string; summary: string; recommendation?: string; organicImpactScore: number };
+export type Finding = { id: string; category: string; severity: string; title: string; summary: string; recommendation?: string; organicImpactScore: number; checkId?: string; pagesAffected?: string[] };
 
 /** The saved report: the pipeline's output plus what the workflow adds. Reports saved before a section existed lack it. */
 type Saved = Awaited<ReturnType<typeof runFullAnalysis>> & {
   /** Unchanged pages whose results were carried over from the last crawl. */
   crawlReuse?: { urls: number; from?: string };
 };
-type Later = "coverage" | "competition" | "aiReadiness" | "conversion" | "search" | "repo" | "rendering";
+type Later = "coverage" | "competition" | "aiReadiness" | "conversion" | "search" | "repo" | "rendering" | "audit";
 export type Report = Omit<Saved, Later> & Partial<Pick<Saved, Later>>;
 
 /** What a finding or opportunity is about, which decides the page that explains it. */
@@ -130,4 +131,37 @@ type Competition = NonNullable<Report["competition"]>;
 export function gapsFirst(competition: Competition) {
   const lead = (row: Competition["rows"][number]) => Math.max(0, ...row.competitors.map((entry) => entry.pages)) - row.you.pages;
   return [...competition.rows].sort((a, b) => lead(b) - lead(a));
+}
+
+/**
+ * Which health score a finding belongs to: its check's pillar (SEO when it is
+ * in both, since the Technical tab explains those), or for reports from
+ * before the check registry, its category. Null for conversion and data.
+ */
+export function pillarOf(finding: Pick<Finding, "category" | "checkId">): "seo" | "ai" | null {
+  const check = finding.checkId ? CHECKS[finding.checkId] : undefined;
+  if (check) return check.pillars.includes("seo") ? "seo" : check.pillars.includes("ai") ? "ai" : null;
+  return finding.category === "ai_visibility" ? "ai" : finding.category === "conversion" ? null : "seo";
+}
+
+export type CheckRow = { check: Check; row: AuditRow; finding?: Finding };
+
+/** A pillar's checks from the report's audit, by class: failed first, then passed, then skipped, each by name. */
+export function checksFor(report: Report, pillar: "seo" | "ai"): Record<"error" | "warning" | "notice", CheckRow[]> {
+  const groups: Record<"error" | "warning" | "notice", CheckRow[]> = { error: [], warning: [], notice: [] };
+  for (const row of report.audit?.checks ?? []) {
+    const check = CHECKS[row.id];
+    if (!check?.pillars.includes(pillar)) continue;
+    groups[check.class].push({ check, row, finding: report.findings.find((finding) => (finding as Finding).checkId === row.id) as Finding | undefined });
+  }
+  const order = { failed: 0, passed: 1, skipped: 2 };
+  for (const list of Object.values(groups)) list.sort((a, b) => order[a.row.status] - order[b.row.status] || a.check.name.localeCompare(b.check.name));
+  return groups;
+}
+
+/** How many checks the latest analysis ran, passed, failed and skipped; null for a report from before the audit. */
+export function auditCounts(report: Report | null): { checks: number; passed: number; failed: number; skipped: number } | null {
+  const rows = report?.audit?.checks;
+  if (!rows) return null;
+  return { checks: rows.length, passed: rows.filter((row) => row.status === "passed").length, failed: rows.filter((row) => row.status === "failed").length, skipped: rows.filter((row) => row.status === "skipped").length };
 }

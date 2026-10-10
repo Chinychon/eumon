@@ -18,6 +18,7 @@ import type { RepoAnalysisResult } from "@organic-growth/repo-analyzer";
 import { competitionOpportunities, counted, type CompetitionReport } from "./competition.js";
 import { linkGapOpportunity, withSerpContext, type ConnectorSignals } from "./connector-findings.js";
 import { estimateDemand } from "./demand.js";
+import { rankOpportunities } from "./rank-findings.js";
 import { analyzeSearch, searchOpportunities, type SearchInsights } from "./search.js";
 
 export interface AnalysisBundle {
@@ -122,7 +123,9 @@ export function buildOpportunities(bundle: AnalysisBundle): Opportunity[] {
       };
     });
   const links = linkGapOpportunity(bundle.connectors?.links, bundle.siteId, bundle.analysisId);
-  return withSerpContext([...technical, ...fromSearch, ...contentGaps, ...unpublishedData, ...gaps, ...(links ? [links] : [])], bundle.connectors?.serp)
+  const base = [...technical, ...fromSearch, ...contentGaps, ...unpublishedData, ...gaps, ...(links ? [links] : [])];
+  const tracked = rankOpportunities({ siteId: bundle.siteId, analysisId: bundle.analysisId, ranks: bundle.connectors?.ranks, searchMetrics: bundle.searchMetrics, existing: base, demand });
+  return withSerpContext([...base, ...tracked], bundle.connectors?.serp)
     .sort((a, b) => b.priorityScore - a.priorityScore);
 }
 
@@ -420,6 +423,7 @@ function renderGrowthPlanMarkdown(input: {
 }
 
 export * from "./pipeline.js";
+export * from "./audit.js";
 export * from "./inventory-data.js";
 export * from "./github-pr.js";
 export * from "./ai-plan.js";
@@ -439,5 +443,6 @@ export * from "./bing.js";
 export * from "./connector-findings.js";
 export * from "./log-coverage.js";
 export * from "./trend-signals.js";
+export * from "./rank-findings.js";
 export * from "./not-found-probe.js";
 export * from "./fix-text.js";

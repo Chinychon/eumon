@@ -8,6 +8,7 @@ import { Heatmap, PairedBars, Scatter } from "./charts";
 import { LeadFunnel, TechnicalTab, searchPoints } from "./ReportTabs";
 import { AREA_PLACE, doFirst, gapsFirst, HEALTH_COLUMNS, pageTypeHealth, type Navigate, type Place, type Report } from "./report-model";
 import { KeyNumbers, ProofHeadline } from "./results/sections";
+import { HealthTiles } from "./ChecksCard";
 import { AiPanel, CompetitorsPanel, EnquiriesPanel, KeywordsPanel, SearchPanel } from "./SitePanels";
 import { HistoryPanel } from "./HistoryPanel";
 import { ExportContext, ExportMenu } from "./export/ExportMenu";
@@ -251,6 +252,7 @@ export function OverviewView({ site, tab, onTab, onNavigate }: {
                     <KeyNumbers data={results.data} operator />
                   </>
                 ) : <Card title="Google clicks per week"><p className="empty-state">{results.error || "Loading…"}</p></Card>}
+                <HealthTiles report={report} scores={results.data?.results.scores} onOpen={openTab} />
               </div>
               <button className="connections-strip" onClick={() => onNavigate("setup")}>
                 <span className="connections-label">Connections</span>
@@ -267,7 +269,7 @@ export function OverviewView({ site, tab, onTab, onNavigate }: {
             {current === "technical" && <TechnicalTab siteId={site.id} report={report} results={results.data} running={Boolean(pendingId)} busy={busy} hasRepo={hasRepo} onRecrawl={() => runAnalysis(true)} onSetup={() => onNavigate("setup")} />}
             {results.data && current === "search" && <SearchPanel site={site} data={results.data} report={report} onNavigate={onNavigate} />}
             {results.data && current === "enquiries" && <EnquiriesPanel site={site} data={results.data} report={report} leads={leads} onNavigate={onNavigate} onLeadsChanged={() => void reloadResults()} />}
-            {results.data && current === "keywords" && <KeywordsPanel site={site} data={results.data} />}
+            {results.data && current === "keywords" && <KeywordsPanel site={site} data={results.data} onSaved={() => void reloadResults()} />}
             {results.data && current === "competitors" && <CompetitorsPanel site={site} data={results.data} report={report} onNavigate={onNavigate} onCompetitorsChanged={() => setCompetitorCount((count) => (count ?? 0) + 1)} />}
             {results.data && current === "ai" && <AiPanel data={results.data} report={report} onNavigate={onNavigate} />}
             {current === "history" && <HistoryPanel siteId={site.id} onNavigate={onNavigate} />}

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { doFirst, gapsFirst, pageTypeHealth, resolveLink, servedShare, type Finding } from "./report-model.ts";
+import { auditCounts, checksFor, doFirst, gapsFirst, pageTypeHealth, pillarOf, resolveLink, servedShare, type Finding, type Report } from "./report-model.ts";
 
 const finding = (title: string, severity: string, impact: number, category = "rendering"): Finding =>
   ({ id: title, category, severity, title, summary: "", organicImpactScore: impact });
@@ -69,5 +69,38 @@ describe("urlPath", () => {
   it("keeps the path and query of a URL and shows the homepage as /", () => {
     assert.equal(model.urlPath("https://x.com/doctors/amy?lang=id"), "/doctors/amy?lang=id");
     assert.equal(model.urlPath("https://x.com"), "/");
+  });
+});
+
+describe("audit in the report", () => {
+  it("derives the pillar from the check id, else from the category for old reports", () => {
+    assert.equal(pillarOf({ category: "metadata", checkId: "title.weak" }), "seo");
+    assert.equal(pillarOf({ category: "ai_visibility" }), "ai");
+    assert.equal(pillarOf({ category: "conversion" }), null);
+    assert.equal(pillarOf({ category: "content", checkId: "data.duplicates" }), null);
+    assert.equal(pillarOf({ category: "ai_visibility", checkId: "ai.stale" }), "ai");
+    assert.equal(pillarOf({ category: "rendering", checkId: "render.empty_shell" }), "seo", "a check in both pillars is explained on the Technical tab");
+  });
+
+  const report = {
+    findings: [{ id: "f", category: "metadata", severity: "HIGH", title: "t", summary: "s", organicImpactScore: 70, checkId: "title.weak" }],
+    audit: {
+      seo: { value: 90, indexable: 10, unhealthy: 1 }, ai: { value: null, indexable: 0, unhealthy: 0, reason: "no finished full crawl" },
+      checks: [{ id: "title.weak", status: "failed", pages: 1 }, { id: "title.length", status: "passed" }, { id: "ai.stale", status: "skipped", reason: "x" }, { id: "render.empty_shell", status: "passed" }],
+    },
+  } as unknown as Report;
+
+  it("groups a pillar's checks by class, failed first, with the finding attached", () => {
+    const groups = checksFor(report, "seo");
+    assert.equal(groups.error[0]!.check.id, "title.weak");
+    assert.equal(groups.error[0]!.finding?.id, "f");
+    assert.ok(groups.warning.some((row) => row.check.id === "title.length" && row.row.status === "passed"));
+    assert.ok(!Object.values(groups).flat().some((row) => row.check.id === "ai.stale"), "AI-only checks are not on the SEO list");
+    assert.ok(checksFor(report, "ai").error.some((row) => row.check.id === "render.empty_shell"), "a check in both pillars is on both lists");
+  });
+
+  it("counts the checks, and has nothing for an old report", () => {
+    assert.deepEqual(auditCounts(report), { checks: 4, passed: 2, failed: 1, skipped: 1 });
+    assert.equal(auditCounts({ findings: [] } as unknown as Report), null);
   });
 });

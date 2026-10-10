@@ -136,3 +136,18 @@ describe("results math", () => {
     assert.equal(resultsView(base()).speed.measured, false);
   });
 });
+
+describe("health scores in the results view", () => {
+  it("gives each pillar's latest score and the one from 28 days before", () => {
+    const view = resultsView(base({ series: {
+      health_seo: [{ day: "2026-08-20", value: 61 }, { day: "2026-09-01", value: 70 }, { day: "2026-09-25", value: 84.5 }],
+      health_ai: [{ day: "2026-09-25", value: 40 }],
+    } }));
+    assert.deepEqual(view.scores.seo, { value: 84.5, before: 70, day: "2026-09-25" }, "before is the latest score on or before 9 Sep");
+    assert.deepEqual(view.scores.ai, { value: 40, before: null, day: "2026-09-25" });
+  });
+
+  it("is empty before any analysis scored the site", () => {
+    assert.deepEqual(resultsView(base({ series: {} })).scores, { seo: { value: null, before: null, day: null }, ai: { value: null, before: null, day: null } });
+  });
+});

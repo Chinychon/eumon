@@ -60,6 +60,20 @@ describe("history", () => {
     assert.deepEqual(history.rows.map((row) => row.kind), ["fixed", "resolved", "change"], "newest first; the two resolutions share a date and come before the earlier PR");
   });
 
+  it("names the check behind a resolution, and credits a change made before the check registry", async () => {
+    const db = await site();
+    // a1 is saved before findings carried check ids; a2 reports the same problem under its check; a3 no longer does.
+    await finished(db, "a1", "2026-09-01T00:00:00.000Z", [finding("f1", "Thin meta descriptions")]);
+    await change(db, "c1", "f1", "2026-09-05T00:00:00.000Z");
+    await finished(db, "a2", "2026-09-08T00:00:00.000Z", [{ ...finding("f2", "Thin meta descriptions"), checkId: "description.missing" }]);
+    await finished(db, "a3", "2026-09-15T00:00:00.000Z", []);
+    const history = await assembleHistory(db, "s");
+    const fixed = history.rows.find((row) => row.kind === "fixed");
+    assert.ok(fixed, history.rows.map((row) => `${row.kind}: ${row.title}`).join(" | "));
+    assert.equal(fixed.check, "Missing or thin descriptions");
+    assert.equal(fixed.since, "2026-09-01T00:00:00.000Z", "one stretch across the key change");
+  });
+
   it("credits the change made in each stretch when a problem comes back and is fixed again", async () => {
     const db = await site();
     await finished(db, "a1", "2026-09-01T00:00:00.000Z", [finding("f1", "Thin meta descriptions")]);

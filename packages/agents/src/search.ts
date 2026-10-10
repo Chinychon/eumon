@@ -1,4 +1,4 @@
-import { countryName, createId, severityFromImpact, slugify, type Finding, type KeywordDemand, type Opportunity, type SearchMetricRow } from "@organic-growth/core";
+import { CHECKS, countryName, createId, finding, slugify, type Finding, type KeywordDemand, type Opportunity, type SearchMetricRow } from "@organic-growth/core";
 import { expectedCtr } from "@organic-growth/pages";
 import { estimateDemand } from "./demand.js";
 
@@ -210,11 +210,12 @@ function searchNarrative(insights: SearchInsights): string {
 
 /** Market alignment, intent mix, snippets that don't earn clicks, and pages competing with each other. */
 export function findingsFromSearch(insights: SearchInsights, siteId: string, analysisId: string): Finding[] {
-  const drafts: Array<Pick<Finding, "title" | "summary" | "recommendation" | "evidence" | "organicImpactScore" | "pagesAffected">> = [];
+  const drafts: Array<Pick<Finding, "title" | "summary" | "recommendation" | "evidence" | "organicImpactScore" | "pagesAffected"> & { checkId: string }> = [];
   const { totals } = insights;
   if (insights.targetShare && totals.impressions >= 500 && insights.targetShare.impressions < 0.3) {
     const outside = insights.countries.filter((country) => !insights.targetMarkets.includes(country.country)).slice(0, 3);
     drafts.push({
+      checkId: "search.market_mismatch",
       title: "Most search visibility comes from outside your target market",
       summary: `${insights.targetMarkets.map(countryName).join(", ")} ${insights.targetMarkets.length > 1 ? "account" : "accounts"} for ${pct(insights.targetShare.impressions)} of impressions and ${pct(insights.targetShare.clicks)} of clicks; ${outside.map((country) => `${country.name} ${pct(country.impressionShare)}`).join(", ")}. More pages of the same kind are unlikely to change who finds you; content in the market's language and for its searches will.`,
       recommendation: "Set the page language to your market's language, scope datasets around what that market searches for (treatments, costs, cities), and add hreflang if you publish several languages.",
@@ -228,6 +229,7 @@ export function findingsFromSearch(insights: SearchInsights, siteId: string, ana
   if (entity && entity.share >= 0.5 && insights.commercialShare < 0.15 && totals.clicks >= 50) {
     const top = entity.byType[0]!;
     drafts.push({
+      checkId: "search.navigational",
       title: `Search traffic is mostly people looking up a ${top.entityType} by name`,
       summary: `${pct(entity.share)} of clicks come from searches naming a specific ${top.entityType} (e.g. ${top.examples.slice(0, 2).map((query) => `“${query}”`).join(", ")}), and only ${pct(insights.commercialShare)} from commercial-intent searches. Name lookups convert poorly; the demand that produces customers (costs, treatments, comparisons) isn't being captured.`,
       recommendation: "Build landing pages around commercial intent — cost, comparison, and service × location pages — and link to them from the pages that already rank for names.",
@@ -239,6 +241,7 @@ export function findingsFromSearch(insights: SearchInsights, siteId: string, ana
   if (insights.lowCtrPages.length >= 2) {
     const lost = insights.lowCtrPages.reduce((sum, page) => sum + page.impressions * (page.expectedCtr - page.ctr), 0);
     drafts.push({
+      checkId: "search.low_ctr",
       title: "Pages on page one that searchers skip",
       summary: `${insights.lowCtrPages.length} pages rank in the top 10 but get under half the clicks their position usually earns — roughly ${count(Math.round(lost))} clicks a month left on the table. Their titles and descriptions don't match what people searched for.`,
       recommendation: "Rewrite the title and meta description of each page around its top queries and the most compelling concrete fact (price, location, rating).",
@@ -249,6 +252,7 @@ export function findingsFromSearch(insights: SearchInsights, siteId: string, ana
   }
   if (insights.cannibalized.length >= 3) {
     drafts.push({
+      checkId: "search.cannibalisation",
       title: "Several pages compete for the same searches",
       summary: `${insights.cannibalized.length} queries split their impressions across two or more of your pages (e.g. “${insights.cannibalized[0]!.query}” across ${insights.cannibalized[0]!.pages.length} pages). Google picks between them, and neither ranks as well as one strong page would.`,
       recommendation: "For each query, pick the page that should rank: merge or redirect the weaker one, or differentiate it and link from it to the main page.",
@@ -258,15 +262,7 @@ export function findingsFromSearch(insights: SearchInsights, siteId: string, ana
     });
   }
   const createdAt = new Date().toISOString();
-  return drafts.map((draft) => ({
-    id: createId("finding"),
-    siteId,
-    analysisId,
-    category: "search" as const,
-    severity: severityFromImpact(draft.organicImpactScore),
-    ...draft,
-    createdAt,
-  }));
+  return drafts.map(({ checkId, organicImpactScore: impact, ...rest }) => finding(CHECKS[checkId]!, { ...rest, siteId, analysisId, impact, createdAt }));
 }
 
 /** The pages and queries closest to more clicks, as prioritized opportunities. */

@@ -1,5 +1,5 @@
 import {
-  createId, dropFromPeak, googlebotPace, latestAverage, peakAverage, referringDomainGap, serpCrowding, serpLookup, severityFromImpact,
+  createId, dropFromPeak, googlebotPace, latestAverage, peakAverage, referringDomainGap, serpCrowding, serpLookup, CHECKS, finding,
   type CompetitorSuggestion, type CrawlDayRow, type CrawlLogView, type DayPoint, type Finding, type FindingCategory, type JsonObject, type LinksInput, type Opportunity, type SerpResult,
 } from "@organic-growth/core";
 import type { SearchConsoleReconciliation } from "@organic-growth/db";
@@ -33,6 +33,8 @@ export type TrendSignals = {
   today: string;
 };
 
+import type { RankSignals } from "./rank-findings.js";
+
 export type ConnectorSignals = {
   serp?: SerpResult[];
   suggestions?: CompetitorSuggestion[];
@@ -41,12 +43,13 @@ export type ConnectorSignals = {
   searchConsole?: SearchConsoleSignal | null;
   trends?: TrendSignals | null;
   inventory?: InventorySignal[];
+  ranks?: RankSignals | null;
 };
 
 /** Fewer days of logs than this say nothing about what Googlebot skips. */
 const MIN_LOG_DAYS = 14;
 
-type Draft = { category: FindingCategory; impact: number; title: string; summary: string; evidence: JsonObject; recommendation: string; pagesAffected?: string[] };
+type Draft = { checkId: string; scopeKey?: string; category: FindingCategory; impact: number; title: string; summary: string; evidence: JsonObject; recommendation: string; pagesAffected?: string[] };
 
 const share = (part: number, whole: number) => `${Math.round((part / whole) * 100)}%`;
 
@@ -66,6 +69,7 @@ export function findingsFromCrawlLog(input: { siteId: string; analysisId: string
       // Impact grows with the share skipped and with how many pages that is.
       const impact = Math.min(85, Math.round(30 + ratio * 35 + Math.min(20, family.unrequested / 200)));
       drafts.push({
+        checkId: "crawl.unrequested", scopeKey: family.family,
         category: "indexing", impact,
         title: `Googlebot hasn't requested ${share(family.unrequested, family.sitemapUrls)} of the /${family.family}/ pages in ${coverage.days} days`,
         summary: `Your logs show no Googlebot request for ${family.unrequested.toLocaleString("en")} of the ${family.sitemapUrls.toLocaleString("en")} /${family.family}/ URLs in the sitemap over the last ${coverage.days} days. A page Google doesn't fetch can't be indexed or refreshed.`,
@@ -79,6 +83,7 @@ export function findingsFromCrawlLog(input: { siteId: string; analysisId: string
   const wasted = statuses.redirects + statuses.clientErrors + statuses.serverErrors;
   if (totals.googlebot >= 200 && wasted / totals.googlebot >= 0.2) {
     drafts.push({
+      checkId: "crawl.budget_wasted",
       category: "indexing", impact: statuses.serverErrors / totals.googlebot >= 0.05 ? 60 : 42,
       title: `${share(wasted, totals.googlebot)} of Googlebot's requests hit redirects or errors`,
       summary: `Of ${totals.googlebot.toLocaleString("en")} Googlebot requests in 28 days, ${statuses.redirects.toLocaleString("en")} were redirected, ${statuses.clientErrors.toLocaleString("en")} got a 4xx and ${statuses.serverErrors.toLocaleString("en")} a 5xx. Each one is a request not spent on a page you want indexed${statuses.serverErrors ? "; server errors also make Google crawl more slowly" : ""}.`,
@@ -88,6 +93,7 @@ export function findingsFromCrawlLog(input: { siteId: string; analysisId: string
   }
   if (totals.googlebot >= 200 && parameterHits / totals.googlebot >= 0.25) {
     drafts.push({
+      checkId: "crawl.budget_parameters",
       category: "indexing", impact: 30,
       title: `${share(parameterHits, totals.googlebot)} of Googlebot's requests are for URLs with query strings`,
       summary: `${parameterHits.toLocaleString("en")} of ${totals.googlebot.toLocaleString("en")} Googlebot requests in 28 days asked for URLs with a query string (filters, sorting, tracking). They usually duplicate other pages.`,
@@ -96,11 +102,7 @@ export function findingsFromCrawlLog(input: { siteId: string; analysisId: string
     });
   }
   const createdAt = new Date().toISOString();
-  return drafts.map((draft) => ({
-    id: createId("finding"), siteId: input.siteId, analysisId: input.analysisId, category: draft.category, severity: severityFromImpact(draft.impact),
-    title: draft.title, summary: draft.summary, evidence: draft.evidence, organicImpactScore: draft.impact, recommendation: draft.recommendation,
-    pagesAffected: draft.pagesAffected ?? [], createdAt,
-  }));
+  return drafts.map(({ checkId, category: _category, impact, ...rest }) => finding(CHECKS[checkId]!, { ...rest, siteId: input.siteId, analysisId: input.analysisId, impact, createdAt }));
 }
 
 /** One opportunity for the whole link gap: the sites that already link to competitors are the likeliest to link to the site. */
@@ -157,6 +159,7 @@ export function findingsFromSearchConsoleImport(input: { siteId: string; analysi
   if (indexed !== null && known >= 100 && indexed / known < 0.5) {
     const rest = (view.summary?.rows ?? []).filter((row) => row.reason !== "indexed").sort((a, b) => b.pages - a.pages);
     drafts.push({
+      checkId: "index.coverage",
       category: "indexing", impact: Math.min(90, 55 + Math.round((0.5 - indexed / known) * 70)),
       title: `Google has indexed ${n(indexed)} of the ${n(known)} URLs it knows (${Math.round((indexed / known) * 100)}%)`,
       summary: `Search Console's Page indexing report counts ${n(known)} URLs on this site and ${n(indexed)} indexed.${rest.length ? ` The rest sit under ${rest.slice(0, 3).map((row) => `${row.reasonText} (${n(row.pages)})`).join(", ")}${rest.length > 3 ? " and more" : ""}.` : ""}`,
@@ -168,6 +171,7 @@ export function findingsFromSearchConsoleImport(input: { siteId: string; analysi
   if (noindex && noindex.today.indexable >= 10) {
     const also = [noindex.today.noindex && `${n(noindex.today.noindex)} are still noindex`, noindex.today.redirect && `${n(noindex.today.redirect)} redirect`, noindex.today.gone && `${n(noindex.today.gone)} are gone`].filter(Boolean);
     drafts.push({
+      checkId: "index.noindex_recovered",
       category: "indexing", impact: Math.min(80, 40 + Math.round(Math.log10(noindex.today.indexable + 1) * 12)),
       title: `${n(noindex.today.indexable)} URLs Google excluded as noindex are indexable now`,
       summary: `Google crawled ${n(noindex.urls)} URLs it found marked noindex; today ${n(noindex.today.indexable)} of them serve an indexable page${also.length ? `, ${also.join(", ")}` : ""}. Google only revisits when told.`,
@@ -181,6 +185,7 @@ export function findingsFromSearchConsoleImport(input: { siteId: string; analysi
     const matched = view.suggestions.length;
     const named = [...new Set([...view.suggestions.map((entry) => entry.url), ...view.reasons.flatMap((entry) => entry.examples.gone ?? [])])];
     drafts.push({
+      checkId: "index.gone_urls",
       category: "indexing", impact: Math.min(70, 30 + Math.round(Math.log10(gone + 1) * 12)),
       title: `${n(gone)} old URLs Google still crawls return 404; ${n(matched)} match a live page`,
       summary: `Across the imported reasons, ${n(gone)} URLs Google remembers now return 404 or 410. ${matched ? `${n(matched)} of them share their words with a live page of the same type, so the redirect is obvious.` : "None matches a live page by name."}`,
@@ -194,10 +199,7 @@ export function findingsFromSearchConsoleImport(input: { siteId: string; analysi
 
 const toFindings = (drafts: Draft[], input: { siteId: string; analysisId: string }): Finding[] => {
   const createdAt = new Date().toISOString();
-  return drafts.map((draft) => ({
-    id: createId("finding"), siteId: input.siteId, analysisId: input.analysisId, category: draft.category, severity: severityFromImpact(draft.impact),
-    title: draft.title, summary: draft.summary, evidence: draft.evidence, organicImpactScore: draft.impact, recommendation: draft.recommendation, pagesAffected: draft.pagesAffected, createdAt,
-  }));
+  return drafts.map(({ checkId, category: _category, impact, ...rest }) => finding(CHECKS[checkId]!, { ...rest, siteId: input.siteId, analysisId: input.analysisId, impact, createdAt }));
 };
 
 /** Thresholds for the trend findings, with their reasons. */
@@ -237,6 +239,7 @@ export function findingsFromTrends(input: { siteId: string; analysisId: string; 
     const share = Math.round((1 - current.average / peak.average) * 100);
     const together = indexedFall && Math.abs(Date.parse(indexedFall.peakDay) - Date.parse(peak.to)) <= 7 * DAY_MS ? indexedFall : null;
     drafts.push({
+      checkId: "trend.impressions_fell",
       category: "search", impact: Math.min(90, 50 + Math.round(share * 0.4)),
       title: `Search impressions fell ${share}% since ${shortDay(peak.to)}`,
       summary: `Search Console impressions averaged ${n(Math.round(peak.average))} a day in the week to ${shortDay(peak.to)} and ${n(Math.round(current.average))} a day in the week to ${shortDay(current.to)}.${together ? ` That is when Google's indexed count fell from ${n(together.peak)} to ${n(together.latest)}.` : ""}`,
@@ -246,6 +249,7 @@ export function findingsFromTrends(input: { siteId: string; analysisId: string; 
   }
   if (indexedFall) {
     drafts.push({
+      checkId: "trend.indexed_fell",
       category: "indexing", impact: Math.min(85, 45 + Math.round(indexedFall.share * 100)),
       title: `Google's indexed count fell from ${indexedFall.peak} to ${indexedFall.latest} since ${shortDay(indexedFall.peakDay)}`,
       summary: `${trends.indexedSource === "search_console" ? "Search Console's Page indexing chart" : "Eumon's URL inspection sample"} had ${n(indexedFall.peak)} pages indexed on ${shortDay(indexedFall.peakDay)} and ${n(indexedFall.latest)} on ${shortDay(indexedFall.latestDay)}: ${Math.round(indexedFall.share * 100)}% fewer.`,
@@ -258,6 +262,7 @@ export function findingsFromTrends(input: { siteId: string; analysisId: string; 
     const days = Math.ceil(input.sitemapUrls / pace.perDay);
     if (days > TREND.paceDays) {
       drafts.push({
+        checkId: "trend.googlebot_pace",
         category: "indexing", impact: Math.min(80, 40 + Math.min(40, Math.round(days / 10))),
         title: `At Googlebot's pace the sitemap takes ${days} days to crawl once`,
         summary: `Googlebot made about ${n(Math.round(pace.perDay))} requests a day over the last ${pace.days} days of logs, and the sitemap lists ${n(input.sitemapUrls)} URLs.${input.discovered ? ` Search Console lists ${n(input.discovered)} of them as discovered but not yet crawled.` : ""}`,
@@ -299,6 +304,7 @@ export function findingsFromInventory(input: { siteId: string; analysisId: strin
     if (gap) {
       const missing = records - gap.filled;
       drafts.push({
+        checkId: "data.missing_field", scopeKey: dataset.id,
         category: "content", impact: Math.min(75, 40 + Math.round((missing / records) * 60)),
         title: `${n(missing)} of ${n(records)} ${entities} have no ${gap.label}`,
         summary: `${filledShare(gap.filled, records)} of the ${n(records)} ${entities} in ${dataset.name} have ${gap.label} filled; ${n(missing)} don't. A page built from one of those records has nothing to say${gap.language ? ` in ${gap.language}` : ""}, so it is thin${gap.language ? ` in ${gap.language} search results` : ""} or left out.`,
@@ -309,6 +315,7 @@ export function findingsFromInventory(input: { siteId: string; analysisId: strin
     const duplicates = inventory.duplicates;
     if (duplicates.records >= INVENTORY.minDuplicateRecords) {
       drafts.push({
+        checkId: "data.duplicates", scopeKey: dataset.id,
         category: "content", impact: Math.min(70, 35 + Math.round(Math.log10(duplicates.records + 1) * 10)),
         title: `${n(duplicates.records)} ${entities} are listed more than once`,
         summary: `${n(duplicates.groups)} name${duplicates.groups === 1 ? "" : "s"} in ${dataset.name} appear${duplicates.groups === 1 ? "s" : ""} on more than one record${duplicates.examples[0] ? ` (${duplicates.examples.slice(0, 3).map((group) => `${group.name} ×${group.keys.length}`).join(", ")})` : ""}. Those records may be the same ${dataset.entityType} listed twice, each with its own page saying the same thing: Google keeps one and the clicks split.`,
@@ -319,6 +326,7 @@ export function findingsFromInventory(input: { siteId: string; analysisId: strin
     const pages = inventory.pages;
     if (pages && pages.thin >= INVENTORY.minThin && pages.thin >= pages.linked * INVENTORY.minThinShare) {
       drafts.push({
+        checkId: "content.thin_records", scopeKey: dataset.id,
         category: "content", impact: Math.min(80, 40 + Math.round((pages.thin / pages.linked) * 60)),
         title: `${n(pages.thin)} ${dataset.entityType} pages have almost no content`,
         summary: `Of the ${n(pages.linked)} ${dataset.entityType} pages the records point to, ${n(pages.thin)} answered with an empty shell or under ${INVENTORY.thinChars} characters of text in the crawl${pages.gone ? `, ${n(pages.gone)} answer 404 or 410` : ""}${pages.unreached ? `, and ${n(pages.unreached)} were not reached` : ""}. Google indexes few thin pages and ranks fewer.`,
@@ -329,9 +337,5 @@ export function findingsFromInventory(input: { siteId: string; analysisId: strin
     }
   }
   const createdAt = new Date().toISOString();
-  return drafts.map((draft) => ({
-    id: createId("finding"), siteId: input.siteId, analysisId: input.analysisId, category: draft.category, severity: severityFromImpact(draft.impact),
-    title: draft.title, summary: draft.summary, evidence: draft.evidence, organicImpactScore: draft.impact, recommendation: draft.recommendation,
-    pagesAffected: draft.pagesAffected ?? [], createdAt,
-  }));
+  return drafts.map(({ checkId, category: _category, impact, ...rest }) => finding(CHECKS[checkId]!, { ...rest, siteId: input.siteId, analysisId: input.analysisId, impact, createdAt }));
 }

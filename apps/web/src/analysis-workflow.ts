@@ -10,6 +10,7 @@ import {
   getCrawlCoverage,
   getSite,
   listCrawlPageResults,
+  probePages,
   listPendingCrawlUrls,
   listRecordKeys,
   listSiteMarkets,
@@ -22,7 +23,7 @@ import {
   updateSiteFingerprint,
 } from "@organic-growth/db";
 import {
-  MAX_COMPETITORS, crawlLogCoverage, fetchSearchConsoleMetrics, loadInventories, loadTrendSignals, probeTitleForCoverage, queueFullCrawl, runFullAnalysis, synthesizePlanNarrative,
+  MAX_COMPETITORS, crawlLogCoverage, fetchSearchConsoleMetrics, loadInventories, loadRankSignals, loadTrendSignals, probeTitleForCoverage, queueFullCrawl, runFullAnalysis, synthesizePlanNarrative,
 } from "@organic-growth/agents";
 import {
   buildRepoSnapshotFromGitHub,
@@ -31,7 +32,11 @@ import {
 } from "@organic-growth/repo-analyzer";
 import {
   crawlGooglebotBatch,
+  defaultFetcher,
   isSafePublicUrl,
+  probeAiCrawlers,
+  probeHost,
+  robotsState,
   researchSite,
   type SiteResearch,
   probeNotFound,
@@ -102,6 +107,29 @@ export class SiteAnalysisWorkflow extends WorkflowEntrypoint<AppEnv, AnalysisPay
         if (crawled === 0) break;
       }
 
+      // Coverage in its own step: its queries get their own budget (the Free plan allows 50 a request).
+      // The not-found probe runs first because coverage counts pages carrying its title as soft 404s.
+      const { coverage, notFoundProbe } = await step.do("coverage", { retries: { limit: 2, delay: "5 seconds", backoff: "exponential" } }, async () => {
+        await progress("analysis", "Counting what the crawl found");
+        // One fetch of a URL that cannot exist: a site that answers 200 for it is a soft-404 site, and pages carrying that title are soft 404s.
+        const probe = await probeNotFound(site.baseUrl, analysisId).catch(() => undefined);
+        return { notFoundProbe: probe, coverage: await getCrawlCoverage(db, analysisId, { notFoundTitle: probeTitleForCoverage(probe) }) };
+      });
+
+      // How AI crawlers and the host answer: each AI agent robots.txt allows, on the homepage and one page per template
+      // (7 agents × 6 pages), plus the other host form, the HTTP homepage, HSTS and llms.txt: 47 fetches at most.
+      const hostProbe = await step.do("probe-ai-crawlers", { retries: { limit: 1, delay: "10 seconds" } }, async () => {
+        await progress("analysis", "Checking how AI crawlers and the host answer");
+        const [robotsResponse, sample] = await Promise.all([
+          defaultFetcher(new URL("/robots.txt", site.baseUrl).toString(), { maxBytes: 500_000 }).catch(() => null),
+          probePages(db, analysisId, 5),
+        ]);
+        const robots = robotsState(robotsResponse);
+        const pages = [new URL("/", site.baseUrl).toString(), ...sample];
+        const ai = robots.robots === "unreadable" ? [] : await probeAiCrawlers([...new Set(pages)], robots.body ?? null, defaultFetcher);
+        return { ai, host: await probeHost(site.baseUrl, defaultFetcher), robotsReadable: robots.robots !== "unreadable" };
+      });
+
       // Each competitor is researched in its own step (sitemaps and a few sample
       // pages, fetched as EumonBot), so one slow site can retry on its own.
       const competitorDomains = await step.do("list-competitors", async () => {
@@ -152,10 +180,7 @@ export class SiteAnalysisWorkflow extends WorkflowEntrypoint<AppEnv, AnalysisPay
             searchMetrics = await fetchSearchConsoleMetrics(accessToken, site.gscProperty);
             await replaceCurrentSearchMetrics(db, siteId, searchMetrics);
           }
-          // One fetch of a URL that cannot exist: a site that answers 200 for it is a soft-404 site, and pages carrying that title are soft 404s.
-          const notFoundProbe = await probeNotFound(site.baseUrl, analysisId).catch(() => undefined);
-          const [coverage, examples, datasets, targetMarkets, entityKeys, competitors] = await Promise.all([
-            getCrawlCoverage(db, analysisId, { notFoundTitle: probeTitleForCoverage(notFoundProbe) }),
+          const [examples, datasets, targetMarkets, entityKeys, competitors] = await Promise.all([
             listCrawlPageResults(db, analysisId, 50),
             datasetCoverage(db, siteId),
             listSiteMarkets(db, siteId),
@@ -170,7 +195,7 @@ export class SiteAnalysisWorkflow extends WorkflowEntrypoint<AppEnv, AnalysisPay
             loadConnectorLists(db, { id: siteId, baseUrl: site.baseUrl }, { markets: targetMarkets, competitors }),
             crawlLogCoverage(db, siteId, analysisId),
             searchConsoleReconciliation(db, siteId, analysisId).catch(() => null),
-          ]).then(async ([lists, coverage, searchConsole]) => connectorSignals(lists, coverage, searchConsole, await loadTrendSignals(db, siteId, lists.crawlLog).catch(() => null), inventory)).catch(() => connectorSignals({ serp: { lists: [], suggestions: [] }, links: undefined } as never, null, null, null, inventory));
+          ]).then(async ([lists, coverage, searchConsole]) => connectorSignals(lists, coverage, searchConsole, await loadTrendSignals(db, siteId, lists.crawlLog).catch(() => null), inventory, await loadRankSignals(db, siteId).catch(() => null))).catch(() => connectorSignals({ serp: { lists: [], suggestions: [] }, links: undefined } as never, null, null, null, inventory, null));
           const raw = await runFullAnalysis({
             analysisId,
             siteId,
@@ -188,6 +213,7 @@ export class SiteAnalysisWorkflow extends WorkflowEntrypoint<AppEnv, AnalysisPay
             keywords,
             connectors,
             notFoundProbe,
+            hostProbe,
             llm,
             repoSnapshot,
             maxPages: 25,

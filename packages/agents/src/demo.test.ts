@@ -108,6 +108,10 @@ describe("demo site", () => {
     const report = (await getAnalysisJob(db, "analysis_demo_2"))!.report as { findings: Array<{ title: string }> };
     const pace = report.findings.find((finding) => finding.title.startsWith("At Googlebot's pace"));
     assert.ok(pace, report.findings.map((finding) => finding.title).join(" | "));
+    const drop = report.findings.find((finding) => finding.title.includes("dropped out of the top 10"));
+    assert.ok(drop, report.findings.map((finding) => finding.title).join(" | "));
+    const { opportunities } = (await getAnalysisJob(db, "analysis_demo_2"))!.report as unknown as { opportunities: Array<{ title: string }> };
+    assert.ok(opportunities.some((opportunity) => opportunity.title.includes("\u201c" + "fillings cost kuala lumpur" + "\u201d")), opportunities.map((opportunity) => opportunity.title).join(" | "));
     assert.ok(!report.findings.some((finding) => /^Search impressions fell|^Google's indexed count fell/.test(finding.title)), "the demo's numbers rise");
   });
 
@@ -120,5 +124,21 @@ describe("demo site", () => {
     assert.ok(!titles.includes("The site answers 200 for pages that don't exist"), "the demo's unknown URLs are real 404s");
     const report = (await getAnalysisJob(db, "analysis_demo_2"))!.report as { notFoundProbe?: { status: number } };
     assert.equal(report.notFoundProbe?.status, 404, "the probe's answer is kept on the report");
+  });
+});
+
+describe("demo site audit", () => {
+  it("shows every new check at least once, and both health scores", async () => {
+    const db = openSqliteD1();
+    await seedDemoSite(db, Date.now());
+    type Report = { findings: Array<{ checkId?: string; title: string }>; audit: { seo: { value: number | null }; ai: { value: number | null; reason?: string }; checks: Array<{ id: string; status: string }> } };
+    const report = (await getAnalysisJob(db, "analysis_demo_2"))!.report as Report;
+    const failed = new Set(report.findings.map((finding) => finding.checkId));
+    for (const id of ["http.redirect_chain", "security.mixed_content", "ai.snippet_blocked", "links.orphan", "links.broken_internal", "ai.stale", "ai.no_author", "url.year_in_slug", "security.hsts_missing", "ai.crawler_refused", "image.alt_missing", "title.length"]) {
+      assert.ok(failed.has(id), `${id} not in ${[...failed].join(", ")}`);
+    }
+    assert.ok(typeof report.audit.seo.value === "number" && report.audit.seo.value > 0 && report.audit.seo.value < 100, `SEO ${report.audit.seo.value}`);
+    assert.ok(typeof report.audit.ai.value === "number" && report.audit.ai.value > 0, `AI ${report.audit.ai.value} ${report.audit.ai.reason ?? ""}`);
+    assert.equal(report.audit.checks.length, 94);
   });
 });

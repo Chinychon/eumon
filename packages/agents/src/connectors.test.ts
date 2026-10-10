@@ -35,7 +35,7 @@ describe("DataForSEO search results and backlinks", () => {
     };
     const { asked, fetchFn } = recorder(envelope({ result: [page] }));
     const { row } = await fetchSerp(auth, { keyword: "ivf cost", location: 2360, language: "id", site: "x.com", checkedAt: "2026-10-09", volume: 2400 }, fetchFn);
-    assert.equal(asked[0]!.url, "https://api.dataforseo.com/v3/serp/google/organic/live/advanced/live");
+    assert.equal(asked[0]!.url, "https://api.dataforseo.com/v3/serp/google/organic/live/advanced");
     assert.deepEqual((asked[0]!.body as object[])[0], { keyword: "ivf cost", location_code: 2360, language_code: "id", depth: 10, load_async_ai_overview: true });
     assert.deepEqual(row.features, ["ai_overview", "people_also_ask", "video"]);
     assert.deepEqual([row.position, row.url, row.cited], [2, "https://www.x.com/ivf", true]);

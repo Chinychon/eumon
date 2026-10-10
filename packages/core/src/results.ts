@@ -7,6 +7,8 @@ import { AI_ASSISTANTS, AI_ENGINES, type AiAssistant, type AiEngine } from "./ai
 import { keywordsView, type KeywordsInput } from "./keywords.js";
 import type { PageTypeOutcome } from "./whatsapp.js";
 import { linksView, type LinksInput, type LinksView } from "./links.js";
+import { addDays } from "./dates.js";
+import { ranksView, type RankCheck, type RanksView } from "./ranks.js";
 import { serpView, type CompetitorSuggestion, type SerpResult, type SerpView } from "./serp.js";
 import { crawlLogView, type CrawlDayRow, type CrawlLogView } from "./server-logs.js";
 import { SPEED_METRICS, speedRating, type SpeedMetric, type SpeedRating } from "./signals.js";
@@ -15,11 +17,7 @@ export type DayValue = { day: string; value: number };
 export type Compare = { current: number | null; before: number | null; previous: number | null };
 type Range = [string, string];
 
-export function addDays(day: string, n: number): string {
-  const date = new Date(`${day}T00:00:00Z`);
-  date.setUTCDate(date.getUTCDate() + n);
-  return date.toISOString().slice(0, 10);
-}
+export { addDays } from "./dates.js";
 
 /** The Monday on or before `day`; weeks run Monday to Sunday. */
 export function weekStart(day: string): string {
@@ -99,7 +97,8 @@ export const METRICS = {
     ...AI_ASSISTANTS.map(({ assistant }) => `ai_referral_visits.${assistant}`),
   ],
   /** Plus how many of the AI robots.txt tokens the site allows, of how many checked. */
-  analysis: ["site_health", "crawl_urls", "crawl_empty_shells", "crawl_http_errors", "crawl_noindex", "ai_crawlers_allowed", "ai_crawlers_checked"],
+  /** Plus the two health scores (`health_seo`, `health_ai`), their denominator and unhealthy counts, from the report's audit. */
+  analysis: ["site_health", "crawl_urls", "crawl_empty_shells", "crawl_http_errors", "crawl_noindex", "ai_crawlers_allowed", "ai_crawlers_checked", "health_seo", "health_ai", "health_pages", "health_unhealthy_seo", "health_unhealthy_ai"],
   /** Search Console: daily series (whole site, Eumon pages, target markets), Monday ranking buckets, index status. */
   search: [
     "sync.search", "sync.search@markets", "sync.rankings",
@@ -122,6 +121,8 @@ export const METRICS = {
   keywords: ["sync.competitor_keywords", "sync.keyword_volumes", "kw_top10", "kw_traffic"],
   /** Search results per query live in snapshots; these count the checked searches with an AI Overview, and those citing the site. */
   serp: ["sync.serp", "sync.serp_competitors", "serp_ai_overviews", "serp_ai_cited"],
+  /** Rank tracking: pairs checked a day, how many in the top 3 and 10, not in the ten, and the sum of ranked positions. */
+  ranks: ["sync.ranks", "tracked_checked", "tracked_top3", "tracked_top10", "tracked_unranked", "tracked_position_sum"],
   /** DataForSEO Backlinks: the site's profile. Plus `backlinks:<domain>`, `ref_domains:<domain>` and `backlink_rank:<domain>` for each current competitor. */
   backlinks: ["sync.backlinks", "backlinks", "ref_domains", "backlink_rank"],
   /** Bing Webmaster Tools: daily clicks and impressions (Bing and the products built on its index), and crawl counts. */
@@ -164,6 +165,8 @@ export type ResultsInput = {
   outcomes?: { currency: string | null; byPageType: PageTypeOutcome[] };
   /** Checked search results per market, and the domains suggested as competitors from them. */
   serp?: { lists: Array<{ market: string; periodEnd: string; rows: SerpResult[] }>; suggestions: CompetitorSuggestion[] };
+  /** The tracked keywords and their daily checks (last 90 days). */
+  ranks?: { tracked: string[]; checks: RankCheck[] };
   /** Link profiles for the site and each current competitor, and the link gap. */
   links?: LinksInput;
   /** Crawler requests from the site's server or CDN logs, per day; undefined when no log has been received. */
@@ -208,6 +211,8 @@ export type ResultsView = {
     funnel: Array<{ label: string; value: number }> | null;
   };
   health: { value: number | null; day: string | null };
+  /** Each pillar's health score from the latest analysis, and the latest one on or before 28 days ago. */
+  scores: Record<"seo" | "ai", { value: number | null; before: number | null; day: string | null }>;
   speed: {
     /** Whether CrUX has been asked yet; asked with no values means too few Chrome visits. */
     measured: boolean;
@@ -225,6 +230,7 @@ export type ResultsView = {
     byPageType: PageTypeOutcome[];
   };
   serp: SerpView;
+  ranks: RanksView;
   links: LinksView & { history: DayValue[] };
   /** Bing Webmaster Tools; null until its first sync. */
   bing: {
@@ -352,6 +358,7 @@ export function resultsView(input: ResultsInput): ResultsView {
     byPageType: input.outcomes?.byPageType ?? [],
   };
   const serp = serpView(input.serp?.lists ?? [], input.serp?.suggestions ?? []);
+  const ranks = ranksView({ tracked: input.ranks?.tracked ?? [], markets: input.markets, checks: input.ranks?.checks ?? [], today: input.today });
   const links = { ...linksView(input.links ?? { site: keywordLists.site, competitors: input.competitors ?? [], synced: false, summaries: [], gap: null }), history: series.ref_domains ?? [] };
   // Bing reports through yesterday, like the first-party numbers.
   const bingImpressions = weekly(series.bing_impressions, from, today, addDays(today, -1));
@@ -429,6 +436,10 @@ export function resultsView(input: ResultsInput): ResultsView {
       value: latest(series.site_health, today),
       day: series.site_health?.length ? series.site_health[series.site_health.length - 1]!.day : null,
     },
-    speed, lab, authority, keywords, serp, links, bing, indexNow, crawlLog, outcomes, ai,
+    scores: {
+      seo: { value: latest(series.health_seo, today), before: latest(series.health_seo, addDays(today, -28)), day: series.health_seo?.at(-1)?.day ?? null },
+      ai: { value: latest(series.health_ai, today), before: latest(series.health_ai, addDays(today, -28)), day: series.health_ai?.at(-1)?.day ?? null },
+    },
+    speed, lab, authority, keywords, serp, ranks, links, bing, indexNow, crawlLog, outcomes, ai,
   };
 }

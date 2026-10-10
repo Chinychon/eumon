@@ -1,4 +1,4 @@
-import { createId, severityFromImpact, type Finding } from "@organic-growth/core";
+import { CHECKS, finding, type Finding } from "@organic-growth/core";
 
 /** What the site answered for a URL that cannot exist (`probeNotFound` in the crawler); `finalUrl` is where it was sent. */
 export type NotFoundProbe = { url: string; finalUrl?: string; status: number; title?: string };
@@ -19,13 +19,11 @@ export function probeTitleForCoverage(probe: NotFoundProbe | null | undefined): 
 export function notFoundProbeFinding(probe: NotFoundProbe, siteId: string, analysisId: string): Finding | null {
   if (probe.status >= 400) return null;
   const impact = 62;
-  return {
-    id: createId("finding"), siteId, analysisId, category: "indexing", severity: severityFromImpact(impact),
+  return finding(CHECKS["server.soft_404_probe"]!, {
+    siteId, analysisId, impact,
     title: "The site answers 200 for pages that don't exist",
     summary: `A URL that cannot exist (${new URL(probe.url).pathname}) ${sentHome(probe) ? `redirects to the homepage and answers ${probe.status}` : `answered ${probe.status}${probe.title ? ` with the title “${probe.title}”` : ""}`}. Google treats such pages as soft 404s: it crawls them, indexes nothing, and returns, and every old link or typo becomes a page it has to check.`,
     evidence: { url: probe.url, finalUrl: probe.finalUrl ?? null, status: probe.status, title: probe.title ?? null },
-    organicImpactScore: impact,
     recommendation: "Return a real 404 (or 410 for pages taken down) with the not-found page's content, so Google drops dead URLs instead of re-crawling them.",
-    createdAt: new Date().toISOString(),
-  };
+  });
 }

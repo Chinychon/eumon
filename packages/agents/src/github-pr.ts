@@ -23,20 +23,15 @@ export interface PullRequestResult {
 export async function createGitHubPullRequest(
   token: string,
   input: PullRequestInput,
+  fetchFn: typeof fetch = fetch,
 ): Promise<PullRequestResult> {
   if (!token) throw new Error("A GitHub token is required.");
   if (!Object.keys(input.files).length) throw new Error("At least one changed file is required.");
   const api = `https://api.github.com/repos/${encodeURIComponent(input.owner)}/${encodeURIComponent(input.repo)}`;
-  const headers = {
-    Accept: "application/vnd.github+json",
-    Authorization: `Bearer ${token}`,
-    "X-GitHub-Api-Version": "2022-11-28",
-    "Content-Type": "application/json",
-  };
   const request = async <T>(path: string, method: string, body?: unknown): Promise<T> => {
-    const response = await fetch(`${api}${path}`, {
+    const response = await fetchFn(`${api}${path}`, {
       method,
-      headers,
+      headers: { ...headers(token), "Content-Type": "application/json" },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     if (!response.ok) throw new Error(`GitHub API ${method} ${path} failed: ${response.status} ${await response.text()}`);

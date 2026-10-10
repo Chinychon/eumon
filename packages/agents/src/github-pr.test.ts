@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { checkStateOf, closePullRequest, combinedCheckState, commentOnPullRequest, getFileWithSha, latestPreviewUrl, markReadyForReview } from "./github-pr.js";
+import { checkStateOf, closePullRequest, combinedCheckState, commentOnPullRequest, createGitHubPullRequest, getFileWithSha, latestPreviewUrl, markReadyForReview } from "./github-pr.js";
 
 function fake(routes: Record<string, unknown>) {
   const calls: Array<{ url: string; init?: RequestInit }> = [];
@@ -67,5 +67,16 @@ describe("github helpers", () => {
     const { fetchFn } = fake({});
     await assert.rejects(closePullRequest("t", "a", "b", 9, fetchFn), /wasn't found/);
     await assert.rejects(commentOnPullRequest("t", "a", "b", 9, "hi", fetchFn), /wasn't found/);
+  });
+
+  it("sends a User-Agent on every call when opening a pull request (C2)", async () => {
+    const { fetchFn, calls } = fake({
+      "/git/ref/heads/main": { object: { sha: "c0" } }, "/git/commits/c0": { tree: { sha: "t0" } }, "/git/blobs": { sha: "b1" },
+      "/git/trees": { sha: "t1" }, "/git/commits": { sha: "c1" }, "/git/refs": {}, "/pulls": { number: 7, html_url: "https://github.com/a/b/pull/7", node_id: "N" },
+    });
+    const pr = await createGitHubPullRequest("t", { owner: "a", repo: "b", branch: "eumon/x", baseBranch: "main", title: "T", body: "B", files: { "public/llms.txt": "x" } }, fetchFn);
+    assert.deepEqual(pr, { number: 7, url: "https://github.com/a/b/pull/7", nodeId: "N", headSha: "c1" });
+    assert.equal(calls.length, 7);
+    for (const call of calls) assert.equal((call.init!.headers as Record<string, string>)["User-Agent"], "Eumon", call.url);
   });
 });

@@ -60,7 +60,16 @@ export function createAuth(env: AuthEnv) {
       sendOnSignUp: true,
       sendVerificationEmail: async ({ user, url }) => deliver(env, user.email, "Confirm your email for Eumon", `Confirm your email here: ${url}`),
     },
-    socialProviders: { google: { clientId: env.GOOGLE_CLIENT_ID, clientSecret: env.GOOGLE_CLIENT_SECRET } },
+    socialProviders: { google: {
+        clientId: env.GOOGLE_CLIENT_ID,
+        clientSecret: env.GOOGLE_CLIENT_SECRET,
+        // The same OAuth client also grants Search Console; keep sign-in tokens sign-in scoped.
+        includeGrantedScopes: false,
+      },
+    },
+    account: { encryptOAuthTokens: true },
+    // On Cloudflare the real client IP is cf-connecting-ip (used for captcha remoteIP and session records).
+    advanced: { ipAddress: { ipAddressHeaders: ["cf-connecting-ip"] } },
     session: {
       expiresIn: 60 * 60 * 24 * 30,
       // D1 is on the free plan: re-check the session in D1 at most every 5 minutes, and extend it at most daily.
@@ -101,7 +110,12 @@ export function createAuth(env: AuthEnv) {
         },
       }),
       ...(emailEnabled(env) ? [magicLink({ sendMagicLink: async ({ email, url }) => deliver(env, email, "Your Eumon sign-in link", `Sign in here: ${url}`) })] : []),
-      captcha({ provider: "cloudflare-turnstile", secretKey: env.TURNSTILE_SECRET_KEY }),
+      captcha({
+        provider: "cloudflare-turnstile",
+        secretKey: env.TURNSTILE_SECRET_KEY,
+        // Defaults plus magic link (which also creates accounts) and verification email.
+        endpoints: ["/sign-up/email", "/sign-in/email", "/sign-in/magic-link", "/request-password-reset", "/send-verification-email"],
+      }),
     ],
   });
 }

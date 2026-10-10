@@ -8,3 +8,5 @@ export * from "./code.js";
 export * from "./snippet.js";
 export * from "./edit/metadata.js";
 export * from "./edit/jsonld.js";
+export * from "./edit/llms-txt.js";
+export * from "./edit/ai-robots.js";

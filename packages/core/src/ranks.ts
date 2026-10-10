@@ -16,6 +16,8 @@ export type RankCheck = { keyword: string; market: string; day: string; position
 export type RankChange = { kind: "none" | "same" | "up" | "down" | "entered" | "left"; places: number };
 export type RankRow = {
   keyword: string; market: string; position: number | null; url: string | null; features: string[];
+  /** At least one check exists for the pair; an unchecked row's null position means "not checked yet", not "not in the ten". */
+  checked: boolean;
   change7: RankChange; change30: RankChange; best: number | null;
   series: Array<{ day: string; position: number | null }>;
 };
@@ -51,14 +53,15 @@ export function ranksView(input: { tracked: string[]; markets: string[]; checks:
       const monthAgo = latest ? addDays(latest.day, -30) : input.today;
       const ranked = series.filter((row) => row.day > monthAgo && row.position !== null).map((row) => row.position!);
       rows.push({
-        keyword, market, position: latest?.position ?? null, url: latest?.url ?? null, features: latest?.features ?? [],
+        keyword, market, position: latest?.position ?? null, url: latest?.url ?? null, features: latest?.features ?? [], checked: series.length > 0,
         change7: change(latest && at(series, addDays(latest.day, -7)), latest), change30: change(latest && at(series, monthAgo), latest),
         best: ranked.length ? Math.min(...ranked) : null,
         series: series.filter((row) => row.day > addDays(input.today, -RANK_SERIES_DAYS)).map((row) => ({ day: row.day, position: row.position })),
       });
     }
   }
-  rows.sort((a, b) => (a.position ?? 99) - (b.position ?? 99) || a.keyword.localeCompare(b.keyword) || a.market.localeCompare(b.market));
+  // Ranked by position, then not in the ten, then never checked.
+  rows.sort((a, b) => (a.position ?? (a.checked ? 99 : 100)) - (b.position ?? (b.checked ? 99 : 100)) || a.keyword.localeCompare(b.keyword) || a.market.localeCompare(b.market));
   const checked = rows.filter((row) => row.series.length);
   const positions = checked.filter((row) => row.position !== null).map((row) => row.position!);
   return {

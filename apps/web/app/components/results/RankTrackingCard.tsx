@@ -64,6 +64,8 @@ export function RankTrackingCard({ ranks, siteId, operator, hasCredentials, hasM
     : !ranks.tracked ? (operator ? null : "No keywords are tracked yet.")
     : !ranks.checked ? "First check at the next sync." : null;
   const keywordCount = draft.split("\n").filter((line) => line.trim()).length;
+  // A pair not checked yet (just added, an uncovered market, a failed check) has no position to report; the client link leaves it out.
+  const rows = operator ? ranks.rows : ranks.rows.filter((row) => row.checked);
   return (
     <Card title="Rank tracking" subtitle={`Google's position for each keyword, checked daily in your target markets by DataForSEO${ranks.asOf ? ` (last on ${formatDay(ranks.asOf)})` : ""}.`}>
       {empty && <p className="empty-state">{empty}</p>}
@@ -79,16 +81,29 @@ export function RankTrackingCard({ ranks, siteId, operator, hasCredentials, hasM
           <div className="table-wrap">
             <table className="table top-queries">
               <thead><tr><th>Keyword</th><th>Market</th><th className="num">Position</th><th className="num">7 days</th><th className="num">30 days</th><th className="num">Best</th><th>Page</th><th>On the page</th></tr></thead>
-              <tbody>{ranks.rows.map((row) => (
+              <tbody>{rows.map((row) => (
                 <tr key={`${row.keyword}|${row.market}`}>
                   <td>{row.keyword}</td>
                   <td>{countryName(row.market)}</td>
-                  <td className="num">{row.position === null ? <Badge tone="gray">not in top 10</Badge> : <Badge tone={positionTone(row.position)}>{row.position}</Badge>}</td>
-                  <td className="num"><Change change={row.change7} /></td>
-                  <td className="num"><Change change={row.change30} /></td>
-                  <td className="num">{row.best ?? "—"}</td>
-                  <td>{row.url ? <a href={row.url} target="_blank" rel="noreferrer">{new URL(row.url).pathname}</a> : "—"}</td>
-                  <td>{row.features.map((feature) => <Badge key={feature} tone="gray">{FEATURE_LABEL[feature] ?? feature}</Badge>)}</td>
+                  {row.checked ? (
+                    <>
+                      <td className="num">{row.position === null ? <Badge tone="gray">not in top 10</Badge> : <Badge tone={positionTone(row.position)}>{row.position}</Badge>}</td>
+                      <td className="num"><Change change={row.change7} /></td>
+                      <td className="num"><Change change={row.change30} /></td>
+                      <td className="num">{row.best ?? "—"}</td>
+                      <td>{row.url ? <a href={row.url} target="_blank" rel="noreferrer">{new URL(row.url).pathname}</a> : "—"}</td>
+                      <td>{row.features.map((feature) => <Badge key={feature} tone="gray">{FEATURE_LABEL[feature] ?? feature}</Badge>)}</td>
+                    </>
+                  ) : (
+                    <>
+                      <td className="num muted">not checked yet</td>
+                      <td className="num muted">—</td>
+                      <td className="num muted">—</td>
+                      <td className="num muted">—</td>
+                      <td className="muted">—</td>
+                      <td className="muted">—</td>
+                    </>
+                  )}
                 </tr>
               ))}</tbody>
             </table>

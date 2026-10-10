@@ -357,3 +357,19 @@ describe("crawl queue query plans", () => {
     );
   });
 });
+
+describe("content signals in result_json", async () => {
+  const db = openSqliteD1();
+  const now = new Date().toISOString();
+  await upsertSite(db, { id: "cs", name: "y.com", baseUrl: "https://y.com", createdAt: now, updatedAt: now });
+  await createAnalysis(db, { id: "cs1", siteId: "cs", status: "running", createdAt: now });
+  await enqueueAnalysisCrawlUrls(db, { analysisId: "cs1", siteId: "cs", urls: [{ url: "https://y.com/blog/a", routeFamily: "blog" }] });
+
+  it("keeps every new per-page signal", async () => {
+    const signals = { redirectHops: 2, hsts: true, lang: "en", viewport: false, images: 3, imagesNoAlt: 1, mixedContent: 1, httpLinks: 2, externalLinks: 4, h1: "A", words: 120, questionHeadings: 1, listsOrTables: true, leadWords: 40, statistics: 5, quotes: 1, modified: "2024-01-01", articleLike: true, author: false, snippetBlocked: true, landmarks: 2, headingSkips: true, entitySchema: false };
+    await saveCrawlBatch(db, { analysisId: "cs1", outcomes: [{ url: "https://y.com/blog/a", page: page("https://y.com/blog/a", signals) }] });
+    const row = await db.prepare("SELECT result_json FROM pages WHERE analysis_id = 'cs1'").first<{ result_json: string }>();
+    const saved = JSON.parse(row!.result_json) as Record<string, unknown>;
+    for (const [key, value] of Object.entries(signals)) assert.deepEqual(saved[key], value, key);
+  });
+});

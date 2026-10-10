@@ -1,6 +1,7 @@
 import type { CrawlPageResult, Finding, SitemapAudit } from "@organic-growth/core";
 import { CHECKS, finding, organicImpactScore, simhash } from "@organic-growth/core";
 import { contentMarkup, elementSpans, findTags, hasToken, innerText, parseAttributes, stripElements, visibleText } from "./html.js";
+import { contentSignals } from "./content-signals.js";
 import { GOOGLEBOT_TOKEN, parseRobots, type RobotsPolicy } from "./robots.js";
 import { classifyLanguage, classifyUrlType, isSameSite, sameDocument } from "./urls.js";
 
@@ -16,6 +17,8 @@ export interface FetchResult {
   finalUrl: string;
   headers: Record<string, string>;
   body: string;
+  /** Redirects followed before this response. */
+  hops?: number;
 }
 
 export type Fetcher = (
@@ -66,6 +69,7 @@ async function boundedText(response: Response, maxBytes = 2_000_000): Promise<st
 export const defaultFetcher: Fetcher = async (url, init) => {
   if (!isSafePublicUrl(url)) throw new Error("Crawler only accepts public HTTP(S) website URLs.");
   let target = url;
+  let hops = 0;
   for (let redirects = 0; redirects <= 5; redirects++) {
     const res = await fetch(target, {
       redirect: "manual",
@@ -82,12 +86,13 @@ export const defaultFetcher: Fetcher = async (url, init) => {
       const next = new URL(location, target).toString();
       if (!isSafePublicUrl(next) || !isSameSite(next, url)) throw new Error("Crawler blocked a redirect outside the connected website.");
       target = next;
+      hops++;
       continue;
     }
     const body = await boundedText(res, init?.maxBytes);
     const headers: Record<string, string> = {};
     res.headers.forEach((v, k) => { headers[k.toLowerCase()] = v; });
-    return { url, status: res.status, finalUrl: target, headers, body };
+    return { url, status: res.status, finalUrl: target, headers, body, ...(hops ? { hops } : {}) };
   }
   throw new Error("Crawler stopped after an unsafe or excessive redirect chain.");
 };
@@ -106,6 +111,8 @@ export type HtmlSignals = {
   hreflang: Array<{ lang: string; href: string }>;
   jsonLdCount: number;
   jsonLdTypes: string[];
+  /** Every JSON-LD object on the page, `@graph` members included (50 at most). */
+  jsonLdObjects: Array<Record<string, unknown>>;
   invalidJsonLd: number;
   headingOutline: string[];
   h1Count: number;
@@ -177,6 +184,7 @@ export function parseHtmlSignals(html: string, pageUrl?: string): HtmlSignals {
     hreflang,
     jsonLdCount: jsonLd.blocks,
     jsonLdTypes: jsonLd.types,
+    jsonLdObjects: jsonLd.objects,
     invalidJsonLd: jsonLd.invalid,
     headingOutline,
     h1Count,
@@ -209,14 +217,16 @@ function resolveUrl(href: string, base: string): string {
 }
 
 /** Counts JSON-LD blocks and collects their schema.org types; malformed blocks are counted, not thrown. */
-function readJsonLd(html: string): { blocks: number; types: string[]; invalid: number } {
+function readJsonLd(html: string): { blocks: number; types: string[]; objects: Array<Record<string, unknown>>; invalid: number } {
   const types = new Set<string>();
+  const objects: Array<Record<string, unknown>> = [];
   let blocks = 0;
   let invalid = 0;
   const visit = (value: unknown): void => {
     if (Array.isArray(value)) value.forEach(visit);
     else if (value && typeof value === "object") {
       const node = value as Record<string, unknown>;
+      if (objects.length < 50) objects.push(node);
       const type = node["@type"];
       for (const entry of Array.isArray(type) ? type : [type]) {
         if (typeof entry === "string" && entry) types.add(entry.replace(/^https?:\/\/schema\.org\//i, ""));
@@ -233,7 +243,7 @@ function readJsonLd(html: string): { blocks: number; types: string[]; invalid: n
       invalid++;
     }
   }
-  return { blocks, types: [...types].slice(0, 30), invalid };
+  return { blocks, types: [...types].slice(0, 30), objects, invalid };
 }
 
 /**
@@ -411,6 +421,9 @@ function toCrawlResult(
 ): CrawlPageResult {
   const finalUrl = fetchResult.finalUrl || url;
   const signals = parseHtmlSignals(fetchResult.body, finalUrl);
+  const content = contentSignals(fetchResult.body, finalUrl, { jsonLdTypes: signals.jsonLdTypes, jsonLd: signals.jsonLdObjects });
+  // Zero, false and empty are left out to keep result_json small, except the fields whose absence must mean "not checked".
+  const some = <T>(value: T) => (value === 0 || value === false || value === undefined || value === "" ? undefined : value);
   return {
     url,
     status: fetchResult.status,
@@ -439,6 +452,13 @@ function toCrawlResult(
     ...(signals.mainText.length >= 200 ? { textHash: simhash(signals.mainText) } : {}),
     ...(isSoftNotFound(fetchResult.status, signals) ? { softNotFound: true } : {}),
     ...(signals.metaRefresh ? { metaRefresh: signals.metaRefresh } : {}),
+    redirectHops: some(fetchResult.hops),
+    hsts: some(Boolean(fetchResult.headers["strict-transport-security"])),
+    lang: some(content.lang), imagesNoAlt: some(content.imagesNoAlt), mixedContent: some(content.mixedContent), httpLinks: some(content.httpLinks),
+    externalLinks: some(content.externalLinks), h1: some(content.h1), questionHeadings: some(content.questionHeadings), statistics: some(content.statistics),
+    quotes: some(content.quotes), modified: some(content.modified), snippetBlocked: some(content.snippetBlocked), headingSkips: some(content.headingSkips),
+    viewport: content.viewport, words: content.words, leadWords: content.leadWords, images: content.images, landmarks: content.landmarks,
+    listsOrTables: content.listsOrTables, articleLike: content.articleLike, author: content.author, entitySchema: content.entitySchema,
     ...(withLinks ? { internalLinks: signals.internalLinks.map((path) => ({ path, family: classifyUrlType(new URL(path || "/", finalUrl).toString()) })) } : {}),
   };
 }
@@ -748,3 +768,5 @@ export * from "./urls.js";
 export * from "./html.js";
 export * from "./robots.js";
 export * from "./ai-readiness.js";
+
+export * from "./content-signals.js";

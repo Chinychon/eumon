@@ -478,3 +478,13 @@ describe("isSafePublicUrl", () => {
     assert.equal(isSafePublicUrl("http://127.0.0.1./"), false);
   });
 });
+
+describe("redirect hops and HSTS", () => {
+  it("records how many redirects the fetch followed and whether HSTS is sent", async () => {
+    const fake: Fetcher = async (url) => ({ url, finalUrl: "https://x.com/c", hops: 2, status: 200, headers: { "strict-transport-security": "max-age=1" }, body: "<html><head><title>T</title></head><body><main>x</main></body></html>" });
+    const page = await fetchGooglebotPage("https://x.com/a", fake);
+    assert.equal(page.redirectHops, 2);
+    assert.equal(page.hsts, true);
+    assert.equal(page.viewport, false, "always written, so absence means not checked");
+  });
+});

@@ -166,6 +166,40 @@ export type CrawlPageResult = {
    * type), from full-crawl fetches only. Stored in `page_links`, not with the page.
    */
   internalLinks?: Array<{ path: string; family: string }>;
+  /** Redirects followed before the final response; 2 or more is a chain. */
+  redirectHops?: number;
+  /** The response carried Strict-Transport-Security. */
+  hsts?: boolean;
+  /*
+   * Content signals (packages/crawler/src/content-signals.ts). `viewport`,
+   * `words`, `leadWords`, `images`, `landmarks`, `listsOrTables`,
+   * `articleLike`, `author` and `entitySchema` are always written by crawls
+   * that read them, so their absence means a result from before they existed.
+   */
+  lang?: string;
+  viewport?: boolean;
+  images?: number;
+  imagesNoAlt?: number;
+  mixedContent?: number;
+  httpLinks?: number;
+  externalLinks?: number;
+  h1?: string;
+  words?: number;
+  questionHeadings?: number;
+  listsOrTables?: boolean;
+  leadWords?: number;
+  statistics?: number;
+  quotes?: number;
+  /** Last-modified day (YYYY-MM-DD) from structured data, Open Graph or a <time> element. */
+  modified?: string;
+  articleLike?: boolean;
+  author?: boolean;
+  /** nosnippet or max-snippet:0: the page cannot appear in AI Overviews or AI Mode. */
+  snippetBlocked?: boolean;
+  landmarks?: number;
+  headingSkips?: boolean;
+  /** Organization, LocalBusiness or Person structured data with sameAs or url. */
+  entitySchema?: boolean;
 }
 
 export type SitemapAudit = {

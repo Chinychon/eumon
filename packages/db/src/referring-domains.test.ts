@@ -1,0 +1,79 @@
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+import type { ReferringDomain } from "@organic-growth/core";
+import { openSqliteD1 } from "./sqlite.js";
+import { upsertSite } from "./index.js";
+import { listReferringDomains, referringDomainCounts, replaceReferringDomains } from "./referring-domains.js";
+
+const at = "2026-10-10T04:00:00.000Z";
+async function site() {
+  const db = openSqliteD1();
+  await upsertSite(db, { id: "s", name: "x.com", baseUrl: "https://x.com", createdAt: at, updatedAt: at });
+  return db;
+}
+const row = (domain: string, overrides: Partial<ReferringDomain> = {}): ReferringDomain => ({
+  domain, urlFrom: `https://${domain}/p`, urlTo: "https://x.com/", anchor: "x", dofollow: true,
+  firstSeen: "2026-10-01", lastSeen: "2026-10-09", lost: false, broken: false, rank: 50, spamScore: 10, spam: false, spamReason: null,
+  ...overrides,
+});
+const all = (db: ReturnType<typeof openSqliteD1>) => listReferringDomains(db, "s", { limit: 100 });
+
+describe("referring domains store", () => {
+  it("replacing writes every row and a second replace drops the old ones", async () => {
+    const db = await site();
+    await replaceReferringDomains(db, "s", [row("a.example"), row("b.example", { spamScore: null })]);
+    const first = await all(db);
+    assert.deepEqual(first.map((r) => r.domain).sort(), ["a.example", "b.example"]);
+    assert.equal(first.find((r) => r.domain === "b.example")?.spamScore, null);
+    await replaceReferringDomains(db, "s", [row("c.example")]);
+    assert.deepEqual((await all(db)).map((r) => r.domain), ["c.example"]);
+  });
+
+  it("replacing with nothing clears", async () => {
+    const db = await site();
+    await replaceReferringDomains(db, "s", [row("a.example")]);
+    await replaceReferringDomains(db, "s", []);
+    assert.deepEqual(await all(db), []);
+  });
+
+  it("lists strongest first, filtered by spam / new / lost / broken, limited", async () => {
+    const db = await site();
+    await replaceReferringDomains(db, "s", [
+      row("a.example", { rank: 80, firstSeen: "2026-10-08" }),
+      row("b.example", { rank: 80, firstSeen: "2026-09-01", lost: true, lastSeen: "2026-10-08" }),
+      row("c.example", { rank: 60, spam: true, spamReason: "network", firstSeen: "2026-10-09" }),
+      row("d.example", { rank: 40, broken: true }),
+      row("e.example", { rank: 90, lost: true, lastSeen: "2026-09-01", broken: true }),
+    ]);
+    const domains = async (filter: Parameters<typeof listReferringDomains>[2]) => (await listReferringDomains(db, "s", filter)).map((r) => r.domain);
+    assert.deepEqual(await domains({ limit: 100 }), ["e.example", "a.example", "b.example", "c.example", "d.example"]);
+    assert.deepEqual(await domains({ limit: 3 }), ["e.example", "a.example", "b.example"]);
+    assert.deepEqual(await domains({ limit: 100, spam: true }), ["c.example"]);
+    assert.deepEqual(await domains({ limit: 100, spam: false }), ["e.example", "a.example", "b.example", "d.example"]);
+    assert.deepEqual(await domains({ limit: 100, newSince: "2026-10-07" }), ["a.example", "c.example"]);
+    assert.deepEqual(await domains({ limit: 100, lostSince: "2026-10-01" }), ["b.example"]);
+    assert.deepEqual(await domains({ limit: 100, broken: true }), ["d.example"]);
+  });
+
+  it("counts in one query: real, spam, new real since a day, lost real since a day, broken live real, dofollow real, new spam since a day", async () => {
+    const db = await site();
+    await replaceReferringDomains(db, "s", [
+      row("a.example", { firstSeen: "2026-10-08", dofollow: true }),
+      row("b.example", { firstSeen: "2026-09-01", lost: true, lastSeen: "2026-10-08", dofollow: false }),
+      row("c.example", { spam: true, spamReason: "network", firstSeen: "2026-10-09", dofollow: true }),
+      row("d.example", { firstSeen: "2026-09-01", lastSeen: "2026-09-01", broken: true, dofollow: true }),
+      row("e.example", { firstSeen: "2026-09-01", lastSeen: "2026-09-01", lost: true, broken: true, dofollow: false }),
+    ]);
+    assert.deepEqual(await referringDomainCounts(db, "s", "2026-10-07"), {
+      real: 4, spam: 1, newReal: 1, lostReal: 1, brokenReal: 1, dofollowReal: 2, newSpam: 1,
+    });
+  });
+
+  it("deleting the site removes the rows", async () => {
+    const db = await site();
+    await db.prepare("PRAGMA foreign_keys = ON").run();
+    await replaceReferringDomains(db, "s", [row("a.example")]);
+    await db.prepare("DELETE FROM sites WHERE id = ?").bind("s").run();
+    assert.deepEqual(await all(db), []);
+  });
+});

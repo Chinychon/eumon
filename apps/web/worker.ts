@@ -6,7 +6,7 @@ import { authFor } from "./src/auth.js";
 import { gate, isPublicPath } from "./src/gate.js";
 import { APP_HEADERS, withHeaders } from "./src/headers.js";
 import { fetchHtml } from "./src/fix-steps.js";
-import { fixRepoFor } from "./src/fix-github.js";
+import { githubOpsFor } from "./src/fix-github.js";
 import { sweepFixes } from "./src/fix-sweep.js";
 import { startDailySyncs } from "./src/sync-steps.js";
 
@@ -54,6 +54,6 @@ export default {
   /** The daily Results sync (the cron trigger in cloudflare.config.ts): one workflow instance per site, named after the day, so a second firing creates none. */
   scheduled(controller: ScheduledController, env: AppEnv, ctx: ExecutionContext) {
     ctx.waitUntil(startDailySyncs(env, new Date(controller.scheduledTime)));
-    ctx.waitUntil(sweepFixes({ db: env.DB, opsFor: async (site) => (await fixRepoFor(env, site)).ops, fetchHtml, now: () => new Date(controller.scheduledTime) }).catch(() => 0));
+    ctx.waitUntil(sweepFixes({ db: env.DB, opsFor: (site) => githubOpsFor(env, site), fetchHtml, now: () => new Date(controller.scheduledTime) }).catch((error) => { console.error("Fix sweep failed", error); return 0; }));
   },
 } satisfies ExportedHandler<AppEnv>;

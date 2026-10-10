@@ -13,6 +13,24 @@ export type GitHubOps = {
   close(n: number): Promise<void>;
 };
 
+function opsWith(token: string, owner: string, name: string): GitHubOps {
+  return {
+    getPullRequest: (n) => getPullRequest(token, owner, name, n),
+    checkState: (sha) => combinedCheckState(token, owner, name, sha),
+    previewUrl: (sha) => latestPreviewUrl(token, owner, name, sha),
+    markReady: (nodeId) => markReadyForReview(token, nodeId),
+    comment: (n, body) => commentOnPullRequest(token, owner, name, n, body),
+    close: (n) => closePullRequest(token, owner, name, n),
+  };
+}
+
+/** Just the PR operations: one installation token, no repo tree fetch. */
+export async function githubOpsFor(env: AppEnv, site: SiteRecord): Promise<GitHubOps> {
+  if (!site.githubInstallationId || !site.githubOwner || !site.githubRepo) throw new Error("The site has no connected repository.");
+  const token = await createInstallationToken(env.GITHUB_APP_ID, env.GITHUB_APP_PRIVATE_KEY, site.githubInstallationId);
+  return opsWith(token, site.githubOwner, site.githubRepo);
+}
+
 export async function fixRepoFor(env: AppEnv, site: SiteRecord): Promise<{ repo: FixRepo; pr: PrOps; ops: GitHubOps }> {
   if (!site.githubInstallationId || !site.githubOwner || !site.githubRepo) throw new Error("The site has no connected repository.");
   const token = await createInstallationToken(env.GITHUB_APP_ID, env.GITHUB_APP_PRIVATE_KEY, site.githubInstallationId);
@@ -23,13 +41,6 @@ export async function fixRepoFor(env: AppEnv, site: SiteRecord): Promise<{ repo:
   return {
     repo: { owner, name, branch, treePaths, getFile: (path) => getFileWithSha(token, owner, name, path, branch) },
     pr: { createPr: (input) => createGitHubPullRequest(token, { owner, repo: name, baseBranch: branch, ...input }) },
-    ops: {
-      getPullRequest: (n) => getPullRequest(token, owner, name, n),
-      checkState: (sha) => combinedCheckState(token, owner, name, sha),
-      previewUrl: (sha) => latestPreviewUrl(token, owner, name, sha),
-      markReady: (nodeId) => markReadyForReview(token, nodeId),
-      comment: (n, body) => commentOnPullRequest(token, owner, name, n, body),
-      close: (n) => closePullRequest(token, owner, name, n),
-    },
+    ops: opsWith(token, owner, name),
   };
 }

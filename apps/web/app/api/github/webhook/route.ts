@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import type { D1Like } from "@organic-growth/db";
-import { fixRepoFor } from "../../../../src/fix-github";
+import { githubOpsFor } from "../../../../src/fix-github";
 import { fetchHtml } from "../../../../src/fix-steps";
 import { handleGitHubEvent, verifySignature } from "../../../../src/github-webhook";
 
@@ -20,7 +20,7 @@ export async function POST(request: Request) {
   }
   try {
     const outcome = await handleGitHubEvent(
-      { db: env.DB as unknown as D1Like, opsFor: async (site) => (await fixRepoFor(env, site)).ops, fetchHtml, now: () => new Date() },
+      { db: env.DB as unknown as D1Like, opsFor: (site) => githubOpsFor(env, site), fetchHtml, now: () => new Date() },
       request.headers.get("x-github-event") ?? "", payload,
     );
     return Response.json({ outcome });

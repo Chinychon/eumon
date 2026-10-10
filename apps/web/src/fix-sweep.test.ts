@@ -62,4 +62,48 @@ describe("sweepFixes", () => {
     assert.equal((await getFix(t.db, "f1"))?.status, "draft");
     assert.equal((await getFix(t.db, "f2"))?.status, "merged");
   });
+
+  it("mints ops once per site across its fixes", async () => {
+    const t = await setup({}, 0);
+    for (const n of [2, 3]) {
+      await stageFix(t.db, { id: `f${n}`, siteId: "s", analysisId: "a", kind: "llms-txt", route: "public/llms.txt", filePath: "public/llms.txt", title: "T", reason: "R",
+        files: {}, original: {}, urls: [], problems: [], warnings: [], score: 1, status: "staged", createdAt: AT, updatedAt: AT });
+      await updateFix(t.db, `f${n}`, { status: "draft", prNumber: 7 + n, headSha: `h${n}`, prNodeId: `N${n}` });
+    }
+    let minted = 0;
+    await sweepFixes({ ...t.deps, opsFor: async () => { minted++; return t.ops; } });
+    assert.equal(minted, 1);
+  });
+
+  async function many(updated: string[]) {
+    const t = await setup({ state: "closed", merged: true });
+    for (const [i, at] of updated.entries()) {
+      await stageFix(t.db, { id: `g${i}`, siteId: "s", analysisId: "a", kind: "llms-txt", route: "public/llms.txt", filePath: "public/llms.txt", title: "T", reason: "R",
+        files: {}, original: {}, urls: [], problems: [], warnings: [], score: 1, status: "staged", createdAt: AT, updatedAt: AT });
+      await updateFix(t.db, `g${i}`, { status: "draft", prNumber: 20 + i, headSha: `x${i}`, prNodeId: `X${i}` });
+      await t.db.prepare("UPDATE changes SET updated_at = ? WHERE id = ?").bind(at, `g${i}`).run();
+    }
+    await t.db.prepare("DELETE FROM changes WHERE id = 'f1'").run();
+    return t;
+  }
+  const status = async (t: Awaited<ReturnType<typeof many>>, id: string) => (await getFix(t.db, id))?.status;
+
+  it("always sweeps a stale draft first even when newer ones exceed the limit", async () => {
+    const now = Date.now();
+    const fresh = new Date(now).toISOString();
+    const t = await many([fresh, fresh, fresh, fresh, fresh, new Date(now - 9 * 86_400_000).toISOString()]);
+    await sweepFixes({ ...t.deps, now: () => new Date(now), random: () => 0 }, 2);
+    assert.equal(await status(t, "g5"), "merged");
+  });
+
+  it("picks among fresh drafts with the injected random source", async () => {
+    const now = Date.now();
+    const fresh = new Date(now).toISOString();
+    const t = await many([fresh, fresh, fresh]);
+    await sweepFixes({ ...t.deps, now: () => new Date(now), random: () => 0 }, 1);
+    // random() = 0 swaps each slot with index 0 going down, leaving the first draft last in line and g1 first.
+    const merged = [];
+    for (const id of ["g0", "g1", "g2"]) if ((await status(t, id)) === "merged") merged.push(id);
+    assert.deepEqual(merged, ["g1"]);
+  });
 });

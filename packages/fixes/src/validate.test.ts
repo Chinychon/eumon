@@ -94,6 +94,28 @@ describe("adversarial", () => {
   });
 });
 
+describe("appended text", () => {
+  const src = `export const metadata = {\n  title: procedure.name,\n};\n`;
+  const at = src.indexOf("name,") + 4;
+  const run = (text: string) => validateEdit({ ...base, before: src, roots: ["procedure"], allowedRanges: [{ start: 0, end: src.length }], edits: [{ start: at, end: at, text }] });
+  it("refuses text that turns an existing expression into a call, assignment or computed member", () => {
+    assert.equal(run('("x")').ok, false);
+    assert.equal(run(' = "x"').ok, false);
+    assert.equal(run('["constructor"]').ok, false);
+    assert.equal(run('.constructor.constructor("return process.env")()').ok, false);
+  });
+  it("allows a component import at offset 0 of a file with no imports", () => {
+    const plain = `export default function P() { return <main/>; }\n`;
+    const r = validateEdit({ ...base, before: plain, roots: [], allowedRanges: [{ start: 0, end: 0 }], edits: [{ start: 0, end: 0, text: `import { EumonJsonLd } from "../components/eumon-json-ld";\n` }] });
+    assert.equal(r.ok, true);
+  });
+  it("counts \\r-separated lines", () => {
+    const r = run(Array.from({ length: 70 }, () => "").join("\r"));
+    assert.equal(r.ok, false);
+    assert.match(String((r as { reason?: string }).reason), /lines/);
+  });
+});
+
 describe("validateFile", () => {
   it("allows only the whole-file targets", () => {
     assert.equal(validateFile("public/llms.txt", "# x", []).ok, true);

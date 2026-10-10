@@ -14,6 +14,7 @@ const LINE_BREAK = /\r\n|[\r\n\u2028\u2029]/;
 const COMPONENT_IMPORT = /^(\.{1,2}\/)+components\/eumon-json-ld$/;
 const BAD_PROPS = new Set(["constructor", "prototype", "__proto__"]);
 const PLAIN_TYPES = new Set([
+  "Program",
   "ObjectExpression", "ObjectProperty", "ArrayExpression", "StringLiteral", "NumericLiteral", "BooleanLiteral", "NullLiteral",
   "TemplateLiteral", "TemplateElement", "Identifier", "VariableDeclaration", "VariableDeclarator", "ImportDeclaration", "ImportSpecifier",
   "JSXElement", "JSXAttribute", "JSXExpressionContainer", "JSXText", "JSXIdentifier",
@@ -104,7 +105,7 @@ export function validateEdit(input: ValidateInput): { ok: true; after: string } 
   let banned: string | null = null;
   walk(afterProgram, (node, parent) => {
     if (unknown || banned) return;
-    if (spans.some((s) => node.start >= s.start && node.end <= s.end)) {
+    if (spans.some((s) => node.start < s.end && node.end > s.start && !(node.start < s.start && node.end > s.end))) {
       const why = forbidden(node);
       if (why) { banned = why; return; }
     }

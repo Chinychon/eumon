@@ -109,7 +109,13 @@ export function OverviewView({ site, tab, onTab, onNavigate }: {
   }, []);
 
   useEffect(() => {
-    setReport(null); setPendingId(""); setFinished(null); setNote(""); setError(""); setChanges([]); setLoaded(false); setCompetitorCount(null);
+    // Switching sites while these requests are in flight must not let the old site's answers land on the new one.
+    let active = true;
+    const loadChanges = async (analysisId: string) => {
+      const data = await api<{ changes: Change[] }>(`/api/analyses/${analysisId}/changes`).catch(() => ({ changes: [] }));
+      if (active) setChanges(data.changes);
+    };
+    setReport(null); setPendingId(""); setFinished(null); setNote(""); setError(""); setFailure(""); setChanges([]); setLoaded(false); setCompetitorCount(null);
     void (async () => {
       try {
         const latest = await api<{
@@ -117,6 +123,7 @@ export function OverviewView({ site, tab, onTab, onNavigate }: {
           previous: { analysisId: string; report: Report } | null;
           pace: { perMinute: number } | null;
         }>(`/api/sites/${site.id}/analyses`);
+        if (!active) return;
         setPace(latest.pace);
         if (latest.analysis?.status === "completed" && latest.analysis.report) {
           setReport(latest.analysis.report);
@@ -136,11 +143,12 @@ export function OverviewView({ site, tab, onTab, onNavigate }: {
             void loadChanges(latest.previous.analysisId);
           }
         }
-      } catch (cause) { setError(errorMessage(cause)); } finally { setLoaded(true); }
+      } catch (cause) { if (active) setError(errorMessage(cause)); } finally { if (active) setLoaded(true); }
     })();
-    api<{ domains: string[] }>(`/api/sites/${site.id}/competitors`).then((data) => setCompetitorCount(data.domains.length)).catch(() => setCompetitorCount(0));
-    api<{ countries: string[] }>(`/api/sites/${site.id}/markets`).then((data) => setMarkets(data.countries.length)).catch(() => undefined);
-  }, [site.id, loadChanges]);
+    api<{ domains: string[] }>(`/api/sites/${site.id}/competitors`).then((data) => { if (active) setCompetitorCount(data.domains.length); }).catch(() => { if (active) setCompetitorCount(0); });
+    api<{ countries: string[] }>(`/api/sites/${site.id}/markets`).then((data) => { if (active) setMarkets(data.countries.length); }).catch(() => undefined);
+    return () => { active = false; };
+  }, [site.id]);
 
   const run = useRun(pendingId, site.id, new URL(site.baseUrl).hostname);
   const reportBefore = useRef(report);

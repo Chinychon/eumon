@@ -118,6 +118,13 @@ describe("demo site", () => {
     assert.ok(!report.findings.some((finding) => /^Search impressions fell|^Google's indexed count fell/.test(finding.title)), "the demo's numbers rise");
   });
 
+  it("carries the three backlink findings: missing pages, lost links and a spam wave", async () => {
+    const db = openSqliteD1();
+    await seedDemoSite(db, Date.now());
+    const titles = ((await getAnalysisJob(db, "analysis_demo_2"))!.report as { findings: Array<{ title: string }> }).findings.map((finding) => finding.title);
+    for (const title of ["3 sites link to pages on your site that are missing", "You lost links from 4 sites in 30 days", "90 spam sites started linking to you in 30 days"]) assert.ok(titles.includes(title), `${title} in ${titles.join(" | ")}`);
+  });
+
   it("shows a soft 404 and the same dentist listed twice in the latest analysis", async () => {
     const db = openSqliteD1();
     await seedDemoSite(db, Date.now());

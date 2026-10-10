@@ -1,6 +1,6 @@
-import { addDays, type BacklinkSummary, type CompetitorSuggestion, type LinkGap, type LinksInput, type SerpCompetitor, type SerpFeature, type SerpResult } from "@organic-growth/core";
+import { addDays, classifyReferringDomains, spamNetworks, type BacklinkSummary, type BacklinksInput, type ReferringDomain, type SpamNetwork, type CompetitorSuggestion, type LinkGap, type LinksInput, type SerpCompetitor, type SerpFeature, type SerpResult } from "@organic-growth/core";
 import { classifyUrlType } from "@organic-growth/crawler";
-import { recordCrawlLog, saveSnapshot, upsertMetricPoints, type D1Like, type MetricPoint } from "@organic-growth/db";
+import { getSnapshot, listReferringDomains, recordCrawlLog, referringDomainCounts, replaceReferringDomains, saveSnapshot, upsertMetricPoints, type D1Like, type MetricPoint } from "@organic-growth/db";
 
 /*
  * The demo clinic's data from the connectors beyond Google: results pages for
@@ -107,6 +107,49 @@ export function demoSuggestions(): CompetitorSuggestion[] {
   ];
 }
 
+const REAL_NAMES = ["smilehealth-guide", "klang-valley-health", "penang-family-care", "dentalcare-asia", "malaysia-parents-club", "kl-lifestyle-weekly", "toothfacts", "jb-community-news", "ipoh-living", "wellness-sg", "mysmile-centre", "orthodontic-society-my", "kids-health-forum", "bangsar-neighbours", "petaling-business-hub", "health-insurance-compare", "sg-dentalhub", "clinic-finder-asia", "mum-and-baby-blog", "expat-kl-guide", "klinikpergigian", "campus-health-uitm", "care-directory-my", "seniors-living-sg", "malay-mail-health-desk", "oral-care-research", "gigi-sihat", "family-budget-tips", "borneo-community", "sunway-residents", "nutrition-notes-asia", "pharmacy-tips-my", "school-nurses-network", "travel-medical-asia", "teeth-whitening-reviews", "city-guide-penang", "wellbeing-weekly", "smile-stories", "dental-students-my", "kl-moms-circle"];
+const REAL_ANCHORS = ["Demo Dental Clinic", "demo-clinic.example", "click here", "this clinic", "affordable braces in kuala lumpur", "a family dentist we recommend", "Demo Clinic", "https://demo-clinic.example/", "their guide to dental implants", "read more", "dentist in petaling jaya", "how much do fillings cost"];
+const REAL_PATHS = ["/resources/dental-care", "/blog/our-favourite-clinics", "/partners", "/health/local-services", "/guides/choosing-a-dentist", "/news/community-roundup", "/directory/clinics", "/lifestyle/smile-care", "/about/sponsors", "/reviews/best-of-the-year"];
+const SPAM_PATH = "/dir/seo-growth-backlinks-77122";
+
+/** The clinic's referring domains as DataForSEO would give them: 40 real (3 new, 4 lost, 3 pointing at missing pages) and a 120-site network, 90 of them new. Spam is decided by the real rules. */
+export function demoReferringRows(demo: Demo, today: string): ReferringDomain[] {
+  const rows: Array<Omit<ReferringDomain, "spam" | "spamReason">> = REAL_NAMES.map((name, i) => {
+    const lost = i >= 5 && i < 9;
+    const fresh = i >= 20 && i < 23;
+    const broken = i >= 30 && i < 33;
+    return {
+      domain: `${name}.example`, urlFrom: `https://${name}.example${REAL_PATHS[(i * 7) % REAL_PATHS.length]}`,
+      urlTo: broken ? `${demo.origin}/${["clinics/old-branch-closed", "treatments/retired-laser-whitening", "blog/2022-promo"][i - 30]}` : `${demo.origin}${i % 3 === 0 ? "/" : demo.paths[(i * 5) % demo.paths.length]!.path}`,
+      anchor: REAL_ANCHORS[i % REAL_ANCHORS.length]!, dofollow: i % 5 !== 4,
+      firstSeen: addDays(today, fresh ? -(4 + (i - 20) * 9) : -(60 + i * 17)), lastSeen: addDays(today, lost ? -(5 + (i - 5) * 5) : -1 - (i % 3)),
+      lost, broken, rank: 40 + Math.round((i * 480) / 39), spamScore: i % 6,
+    };
+  });
+  for (let i = 0; i < 120; i++) {
+    rows.push({
+      domain: `seo-links-${i}.example`, urlFrom: `https://seo-links-${i}.example${SPAM_PATH}`, urlTo: `${demo.origin}/`,
+      anchor: `Premium SEO Authority Backlinks to Help ${demo.own} Websites Rank Higher`, dofollow: true,
+      firstSeen: addDays(today, i < 90 ? -(1 + (i % 28)) : -(90 + i)), lastSeen: addDays(today, -1), lost: false, broken: false, rank: i % 6, spamScore: 60 + (i % 30),
+    });
+  }
+  return classifyReferringDomains(rows, demo.own);
+}
+
+/** What the card and findings read, from the same six bounded reads as the web's loadConnectorLists. */
+export async function loadDemoReferring(db: D1Like, siteId: string, own: string, today: string): Promise<BacklinksInput | null> {
+  const month = addDays(today, -30);
+  const [counts, top, newReal, lostReal, brokenReal, networks] = await Promise.all([
+    referringDomainCounts(db, siteId, month),
+    listReferringDomains(db, siteId, { spam: false, limit: 25 }),
+    listReferringDomains(db, siteId, { spam: false, newSince: month, limit: 10 }),
+    listReferringDomains(db, siteId, { spam: false, lostSince: month, limit: 10 }),
+    listReferringDomains(db, siteId, { spam: false, broken: true, limit: 25 }),
+    getSnapshot<SpamNetwork>(db, siteId, "spam_networks", own),
+  ]);
+  return counts.real + counts.spam === 0 ? null : { asOf: networks?.periodEnd ?? null, counts, top, newReal, lostReal, brokenReal, networks: networks?.rows ?? [] };
+}
+
 const DAY_MS = 86_400_000;
 
 /**
@@ -123,12 +166,19 @@ export async function seedDemoConnectors(db: D1Like, demo: Demo, now: number): P
   for (const entry of links.summaries) await saveSnapshot(db, demo.siteId, { kind: "backlinks", scope: entry.row.domain, periodEnd: entry.periodEnd, rows: [entry.row] });
   await saveSnapshot(db, demo.siteId, { kind: "link_gap", scope: demo.competitors.slice(0, 3).sort().join(","), periodEnd: links.gap!.periodEnd, rows: links.gap!.rows });
 
+  const referring = demoReferringRows(demo, today);
+  await replaceReferringDomains(db, demo.siteId, referring);
+  await saveSnapshot(db, demo.siteId, { kind: "spam_networks", scope: demo.own, periodEnd: today, rows: spamNetworks(referring) });
+  const counts = await referringDomainCounts(db, demo.siteId, addDays(today, -30));
+
   const serp = demoSerpLists(demo, today).flatMap((list) => list.rows);
   const points: MetricPoint[] = [
     { metric: "sync.serp", day: today, value: 2 }, { metric: "sync.serp_competitors", day: today, value: 0 }, { metric: "sync.backlinks", day: today, value: 9 },
     { metric: "sync.bing", day: today, value: 1 }, { metric: "sync.indexnow", day: today, value: 1 },
     { metric: "serp_ai_overviews", day: today, value: serp.filter((row) => row.features.includes("ai_overview")).length },
     { metric: "serp_ai_cited", day: today, value: serp.filter((row) => row.cited).length },
+    { metric: "ref_domains_real", day: today, value: counts.real }, { metric: "ref_domains_spam", day: today, value: counts.spam },
+    { metric: "links_new_real", day: today, value: counts.newReal }, { metric: "links_lost_real", day: today, value: counts.lostReal }, { metric: "links_broken_real", day: today, value: counts.brokenReal },
   ];
   for (const entry of links.summaries) {
     const suffix = entry.row.domain === demo.own ? "" : `:${entry.row.domain}`;

@@ -8,7 +8,7 @@ import {
   updateAnalysisStatus, upsertDataset, upsertRecords, upsertSite, upsertTemplate, type D1Like,
 } from "@organic-growth/db";
 import { generatePages } from "@organic-growth/pages";
-import { demoLinks, demoSerpLists, demoSuggestions, seedDemoConnectors } from "./demo-connectors.js";
+import { demoLinks, loadDemoReferring, demoSerpLists, demoSuggestions, seedDemoConnectors } from "./demo-connectors.js";
 import { crawlLogCoverage } from "./log-coverage.js";
 import { queueFullCrawl, runFullAnalysis } from "./pipeline.js";
 import { probeTitleForCoverage } from "./not-found-probe.js";
@@ -530,6 +530,7 @@ async function analyzeDemo(db: D1Like, input: { analysisId: string; version: num
       inventory: await loadInventories(db, DEMO_SITE_ID, { analysisId: input.analysisId }),
       ranks: await loadRankSignals(db, DEMO_SITE_ID, new Date(input.now).toISOString().slice(0, 10)),
       aiAnswers: await loadAiAnswerSignals(db, DEMO_SITE_ID, new Date(input.now).toISOString().slice(0, 10)),
+      referring: await loadDemoReferring(db, DEMO_SITE_ID, own, new Date(input.now).toISOString().slice(0, 10)),
     },
     crawlCoverage: { coverage, examples },
     renderPages: (urls) => renderDemo(urls, input.version),

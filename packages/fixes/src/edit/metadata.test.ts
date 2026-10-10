@@ -52,6 +52,42 @@ describe("editMetadata", () => {
   });
 });
 
+describe("editMetadata edge cases", () => {
+  it("adds a property outside a trailing comment containing a comma", () => {
+    const source = `export const metadata = { title: "a" /* x, y */ };\n`;
+    const after = applied(source, editMetadata(source, { description: "d" }, false), "app/a/page.tsx");
+    assert.ok(after.indexOf("description:") < after.indexOf("/*"));
+    assert.ok(after.includes("/* x, y */"));
+  });
+  it("keeps a line comment after the comma valid", () => {
+    const source = `export const metadata = {\n  title: "a", // main\n};\n`;
+    const after = applied(source, editMetadata(source, { description: "d" }, false), "app/a/page.tsx");
+    assert.match(after, /title: "a",\n  description: "d", \/\/ main/);
+  });
+  it("refuses duplicate keys", () => {
+    const source = `export const metadata = { title: "a", title: "b" };\n`;
+    const r = editMetadata(source, { title: "c" }, false);
+    assert.equal(r.ok, false);
+    if (!r.ok) assert.match(r.reason, /title is defined more than once/);
+    const alt = `export const metadata = { alternates: { canonical: "/a", canonical: "/b" } };\n`;
+    assert.equal(editMetadata(alt, { canonical: "/c" }, false).ok, false);
+  });
+  it("expands a shorthand property", () => {
+    const source = `export async function generateMetadata({ params }) {\n  const x = await get(params);\n  const title = x.t;\n  return { title };\n}\n`;
+    const after = applied(source, editMetadata(source, { title: "{x.name} | MedBay" }, true));
+    assert.match(after, /return \{ title: `\$\{x\.name\} \| MedBay` \}/);
+  });
+});
+
+describe("toCode escapes", () => {
+  it("escapes ${, backslashes and $ before a placeholder", () => {
+    assert.equal(toCode("a ${b-c} {x.y}"), "`a \\${b-c} ${x.y}`");
+    assert.equal(toCode("a\\b {x}"), "`a\\\\b ${x}`");
+    assert.equal(toCode("$ {x}"), "`$ ${x}`");
+    assert.equal(toCode("${x}"), "`$${x}`"); // "$" then the placeholder {x}: renders "$" + x
+  });
+});
+
 describe("editMetadataBase", () => {
   it("adds metadataBase to the root layout's metadata", () => {
     const source = `export const metadata = { title: "MedBay" };\nexport default function L({ children }) { return <html><body>{children}</body></html>; }\n`;

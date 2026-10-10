@@ -1,5 +1,5 @@
 import { parseModule, unwrap, type AstNode } from "../ast.js";
-import { propertyNamed, setProperties, toCode } from "../code.js";
+import { propertiesNamed, propertyNamed, setProperties, toCode } from "../code.js";
 import { findMetadata } from "../scope.js";
 import { languagesCode, metadataSnippet } from "../snippet.js";
 import type { EditResult } from "../types.js";
@@ -31,9 +31,16 @@ function edit(source: string, entries: { top: Array<[string, string]>; alternate
     return { ok: true, edits: [{ start: site.insertAt, end: site.insertAt, text }], allowedRanges: [{ start: site.insertAt, end: site.insertAt }], roots: [], files: {}, summary };
   }
   const object = site.object;
+  const dup = (o: AstNode, names: string[]) => names.find((n) => propertiesNamed(o, n).length > 1);
+  const topDup = dup(object, [...entries.top.map(([n]) => n), ...(entries.alternates.length ? ["alternates"] : [])]);
+  if (topDup) return { ok: false, reason: `${topDup} is defined more than once`, snippet };
   const altProp = propertyNamed(object, "alternates");
   const altValue = altProp ? unwrap(altProp.value as AstNode) : null;
   if (altProp && entries.alternates.length && altValue?.type !== "ObjectExpression") return { ok: false, reason: "`alternates` isn't a plain object", snippet };
+  if (altValue?.type === "ObjectExpression") {
+    const altDup = dup(altValue, entries.alternates.map(([n]) => n));
+    if (altDup) return { ok: false, reason: `${altDup} is defined more than once`, snippet };
+  }
   const edits = altValue?.type === "ObjectExpression" && entries.alternates.length
     ? [...setProperties(source, object, entries.top), ...setProperties(source, altValue, entries.alternates)]
     : setProperties(source, object, [...entries.top, ...(entries.alternates.length ? [["alternates", objectCode(entries.alternates)] as [string, string]] : [])]);

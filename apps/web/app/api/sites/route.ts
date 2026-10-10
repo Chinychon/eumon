@@ -62,7 +62,7 @@ export async function POST(request: Request) {
     return fail("Choose an installed repository.");
   }
   const installations = await listGithubInstallations(env.DB, workspaceId);
-  if (!installations.length) return fail("Install the GitHub App for this workspace before connecting a repository.", 401);
+  if (!installations.length) return fail("Install the GitHub App for this workspace before connecting a repository.", 409);
 
   try {
     const repository = (await workspaceRepositories(env.GITHUB_APP_ID, env.GITHUB_APP_PRIVATE_KEY, installations)).find((item) => item.id === body.repositoryId);

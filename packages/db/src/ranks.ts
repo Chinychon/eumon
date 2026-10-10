@@ -1,3 +1,4 @@
+import type { RankCheck } from "@organic-growth/core";
 import { chunks, nowIso, runStatements, type D1Like } from "./d1.js";
 
 /*
@@ -5,8 +6,6 @@ import { chunks, nowIso, runStatements, type D1Like } from "./d1.js";
  * position for each in each target market, per day (`rank_checks`). A check
  * with a null position means the site wasn't in the ten results fetched.
  */
-
-export type RankCheck = { keyword: string; market: string; day: string; position: number | null; url: string | null; features: string[] };
 
 /** Replaces the list. Keywords arrive normalised (lower-cased, whitespace collapsed) and de-duplicated. */
 export async function setTrackedKeywords(db: D1Like, siteId: string, keywords: string[]): Promise<void> {

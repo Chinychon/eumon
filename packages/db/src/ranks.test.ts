@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { openSqliteD1 } from "./sqlite.js";
 import { upsertSite } from "./index.js";
-import { checkedPairsOn, listRankChecks, listTrackedKeywords, pruneRankChecks, saveRankChecks, setTrackedKeywords, type RankCheck } from "./ranks.js";
+import { checkedPairsOn, listRankChecks, listTrackedKeywords, pruneRankChecks, saveRankChecks, setTrackedKeywords } from "./ranks.js";
+import type { RankCheck } from "@organic-growth/core";
 
 const at = "2026-10-07T04:15:00.000Z";
 async function site() {

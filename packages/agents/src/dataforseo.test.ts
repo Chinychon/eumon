@@ -98,7 +98,7 @@ describe("DataForSEO client", () => {
       "https://api.dataforseo.com/v3/ai_optimization/perplexity/llm_responses/live",
     ]);
     assert.deepEqual(asked[0]!.task, { keyword: "best dentist kl", location_code: 2458, language_code: "en", force_web_search: true });
-    assert.deepEqual(asked[3]!.task, { user_prompt: "best dentist kl", model_name: "sonar", max_output_tokens: 1024, web_search_country_iso_code: "MY" });
+    assert.deepEqual(asked[3]!.task, { user_prompt: "best dentist kl", model_name: "sonar", max_output_tokens: 2048, web_search_country_iso_code: "MY" });
   });
 
   it("an answer with nothing in it is an empty answer, not an error; a refused task throws", async () => {
@@ -106,5 +106,16 @@ describe("DataForSEO client", () => {
     assert.deepEqual(await fetchAiAnswer(auth, { engine: "chatgpt", prompt: "q", location: 2458, language: "en", countryIso2: null }, empty), { text: "", sources: [], cost: 0.004 });
     const refused = (async () => new Response(envelope({ status_code: 40501, status_message: "Invalid Field: 'location_code'.", cost: 0, result: null }))) as unknown as typeof fetch;
     await assert.rejects(fetchAiAnswer(auth, { engine: "gemini", prompt: "q", location: 2458, language: "en", countryIso2: null }, refused), /location_code/);
+  });
+
+  it("AI Mode text and sources are not repeated; an empty markdown falls back to the items", async () => {
+    const result = { items: [{ type: "ai_overview", markdown: "Top clinics.", references: [{ domain: "a.example", url: "https://a.example/1" }], items: [{ type: "ai_overview_element", markdown: "Top clinics.", references: [{ domain: "a.example", url: "https://a.example/1" }, { domain: "b.example", url: "https://b.example/2" }] }] }] };
+    const serve = (body: object) => (async () => new Response(envelope({ status_code: 20000, status_message: "Ok.", cost: 0, result: [body] }))) as unknown as typeof fetch;
+    const input = { prompt: "q", location: 2458, language: "en", countryIso2: null };
+    const mode = await fetchAiAnswer(auth, { ...input, engine: "ai_mode" }, serve(result));
+    assert.equal(mode.text, "Top clinics.");
+    assert.deepEqual(mode.sources, [{ domain: "a.example", url: "https://a.example/1" }, { domain: "b.example", url: "https://b.example/2" }]);
+    const gemini = await fetchAiAnswer(auth, { ...input, engine: "gemini" }, serve({ markdown: "", items: [{ text: "From items." }], sources: [] }));
+    assert.equal(gemini.text, "From items.");
   });
 });

@@ -5,7 +5,7 @@
  * competitors it names or cites instead.
  */
 
-import { bareDomain } from "./serp.js";
+import { bareDomain, isOrUnder } from "./serp.js";
 
 export const AI_ANSWER_ENGINES = [
   { engine: "chatgpt", label: "ChatGPT" },
@@ -38,21 +38,35 @@ export type AiAnswerCheck = {
   excerpt: string;
 };
 
-const isOrUnder = (domain: string, root: string) => domain === root || domain.endsWith(`.${root}`);
 /** "brightsmile.example" → "brightsmile"; "rival-dental.example" → "rival-dental". */
 const domainLabel = (domain: string) => bareDomain(domain).split(".")[0] ?? domain;
 const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const BOUNDARY = "[^\\p{L}\\p{N}]";
+const NO_SPACES = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Thai}\p{Script=Lao}\p{Script=Khmer}]/u;
+const straighten = (text: string) => text.replace(/[\u2018\u2019]/g, "'");
 
-/** A whole-word pattern for a name; a hyphen or space in it matches either, or nothing; names of three characters or fewer match only in their exact case. */
+/** A whole-word pattern for a name; a hyphen or space in it matches either, or nothing; names of three characters or fewer match only in their exact case. Scripts written without spaces match as plain substrings. */
 function namePattern(name: string): RegExp {
-  const body = escapeRegExp(name.trim()).replace(/[\s-]+/g, "[\\s-]?");
-  return new RegExp(`(^|[^\\p{L}\\p{N}])${body}($|[^\\p{L}\\p{N}])`, name.trim().length <= 3 ? "u" : "iu");
+  const clean = straighten(name.trim());
+  if (NO_SPACES.test(clean)) return new RegExp(`()${escapeRegExp(clean)}`, "u");
+  const body = escapeRegExp(clean).replace(/[\s-]+/g, "[\\s-]?");
+  return new RegExp(`(^|${BOUNDARY})${body}($|${BOUNDARY})`, clean.length <= 3 ? "u" : "iu");
 }
 
-function firstMention(text: string, names: string[]): number {
+/** A domain label as written ("rival-dental") or with its hyphens removed ("rivaldental"), whole-word, never with a space. */
+function labelPattern(label: string): RegExp {
+  const forms = [...new Set([label, label.replace(/-/g, "")])].map(escapeRegExp).join("|");
+  return new RegExp(`(^|${BOUNDARY})(?:${forms})($|${BOUNDARY})`, "iu");
+}
+
+/** A label made only of the question's own words ("dentist-kl" for "best dentist kl") says nothing about a brand. */
+const isGenericLabel = (label: string, prompt: string) =>
+  label.split("-").filter(Boolean).every((part) => new RegExp(`(^|${BOUNDARY})${escapeRegExp(part)}($|${BOUNDARY})`, "iu").test(prompt));
+
+function firstMatch(text: string, patterns: RegExp[]): number {
   let first = -1;
-  for (const name of names) {
-    const match = namePattern(name).exec(text);
+  for (const pattern of patterns) {
+    const match = pattern.exec(text);
     if (match) {
       const at = match.index + match[1]!.length;
       if (first < 0 || at < first) first = at;
@@ -61,19 +75,26 @@ function firstMention(text: string, names: string[]): number {
   return first;
 }
 
+/** The patterns that find a domain in text: the domain itself, and its label unless the question's own words make it up. */
+const domainPatterns = (domain: string, prompt: string) => {
+  const label = domainLabel(domain);
+  return [namePattern(domain), ...(label.length >= 2 && !isGenericLabel(label, prompt) ? [labelPattern(label)] : [])];
+};
+
 const EXCERPT = 600;
 
-/** What one answer says about the site: mentioned (a brand name, the domain or its label in the text), cited (a source on the site's domain), and which competitors it names or cites. */
-export function readAnswer(input: { text: string; sources: AiSource[]; brandNames: string[]; site: string; competitors: string[] }) {
+/** What one answer says about the site: mentioned (a brand name, the domain or its label in the text, links aside), cited (a source on the site's domain), and which competitors it names or cites. The excerpt is cut from the link-stripped text. */
+export function readAnswer(input: { text: string; prompt: string; sources: AiSource[]; brandNames: string[]; site: string; competitors: string[] }) {
   const site = bareDomain(input.site);
-  const names = [...new Set([...input.brandNames, site, domainLabel(site)])].filter((name) => name.trim().length >= 2);
-  const at = firstMention(input.text, names);
+  const text = straighten(input.text).replace(/\]\([^)]*\)/g, "]").replace(/https?:\/\/\S+/g, " ");
+  const names = [...new Set(input.brandNames)].filter((name) => name.trim().length >= 2);
+  const at = firstMatch(text, [...names.map(namePattern), ...domainPatterns(site, input.prompt)]);
   const domains = [...new Set(input.sources.map((source) => bareDomain(source.domain)))];
   const rank = domains.findIndex((domain) => isOrUnder(domain, site));
   const rivals: AiRival[] = input.competitors.map((competitor) => {
     const domain = bareDomain(competitor);
-    return { domain, mentioned: firstMention(input.text, [domain, domainLabel(domain)]) >= 0, cited: domains.some((source) => isOrUnder(source, domain)) };
+    return { domain, mentioned: firstMatch(text, domainPatterns(domain, input.prompt)) >= 0, cited: domains.some((source) => isOrUnder(source, domain)) };
   }).filter((rival) => rival.mentioned || rival.cited);
-  const start = at < 0 ? 0 : Math.max(0, Math.min(at - EXCERPT / 2, input.text.length - EXCERPT));
-  return { mentioned: at >= 0, cited: rank >= 0, citedRank: rank >= 0 ? rank + 1 : null, rivals, excerpt: input.text.slice(start, start + EXCERPT) };
+  const start = at < 0 ? 0 : Math.max(0, Math.min(at - EXCERPT / 2, text.length - EXCERPT));
+  return { mentioned: at >= 0, cited: rank >= 0, citedRank: rank >= 0 ? rank + 1 : null, rivals, excerpt: text.slice(start, start + EXCERPT) };
 }

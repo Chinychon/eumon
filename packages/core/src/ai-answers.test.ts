@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { readAnswer } from "./ai-answers.js";
 
-const base = { sources: [], brandNames: ["Bright Smile"], site: "brightsmile.example", competitors: ["rival-dental.example", "other.example"] };
+const base = { prompt: "best dentist kl", sources: [], brandNames: ["Bright Smile"], site: "brightsmile.example", competitors: ["rival-dental.example", "othersmile.example"] };
 
 describe("readAnswer", () => {
   it("finds the brand by name, by domain, and by the domain's label", () => {
@@ -34,8 +34,8 @@ describe("readAnswer", () => {
   });
 
   it("names the competitors mentioned or cited, and only those", () => {
-    const read = readAnswer({ ...base, text: "Rival Dental is popular.", sources: [{ domain: "other.example", url: "https://other.example/p" }] });
-    assert.deepEqual(read.rivals, [{ domain: "rival-dental.example", mentioned: true, cited: false }, { domain: "other.example", mentioned: false, cited: true }]);
+    const read = readAnswer({ ...base, text: "rival-dental is popular.", sources: [{ domain: "othersmile.example", url: "https://othersmile.example/p" }] });
+    assert.deepEqual(read.rivals, [{ domain: "rival-dental.example", mentioned: true, cited: false }, { domain: "othersmile.example", mentioned: false, cited: true }]);
   });
 
   it("the excerpt centres on the first mention, else the answer's start, and stays within 600 characters", () => {
@@ -44,5 +44,36 @@ describe("readAnswer", () => {
     assert.ok(read.excerpt.includes("Bright Smile"));
     assert.ok(read.excerpt.length <= 600);
     assert.equal(readAnswer({ ...base, text: "x".repeat(900) }).excerpt, "x".repeat(600));
+  });
+
+  it("a rival's label written with a space doesn't count", () => {
+    assert.deepEqual(readAnswer({ ...base, text: "Rival Dental is popular." }).rivals, []);
+    assert.equal(readAnswer({ ...base, text: "rivaldental is popular." }).rivals.length, 1);
+  });
+
+  it("a label made of the question's own words doesn't count", () => {
+    assert.equal(readAnswer({ ...base, site: "dentist-kl.example", brandNames: [], text: "Try a dentist-kl near you" }).mentioned, false);
+  });
+
+  it("a generic label written with a space doesn't count", () => {
+    assert.equal(readAnswer({ ...base, site: "best-clinic.example", brandNames: [], text: "the best clinic in town" }).mentioned, false);
+    assert.equal(readAnswer({ ...base, site: "best-clinic.example", brandNames: [], prompt: "dentist", text: "try best-clinic today" }).mentioned, true);
+  });
+
+  it("names in scripts without spaces match inside a sentence", () => {
+    assert.equal(readAnswer({ ...base, brandNames: ["光明牙科"], text: "推荐在光明牙科看牙。" }).mentioned, true);
+    assert.equal(readAnswer({ ...base, brandNames: ["ยิ้มสวย"], text: "แนะนำคลินิกยิ้มสวยครับ" }).mentioned, true);
+  });
+
+  it("link targets are not mentions", () => {
+    const url = "https://www.brightsmile.example/p?utm_source=chatgpt.com";
+    const read = readAnswer({ ...base, text: `Clinics ([source](${url}))`, sources: [{ domain: "brightsmile.example", url }] });
+    assert.equal(read.cited, true);
+    assert.equal(read.mentioned, false);
+    assert.equal(readAnswer({ ...base, text: `see ${url} now` }).mentioned, false);
+  });
+
+  it("curly apostrophes match straight ones", () => {
+    assert.equal(readAnswer({ ...base, brandNames: ["Joe's Dental"], text: "Try Joe\u2019s Dental." }).mentioned, true);
   });
 });

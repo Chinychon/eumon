@@ -9,7 +9,7 @@ import type { SignalKeys } from "./results-sync.ts";
 /** Everything the Results view shows for one site, computed from the ledger and the keyword lists. */
 export async function loadResults(db: D1Like, site: SiteRecord, today = new Date().toISOString().slice(0, 10)): Promise<ResultsView> {
   const competitors = await listSiteCompetitorDomains(db, site.id);
-  const perCompetitor = competitors.flatMap((domain) => [`authority:${domain}`, `kw_top10:${domain}`, `kw_traffic:${domain}`, `backlinks:${domain}`, `ref_domains:${domain}`, `backlink_rank:${domain}`, `ai_answers_mentioned:${domain}`, `ai_answers_cited:${domain}`]);
+  const perCompetitor = competitors.flatMap((domain) => [`authority:${domain}`, `kw_top10:${domain}`, `kw_traffic:${domain}`, `backlinks:${domain}`, `ref_domains:${domain}`, `backlink_rank:${domain}`]);
   const [series, pages, index, markets] = await Promise.all([
     listMetricSeries(db, site.id, [...RESULT_METRICS, ...perCompetitor], addDays(today, -500), today),
     publishedPages(db, site.id),

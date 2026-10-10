@@ -334,6 +334,16 @@ describe("startSync and startDailySyncs", () => {
     assert.ok(notes.includes("ranks: 2 checked in 1 step, $0.01"), notes.join("; "));
   });
 
+  it("goes on to the next market's AI slice when an AI step dies", async () => {
+    const { db, steps, run } = await rankSite(["mys", "sgp"], 0, "s/ai-1");
+    await setAiPrompts(db, "s", ["best clinic", "cheap clinic"]);
+    const notes = await run();
+    assert.ok(notes.includes("ai answers failed: boom"), notes.join("; "));
+    assert.ok(steps.some((entry) => entry.name === "s/ai-2"), "the second market's slice still runs");
+    assert.ok(notes.includes("ai answers: 8 checked in 1 step, $0.08"), notes.join("; "));
+    assert.ok(steps.some((entry) => entry.name === "s/ai-counts"));
+  });
+
   it("skips ranks with a note, and still records the run, when reading the workspace's limits dies", async () => {
     const { db, steps, serps, run } = await rankSite(["mys"], 2, "s/dataforseo-limits");
     const notes = await run();

@@ -89,9 +89,7 @@ It maps each crawled URL to its route by matching `pathPattern`. Dynamic segment
 
 Head-tag problems on one route become **one** `head` candidate listing every sub-problem, so each PR covers one fix type per route.
 
-Candidates are ranked by:
-- the number of affected pages times the growth plan's impact score for the matching finding, when there is one;
-- otherwise by the number of affected pages.
+Candidates are ranked by the number of affected pages times a weight per fix type: metadata-base 5, ai-robots 4, head 3, jsonld 2, llms-txt 1. Findings are keyed by title and don't map onto routes, so their impact scores can't be reused.
 
 ## 3. Edit rules (Next.js App Router)
 
@@ -168,7 +166,7 @@ The AI writes words only. Each guardrail mirrors one that worked in MedBay's scr
 **AI client.** It reuses `@organic-growth/ai` in MedBay's cheap mode:
 - thinking off, JSON mode, forgiving JSON parsing;
 - backoff with jitter on 429/5xx;
-- a per-analysis budget (`FIX_TEXT_BUDGET_USD`, default $0.25), after which remaining candidates skip with snippets.
+- a per-analysis budget of AI **calls** (default 30), since the client has no cost tracking. Once it is spent, the remaining candidates skip with snippets.
 
 The prompt version is a hash stored with each staged fix.
 
@@ -274,12 +272,22 @@ The Setup page gains the `allowAiSearch` switch, the PR budget (1–5) and an "A
 
 ## 10. Testing
 
-- **`packages/fixes` fixtures** from real App Router files. Start with copies of MedBay's `app/**/page.tsx` and `layout.tsx` (sanitised), plus synthetic ones for each shape in §3. Each rule gets an "applies" and a "skips with snippet" test.
+- **`packages/fixes` fixtures:** synthetic App Router files for each shape in §3. MedBay is a Vite + React Router single-page app, not Next.js (see §12), so it can't supply fixtures. Each rule gets an "applies" and a "skips with snippet" test.
 - **Validator tests** that try edits outside the region, unknown variables, extra imports, a forbidden file, and an oversize diff. Every one must be refused.
 - **`detect` tests** on crawl and route fixtures: duplicate titles, missing descriptions, a missing `metadataBase`, language variants.
-- **AI text step:** pure checks (closed variables, banned words, rendered-length budget, number check) unit-tested against fixed model outputs, plus a small evaluation script over real MedBay routes that prints before and after, like MedBay's `--dry-run`. Not part of CI.
+- **AI text step:** the pure checks (closed variables, grounded example values, banned words, rendered-length budget, number check, language) are unit-tested against fixed model outputs.
 - **Webhook:** recorded GitHub payloads drive every status transition in §5.3. The signature check refuses tampered bodies.
 - **End to end, manual:** a test repo (a fork of a small Next.js App Router site) with the App installed and a Vercel or Cloudflare Pages preview. Run an analysis and watch the PRs open, verify on preview, and leave draft.
+
+## 12. Corrections from the code research (2026-10-10)
+
+- **The crawl stores no page text,** only head tags, heading outline and lengths. The AI step fetches up to 3 live pages per route at fix time, using `defaultFetcher`, `parseHtmlSignals` and `visibleText`.
+- **Grounding.** The AI must return example values for every variable path it uses, one set per sample page. Each value must appear in that page's title, H1, description or text. Lengths are checked on these rendered examples.
+- **Route patterns use `:param`** (`/procedures/:slug`). Matching a crawled URL to a route prefers the pattern with more static segments.
+- **Repo files are not kept after analysis.** The engine fetches the files it edits, with their blob SHA, from GitHub's contents API.
+- **Leaving draft:** GitHub's REST API can't take a PR out of draft. The engine uses the GraphQL mutation `markPullRequestReadyForReview`.
+- **Settings location.** Autopilot on/off, PR budget and "allow AI search" sit at the top of the Fixes panel rather than on the Setup page, so all fix controls are in one place.
+- **MedBay is Vite + React Router,** with head tags set by an edge Worker. v1 (Next.js App Router) only gives it snippets; support for its setup is a later version. This is the user's decision.
 
 ## 11. Risks
 

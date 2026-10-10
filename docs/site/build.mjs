@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 const here = dirname(fileURLToPath(import.meta.url));
 const ORDER = [
   "overview", "getting-started",
-  "architecture", "flow-analysis", "flow-sync", "flow-pages", "data-model",
+  "architecture", "flow-analysis", "flow-sync", "flow-fixes", "flow-pages", "data-model",
   "packages", "codebase-map", "web-app", "findings", "glossary",
   "ops", "gotchas",
 ];

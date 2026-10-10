@@ -1,16 +1,11 @@
 import { env } from "cloudflare:workers";
-import { createId, verifyToken, type SiteRecord } from "@organic-growth/core";
+import { createId, type SiteRecord } from "@organic-growth/core";
 import { isSafePublicUrl } from "@organic-growth/crawler";
-import { countWorkspaceSites, listSitesForUser, upsertSite } from "@organic-growth/db";
-import { createInstallationToken, listInstallationRepositories } from "@organic-growth/repo-analyzer";
+import { countWorkspaceSites, listGithubInstallations, listSitesForUser, upsertSite } from "@organic-growth/db";
 import { fail, json, readJson } from "../../../src/server";
 import { requireWorkspace } from "../../../src/guard";
 import { limitsFor } from "../../../src/limits";
-
-function installationCookie(request: Request): string | null {
-  return request.headers.get("Cookie")?.split(";").map((part) => part.trim())
-    .find((part) => part.startsWith("og_installation="))?.slice("og_installation=".length) ?? null;
-}
+import { workspaceRepositories } from "../../../src/github-install";
 
 /** The refusal message when the workspace is full, else null. */
 async function overLimit(workspaceId: string): Promise<string | null> {
@@ -66,13 +61,13 @@ export async function POST(request: Request) {
   if (typeof body.repositoryId !== "number" || !Number.isSafeInteger(body.repositoryId)) {
     return fail("Choose an installed repository.");
   }
-  const installationId = (await verifyToken<{ id: string }>(installationCookie(request) ?? "", env.SESSION_SECRET))?.id;
-  if (!installationId) return fail("Install the GitHub App before connecting a repository.", 401);
+  const installations = await listGithubInstallations(env.DB, workspaceId);
+  if (!installations.length) return fail("Install the GitHub App for this workspace before connecting a repository.", 401);
 
   try {
-    const token = await createInstallationToken(env.GITHUB_APP_ID, env.GITHUB_APP_PRIVATE_KEY, installationId);
-    const repository = (await listInstallationRepositories(token)).find((item) => item.id === body.repositoryId);
-    if (!repository) return fail("That repository is not available to this GitHub App installation.", 403);
+    const repository = (await workspaceRepositories(env.GITHUB_APP_ID, env.GITHUB_APP_PRIVATE_KEY, installations)).find((item) => item.id === body.repositoryId);
+    if (!repository) return fail("That repository is not available to this workspace's GitHub installations.", 403);
+    const installationId = repository.installationId;
 
     const existing = sites.find((site) => site.githubOwner === repository.owner.login && site.githubRepo === repository.name)
       ?? sites.find((site) => !site.githubRepo && new URL(site.baseUrl).origin === baseUrl);

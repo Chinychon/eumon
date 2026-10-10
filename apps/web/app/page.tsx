@@ -86,7 +86,9 @@ export default function Home() {
     setAskThread(query.get("thread") ?? "");
     if (query.get("github") === "connected") setNotice("GitHub connected. Choose a repository in Setup.");
     if (query.get("github_error") === "installation_invalid") setError("GitHub returned without a valid install session. Start “Connect GitHub” from this tab and use the same address for the callback.");
-    if (query.get("github_error") === "installation_failed") setError("GitHub installed the app, but Eumon couldn't save the connection. Check that SESSION_SECRET is at least 32 characters, then try again.");
+    if (query.get("github_error") === "authorization_missing") setError("Turn on \u201cRequest user authorization (OAuth) during installation\u201d in the GitHub App\u2019s settings, then install again.");
+    if (query.get("github_error") === "installation_not_yours") setError("That GitHub installation isn\u2019t one your GitHub account can manage.");
+    if (query.get("github_error") === "installation_failed") setError("GitHub installed the app, but Eumon couldn't save the connection. Try again.");
     const gsc = query.get("gsc");
     if (gsc === "connected") setNotice("Google connected. Choose a Search Console property in Setup.");
     else if (gsc) setError("The Google Search Console connection needs attention — try connecting again.");

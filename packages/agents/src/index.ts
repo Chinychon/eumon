@@ -441,3 +441,4 @@ export * from "./connector-findings.js";
 export * from "./log-coverage.js";
 export * from "./trend-signals.js";
 export * from "./not-found-probe.js";
+export * from "./fix-text.js";

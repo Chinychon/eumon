@@ -9,7 +9,7 @@ import { recordCrawlLog, type D1Like } from "@organic-growth/db";
  * crawler requests are kept.
  */
 
-/** A site's log token: derived from the server secret, so nothing is stored and it changes only with the secret. */
+/** A site's original log token, derived from the server secret; used until the site rotates to a stored one. */
 export const logToken = (secret: string, siteId: string) => derivedKey(secret, `logs:${siteId}`);
 
 /** The token a delivery carries: `Authorization: Bearer …` (Vercel's custom headers, Logpush's `header_Authorization`) or `?token=` (anything else). */
@@ -18,9 +18,9 @@ export function presentedToken(request: Request): string | null {
   return bearer ?? new URL(request.url).searchParams.get("token");
 }
 
-export async function tokenMatches(request: Request, secret: string, siteId: string): Promise<boolean> {
+export async function tokenMatches(request: Request, secret: string, siteId: string, stored: string | null): Promise<boolean> {
   const presented = presentedToken(request);
-  return Boolean(presented) && sameSecret(presented!, await logToken(secret, siteId));
+  return Boolean(presented) && sameSecret(presented!, stored ?? await logToken(secret, siteId));
 }
 
 /** Largest delivery read, uncompressed: Logpush batches start at 5 MB, Vercel's at 1 MB, uploads are split client-side. */

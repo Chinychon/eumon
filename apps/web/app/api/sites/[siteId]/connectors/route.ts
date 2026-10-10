@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { indexNowKey } from "@organic-growth/agents";
-import { firstCrawlLogDay, lastMetricDay, listCrawlLogDays } from "@organic-growth/db";
+import { firstCrawlLogDay, getSiteLogToken, lastMetricDay, listCrawlLogDays, setSiteLogToken } from "@organic-growth/db";
 import { bingSiteUrl } from "../../../../../src/connector-sources";
 import { logToken } from "../../../../../src/crawl-logs";
 import { signalKeys } from "../../../../../src/results-access";
@@ -40,11 +40,21 @@ export async function GET(request: Request, context: { params: Promise<{ siteId:
     },
     logs: keys.indexNowSecret ? {
       endpoint: `${origin}/api/logs/${siteId}`,
-      token: await logToken(keys.indexNowSecret, siteId),
+      token: (await getSiteLogToken(env.DB, siteId)) ?? await logToken(keys.indexNowSecret, siteId),
       host: new URL(site.baseUrl).host,
       firstDay: firstLog,
       lastDay: recent.at(-1)?.day ?? null,
       lastWeek: recent.filter((row) => row.day < today).reduce((sum, row) => sum + row.hits, 0),
     } : null,
   });
+}
+
+/** Replaces the site's log token: the old one stops working at once, so update the log shipper after. */
+export async function POST(request: Request, context: { params: Promise<{ siteId: string }> }) {
+  const { siteId } = await context.params;
+  const access = await requireSite(request, siteId, "write");
+  if (access instanceof Response) return access;
+  const token = [...crypto.getRandomValues(new Uint8Array(32))].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  await setSiteLogToken(env.DB, siteId, token);
+  return json({ token });
 }

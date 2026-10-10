@@ -230,7 +230,14 @@ export function ConnectorSetup({ siteId }: { siteId: string }) {
                 <span className="small muted">A one-off look: an nginx or Apache log, or an NDJSON export.</span>
               </div>
               {upload && <p className="small">{upload}</p>}
-              <p className="small muted">The token in these snippets lets anyone who has it send logs for this site; it changes only with SESSION_SECRET.</p>
+              <p className="small muted">The token in these snippets lets anyone who has it send logs for this site; rotate it if it leaks.</p>
+              <Button small variant="ghost" onClick={async () => {
+                if (!window.confirm("Rotate the log token? Log shipping stops until you paste the new token into it.")) return;
+                try {
+                  const { token } = await api<{ token: string }>(`/api/sites/${siteId}/connectors`, { method: "POST" });
+                  setConnectors({ ...connectors, logs: { ...logs, token } });
+                } catch (cause) { setUpload(errorMessage(cause)); }
+              }}>Rotate token</Button>
             </>
           )}
         </div>

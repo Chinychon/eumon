@@ -97,7 +97,7 @@ export async function syncSite(deps: SyncDeps, step: StepLike, siteId: string, t
     // A site whose Google access failed has nothing to inspect with.
     if (inspects && !notes.some((note) => note.startsWith("google failed"))) notes.push(...await inspectSite(deps, safe, site, startedAt.slice(0, 10), spent, published));
   }
-  // The history is for the operator; failing to write it must not fail the sync.
+  // The history is for the dashboard; failing to write it must not fail the sync.
   await safe("record", () => recordSyncRun(deps.db, { id: runId, siteId, trigger, startedAt, finishedAt: deps.now().toISOString(), notes }));
   return notes;
 }

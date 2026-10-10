@@ -6,7 +6,7 @@ import { decryptSecret, encryptSecret } from "./gsc-auth.ts";
 
 /*
  * A Supabase table as a dataset source: read through PostgREST with a
- * read-only key the operator pastes once. The key is sealed the way the
+ * read-only key the user pastes once. The key is sealed the way the
  * Google refresh token is and never leaves the server. A pull runs as
  * collection-workflow steps, a page of rows each, so every step fits the
  * Free plan's budgets; the table is the authority for what it said before.

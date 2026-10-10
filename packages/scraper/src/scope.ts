@@ -30,7 +30,7 @@ export type ProposedDataset = {
 };
 
 export type ScopeProposal = {
-  /** The brand name the business uses for itself (e.g. "Edea Design"). */
+  /** The brand name the business uses for itself (e.g. "Riverside Dental"). */
   businessName: string;
   businessSummary: string;
   conversionGoal: string;

@@ -196,7 +196,7 @@ function AnswerParts({ parts, live }: { parts: AssistantPart[]; live: boolean })
   return <>{nodes}</>;
 }
 
-/** Three questions worth asking from where the operator is. */
+/** Three questions worth asking from where the user is. */
 function suggestionsFor(site: SiteRecord, view: string | undefined, competitors: string[]) {
   if (view === "Data") return ["What data do we have for landing pages?", "Which datasets have the most records?", "Which page types have empty HTML?"];
   if (view === "Landing pages" || view === "Page results") {
@@ -290,7 +290,7 @@ function Conversation({ site, threadId, view, onThread, inDrawer, focusKey, star
   const update = (change: (turn: AnswerTurn) => AnswerTurn) =>
     setTurns((items) => items.map((item, index) => (index === items.length - 1 && item.role === "assistant" ? change(item) : item)));
 
-  // A conversation keeps going if the operator leaves it: the server finishes and saves the answer.
+  // A conversation keeps going if the user leaves it: the server finishes and saves the answer.
   async function ask(question: string) {
     const text = question.trim();
     if (!text || busy) return;

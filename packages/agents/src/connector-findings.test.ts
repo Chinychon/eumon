@@ -167,7 +167,7 @@ describe("trend findings", () => {
   it("trusts the inspection sample's fall only when Google's not-indexed count rose with it, not when pages were unpublished", () => {
     const indexed = [{ day: "2026-09-01", value: 500 }, { day: "2026-10-01", value: 420 }];
     const unpublished = findingsFromTrends({ siteId: "s", analysisId: "a", trends: signals({ indexed, indexedSource: "inspection", notIndexed: [{ day: "2026-09-01", value: 20 }, { day: "2026-10-01", value: 20 }] }), sitemapUrls: null, discovered: null });
-    assert.deepEqual(unpublished, [], "80 fewer indexed pages but none more left out: the operator unpublished them");
+    assert.deepEqual(unpublished, [], "80 fewer indexed pages but none more left out: the user unpublished them");
     const dropped = findingsFromTrends({ siteId: "s", analysisId: "a", trends: signals({ indexed, indexedSource: "inspection", notIndexed: [{ day: "2026-09-01", value: 20 }, { day: "2026-10-01", value: 90 }] }), sitemapUrls: null, discovered: null });
     assert.equal(dropped[0]?.title, "Google's indexed count fell from 500 to 420 since Sep 1");
     assert.match(dropped[0]!.summary, /inspection sample/);

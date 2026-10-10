@@ -10,7 +10,7 @@ import { fail, json, settingsFor } from "../../../../../src/server";
 /**
  * What Setup needs for the connections beyond Google: which keys are set, the
  * site's log address and token, its IndexNow key file, and when each last
- * delivered. The token is a secret: this is an operator route, like the rest
+ * delivered. The token is a secret: this is a dashboard route, like the rest
  * of the console.
  */
 export async function GET(request: Request, context: { params: Promise<{ siteId: string }> }) {

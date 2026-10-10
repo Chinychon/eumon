@@ -7,6 +7,7 @@ import { handleGitHubEvent, verifySignature } from "../../../../src/github-webho
 // Public: GitHub App events, authenticated by the HMAC signature rather than a session.
 export async function POST(request: Request) {
   if (!env.GITHUB_WEBHOOK_SECRET) return Response.json({ error: "Webhooks aren't configured." }, { status: 503 });
+  if (Number(request.headers.get("content-length")) > 26_214_400) return Response.json({ error: "Payload too large." }, { status: 413 });
   const body = await request.text();
   if (!(await verifySignature(env.GITHUB_WEBHOOK_SECRET, body, request.headers.get("x-hub-signature-256")))) {
     return Response.json({ error: "Invalid signature." }, { status: 401 });
@@ -17,9 +18,14 @@ export async function POST(request: Request) {
   } catch {
     return Response.json({ error: "Invalid JSON." }, { status: 400 });
   }
-  const outcome = await handleGitHubEvent(
-    { db: env.DB as unknown as D1Like, opsFor: async (site) => (await fixRepoFor(env, site)).ops, fetchHtml, now: () => new Date() },
-    request.headers.get("x-github-event") ?? "", payload,
-  ).catch((error: unknown) => `error: ${error instanceof Error ? error.message : "unknown"}`);
-  return Response.json({ outcome });
+  try {
+    const outcome = await handleGitHubEvent(
+      { db: env.DB as unknown as D1Like, opsFor: async (site) => (await fixRepoFor(env, site)).ops, fetchHtml, now: () => new Date() },
+      request.headers.get("x-github-event") ?? "", payload,
+    );
+    return Response.json({ outcome });
+  } catch (error) {
+    console.error("GitHub webhook failed", error);
+    return Response.json({ outcome: "error" }, { status: 500 });
+  }
 }

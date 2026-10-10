@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { countOpenFixes, findFixByHeadSha, findSitesByRepo, findFixByPr, getFixSettings, hasLiveFix, listFixes, listPageHeads, setFixSettings, stageFix, updateFix, type FixRecord } from "./fixes.js";
+import { countOpenFixes, findFixByHeadSha, findSitesByRepo, findFixByPr, getFixSettings, hasLiveFix, listFixes, listPageHeads, setFixSettings, stageFix, transitionFix, updateFix, type FixRecord } from "./fixes.js";
 import { upsertSite } from "./index.js";
 import { openSqliteD1 } from "./sqlite.js";
 
@@ -60,5 +60,14 @@ describe("fix storage", () => {
     await db.prepare("UPDATE changes SET evidence_json = 'not json', warnings_json = '{', verification_json = 'x' WHERE id = 'f1'").run();
     const [row] = await listFixes(db, "s");
     assert.deepEqual([row?.files, row?.warnings, row?.verification], [{}, [], undefined]);
+  });
+
+  it("transitions a fix only from the expected statuses", async () => {
+    const db = await setup();
+    await stageFix(db, fix());
+    await updateFix(db, "f1", { status: "draft" });
+    assert.equal(await transitionFix(db, "f1", ["draft"], { status: "ready" }), true);
+    assert.equal(await transitionFix(db, "f1", ["draft"], { status: "failed" }), false);
+    assert.equal((await listFixes(db, "s"))[0]?.status, "ready");
   });
 });

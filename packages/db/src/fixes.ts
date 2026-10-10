@@ -80,14 +80,27 @@ export async function findFixByHeadSha(db: D1Like, headSha: string, siteId: stri
   return row ? mapFix(row) : null;
 }
 
-export async function updateFix(db: D1Like, id: string, patch: Partial<Pick<FixRecord, "status" | "prUrl" | "prNumber" | "branch" | "headSha" | "prNodeId" | "previewUrl" | "verification" | "result">>): Promise<void> {
+type FixPatch = Partial<Pick<FixRecord, "status" | "prUrl" | "prNumber" | "branch" | "headSha" | "prNodeId" | "previewUrl" | "verification" | "result">>;
+
+function fixUpdate(db: D1Like, id: string, patch: FixPatch, from?: FixStatus[]) {
   const columns: Record<string, unknown> = {
     status: patch.status, pr_url: patch.prUrl, pr_number: patch.prNumber, branch: patch.branch, head_sha: patch.headSha, pr_node_id: patch.prNodeId,
     preview_url: patch.previewUrl, verification_json: patch.verification ? JSON.stringify(patch.verification) : undefined, result: patch.result,
   };
   const set = Object.entries(columns).filter(([, v]) => v !== undefined);
-  await db.prepare(`UPDATE changes SET ${[...set.map(([k]) => `${k} = ?`), "updated_at = ?"].join(", ")} WHERE id = ?`)
-    .bind(...set.map(([, v]) => v), nowIso(), id).run();
+  const guard = from ? ` AND status IN (${from.map(() => "?").join(", ")})` : "";
+  return db.prepare(`UPDATE changes SET ${[...set.map(([k]) => `${k} = ?`), "updated_at = ?"].join(", ")} WHERE id = ?${guard}`)
+    .bind(...set.map(([, v]) => v), nowIso(), id, ...(from ?? [])).run();
+}
+
+export async function updateFix(db: D1Like, id: string, patch: FixPatch): Promise<void> {
+  await fixUpdate(db, id, patch);
+}
+
+/** Compare-and-set: applies the patch only while the fix is in one of the `from` statuses. True when a row changed. */
+export async function transitionFix(db: D1Like, id: string, from: FixStatus[], patch: FixPatch): Promise<boolean> {
+  const result = (await fixUpdate(db, id, patch, from)) as { meta?: { changes?: number }; changes?: number } | undefined;
+  return (result?.meta?.changes ?? result?.changes ?? 0) > 0;
 }
 
 export async function hasLiveFix(db: D1Like, siteId: string, route: string, kind: string): Promise<boolean> {

@@ -1,5 +1,5 @@
 import { parseHtmlSignals } from "@organic-growth/crawler";
-import { findFixByHeadSha, findFixByPr, findSitesByRepo, updateFix, type D1Like, type FixRecord } from "@organic-growth/db";
+import { findFixByHeadSha, findFixByPr, findSitesByRepo, transitionFix, type D1Like, type FixRecord } from "@organic-growth/db";
 import type { SiteRecord } from "@organic-growth/core";
 import { LLMS_MARKER, blockedAiSearchAgents } from "@organic-growth/fixes";
 import type { GitHubOps } from "./fix-github.ts";
@@ -50,14 +50,21 @@ function missing(fix: FixRecord, pages: Array<{ url: string; body: string }>): s
 export async function advanceFix(deps: WebhookDeps, ops: GitHubOps, fix: FixRecord): Promise<"ready" | "failed" | "waiting"> {
   if (!fix.headSha || !fix.prNumber) return "waiting";
   const note = (body: string) => ops.comment(fix.prNumber!, body).catch(() => undefined);
+  // Every final write is a compare-and-set on draft, so concurrent events and merges can't be overwritten or double-commented.
   const fail = async (result: string) => {
-    await updateFix(deps.db, fix.id, { status: "failed", result });
-    await note(result);
+    if (await transitionFix(deps.db, fix.id, ["draft"], { status: "failed", result })) await note(result);
     return "failed" as const;
   };
   const ready = async (verification: Record<string, unknown>, comment: string) => {
-    if (fix.prNodeId) await ops.markReady(fix.prNodeId);
-    await updateFix(deps.db, fix.id, { status: "ready", verification });
+    if (!(await transitionFix(deps.db, fix.id, ["draft"], { status: "ready", verification }))) return "ready" as const;
+    if (fix.prNodeId) {
+      try {
+        await ops.markReady(fix.prNodeId);
+      } catch {
+        await transitionFix(deps.db, fix.id, ["ready"], { result: "Checks passed, but GitHub wouldn't mark the PR ready for review. Mark it ready by hand." });
+        return "ready" as const;
+      }
+    }
     await note(comment);
     return "ready" as const;
   };
@@ -69,15 +76,16 @@ export async function advanceFix(deps: WebhookDeps, ops: GitHubOps, fix: FixReco
   const preview = await ops.previewUrl(fix.headSha);
   if (preview) {
     const wanted = fix.kind === "llms-txt" ? ["/llms.txt"] : fix.kind === "ai-robots" ? ["/robots.txt"] : fix.urls.slice(0, 3).map((u) => { const x = new URL(u); return x.pathname + x.search; });
-    const checked = wanted.map((path) => new URL(path, preview).href);
+    const checked = wanted.map((path) => new URL(path, preview)).filter((u) => u.origin === new URL(preview).origin).map((u) => u.href);
     const pages: Array<{ url: string; body: string }> = [];
-    let locked = false;
+    let usable = checked.length > 0;
     for (const url of checked) {
       const res = await deps.fetchHtml(url);
-      if (res?.status === 401 || res?.status === 403) { locked = true; break; }
-      pages.push({ url, body: res?.body ?? "" });
+      // Locked (401/403), unreachable or erroring previews count as no preview; only a 200 can fail the fix.
+      if (!res || res.status === 401 || res.status === 403 || res.status >= 500) { usable = false; break; }
+      pages.push({ url, body: res.body });
     }
-    if (!locked) {
+    if (usable) {
       const which = missing(fix, pages);
       if (which) return fail(`The preview deploy doesn't show the change in its HTML (${which}).`);
       return ready({ preview, checked, at: deps.now().toISOString() }, "Checks passed and the preview shows the change. Ready for your review.");
@@ -102,16 +110,19 @@ export async function handleGitHubEvent(deps: WebhookDeps, event: string, payloa
     for (const site of sites) {
       const fix = await findFixByPr(deps.db, site.id, pr.number);
       if (!fix) continue;
-      if (pr.merged === true) { await updateFix(deps.db, fix.id, { status: "merged" }); return "merged"; }
-      if (fix.status === "draft" || fix.status === "ready") {
-        await updateFix(deps.db, fix.id, { status: "rejected", result: "Closed without merging on GitHub." });
-        return "rejected";
-      }
-      return "ignored";
+      if (pr.merged === true) { return (await transitionFix(deps.db, fix.id, ["draft", "ready", "failed", "closed"], { status: "merged" })) ? "merged" : "ignored"; }
+      return (await transitionFix(deps.db, fix.id, ["draft", "ready"], { status: "rejected", result: "Closed without merging on GitHub." })) ? "rejected" : "ignored";
     }
     return "ignored";
   }
 
+  // Only finished signals advance a fix; anything still running is ignored before any GitHub call.
+  const done = event === "check_suite" ? obj(payload).action === "completed"
+    : event === "check_run" ? obj(payload).action === "completed"
+    : event === "status" ? payload.state === "success" || payload.state === "failure"
+    : event === "deployment_status" ? ["success", "failure"].includes(String(obj(payload.deployment_status).state))
+    : false;
+  if (!done) return "ignored";
   const sha = event === "check_suite" ? obj(payload.check_suite).head_sha
     : event === "check_run" ? obj(payload.check_run).head_sha
     : event === "status" ? payload.sha

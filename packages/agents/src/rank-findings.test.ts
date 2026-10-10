@@ -58,4 +58,12 @@ describe("rankOpportunities", () => {
     assert.equal(rankOpportunities({ siteId: "s", analysisId: "a", ranks, searchMetrics: [row("kw", 44)], existing: [] }).length, 0);
     assert.equal(rankOpportunities({ siteId: "s", analysisId: "a", ranks: signals(series("kw", [null, 7])), searchMetrics: [row("kw", 14)], existing: [] }).length, 0, "ranked today");
   });
+  it("keeps markets apart: rows and opportunities are per market", () => {
+    const two = { tracked: ["kw"], markets: ["mys", "sgp"], today, checks: [...series("kw", [null, null], "mys"), ...series("kw", [null, null], "sgp")] };
+    const sgp = { ...row("kw", 12), country: "sgp" };
+    const one = rankOpportunities({ siteId: "s", analysisId: "a", ranks: two, searchMetrics: [sgp], existing: [] });
+    assert.equal(one.length, 1);
+    assert.match(one[0]!.title, /Singapore/);
+    assert.equal(rankOpportunities({ siteId: "s", analysisId: "a", ranks: two, searchMetrics: [row("kw", 14), sgp], existing: [] }).length, 2);
+  });
 });

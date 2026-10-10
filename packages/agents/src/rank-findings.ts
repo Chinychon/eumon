@@ -100,14 +100,13 @@ export function rankOpportunities(input: { siteId: string; analysisId: string; r
   for (const [key, series] of seriesOf(input.ranks)) {
     const [keyword, market] = key.split("|") as [string, string];
     if (series.at(-1)!.position !== null || named.has(keyword)) continue;
-    const rows = input.searchMetrics.filter((row) => row.query.toLowerCase() === keyword);
+    const rows = input.searchMetrics.filter((row) => row.query.toLowerCase() === keyword && row.country.toLowerCase() === market);
     const impressions = rows.reduce((sum, row) => sum + row.impressions, 0);
     if (!impressions) continue;
     const position = rows.reduce((sum, row) => sum + row.position * row.impressions, 0) / impressions;
     if (position > RANKS.GSC_POSITION_AT_MOST) continue;
     const clicks = rows.reduce((sum, row) => sum + row.clicks, 0);
     const estimate = estimateDemand({ kind: "ranking", query: keyword, position, impressions }, input.demand);
-    named.add(keyword);
     made.push({
       id: createId("opp"), siteId: input.siteId, analysisId: input.analysisId,
       title: `Move “${keyword}” onto the first page in ${countryName(market)} (tracked; Search Console average position ${position.toFixed(1)})`,

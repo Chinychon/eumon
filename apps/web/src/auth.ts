@@ -3,7 +3,7 @@ import { APIError } from "better-auth/api";
 import { captcha, magicLink, organization } from "better-auth/plugins";
 import { createAccessControl } from "better-auth/plugins/access";
 import { defaultStatements, memberAc, ownerAc } from "better-auth/plugins/organization/access";
-import { grantInvitedSites, memberSlotsUsed, setUpNewUser, workspaceForNewSession, type D1Like } from "@organic-growth/db";
+import { grantInvitedSites, memberSlotsUsed, revokeWorkspaceSiteAccess, setUpNewUser, workspaceForNewSession, type D1Like } from "@organic-growth/db";
 import { limitsFor } from "./limits.ts";
 import { hashPassword, verifyPassword } from "./passwords.ts";
 
@@ -107,6 +107,9 @@ export function createAuth(env: AuthEnv) {
           afterAcceptInvitation: async ({ invitation, user }) => {
             await grantInvitedSites(db, invitation.id, user.id);
           },
+          afterRemoveMember: async ({ member, organization: workspace }) => {
+            await revokeWorkspaceSiteAccess(db, workspace.id, member.userId);
+          },
         },
       }),
       ...(emailEnabled(env) ? [magicLink({ sendMagicLink: async ({ email, url }) => deliver(env, email, "Your Eumon sign-in link", `Sign in here: ${url}`) })] : []),
@@ -122,9 +125,8 @@ export function createAuth(env: AuthEnv) {
 
 export type Auth = ReturnType<typeof createAuth>;
 
-let cached: { env: AuthEnv; auth: Auth } | null = null;
-/** One Better Auth instance per isolate (env is the same object for an isolate's lifetime). */
+let cached: Auth | undefined;
+/** One Better Auth instance per isolate, whatever env object a caller holds (env is fixed for an isolate's lifetime). */
 export function authFor(env: AuthEnv): Auth {
-  if (cached?.env !== env) cached = { env, auth: createAuth(env) };
-  return cached.auth;
+  return (cached ??= createAuth(env));
 }

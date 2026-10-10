@@ -204,7 +204,7 @@ export class SiteAnalysisWorkflow extends WorkflowEntrypoint<AppEnv, AnalysisPay
           return plan.highestImpactOpportunity;
         },
       );
-      await runFixSteps(this.env, step, siteId, analysisId).catch(() => undefined);
+      await runFixSteps(this.env, step, siteId, analysisId).catch((error) => console.error("Fix steps failed", error));
       return { analysisId, status: "completed" };
     } catch (error) {
       const message = error instanceof Error ? error.message : "Analysis failed unexpectedly.";

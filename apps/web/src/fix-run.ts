@@ -241,8 +241,10 @@ async function changedSince(repo: FixRepo, fix: FixRecord): Promise<boolean> {
 const slug = (route: string) => route.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40).replace(/-+$/, "") || "root";
 
 export async function openStagedFixes(deps: FixDeps, pr: PrOps, input: { siteId: string; origin: string; budget: number; onlyId?: string; max?: number }): Promise<number> {
-  const limit = Math.min(input.budget - (await countOpenFixes(deps.db, input.siteId)), input.max ?? 3);
-  const fixes = (await listFixes(deps.db, input.siteId, ["staged"])).filter((f) => !input.onlyId || f.id === input.onlyId);
+  const max = input.max ?? 3;
+  const limit = Math.min(input.budget - (await countOpenFixes(deps.db, input.siteId)), max);
+  // Fixes closed as changed cost GitHub calls too, so the number examined is capped as well as the number opened.
+  const fixes = (await listFixes(deps.db, input.siteId, ["staged"])).filter((f) => !input.onlyId || f.id === input.onlyId).slice(0, max * 2);
   let opened = 0;
   for (const fix of fixes) {
     if (opened >= limit) break;

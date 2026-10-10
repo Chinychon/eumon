@@ -39,7 +39,9 @@ const readOrNull = (repo: { getFile(path: string): Promise<{ content: string; sh
 export async function runFixSteps(env: AppEnv, step: FixStep, siteId: string, analysisId: string): Promise<void> {
   const db = env.DB as D1Like;
   const site = await getSite(db, siteId);
-  if (!site?.githubInstallationId || !site.githubOwner || !site.githubRepo) return;
+  if (!site?.githubInstallationId || !site.githubOwner || !site.githubRepo || !site.workspaceId) return;
+  // A workspace without pull requests spends no AI or GitHub calls and writes no rows.
+  if (await featureRefusal(db, site.workspaceId, "pullRequests")) return;
   const report = (await getAnalysisJob(db, analysisId))?.report as Report | undefined;
   const fingerprint = report?.repo?.fingerprint;
   if (fingerprint?.framework !== "Next.js" || fingerprint.router !== "App Router") return;
@@ -88,7 +90,7 @@ export async function runFixSteps(env: AppEnv, step: FixStep, siteId: string, an
   });
 
   const { autopilot, budget } = await getFixSettings(db, siteId);
-  if (!autopilot || (await featureRefusal(db, site.workspaceId!, "pullRequests"))) return;
+  if (!autopilot) return;
   await step.do("fixes-open", async () => {
     const deps = await depsFor(env, site, 0);
     return openStagedFixes(deps, deps.pr, { siteId, origin: prepared.origin, budget });

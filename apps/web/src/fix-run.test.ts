@@ -162,6 +162,20 @@ describe("fix run rulings", () => {
     assert.equal((await listFixes(db, "s", ["staged"])).length, 1);
   });
 
+  it("examines at most twice `max` staged fixes per call", async () => {
+    const { db, deps, files } = await setup();
+    await stageCandidates(deps, { ...input, candidates: [head] });
+    const [fix] = await listFixes(db, "s");
+    for (let i = 0; i < 9; i++) await stageFix(db, { ...fix!, id: `copy${i}`, route: `/copy${i}` });
+    files["app/procedures/[slug]/page.tsx"] = { content: pageFile + "\n// edited", sha: "sha2" };
+    let reads = 0;
+    const counted: FixDeps = { ...deps, repo: { ...deps.repo, getFile: async (p) => { reads++; return deps.repo.getFile(p); } } };
+    const { ops } = prs();
+    assert.equal(await openStagedFixes(counted, ops, { siteId: "s", origin: "https://x.com", budget: 3, max: 3 }), 0);
+    assert.ok(reads <= 6, `read ${reads} files`);
+    assert.equal((await listFixes(db, "s", ["staged"])).length, 4);
+  });
+
   it("closes a new llms.txt fix when the file appeared after the analysis", async () => {
     const { db, deps, files } = await setup();
     const pages = [{ url: "https://x.com/", status: 200, title: "Home", description: "Clinics in Malaysia.", hreflang: [], jsonLdTypes: [] }];

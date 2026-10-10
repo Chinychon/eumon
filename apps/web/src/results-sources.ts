@@ -9,19 +9,15 @@ import {
 } from "@organic-growth/agents";
 import { addDays, AI_ASSISTANTS, countryNumeric, type PricedKeyword, type RankedKeyword, type SiteRecord } from "@organic-growth/core";
 import {
-  defaultPageSettings, firstMetricDay, getPageSettings, indexStatusCounts, listSiteCompetitorDomains, listSiteMarkets, listSnapshotDates, listSnapshots, pagesToInspect, saveIndexStatus,
-  saveSnapshot, saveTopQueriesSnapshot, syncFirstPartyResults, topEumonPage, type D1Like, type MetricPoint,
+  defaultPageSettings, firstMetricDay, getPageSettings, listSiteCompetitorDomains, listSiteMarkets, listSnapshotDates, listSnapshots, saveSnapshot, saveTopQueriesSnapshot, syncFirstPartyResults, topEumonPage, type D1Like, type MetricPoint,
 } from "@organic-growth/db";
 import { ANALYTICS_SCOPE } from "./gsc-auth.ts";
 import type { Source, SyncContext } from "./results-sync.ts";
 import { CONNECTOR_SOURCES } from "./connector-sources.ts";
 import { dollars, eumonOrigin, FRESH_DAYS, marketLocation, noMarkets, said } from "./source-helpers.ts";
-import { inspectSitemapUrls, inspectUrls } from "./url-inspection.ts";
 
 /** Search Console and GA4 history fetched on a site's first sync. */
 const BACKFILL_DAYS = 486;
-/** URL inspections of Eumon pages per site per day (the API allows 2,000 per property). */
-const INSPECTIONS_PER_DAY = 100;
 const FORM_FACTORS: FormFactor[] = ["phone", "desktop"];
 
 
@@ -149,37 +145,6 @@ const topQueryList: Source = {
     const [recent, earlier] = await Promise.all([queriesIn(last28), queriesIn({ startDate: addDays(today, -58), endDate: addDays(today, -31) })]);
     await saveTopQueriesSnapshot(db, site.id, { property, markets, periodEnd: last28.endDate, rows: topQueries(recent, earlier) });
     return { points: questionPoints(recent, last28.endDate) };
-  },
-};
-
-/**
- * Google's index status: a rolling sample of published Eumon pages (those
- * checked today are skipped, so a second Sync now spends no quota), then a
- * short pass over sitemap URLs. The daily workflow runs more sitemap rounds.
- */
-const inspection: Source = {
-  name: "inspection", cadence: "daily", google: true,
-  applies: ({ site }) => Boolean(site.gscProperty),
-  run: async (ctx) => {
-    const { db, site, today, fetchFn, coverageLimit } = ctx;
-    const { token } = await ctx.google();
-    const property = site.gscProperty!;
-    const { origin } = await eumonOrigin(db, site);
-    const pages = await pagesToInspect(db, site.id, INSPECTIONS_PER_DAY, today);
-    // A page Google wouldn't inspect today has no row, so it comes up again tomorrow.
-    const checked = await inspectUrls(pages, (page) => `${origin}${page.path}`, token, property, fetchFn, (batch) =>
-      saveIndexStatus(db, site.id, batch.flatMap(({ entry, result }) => (result ? [{ pageId: entry.pageId, ...result }] : []))));
-    const points: MetricPoint[] = [];
-    if (pages.length) {
-      const counts = await indexStatusCounts(db, site.id);
-      points.push({ metric: "pages_indexed", day: today, value: counts.indexed }, { metric: "pages_not_indexed", day: today, value: counts.notIndexed });
-    }
-    const notes = [`inspected ${checked.inspected} pages`];
-    if (checked.refused) return { points, notes: [...notes, `inspection stopped: Google answered ${checked.refused}`] };
-    const coverage = await inspectSitemapUrls(db, site.id, property, token, today, coverageLimit, fetchFn);
-    if (coverage.inspected || coverage.refused) notes.push(`coverage: inspected ${coverage.inspected}`);
-    if (coverage.refused) notes.push(`coverage stopped: Google answered ${coverage.refused}`);
-    return { points, notes };
   },
 };
 
@@ -340,7 +305,7 @@ const keywordVolumes: Source = {
 };
 
 export const SOURCES: Source[] = [
-  speed, lab, authority, firstParty, search, rankings, topQueryList, inspection, analytics, competitorKeywords, keywordVolumes,
+  speed, lab, authority, firstParty, search, rankings, topQueryList, analytics, competitorKeywords, keywordVolumes,
   // After the keyword lists: search competitors and results pages are chosen from them.
   ...CONNECTOR_SOURCES,
 ];

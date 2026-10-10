@@ -1,51 +1,34 @@
 import { WorkflowEntrypoint } from "cloudflare:workers";
 import type { WorkflowEvent, WorkflowStep } from "cloudflare:workers";
 import type { AppEnv } from "../cloudflare.config";
-import { createId } from "@organic-growth/core";
-import { getSite, listSitesForResults, publishedPages, recordSyncRun } from "@organic-growth/db";
 import { googleAccess, signalKeys } from "./results-access";
-import { syncResults } from "./results-sync";
-import { COVERAGE_STEP, coverageRound } from "./url-inspection";
 import { syncGeneratedPageSearch } from "./search-sync";
+import { syncSite, type StepLike, type StepOptions, type SyncDeps, type SyncParams } from "./sync-steps";
 
-/** The daily sync for every site. Unscheduled for now (scheduled Workflows need the paid Workers plan; see cloudflare.config.ts). */
-export class SearchSyncWorkflow extends WorkflowEntrypoint<AppEnv, Record<string, never>> {
-  async run(_event: WorkflowEvent<Record<string, never>>, step: WorkflowStep) {
-    const siteIds = await step.do("list-sites", () => listSitesForResults(this.env.DB));
-    const results: Record<string, string> = {};
-    for (const siteId of siteIds) {
-      results[siteId] = await step.do(`sync-${siteId}`, { retries: { limit: 1, delay: "1 minute" } }, async () => {
-        const site = await getSite(this.env.DB, siteId);
-        if (!site) return "skipped: site removed";
-        const notes: string[] = [];
-        const startedAt = new Date().toISOString();
-        if (site.gscProperty && (await publishedPages(this.env.DB, siteId)).published) {
-          try {
-            notes.push(`pages: ${(await syncGeneratedPageSearch(this.env, site)).queries} query rows`);
-          } catch (error) {
-            // One site's revoked Google access must not stop the others.
-            notes.push(`pages failed: ${error instanceof Error ? error.message : String(error)}`);
-          }
-        }
-        try {
-          notes.push(...await syncResults(this.env.DB, site, new Date(), googleAccess(this.env, siteId), signalKeys(this.env), COVERAGE_STEP));
-        } catch (error) {
-          // A database error on one site must not stop the sites after it.
-          notes.push(`results failed: ${error instanceof Error ? error.message : String(error)}`);
-        }
-        await recordSyncRun(this.env.DB, { id: createId("sync"), siteId, trigger: "daily", startedAt, finishedAt: new Date().toISOString(), notes }).catch(() => undefined);
-        return notes.join("; ");
-      });
-      // Up to 8 more coverage steps (1,600 inspections), so a 23,000-URL site is checked within about two weeks under the 2,000-a-day quota.
-      const site = await getSite(this.env.DB, siteId);
-      if (site?.gscProperty) {
-        for (let round = 1; round <= 8; round++) {
-          const more = await step.do(`coverage-${siteId}-${round}`, () =>
-            coverageRound(this.env.DB, siteId, site.gscProperty!, googleAccess(this.env, siteId), new Date().toISOString().slice(0, 10)));
-          if (!more) break;
-        }
-      }
-    }
-    return results;
+/**
+ * One site's Results sync: created once a day per site by the cron trigger in
+ * worker.ts, or by "Sync now". The site's sources run in one step and its URL
+ * inspections in steps of 40, so every step fits the Free plan's 50 subrequests.
+ */
+export class SearchSyncWorkflow extends WorkflowEntrypoint<AppEnv, SyncParams> {
+  async run(event: WorkflowEvent<SyncParams>, step: WorkflowStep) {
+    // Step results here are strings, numbers and plain objects, which Workflows serialise; the cast only bridges its generic constraint.
+    const steps: StepLike = {
+      do: <T>(name: string, fn: () => Promise<T>, options?: StepOptions) => (options
+        ? step.do(name, {
+          ...(options.retries ? { retries: { limit: options.retries.limit, delay: options.retries.delay, backoff: "constant" as const } } : {}),
+          ...(options.timeout ? { timeout: options.timeout } : {}),
+        }, fn as never)
+        : step.do(name, fn as never)) as unknown as Promise<T>,
+    };
+    const deps: SyncDeps = {
+      db: this.env.DB,
+      google: (siteId) => googleAccess(this.env, siteId),
+      keys: signalKeys(this.env),
+      now: () => new Date(),
+      pageSearch: (site) => syncGeneratedPageSearch(this.env, site),
+    };
+    const { siteId, trigger } = event.payload;
+    return { [siteId]: (await syncSite(deps, steps, siteId, trigger)).join("; ") };
   }
 }

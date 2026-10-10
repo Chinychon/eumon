@@ -936,7 +936,7 @@ async function seedDemoResults(db: D1Like, now: number) {
   await seedDemoKeywords(db, now);
   // Three syncs for the history in Setup: two clean daily runs, and a Sync now where Analytics refused the token.
   const ran = (daysBack: number, hour: number) => new Date(now - daysBack * DAY + hour * 3600_000).toISOString();
-  const clean = ["speed: 2 weeks", "lab: 2 scores", "authority: 3 domains", "search: 7 days", "search@markets: 7 days", "rankings: skipped (Mondays)", "inspected 52 pages", "coverage: inspected 50", "analytics: 7 days", "keywords: lists fresh",
+  const clean = ["speed: 2 weeks", "lab: 2 scores", "authority: 3 domains", "search: 7 days", "search@markets: 7 days", "rankings: skipped (Mondays)", "inspected 52 pages", "coverage: inspected 50 in 2 steps", "analytics: 7 days", "keywords: lists fresh",
     "search competitors: lists fresh", "search results: 10 pages checked, $0.04", "backlinks: lists fresh", "bing: 14 days", "indexnow: nothing changed", "crawl log: 64 Googlebot and 12 Bingbot requests yesterday"];
   await recordSyncRun(db, { id: "sync_demo_1", siteId: DEMO_SITE_ID, trigger: "daily", startedAt: ran(2, 4.25), finishedAt: ran(2, 4.27), notes: clean });
   await recordSyncRun(db, { id: "sync_demo_2", siteId: DEMO_SITE_ID, trigger: "manual", startedAt: ran(1, 9.1), finishedAt: ran(1, 9.12),

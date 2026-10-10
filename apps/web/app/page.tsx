@@ -157,7 +157,7 @@ export default function Home() {
             />
           ) : (
             <div key={`${site.id}:${view}`} className="view-enter">
-              {view === "overview" && <OverviewView site={site} tab={tab} onTab={setTab} onNavigate={navigate} />}
+              {view === "overview" && <OverviewView key={site.id} site={site} tab={tab} onTab={setTab} onNavigate={navigate} />}
               {view === "ask" && <AskView key={site.id} site={site} threadId={askThread} onThreadChange={setAskThread} />}
               {view === "data" && <DataView site={site} onNavigate={navigate} />}
               {view === "pages" && <PagesView site={site} onNavigate={navigate} />}

@@ -1,27 +1,35 @@
 import { env } from "cloudflare:workers";
-import { createId } from "@organic-growth/core";
-import { getSite, recordSyncRun } from "@organic-growth/db";
-import { googleAccess, signalKeys } from "../../../../../../src/results-access";
-import { syncResults } from "../../../../../../src/results-sync";
+import { getSite } from "@organic-growth/db";
 import { fail, json } from "../../../../../../src/server";
+import { startSync } from "../../../../../../src/sync-steps";
 
-/** "Sync now": the same sync the daily workflow runs, for one site, kept in the site's sync history. */
+/**
+ * "Sync now": starts the same workflow the daily run uses, for this site, and
+ * answers at once. Clicks within ten minutes join one run. The run lands in
+ * Setup → Sync history when it finishes; the dashboard waits for a manual run
+ * started at or after `startedAt`, and asks GET for the instance's status.
+ */
 export async function POST(_request: Request, context: { params: Promise<{ siteId: string }> }) {
   const { siteId } = await context.params;
-  const site = await getSite(env.DB, siteId);
-  if (!site) return fail("Site not found.", 404);
-  const startedAt = new Date().toISOString();
-  // The history is for the operator; failing to write it must not fail the sync.
-  const record = (notes: string[]) => recordSyncRun(env.DB, { id: createId("sync"), siteId, trigger: "manual", startedAt, finishedAt: new Date().toISOString(), notes }).catch(() => undefined);
-  let notes: string[];
+  if (!(await getSite(env.DB, siteId))) return fail("Site not found.", 404);
   try {
-    notes = await syncResults(env.DB, site, new Date(), googleAccess(env, siteId), signalKeys(env));
+    const result = await startSync(env, { siteId, trigger: "manual" });
+    if (result.running) return fail("Today's daily sync for this site is running; its result lands in Setup → Sync history shortly.", 409);
+    return json({ id: result.id, startedAt: result.startedAt, joined: !result.created }, 202);
   } catch (error) {
-    // The run that failed outright is the one the operator most needs to see in Sync history.
-    const reason = error instanceof Error ? error.message : String(error);
-    await record([`results failed: ${reason}`]);
-    return fail(`Sync failed: ${reason}`, 500);
+    return fail(`Could not start the sync: ${error instanceof Error ? error.message : String(error)}`, 503);
   }
-  await record(notes);
-  return json({ notes });
+}
+
+/** The status of one of this site's sync instances, so the dashboard stops waiting on a run that failed. */
+export async function GET(request: Request, context: { params: Promise<{ siteId: string }> }) {
+  const { siteId } = await context.params;
+  const id = new URL(request.url).searchParams.get("id") ?? "";
+  if (!id.startsWith(`manual-${siteId}-`) && !id.endsWith(`-${siteId}`)) return fail("Not this site's sync.", 404);
+  try {
+    const status = await (await env.SEARCH_SYNC_WORKFLOW.get(id)).status();
+    return json({ status: status.status, error: status.error?.message ?? null });
+  } catch {
+    return json({ status: "unknown", error: null });
+  }
 }

@@ -1,15 +1,17 @@
-import { bindings, defineConfig, defineWorker, exports, type InferEnv } from "cf/config";
+import { bindings, defineConfig, defineWorker, exports, triggers, type InferEnv } from "cf/config";
 
 export const worker = defineWorker({
     name: "eumon",
     entrypoint: "./worker.ts",
     compatibilityDate: "2026-10-05",
     compatibilityFlags: ["nodejs_compat"],
+    // The daily Results sync, 04:15 UTC: a Cron Trigger (on the Free plan) runs `scheduled` in worker.ts, which creates
+    // one SearchSyncWorkflow instance for every site. (Workflow `schedules` would need the paid plan.)
+    triggers: [triggers.scheduled({ schedule: "15 4 * * *" })],
     exports: {
       SiteAnalysisWorkflow: exports.workflow({ name: "site-analysis" }),
       ScrapeWorkflow: exports.workflow({ name: "dataset-scrape" }),
-      // Daily sync for every site. Scheduled Workflows need the paid Workers plan, so for now it runs only
-      // from "Sync now"; on the paid plan, add `schedules: "15 4 * * *"` back to run it daily at 04:15 UTC.
+      // The Results sync: every site daily (the cron trigger above) or one site from "Sync now"; inspections in steps of 40.
       SearchSyncWorkflow: exports.workflow({ name: "search-sync" }),
     },
     assets: { notFoundHandling: "none" },

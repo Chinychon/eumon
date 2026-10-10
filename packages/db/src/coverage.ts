@@ -90,3 +90,12 @@ export async function indexCoverage(db: D1Like, siteId: string, now: Date): Prom
   coverage.families = [...families.values()].sort((a, b) => b.total - a.total || a.family.localeCompare(b.family));
   return coverage;
 }
+
+/** Inspections of this site's pages and sitemap URLs since an instant: what the day's quota has already paid for. */
+export async function countInspectionsSince(db: D1Like, siteId: string, since: string): Promise<number> {
+  const row = await db.prepare(
+    `SELECT (SELECT COUNT(*) FROM url_index_status WHERE site_id = ?1 AND checked_at >= ?2)
+          + (SELECT COUNT(*) FROM page_index_status WHERE site_id = ?1 AND checked_at >= ?2) AS n`,
+  ).bind(siteId, since).first<{ n: number }>();
+  return Number(row?.n ?? 0);
+}

@@ -34,6 +34,8 @@ TURNSTILE_SECRET_KEY=1x0000000000000000000000000000000AA
 # The GitHub App's Client ID and a client secret (GitHub App settings → General).
 GITHUB_APP_CLIENT_ID=
 GITHUB_APP_CLIENT_SECRET=
+# The secret set on the GitHub App's webhook; verifies /api/github/webhook.
+GITHUB_WEBHOOK_SECRET=
 # Optional, off until Workers Paid: email sign-in and verification, and password sign-in (needs email).
 # EMAIL_ENABLED=true
 # EMAIL_FROM=no-reply@your-domain

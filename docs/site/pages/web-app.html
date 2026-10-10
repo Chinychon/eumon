@@ -112,7 +112,7 @@
     <dd>A verified email listed in <code>BOOTSTRAP_OWNER_EMAIL</code> (<code>requirePlatformAdmin</code>).</dd>
   </dl>
   <p>The <strong>Limit</strong> column names what the call is counted against (<a href="#web-app--access-control">free limits</a>); blank means it is not metered.</p>
-  <p>Routes keyed by an ID other than a site (<code>/api/analyses/:analysisId</code>, <code>/api/changes/:changeId</code>, <code>/api/datasets/:datasetId</code>, <code>/api/jobs/:jobId</code>, <code>/api/records/:recordId</code>, <code>/api/sources/:sourceId</code>, <code>/api/templates/:templateId</code>, <code>/api/pages/:pageId</code>) are guarded through the site that owns the row. <code>requireOwned</code> (<code class="path">apps/web/src/guard.ts:41</code>) looks up the row's <code>site_id</code> in its table (<code>OWNER_TABLES</code>, <code class="path">apps/web/src/access.ts:13</code>), answers 404 if the row does not exist, and then applies the same check as a site route. Every one of those tables carries <code>site_id</code> directly, so there is one lookup per call.</p>
+  <p>Routes keyed by an ID other than a site (<code>/api/analyses/:analysisId</code>, <code>/api/fixes/:fixId</code>, <code>/api/datasets/:datasetId</code>, <code>/api/jobs/:jobId</code>, <code>/api/records/:recordId</code>, <code>/api/sources/:sourceId</code>, <code>/api/templates/:templateId</code>, <code>/api/pages/:pageId</code>) are guarded through the site that owns the row. <code>requireOwned</code> (<code class="path">apps/web/src/guard.ts:41</code>) looks up the row's <code>site_id</code> in its table (<code>OWNER_TABLES</code>, <code class="path">apps/web/src/access.ts:13</code>), answers 404 if the row does not exist, and then applies the same check as a site route. Every one of those tables carries <code>site_id</code> directly, so there is one lookup per call.</p>
 
   <h3>Sites and settings</h3>
   <table>
@@ -141,9 +141,10 @@
       <tr><td>GET</td><td><code>/api/analyses/:analysisId</code></td><td>Read</td><td></td><td>One analysis job.</td></tr>
       <tr><td>GET</td><td><code>/api/analyses/:analysisId/progress</code></td><td>Read</td><td></td><td>Live stage, crawl counts, pace and time left (polled, see above).</td></tr>
       <tr><td>POST</td><td><code>/api/analyses/:analysisId/cancel</code></td><td>Member+</td><td></td><td>Terminate the Workflow and record the analysis as cancelled.</td></tr>
-      <tr><td>GET</td><td><code>/api/analyses/:analysisId/changes</code></td><td>Read</td><td></td><td>Proposed code changes for this analysis.</td></tr>
-      <tr><td>POST</td><td><code>/api/analyses/:analysisId/changes</code></td><td>Member+</td><td>AI runs</td><td>Generate a <code>public/robots.txt</code> change for a sitemap or indexing finding (needs the GitHub repo and a model).</td></tr>
-      <tr><td>POST</td><td><code>/api/changes/:changeId/pull-request</code></td><td>Member+</td><td>Plan: pull requests</td><td>Open a proposed change as a draft GitHub pull request. Refused with 422 unless the stored change is plain <code>public/robots.txt</code>.</td></tr>
+      <tr><td>GET</td><td><code>/api/sites/:siteId/fixes</code></td><td>Read</td><td></td><td>The site's code fixes (without file contents), its fix settings and how many Eumon pull requests are open.</td></tr>
+      <tr><td>PUT</td><td><code>/api/sites/:siteId/fixes</code></td><td>Member+</td><td></td><td>Fix settings: Autopilot, the PR budget (1 to 5) and whether AI search crawlers may read the site.</td></tr>
+      <tr><td>POST</td><td><code>/api/fixes/:fixId/open</code></td><td>Member+</td><td>Plan: pull requests</td><td>Open a staged fix as a draft pull request now. 409 unless it is staged and the site is under its PR budget.</td></tr>
+      <tr><td>POST</td><td><code>/api/fixes/:fixId/reject</code></td><td>Member+</td><td></td><td>Reject a staged, draft, ready, or failed-with-PR fix; closes its pull request on GitHub. Eumon won't propose it for that route again.</td></tr>
     </tbody>
   </table>
 
@@ -249,6 +250,7 @@
       <tr><td>GET</td><td><code>/api/github/install</code></td><td>Member+ (workspace)</td><td></td><td>Redirect to the GitHub App install page with a state cookie (<code>og_github_state</code>).</td></tr>
       <tr><td>GET</td><td><code>/api/github/callback</code></td><td>Member+ (workspace)</td><td></td><td>Check the state cookie and that the installer owns the installation, store it for the active workspace, redirect to the dashboard.</td></tr>
       <tr><td>GET</td><td><code>/api/github/repositories</code></td><td>Member+ (workspace)</td><td></td><td>Repositories reachable through the active workspace's installations.</td></tr>
+      <tr><td>POST</td><td><code>/api/github/webhook</code></td><td>Public, HMAC</td><td></td><td>GitHub App events for the fix engine (checks, statuses, deployments, pull requests), verified against <code>GITHUB_WEBHOOK_SECRET</code>. See <a href="#flow-fixes">Code fixes</a>.</td></tr>
       <tr><td>GET</td><td><code>/api/google/callback</code></td><td>Member+ on the site named in the state</td><td></td><td>Google OAuth callback: verify state, nonce cookie and user, save the encrypted refresh token, redirect to the dashboard.</td></tr>
     </tbody>
   </table>
@@ -273,7 +275,7 @@
       <tr><td>POST</td><td><code>/api/dev/demo-site</code></td><td>Member+ (workspace)</td><td></td><td>Build or rebuild the fictional demo site and move it into the active workspace. Returns 404 in a production build unless the request is addressed to localhost.</td></tr>
     </tbody>
   </table>
-  <p><code class="path">apps/web/src/routes-guarded.test.ts</code> walks every <code>route.ts</code> and fails if a handler does not call one of the <code>require*</code> guards, apart from the three public ones (events, <code>/api/r/:token</code>, logs). A new route without a guard fails the test suite, and the gate would still refuse it to signed-out callers.</p>
+  <p><code class="path">apps/web/src/routes-guarded.test.ts</code> walks every <code>route.ts</code> and fails if a handler does not call one of the <code>require*</code> guards, apart from the four public ones (events, <code>/api/r/:token</code>, logs, <code>/api/github/webhook</code>). A new route without a guard fails the test suite, and the gate would still refuse it to signed-out callers.</p>
 
   <h2 id="server-helpers">Shared server helpers</h2>
   <p><code class="path">apps/web/src/server.ts</code> holds the helpers most routes use:</p>
@@ -333,7 +335,7 @@
   </ol>
   <p>The gate's rules:</p>
   <ul>
-    <li><strong>Public paths pass</strong> (<code>PUBLIC</code>, <code class="path">apps/web/src/gate.ts:7</code>): <code>/p/*</code>; <code>/api/sites/:siteId/events</code>; <code>/r/*</code> and <code>/api/r/*</code>; <code>/api/logs/*</code>; <code>/api/auth/*</code>; <code>/sign-in</code> and <code>/invite/*</code>; and the static files <code>/manifest.json</code>, <code>/sw.js</code>, <code>/favicon.ico</code>, <code>/robots.txt</code>, <code>/icon-*.png</code> and <code>/assets/*</code>.</li>
+    <li><strong>Public paths pass</strong> (<code>PUBLIC</code>, <code class="path">apps/web/src/gate.ts:7</code>): <code>/p/*</code>; <code>/api/sites/:siteId/events</code>; <code>/r/*</code> and <code>/api/r/*</code>; <code>/api/logs/*</code>; <code>/api/github/webhook</code>; <code>/api/auth/*</code>; <code>/sign-in</code> and <code>/invite/*</code>; and the static files <code>/manifest.json</code>, <code>/sw.js</code>, <code>/favicon.ico</code>, <code>/robots.txt</code>, <code>/icon-*.png</code> and <code>/assets/*</code>.</li>
     <li><strong>A session is required</strong> for everything else. Signed out, <code>/api/*</code> answers 401 <code>{ error: "Sign in to continue." }</code> and a page answers 303 to <code>/sign-in?next=&lt;path&gt;</code>.</li>
     <li><strong>Writes must come from Eumon's pages.</strong> A signed-in <code>/api/*</code> request with a method other than GET, HEAD or OPTIONS whose <code>Origin</code> header is not the app's own origin answers 403 (public paths are exempt; they never reach this check). The session cookie rides along on cross-site requests, so this is the CSRF check.</li>
   </ul>
@@ -385,15 +387,15 @@
       <tr><td>Analyses per day</td><td>3</td><td><code>POST /api/sites/:siteId/analyses</code></td><td>429</td></tr>
       <tr><td>Scrape pages per day</td><td>500</td><td><code>POST /api/datasets/:datasetId/scrape</code>, charged the sum of the chosen sources' <code>maxPages</code></td><td>429</td></tr>
       <tr><td>Ask questions per day</td><td>20</td><td><code>POST /api/sites/:siteId/assistant</code></td><td>429</td></tr>
-      <tr><td>AI runs per day</td><td>10</td><td>Scope, a source preview's sample extraction, dedupe, template design by the model, snippets, change generation</td><td>429</td></tr>
+      <tr><td>AI runs per day</td><td>10</td><td>Scope, a source preview's sample extraction, dedupe, template design by the model, snippets</td><td>429</td></tr>
       <tr><td>People</td><td>3</td><td>Creating an invitation; members of any role plus pending invitations (<code>memberSlotsUsed</code>)</td><td>400 from <code>/api/workspace/invitations</code></td></tr>
       <tr><td>DataForSEO</td><td>off</td><td>The Results sync drops the DataForSEO key for the workspace (<code class="path">apps/web/src/sync-steps.ts:93</code>)</td><td>Sources skipped, no error</td></tr>
-      <tr><td>Pull requests</td><td>off</td><td><code>POST /api/changes/:changeId/pull-request</code></td><td>403</td></tr>
+      <tr><td>Pull requests</td><td>off</td><td><code>POST /api/fixes/:fixId/open</code>, and the fix steps at the end of an analysis (which then stage nothing)</td><td>403</td></tr>
       <tr><td>Google Sheets export</td><td>off</td><td><code>POST /api/sites/:siteId/export/sheets</code></td><td>403</td></tr>
     </tbody>
   </table>
   <p>The four daily limits are metered by <code>charge</code> (<code class="path">apps/web/src/limits.ts:43</code>): one upsert into <code>workspace_usage</code> per action, keyed by workspace, UTC day and metric. It only adds while the total stays within the limit (<code>chargeUsage</code>, <code class="path">packages/db/src/workspaces.ts:103</code>), so two requests at once cannot both slip past the last slot. Refusals are <code>{ error }</code> with a sentence saying what was used up and that it resets at midnight UTC. Features are checked with <code>featureRefusal</code> (line 57).</p>
-  <p>A route makes its own checks before it charges: a run already going (409), no model configured (503), bad input (400), a missing Ask thread (404). A refused request costs nothing. Change generation charges after reading the repository, right before the model call. When the work then can't start, the route gives the charge back with <code>refund</code> (<code class="path">apps/web/src/limits.ts:50</code>): an analysis or collection whose Workflow won't queue (503), and a scope that finds no readable homepage (422).</p>
+  <p>A route makes its own checks before it charges: a run already going (409), no model configured (503), bad input (400), a missing Ask thread (404). A refused request costs nothing. When the work then can't start, the route gives the charge back with <code>refund</code> (<code class="path">apps/web/src/limits.ts:50</code>): an analysis or collection whose Workflow won't queue (503), and a scope that finds no readable homepage (422).</p>
   <div class="callout warn"><p>A model call that fails after the charge is not refunded. An Ask question or AI run that errors still uses one of the day's allowance.</p></div>
 
   <h3>Bootstrap owner and platform admins</h3>
@@ -418,8 +420,8 @@
   <h3>Google connection state</h3>
   <p>A signed OAuth state only proves Eumon made it. <code>/api/sites/:siteId/gsc/connect</code> signs <code>{ siteId, nonce, userId }</code> into the state and sets the nonce in an HttpOnly cookie scoped to <code>/api/google/callback</code> for ten minutes. The callback (<code class="path">apps/web/app/api/google/callback/route.ts:12</code>) refuses unless <code>googleStateProblem</code> (<code class="path">apps/web/src/google-state.ts:11</code>) finds the state valid, the cookie nonce equal to the state's, and the signed-in user the one who started; then it requires Member+ on that site. So nobody can send someone a link that stores the victim's Google account on the sender's site. Every answer expires the nonce cookie.</p>
 
-  <h3>Pull requests change only robots.txt</h3>
-  <p><code>SAFE_SEO_CONFIG_PATHS</code> is just <code>public/robots.txt</code> (<code class="path">packages/agents/src/change-generator.ts:10</code>). <code>app/robots.ts</code> and <code>app/sitemap.ts</code> were dropped because they are code that runs at build time, including preview builds of a draft pull request. The content must also pass <code>isPlainRobotsTxt</code> (line 13): every line blank, a comment, or a <code>User-agent</code>, <code>Allow</code>, <code>Disallow</code>, <code>Sitemap</code>, <code>Crawl-delay</code> or <code>Host</code> directive with no <code>&lt;</code>, <code>&gt;</code> or backtick. The generator drops anything else, and the pull-request route checks the stored change again before opening anything (422 otherwise).</p>
+  <h3>What fix pull requests may change</h3>
+  <p>Every fix passes <code>validateEdit</code> or <code>validateFile</code> (<code class="path">packages/fixes/src/validate.ts</code>) before it is staged. They refuse a path outside <code>ALLOWED_FILES</code> (route <code>page</code> files, the root <code>layout</code>, <code>components/eumon-json-ld.tsx</code>, <code>public/llms.txt</code>, <code>public/robots.txt</code>), a path the repository analysis marks sensitive or that matches its sensitive patterns, an edit outside the metadata object or JSX spot Eumon chose, a pure deletion, a new import other than Eumon's component, any code shape Eumon never inserts (calls, functions, computed members), and a name not in scope. The model writes only words; see <a href="#flow-fixes">Code fixes</a>.</p>
 
   <h3>Other checks</h3>
   <ul>

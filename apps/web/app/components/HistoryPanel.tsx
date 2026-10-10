@@ -70,7 +70,7 @@ function Row({ row, onNavigate }: { row: HistoryRow; onNavigate: Navigate }) {
     <div className="list-row">
       <Badge tone={label.tone}>{label.text}</Badge>
       <div className="grow">
-        <h4>{title}</h4>
+        <h4>{row.check && <span className="small muted">{row.check} · </span>}{title}</h4>
         <p>{row.detail}{row.since && <> · since {day(row.since)}</>}{row.reopenedAt && <> · reopened {day(row.reopenedAt)}</>}</p>
       </div>
       <span className="small muted" style={{ flex: "none" }}>{day(row.at)}</span>

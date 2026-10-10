@@ -1,0 +1,60 @@
+<article id="flow-fixes" data-title="Code fixes" data-group="How it works">
+  <h1>Code fixes and the GitHub App they need</h1>
+  <p class="lede">How Eumon turns findings into small pull requests on a connected Next.js repository, what it will never change, and the one-off GitHub App settings an administrator must make before any of it works.</p>
+
+  <dl class="facts">
+    <dt>Stages fixes</dt><dd>At the end of each analysis</dd>
+    <dt>Main code</dt><dd><code class="path">apps/web/src/fix-steps.ts</code>, <code class="path">apps/web/src/fix-run.ts</code>, <code class="path">apps/web/src/fix-sweep.ts</code>, <code class="path">apps/web/src/fix-github.ts</code>, <code class="path">packages/fixes/src/</code></dd>
+    <dt>Webhook</dt><dd><code>POST /api/github/webhook</code></dd>
+    <dt>Migration</dt><dd><code class="path">packages/db/migrations/0028_fix_engine.sql</code></dd>
+  </dl>
+
+  <h2 id="what-it-does">What it does</h2>
+  <p>Eumon prepares fixes only for repositories whose fingerprint is Next.js with the App Router, and only when the workspace plan includes pull requests. Any other stack gets no fixes. The five fix types are:</p>
+  <ul>
+    <li><code>metadata-base</code>: sets <code>metadataBase</code> in the root layout (<code>app/layout.*</code> or <code>src/app/layout.*</code>, any of <code>.tsx</code>, <code>.jsx</code>, <code>.js</code>, <code>.ts</code>). Canonical and hreflang fixes wait until the layout has it; if Eumon can't find or read the root layout, it proposes neither.</li>
+    <li><code>head</code>: adds or fixes a page's title, description, canonical URL and hreflang tags. When the root layout sets <code>title.template</code>, the title is written without the site name and checked for length as the template renders it. hreflang lists only the locales the page exists in; on a route under a locale segment (<code>[locale]</code>) it is left to a snippet, and so is a canonical that would replace hreflang set by a layout.</li>
+    <li><code>jsonld</code>: adds structured data to a page.</li>
+    <li><code>llms-txt</code>: creates or refreshes <code>public/llms.txt</code>.</li>
+    <li><code>ai-robots</code>: allows AI search crawlers in <code>public/robots.txt</code>.</li>
+  </ul>
+  <p>Fixes are staged at the end of each analysis. With Autopilot on, Eumon opens at most 3 draft pull requests per run, and never more open Eumon pull requests than the site's PR budget (1 to 5, default 3). Branches are named <code>eumon/&lt;kind&gt;-&lt;route&gt;-&lt;id&gt;</code>.</p>
+
+  <h2 id="lifecycle">From draft to merge</h2>
+  <ol>
+    <li>A pull request opens as a draft. It leaves draft only after the repository's checks pass.</li>
+    <li>If the checks fail, the fix is marked failed and Eumon comments on the pull request, which stays open as a draft for you to fix, reject or close.</li>
+    <li>Once the checks pass, Eumon confirms the change in the raw HTML of the preview deploy, running the same head-tag checks that found the problem. If the preview doesn't show the change, the fix is marked failed with a comment saying what is missing.</li>
+    <li>If there is no usable preview (none found, password-protected, or not answering 200), Eumon marks the pull request ready on the passing build alone once 30 minutes have passed. That happens on the next GitHub event for the pull request, or within a day through the daily sweep.</li>
+    <li>A person reviews and merges. Eumon never merges.</li>
+    <li>Drafts and failed pull requests that haven't changed in 7 days are closed. A pull request marked ready stays open until someone merges or closes it.</li>
+    <li>After a merge, the first crawl that starts after it checks the changed pages. If they broke, Eumon opens a revert pull request, but only when the files are unchanged since the merge. Otherwise it asks the user to use GitHub's Revert button.</li>
+    <li>Rejected and reverted fixes are not proposed again. Nor is a fix whose pull request is still open (even a failed one), or one merged in the last 30 days.</li>
+  </ol>
+  <p>The webhook handles check, status, deployment and pull request events as they arrive. A daily sweep from the cron trigger catches any the webhook missed: merges and closes for every open Eumon pull request, plus the checks and preview for drafts. It handles at most 4 pull requests per run, stale ones first, because of the Free plan's subrequest limits. A failed pull request still counts against the PR budget until it is closed.</p>
+
+  <h2 id="what-it-writes">What the AI writes</h2>
+  <p>The model only writes words: titles, descriptions and schema field mappings, and only from facts found on the site's own pages. Anything it cannot ground is offered as a copy-paste snippet instead of a change. An analysis makes at most 30 AI calls for fixes (<code class="path">apps/web/src/fix-steps.ts</code>, <code>FIX_AI_CALLS</code>).</p>
+
+  <h2 id="never">What it never does</h2>
+  <ul>
+    <li>Merge a pull request.</li>
+    <li>Touch a file outside <code>app/**/page.tsx</code> (or <code>src/app/...</code>), the root <code>layout.tsx</code>, <code>components/eumon-json-ld.tsx</code>, <code>public/llms.txt</code> and <code>public/robots.txt</code>.</li>
+    <li>Add a dependency.</li>
+    <li>Allow AI training crawlers. Only OAI-SearchBot, Claude-SearchBot and PerplexityBot are allowed, and only when the site's "Let AI search crawlers read the site" setting is on.</li>
+    <li>Edit a hand-written <code>llms.txt</code>. Eumon creates or refreshes the file only when it carries the line <code>&lt;!-- maintained by Eumon --&gt;</code>.</li>
+    <li>Overwrite <code>components/eumon-json-ld.tsx</code>. It is written only if it does not exist and must match Eumon's version exactly.</li>
+  </ul>
+
+  <h2 id="github-app-setup">GitHub App setup</h2>
+  <p>The administrator of the GitHub App does this once, at <code>github.com/settings/apps/eumon-growth-engine</code>.</p>
+  <ol>
+    <li><strong>Repository permissions.</strong> Contents read and write, Pull requests read and write, Checks read, Commit statuses read, Deployments read.</li>
+    <li><strong>Events.</strong> Subscribe to Check run, Check suite, Status, Deployment status and Pull request.</li>
+    <li><strong>Webhook.</strong> Set the URL to <code>https://eumon.chin-gabriel.workers.dev/api/github/webhook</code> and a random secret.</li>
+    <li><strong>Secret.</strong> From <code>apps/web</code>, run <code>npx wrangler secret put GITHUB_WEBHOOK_SECRET</code> and paste the same value. Locally it goes in <code>apps/web/.dev.vars</code>.</li>
+    <li><strong>Existing installations.</strong> Each installation must accept the new permissions before fixes work on its repositories.</li>
+  </ol>
+
+  <div class="callout warn"><p>Apply migration <code>0028_fix_engine.sql</code> to the remote database before the deploy that includes the fix engine (see <a href="#ops--migrations">Remote migrations</a>). It adds the fix tables and the per-site settings, including the PR budget.</p></div>
+</article>

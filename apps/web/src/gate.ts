@@ -9,6 +9,7 @@ const PUBLIC: RegExp[] = [
   /^\/api\/sites\/[^/]+\/events$/, // conversion events from customer sites
   /^\/r\//, /^\/api\/r\//, // client Results links (signed, revocable tokens)
   /^\/api\/logs\//, // log ingest (per-site token)
+  /^\/api\/github\/webhook$/, // GitHub App events (HMAC-signed)
   /^\/api\/auth\//, // Better Auth's own endpoints
   /^\/sign-in(\/|$|\.)/, /^\/invite\//,
   /^\/(manifest\.json|sw\.js|favicon\.ico|robots\.txt)$/, /^\/icon-[\w-]+\.png$/, /^\/assets\//,

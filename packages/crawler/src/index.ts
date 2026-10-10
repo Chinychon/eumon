@@ -1,6 +1,7 @@
 import type { CrawlPageResult, Finding, SitemapAudit } from "@organic-growth/core";
-import { createId, organicImpactScore, severityFromImpact, simhash } from "@organic-growth/core";
+import { CHECKS, finding, organicImpactScore, simhash } from "@organic-growth/core";
 import { contentMarkup, elementSpans, findTags, hasToken, innerText, parseAttributes, stripElements, visibleText } from "./html.js";
+import { contentSignals, titleWidth } from "./content-signals.js";
 import { GOOGLEBOT_TOKEN, parseRobots, type RobotsPolicy } from "./robots.js";
 import { classifyLanguage, classifyUrlType, isSameSite, sameDocument } from "./urls.js";
 
@@ -16,6 +17,8 @@ export interface FetchResult {
   finalUrl: string;
   headers: Record<string, string>;
   body: string;
+  /** Redirects followed before this response. */
+  hops?: number;
 }
 
 export type Fetcher = (
@@ -66,6 +69,7 @@ async function boundedText(response: Response, maxBytes = 2_000_000): Promise<st
 export const defaultFetcher: Fetcher = async (url, init) => {
   if (!isSafePublicUrl(url)) throw new Error("Crawler only accepts public HTTP(S) website URLs.");
   let target = url;
+  let hops = 0;
   for (let redirects = 0; redirects <= 5; redirects++) {
     const res = await fetch(target, {
       redirect: "manual",
@@ -82,12 +86,13 @@ export const defaultFetcher: Fetcher = async (url, init) => {
       const next = new URL(location, target).toString();
       if (!isSafePublicUrl(next) || !isSameSite(next, url)) throw new Error("Crawler blocked a redirect outside the connected website.");
       target = next;
+      hops++;
       continue;
     }
     const body = await boundedText(res, init?.maxBytes);
     const headers: Record<string, string> = {};
     res.headers.forEach((v, k) => { headers[k.toLowerCase()] = v; });
-    return { url, status: res.status, finalUrl: target, headers, body };
+    return { url, status: res.status, finalUrl: target, headers, body, ...(hops ? { hops } : {}) };
   }
   throw new Error("Crawler stopped after an unsafe or excessive redirect chain.");
 };
@@ -106,6 +111,8 @@ export type HtmlSignals = {
   hreflang: Array<{ lang: string; href: string }>;
   jsonLdCount: number;
   jsonLdTypes: string[];
+  /** Every JSON-LD object on the page, `@graph` members included (50 at most). */
+  jsonLdObjects: Array<Record<string, unknown>>;
   invalidJsonLd: number;
   headingOutline: string[];
   h1Count: number;
@@ -177,6 +184,7 @@ export function parseHtmlSignals(html: string, pageUrl?: string): HtmlSignals {
     hreflang,
     jsonLdCount: jsonLd.blocks,
     jsonLdTypes: jsonLd.types,
+    jsonLdObjects: jsonLd.objects,
     invalidJsonLd: jsonLd.invalid,
     headingOutline,
     h1Count,
@@ -209,14 +217,16 @@ function resolveUrl(href: string, base: string): string {
 }
 
 /** Counts JSON-LD blocks and collects their schema.org types; malformed blocks are counted, not thrown. */
-function readJsonLd(html: string): { blocks: number; types: string[]; invalid: number } {
+function readJsonLd(html: string): { blocks: number; types: string[]; objects: Array<Record<string, unknown>>; invalid: number } {
   const types = new Set<string>();
+  const objects: Array<Record<string, unknown>> = [];
   let blocks = 0;
   let invalid = 0;
   const visit = (value: unknown): void => {
     if (Array.isArray(value)) value.forEach(visit);
     else if (value && typeof value === "object") {
       const node = value as Record<string, unknown>;
+      if (objects.length < 50) objects.push(node);
       const type = node["@type"];
       for (const entry of Array.isArray(type) ? type : [type]) {
         if (typeof entry === "string" && entry) types.add(entry.replace(/^https?:\/\/schema\.org\//i, ""));
@@ -233,7 +243,7 @@ function readJsonLd(html: string): { blocks: number; types: string[]; invalid: n
       invalid++;
     }
   }
-  return { blocks, types: [...types].slice(0, 30), invalid };
+  return { blocks, types: [...types].slice(0, 30), objects, invalid };
 }
 
 /**
@@ -411,6 +421,9 @@ function toCrawlResult(
 ): CrawlPageResult {
   const finalUrl = fetchResult.finalUrl || url;
   const signals = parseHtmlSignals(fetchResult.body, finalUrl);
+  const content = contentSignals(fetchResult.body, finalUrl, { jsonLdTypes: signals.jsonLdTypes, jsonLd: signals.jsonLdObjects });
+  // Zero, false and empty are left out to keep result_json small, except the fields whose absence must mean "not checked".
+  const some = <T>(value: T) => (value === 0 || value === false || value === undefined || value === "" ? undefined : value);
   return {
     url,
     status: fetchResult.status,
@@ -439,6 +452,14 @@ function toCrawlResult(
     ...(signals.mainText.length >= 200 ? { textHash: simhash(signals.mainText) } : {}),
     ...(isSoftNotFound(fetchResult.status, signals) ? { softNotFound: true } : {}),
     ...(signals.metaRefresh ? { metaRefresh: signals.metaRefresh } : {}),
+    redirectHops: some(fetchResult.hops),
+    titleWidth: titleWidth(signals.title),
+    hsts: some(Boolean(fetchResult.headers["strict-transport-security"])),
+    lang: some(content.lang), imagesNoAlt: some(content.imagesNoAlt), mixedContent: some(content.mixedContent), httpLinks: some(content.httpLinks),
+    externalLinks: some(content.externalLinks), h1: some(content.h1), questionHeadings: some(content.questionHeadings), statistics: some(content.statistics),
+    quotes: some(content.quotes), modified: some(content.modified), snippetBlocked: some(content.snippetBlocked), headingSkips: some(content.headingSkips),
+    viewport: content.viewport, words: content.words, leadWords: content.leadWords, images: content.images, landmarks: content.landmarks,
+    listsOrTables: content.listsOrTables, articleLike: content.articleLike, author: content.author, entitySchema: content.entitySchema,
     ...(withLinks ? { internalLinks: signals.internalLinks.map((path) => ({ path, family: classifyUrlType(new URL(path || "/", finalUrl).toString()) })) } : {}),
   };
 }
@@ -647,12 +668,9 @@ export function findingsFromCrawl(input: {
       isBlockingCrawl: emptyRatio >= 0.5,
       commercialIntent: emptyPages.some((p) => COMMERCIAL_URL_PATTERN.test(p.url)),
     });
-    findings.push({
-      id: createId("finding"),
+    findings.push(finding(CHECKS["render.empty_shell"]!, {
       siteId: input.siteId,
       analysisId: input.analysisId,
-      category: "rendering",
-      severity: severityFromImpact(impact),
       title: "Entity pages return empty or thin HTML shells to crawlers",
       summary: `${emptyPages.length}/${input.pageResults.length} sampled URLs look like empty shells in raw/Googlebot fetches (${Math.round(emptyRatio * 100)}%). Search engines and AI crawlers may not receive meaningful content.`,
       evidence: {
@@ -665,12 +683,11 @@ export function findingsFromCrawl(input: {
         emptyRatio,
         sitemapTotal: input.sitemap.totalUrls,
       },
-      organicImpactScore: impact,
+      impact: impact,
       recommendation:
         "Ensure server/edge-rendered HTML with real title, description, JSON-LD and primary content for entity pages — do not rely on client-only hydration for indexable URLs.",
       pagesAffected: emptyPages.map((p) => p.url),
-      createdAt: new Date().toISOString(),
-    });
+    }));
   }
 
   const soft200 = input.pageResults.filter(
@@ -684,21 +701,17 @@ export function findingsFromCrawl(input: {
       pagesAffected: soft200.length,
       isBlockingCrawl: true,
     });
-    findings.push({
-      id: createId("finding"),
+    findings.push(finding(CHECKS["server.soft_200"]!, {
       siteId: input.siteId,
       analysisId: input.analysisId,
-      category: "indexing",
-      severity: severityFromImpact(impact),
       title: "Soft-200 responses risk indexing junk URLs",
       summary: `${soft200.length} sampled URLs returned HTTP 200 without solid content or with not-found titles. Soft 404s waste crawl budget and dilute index quality.`,
       evidence: { urls: soft200.slice(0, 15).map((p) => p.url) },
-      organicImpactScore: impact,
+      impact: impact,
       recommendation:
         "Return true 404/410 for unknown entity slugs and avoid self-canonicalizing empty shells.",
       pagesAffected: soft200.map((p) => p.url),
-      createdAt: new Date().toISOString(),
-    });
+    }));
   }
 
   if (input.sitemap.totalUrls > 5000 && emptyRatio > 0.2) {
@@ -708,24 +721,20 @@ export function findingsFromCrawl(input: {
       isEmptyShellAtScale: true,
       trafficShareAffected: 0.3,
     });
-    findings.push({
-      id: createId("finding"),
+    findings.push(finding(CHECKS["render.coverage_weak"]!, {
       siteId: input.siteId,
       analysisId: input.analysisId,
-      category: "sitemap",
-      severity: severityFromImpact(impact),
       title: "Large sitemap with weak render coverage",
       summary: `Sitemap declares ~${input.sitemap.totalUrls} URLs, but sampled crawl suggests a large share may not expose meaningful HTML. Indexing of the full set is unlikely until rendering is fixed.`,
       evidence: {
         sitemap: input.sitemap,
         emptyRatio,
       },
-      organicImpactScore: impact,
+      impact: impact,
       recommendation:
         "Prioritize edge/SSR HTML for sitemap-listed entity URLs before expanding programmatic page counts.",
       pagesAffected: [],
-      createdAt: new Date().toISOString(),
-    });
+    }));
   }
 
   // Detail pages (two or more path segments) are where structured data earns rich results.
@@ -737,20 +746,16 @@ export function findingsFromCrawl(input: {
       category: "structured_data",
       pagesAffected: missingJsonLd.length,
     });
-    findings.push({
-      id: createId("finding"),
+    findings.push(finding(CHECKS["schema.missing"]!, {
       siteId: input.siteId,
       analysisId: input.analysisId,
-      category: "structured_data",
-      severity: severityFromImpact(impact),
       title: "Detail pages missing JSON-LD in crawler HTML",
       summary: `${missingJsonLd.length} sampled detail pages had no JSON-LD in the fetched HTML.`,
       evidence: { urls: missingJsonLd.slice(0, 10).map((p) => p.url) },
-      organicImpactScore: impact,
+      impact: impact,
       recommendation: "Emit schema.org markup that matches each template (e.g. Product, LocalBusiness, Person, Article) in the initial HTML.",
       pagesAffected: missingJsonLd.map((p) => p.url),
-      createdAt: new Date().toISOString(),
-    });
+    }));
   }
 
   return findings;
@@ -764,3 +769,8 @@ export * from "./urls.js";
 export * from "./html.js";
 export * from "./robots.js";
 export * from "./ai-readiness.js";
+
+export * from "./content-signals.js";
+export * from "./link-findings.js";
+export * from "./ai-findings.js";
+export * from "./probe.js";

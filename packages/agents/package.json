@@ -21,6 +21,7 @@
     "@organic-growth/core": "*",
     "@organic-growth/crawler": "*",
     "@organic-growth/db": "*",
+    "@organic-growth/fixes": "*",
     "@organic-growth/repo-analyzer": "*",
     "@organic-growth/pages": "*"
   },

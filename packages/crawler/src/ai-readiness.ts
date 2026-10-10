@@ -15,6 +15,8 @@ export type AiReadiness = {
   llmsTxt: boolean;
   /** Sampled pages with FAQPage or QAPage structured data, of how many sampled. */
   faqPages: { pages: number; of: number };
+  /** Each AI agent's live fetch of the homepage and one page per template, when the analysis probed. */
+  probe?: Array<{ agent: string; search: boolean; allowedByRobots: boolean; fetched: number; refused: number; challenge: boolean }>;
 };
 
 type Fetched = { status: number; body: string; headers?: Record<string, string> } | null;

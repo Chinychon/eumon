@@ -1,8 +1,8 @@
-import { createId, organicImpactScore, severityFromImpact, type CrawlCoverage, type Finding } from "@organic-growth/core";
+import { CHECKS, finding, organicImpactScore, type CrawlCoverage, type Finding } from "@organic-growth/core";
 import { classifyUrlType, type RenderComparison } from "@organic-growth/crawler";
 import { routeFamily, type RepoAnalysisResult } from "@organic-growth/repo-analyzer";
 
-type Draft = Pick<Finding, "title" | "summary" | "recommendation" | "evidence" | "organicImpactScore"> & { pagesAffected?: string[] };
+type Draft = Pick<Finding, "title" | "summary" | "recommendation" | "evidence" | "organicImpactScore" | "scopeKey"> & { checkId: string; pagesAffected?: string[] };
 
 const count = (value: number) => value.toLocaleString("en");
 const familyLabel = (family: string) => (family === "home" ? "the homepage" : family === "page" ? "top-level pages" : `/${family}/ pages`);
@@ -50,6 +50,8 @@ export function findingsFromCode(input: {
         ? ` A browser rendering of ${rendered.url} shows ${count(rendered.renderedTextLength)} characters of text; the HTML has ${count(rendered.rawTextLength)}.`
         : "";
     drafts.push({
+      checkId: "repo.client_fetch",
+      scopeKey: family,
       title: `${familyLabel(family)[0]!.toUpperCase()}${familyLabel(family).slice(1)} fetch their content in the browser`,
       summary: `${route.source} (${route.pathPattern}) loads its data client-side (${route.clientDataFetching}), so the HTML crawlers receive doesn't contain it.${evidence}`,
       recommendation: serverFetchAdvice(framework, router),
@@ -74,6 +76,8 @@ export function findingsFromCode(input: {
         ? "has no generateMetadata of its own, so every page inherits the same title and description from a parent layout"
         : "sets no page-specific title or description";
     drafts.push({
+      checkId: "repo.no_own_title",
+      scopeKey: family,
       title: `${familyLabel(family)[0]!.toUpperCase()}${familyLabel(family).slice(1)} don't get their own title in the HTML`,
       summary: `${route.source} (${route.pathPattern}) ${what}.${shared ? ` The crawl found duplicate titles on ${familyLabel(family)}.` : ""}`,
       recommendation: router === "App Router"
@@ -93,6 +97,8 @@ export function findingsFromCode(input: {
     const timing = input.repeatability?.find((entry) => entry.family === family);
     const slow = timing && timing.medianMs >= 2000;
     drafts.push({
+      checkId: "repo.sequential_awaits",
+      scopeKey: family,
       title: `${familyLabel(family)[0]!.toUpperCase()}${familyLabel(family).slice(1)} wait for ${route.sequentialAwaits} data requests in sequence`,
       summary: `${route.source} renders per request (${route.renderingEvidence ?? route.rendering}) and awaits ${route.sequentialAwaits} data requests one after another before sending HTML.${slow ? ` Googlebot fetches of ${familyLabel(family)} took a median ${(timing.medianMs / 1000).toFixed(1)} s.` : ""}`,
       recommendation: "Run independent requests together with Promise.all, cache shared lookups, or make the route static with revalidation so the HTML is ready before crawlers ask.",
@@ -109,6 +115,7 @@ export function findingsFromCode(input: {
     const total = Object.values(input.familySizes).reduce((sum, size) => sum + size, 0);
     if (supabase) {
       drafts.push({
+        checkId: "repo.sitemap_capped",
         title: capped.length ? `The sitemap stops at 1,000 ${familyLabel(capped[0]!)}` : "The sitemap query can stop at 1,000 rows",
         summary: `${source} reads ${unboundedQueries.map((query) => query.split(":")[0]).join(", ")} with no range. Supabase returns at most 1,000 rows per request by default, so records beyond the first 1,000 never reach the sitemap.${capped.length ? ` The live sitemap lists exactly 1,000 ${familyLabel(capped[0]!)}.` : ""}`,
         recommendation: "Page through the table with .range(from, to) until a short page comes back, and split the sitemap (e.g. Next.js generateSitemaps) before it reaches 50,000 URLs.",
@@ -117,6 +124,7 @@ export function findingsFromCode(input: {
       });
     } else if (!splitsSitemaps) {
       drafts.push({
+        checkId: "repo.sitemap_unpaged",
         title: "The sitemap is built from one query with no paging",
         summary: `${source} loads every row in one query (${unboundedQueries.map((query) => query.split(":")[0]).join(", ")}) and writes a single sitemap. ${total > 40_000 ? `With ~${count(total)} URLs already, it will pass the 50,000-URL limit of a single sitemap.` : "This slows down as the data grows and breaks at 50,000 URLs, the limit for one sitemap file."}`,
         recommendation: "Query in pages (LIMIT/OFFSET or a cursor) and split the sitemap into an index with files of up to 50,000 URLs.",
@@ -130,6 +138,7 @@ export function findingsFromCode(input: {
   if (unbounded.length) {
     const truncates = supabase && unbounded.some((route) => route.prebuildsPaths || route.rendering === "client");
     drafts.push({
+      checkId: "repo.unpaged_queries",
       title: supabase ? "List queries without a range return at most 1,000 rows" : "Pages load whole tables without pagination",
       summary: `${unbounded.slice(0, 4).map((route) => `${route.source} (${route.unboundedQueries.map((query) => query.split(":")[0]).join(", ")})`).join("; ")} ${unbounded.length === 1 ? "reads" : "read"} every row with no limit.${supabase ? " Supabase silently stops at 1,000 rows by default, so pages or static paths beyond that are missing." : " Response time and memory grow with the table, which is how programmatic pages start timing out."}`,
       recommendation: "Paginate list queries (.range() in Supabase, take/skip in Prisma, LIMIT/OFFSET in SQL). On listing pages, expose the pages as crawlable links (?page=2) so every entity stays reachable.",
@@ -139,19 +148,6 @@ export function findingsFromCode(input: {
   }
 
   const createdAt = new Date().toISOString();
-  return drafts.map((draft) => ({
-    id: createId("finding"),
-    siteId: input.siteId,
-    analysisId: input.analysisId,
-    category: "repository" as const,
-    severity: severityFromImpact(draft.organicImpactScore),
-    title: draft.title,
-    summary: draft.summary,
-    evidence: draft.evidence,
-    organicImpactScore: draft.organicImpactScore,
-    recommendation: draft.recommendation,
-    pagesAffected: draft.pagesAffected ?? [],
-    createdAt,
-  }));
+  return drafts.map(({ checkId, organicImpactScore: impact, ...rest }) => finding(CHECKS[checkId]!, { ...rest, siteId: input.siteId, analysisId: input.analysisId, impact, createdAt }));
 }
 

@@ -46,7 +46,7 @@ What each setting in `.dev.vars` unlocks (details in [apps/web/README.md](apps/w
 | `BING_WEBMASTER_API_KEY` | Bing clicks, impressions and crawl counts |
 | `SESSION_SECRET` (32+ characters) | Also derives each site's IndexNow key and server-log token |
 | `SESSION_SECRET`, `OAUTH_ENCRYPTION_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Google Search Console data |
-| `GITHUB_APP_*` | Repository analysis and draft pull requests (which only ever change `public/robots.txt`) |
+| `GITHUB_APP_*`, `GITHUB_WEBHOOK_SECRET` | Repository analysis and fix pull requests for Next.js App Router repos (see the developer docs, *Code fixes*) |
 | `BOOTSTRAP_OWNER_EMAIL` | The emails that own the initial workspace and can open `/admin`. Required in production, along with `BETTER_AUTH_SECRET` |
 | `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | Bot check on the email sign-in methods (off by default; Google sign-in doesn't use it) |
 | `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET` | Verifying who installs the GitHub App ("Request user authorization during installation" must be on) |

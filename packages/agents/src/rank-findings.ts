@@ -1,4 +1,4 @@
-import { addDays, countryName, createId, severityFromImpact, type Finding, type JsonObject, type KeywordDemand, type Opportunity, type RankCheck, type SearchMetricRow, SERP_FEATURES } from "@organic-growth/core";
+import { addDays, CHECKS, countryName, createId, finding, type Finding, type JsonObject, type KeywordDemand, type Opportunity, type RankCheck, type SearchMetricRow, SERP_FEATURES } from "@organic-growth/core";
 import { listRankChecks, listSiteMarkets, listTrackedKeywords, type D1Like } from "@organic-growth/db";
 import { expectedCtr } from "@organic-growth/pages";
 import { estimateDemand } from "./demand.js";
@@ -58,7 +58,7 @@ function seriesOf(signals: RankSignals): Map<string, RankCheck[]> {
 
 export function findingsFromRanks(input: { siteId: string; analysisId: string; ranks: RankSignals | null | undefined }): Finding[] {
   if (!input.ranks) return [];
-  const drafts: Array<{ impact: number; title: string; summary: string; evidence: JsonObject; pagesAffected: string[] }> = [];
+  const drafts: Array<{ checkId: string; scopeKey: string; impact: number; title: string; summary: string; evidence: JsonObject; pagesAffected: string[] }> = [];
   for (const series of seriesOf(input.ranks).values()) {
     if (series.length < 2) continue;
     const latest = series.at(-1)!;
@@ -91,6 +91,7 @@ export function findingsFromRanks(input: { siteId: string; analysisId: string; r
     if (latest.position !== null) {
       const places = latest.position - best;
       drafts.push({
+        checkId: "rank.fell", scopeKey: `${latest.keyword}|${latest.market}`,
         impact: Math.min(80, 35 + 2 * places + (best <= 3 ? 15 : 0)),
         title: `“${latest.keyword}” fell from ${best} to ${latest.position} in ${market} since ${since}`,
         summary: `Google's position for “${latest.keyword}” in ${market} was ${best} on ${bestRow.day} and is ${latest.position} on ${latest.day}. ${pages}${since_}`,
@@ -102,6 +103,7 @@ export function findingsFromRanks(input: { siteId: string; analysisId: string; r
       const lastRanked = window.at(-1)!;
       const left = series[series.indexOf(lastRanked) + 1]!.day;
       drafts.push({
+        checkId: "rank.dropped_out", scopeKey: `${latest.keyword}|${latest.market}`,
         impact: Math.min(80, 35 + 2 * (11 - best) + (best <= 3 ? 15 : 0)),
         title: `“${latest.keyword}” dropped out of the top 10 in ${market} since ${left}`,
         summary: `Google's position for “${latest.keyword}” in ${market} was ${best} at best (${lastRanked.position} on ${lastRanked.day}) and the site is not in the ten results on ${latest.day}. ${pages}${since_}`,
@@ -110,12 +112,7 @@ export function findingsFromRanks(input: { siteId: string; analysisId: string; r
     }
   }
   const createdAt = new Date().toISOString();
-  return drafts.sort((a, b) => b.impact - a.impact).slice(0, RANKS.MAX_FINDINGS).map((draft) => ({
-    id: createId("finding"), siteId: input.siteId, analysisId: input.analysisId, category: "search", severity: severityFromImpact(draft.impact),
-    title: draft.title, summary: draft.summary, evidence: draft.evidence, organicImpactScore: draft.impact,
-    recommendation: "Compare the page with the top three on today's results page (the Keywords tab shows them), check that it still answers the search and loads quickly, and strengthen its title and the internal links to it. History records the recovery.",
-    pagesAffected: draft.pagesAffected, createdAt,
-  }));
+  return drafts.sort((a, b) => b.impact - a.impact).slice(0, RANKS.MAX_FINDINGS).map(({ checkId, ...draft }) => finding(CHECKS[checkId]!, { ...draft, siteId: input.siteId, analysisId: input.analysisId, createdAt }));
 }
 
 /** Tracked keywords not in today's ten that Search Console still sees at 30 or better, unless an opportunity already names them. */

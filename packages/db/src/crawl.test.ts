@@ -72,7 +72,8 @@ describe("full-crawl coverage", async () => {
       robotsBlocked: 1,
       noindex: 1,
       canonicalMismatch: 1,
-      redirected: 2,
+      redirected: 1,
+      metaRefresh: 1,
       missingH1: 1,
       multipleH1: 1,
       missingDescription: 1,
@@ -81,9 +82,15 @@ describe("full-crawl coverage", async () => {
       botFallback: 1,
       botChallenge: 1,
       duplicateTitle: 2,
+      // Every page here shares one description; the rest are content checks these pages predate.
+      duplicateDescription: 6,
+      redirectChain: 0, mixedContent: 0, httpLinks: 0, titleLength: 0, descriptionLength: 0, h1EqualsTitle: 0, headingSkips: 0, langMissing: 0,
+      viewportMissing: 0, imagesNoAlt: 0, thinContent: 0, yearInSlug: 0, snippetBlocked: 0, stale: 0, noDate: 0, noAnswerStructure: 0, lowEvidence: 0,
+      noAuthor: 0, noLandmarks: 0,
     });
     assert.deepEqual(coverage.issueExamples?.canonicalMismatch, [{ url: u("/doctors/b"), detail: "https://x.com/" }]);
-    assert.deepEqual(coverage.issueExamples?.redirected, [{ url: u("/go/github"), detail: "https://github.com/x" }, { url: u("/old/page"), detail: u("/new/page") }]);
+    assert.deepEqual(coverage.issueExamples?.redirected, [{ url: u("/old/page"), detail: u("/new/page") }]);
+    assert.deepEqual(coverage.issueExamples?.metaRefresh, [{ url: u("/go/github"), detail: "https://github.com/x" }], "a meta refresh is its own check now");
     assert.deepEqual(coverage.issueExamples?.robotsBlocked, [{ url: u("/private/report") }]);
     assert.deepEqual(coverage.duplicateTitleGroups, [{ title: "Shared title", count: 2, examples: [u("/about"), u("/doctors/a")] }]);
     const procedures = coverage.families?.find((family) => family.family === "procedures");
@@ -355,5 +362,21 @@ describe("crawl queue query plans", () => {
       await plan("SELECT route_family, SUM(1) FROM pages WHERE analysis_id = ? AND +crawl_state = 'pending' AND url IN (?, ?) GROUP BY route_family", "a", "u1", "u2"),
       /analysis_id=\? AND url=\?/,
     );
+  });
+});
+
+describe("content signals in result_json", async () => {
+  const db = openSqliteD1();
+  const now = new Date().toISOString();
+  await upsertSite(db, { id: "cs", name: "y.com", baseUrl: "https://y.com", createdAt: now, updatedAt: now });
+  await createAnalysis(db, { id: "cs1", siteId: "cs", status: "running", createdAt: now });
+  await enqueueAnalysisCrawlUrls(db, { analysisId: "cs1", siteId: "cs", urls: [{ url: "https://y.com/blog/a", routeFamily: "blog" }] });
+
+  it("keeps every new per-page signal", async () => {
+    const signals = { redirectHops: 2, hsts: true, lang: "en", viewport: false, images: 3, imagesNoAlt: 1, mixedContent: 1, httpLinks: 2, externalLinks: 4, h1: "A", words: 120, questionHeadings: 1, listsOrTables: true, leadWords: 40, statistics: 5, quotes: 1, modified: "2024-01-01", articleLike: true, author: false, snippetBlocked: true, landmarks: 2, headingSkips: true, entitySchema: false };
+    await saveCrawlBatch(db, { analysisId: "cs1", outcomes: [{ url: "https://y.com/blog/a", page: page("https://y.com/blog/a", signals) }] });
+    const row = await db.prepare("SELECT result_json FROM pages WHERE analysis_id = 'cs1'").first<{ result_json: string }>();
+    const saved = JSON.parse(row!.result_json) as Record<string, unknown>;
+    for (const [key, value] of Object.entries(signals)) assert.deepEqual(saved[key], value, key);
   });
 });

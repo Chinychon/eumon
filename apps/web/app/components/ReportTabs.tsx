@@ -1,13 +1,15 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
-import { COVERAGE_CLASSES, countryName, type CoverageClass, type SiteRecord } from "@organic-growth/core";
+import { CHECKS, COVERAGE_CLASSES, countryName, type CoverageClass, type SiteRecord } from "@organic-growth/core";
+import { ChecksCard } from "./ChecksCard";
 import type { IndexCoverage } from "@organic-growth/db";
 import { api, formatDay, formatNumber } from "./api";
 import { BarList, Funnel, Heatmap, PairedBars, Scatter } from "./charts";
 import { CrawlGarden } from "./pixel";
 import { CrawlLogCard } from "./results/ConnectorCards";
 import { SPEED_SUBTITLE, SpeedSection } from "./results/sections";
+import { FixesPanel } from "./FixesPanel";
 import { SiteGraph } from "./SiteGraph";
 import { familyLabel, findingArea, gapsFirst, HEALTH_COLUMNS, opportunityArea, pageTypeHealth, servedShare, urlPath, type Finding, type Navigate, type Report } from "./report-model";
 import { ExportMenu } from "./export/ExportMenu";
@@ -23,8 +25,6 @@ import { Badge, Button, Card, Kpi } from "./ui";
  * the page reads at a glance. Sections return fragments, so they stack into
  * the page's ruled `.results` column.
  */
-
-export type Change = { id: string; findingId?: string; title: string; reason: string; patch: string; prUrl?: string };
 
 const SEVERITY_CLASS: Record<string, string> = { CRITICAL: "critical", HIGH: "high", MEDIUM: "medium", LOW: "low", INFORMATIONAL: "info" };
 const path = urlPath;
@@ -45,20 +45,23 @@ export function WhyRow({ lead, title, aside, children }: { lead?: ReactNode; tit
   );
 }
 
+/** A finding's title, led by its check's name, and the anchor the Checks card links to. */
+const FindingTitle = ({ finding }: { finding: Finding }) => {
+  const check = finding.checkId ? CHECKS[finding.checkId] : undefined;
+  return <span id={`finding-${finding.id}`}>{check && <span className="small muted">{check.name} · </span>}{finding.title}</span>;
+};
+
 export const Severity = ({ value }: { value: string }) => <span className={`severity ${SEVERITY_CLASS[value] ?? "info"}`}>{value}</span>;
 
 /** The site as Google receives it, where it breaks, how fast it is, and the fixes, most impact first. Speed comes from the sync, so it shows before any analysis. */
-export function TechnicalTab({ siteId, report, results, running, changes, busy, hasRepo, onGenerateChange, onOpenPullRequest, onRecrawl, onSetup }: {
+export function TechnicalTab({ siteId, report, results, running, busy, hasRepo, onRecrawl, onSetup }: {
   siteId: string;
   report: Report | null;
   results: Payload | null;
   /** An analysis is under way, so the empty states wait for it rather than ask for one. */
   running: boolean;
-  changes: Change[];
   busy: string;
   hasRepo: boolean;
-  onGenerateChange: (findingId: string) => void;
-  onOpenPullRequest: (change: Change) => void;
   onRecrawl: () => void;
   /** Opens Setup, where server logs are connected. */
   onSetup?: () => void;
@@ -109,10 +112,11 @@ export function TechnicalTab({ siteId, report, results, running, changes, busy, 
       {crawlLog}
       {speed}
       <SiteGraph siteId={siteId} />
+      <ChecksCard report={report} pillar="seo" />
+      <FixesPanel siteId={siteId} hasRepo={hasRepo} />
       <Card title="Fixes" actions={<><span className="count-pill">{findings.length} findings</span>{findings.length > 0 && <ExportMenu title="Technical fixes" sheets={() => fixSheets(report, (category) => findingArea(category) === "technical")} />}</>}>
         {findings.length ? findings.map((finding) => (
-          <FindingRow key={finding.id} finding={finding} change={changes.find((item) => item.findingId === finding.id)} busy={busy}
-            fixable={hasRepo && ["sitemap", "indexing"].includes(finding.category)} onGenerateChange={onGenerateChange} onOpenPullRequest={onOpenPullRequest} />
+          <FindingRow key={finding.id} finding={finding} />
         )) : <p className="empty-state">No technical issues surfaced in this analysis.</p>}
       </Card>
       {report.repo && <CodeIntelligence repo={report.repo} />}
@@ -144,23 +148,11 @@ function TechnicalNumbers({ report, results, running }: { report: Report | null;
   );
 }
 
-function FindingRow({ finding, change, busy, fixable, onGenerateChange, onOpenPullRequest }: {
-  finding: Finding; change?: Change; busy: string; fixable: boolean;
-  onGenerateChange: (findingId: string) => void; onOpenPullRequest: (change: Change) => void;
-}) {
+function FindingRow({ finding }: { finding: Finding }) {
   return (
-    <WhyRow lead={<Severity value={finding.severity} />} title={finding.title} aside={<span className="impact">{finding.organicImpactScore}<small>impact</small></span>}>
+    <WhyRow lead={<Severity value={finding.severity} />} title={<FindingTitle finding={finding} />} aside={<span className="impact">{finding.organicImpactScore}<small>impact</small></span>}>
       <p>{finding.summary}</p>
       {finding.recommendation && <p><strong>Next step.</strong> {finding.recommendation}</p>}
-      {fixable && !change && <button className="inline-action" disabled={Boolean(busy)} onClick={() => onGenerateChange(finding.id)}>{busy === finding.id ? "Preparing reviewable change…" : "Generate safe configuration fix"}</button>}
-      {change && (
-        <div className="change-card">
-          <strong>{change.title}</strong>
-          <p>{change.reason}</p>
-          <pre>{change.patch}</pre>
-          {change.prUrl ? <a href={change.prUrl} target="_blank" rel="noreferrer">Open draft pull request</a> : <button className="inline-action" disabled={Boolean(busy)} onClick={() => onOpenPullRequest(change)}>{busy === change.id ? "Opening draft PR…" : "Create draft GitHub PR"}</button>}
-        </div>
-      )}
     </WhyRow>
   );
 }
@@ -259,7 +251,7 @@ export function SearchAnalysis({ report }: { report: Report }) {
       </Card>
       <Card title="Pages to fix" actions={<ExportMenu title="Pages to fix" sheets={() => [...pick(searchAnalysisSheets(report), "Skipped on page one", "Competing pages"), ...fixSheets(report, (category) => category === "search")]} />}>
         {findings.map((finding) => (
-          <WhyRow key={finding.id} lead={<Severity value={finding.severity} />} title={finding.title}>
+          <WhyRow key={finding.id} lead={<Severity value={finding.severity} />} title={<FindingTitle finding={finding} />}>
             <p>{finding.summary}</p>
             {finding.recommendation && <p><strong>Next step.</strong> {finding.recommendation}</p>}
           </WhyRow>
@@ -442,10 +434,10 @@ export function AiReadinessCard({ report }: { report: Report | null }) {
         <Kpi label="AI agents allowed" value={readiness.robots === "unreadable" ? "—" : `${readiness.crawlers.length - blocked.length} of ${readiness.crawlers.length}`}
           caption={readiness.robots === "missing" ? "No robots.txt: everything is allowed" : readiness.robots === "unreadable" ? "robots.txt couldn't be read" : blocked.length ? `${blocked.length} blocked in robots.txt` : "None blocked"} />
         <Kpi label="llms.txt" value={readiness.llmsTxt ? "Present" : "None"} caption={readiness.llmsTxt ? "A plain-text guide AI tools can read" : "Optional: a short guide to the site for AI tools"} />
-        <Kpi label="Pages with FAQ markup" value={`${readiness.faqPages.pages} of ${readiness.faqPages.of}`} caption="Sampled pages with FAQPage or QAPage data" />
+        <Kpi label="Pages with Q&A markup" value={`${readiness.faqPages.pages} of ${readiness.faqPages.of}`} caption="FAQPage or QAPage data on sampled pages; no longer a Google rich result" />
       </div>
       {findings.map((finding) => (
-        <WhyRow key={finding.id} lead={<Severity value={finding.severity} />} title={finding.title}>
+        <WhyRow key={finding.id} lead={<Severity value={finding.severity} />} title={<FindingTitle finding={finding} />}>
           <p>{finding.summary}</p>
           {finding.recommendation && <p><strong>Next step.</strong> {finding.recommendation}</p>}
         </WhyRow>

@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+import { startSync } from "../../../../../../src/sync-steps";
 import { listGa4Properties } from "@organic-growth/agents";
 import { METRICS } from "@organic-growth/core";
 import { clearMetricPoints, updateSiteGa4Property } from "@organic-growth/db";
@@ -7,6 +8,11 @@ import { requireSite } from "../../../../../../src/guard";
 import { fail, json, readJson } from "../../../../../../src/server";
 
 /** GA4 properties the site's Google connection can read; `needsReconnect` when it was granted before Analytics was requested. */
+/** Starts this site's sync after a connection changes, so the dashboard fills in now instead of at the daily run; null while the daily run is already going (it brings the same data) or when it can't start. */
+const syncNow = (siteId: string) => startSync(env, { siteId, trigger: "manual" })
+  .then((result) => (result.running ? null : { id: result.id, startedAt: result.startedAt }))
+  .catch(() => null);
+
 export async function GET(request: Request, context: { params: Promise<{ siteId: string }> }) {
   const { siteId } = await context.params;
   const access = await requireSite(request, siteId, "write");
@@ -34,5 +40,5 @@ export async function POST(request: Request, context: { params: Promise<{ siteId
   // A different property's sessions are not this site's baseline: clear them so the next sync backfills.
   if (site.ga4Property && site.ga4Property !== property) await clearMetricPoints(env.DB, siteId, METRICS.ga4);
   await updateSiteGa4Property(env.DB, siteId, property);
-  return json({ property });
+  return json({ property, sync: property ? await syncNow(siteId) : null });
 }

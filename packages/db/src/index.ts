@@ -6,12 +6,13 @@ import type {
   CrawlPageResult,
   Finding,
   FrameworkFingerprint,
+  LinkGraphIssues,
   ProposedChange,
   SearchMetricRow,
   SiteRecord,
 } from "@organic-growth/core";
 import { chunks, nowIso, runStatements, type D1Like } from "./d1.js";
-import { hammingBits, hashBits, NEAR_DUPLICATE_DISTANCE } from "@organic-growth/core";
+import { AI_FRESHNESS_DAYS, DESCRIPTION_MAX, hammingBits, hashBits, LEAD_WORDS_MAX, LINK_DEPTH, NEAR_DUPLICATE_DISTANCE, THIN_WORDS, TITLE_LENGTH } from "@organic-growth/core";
 
 export * from "./d1.js";
 export * from "./page-engine.js";
@@ -591,6 +592,30 @@ export async function saveCrawlBatch(
       googlebotBlockedStatus: page.googlebotBlockedStatus,
       botChallenge: page.botChallenge,
       metaRefresh: page.metaRefresh,
+      redirectHops: page.redirectHops,
+      hsts: page.hsts,
+      titleWidth: page.titleWidth,
+      lang: page.lang,
+      viewport: page.viewport,
+      images: page.images,
+      imagesNoAlt: page.imagesNoAlt,
+      mixedContent: page.mixedContent,
+      httpLinks: page.httpLinks,
+      externalLinks: page.externalLinks,
+      h1: page.h1,
+      words: page.words,
+      questionHeadings: page.questionHeadings,
+      listsOrTables: page.listsOrTables,
+      leadWords: page.leadWords,
+      statistics: page.statistics,
+      quotes: page.quotes,
+      modified: page.modified,
+      articleLike: page.articleLike,
+      author: page.author,
+      snippetBlocked: page.snippetBlocked,
+      landmarks: page.landmarks,
+      headingSkips: page.headingSkips,
+      entitySchema: page.entitySchema,
       // Whether this fetch recorded the page's links (crawls before link tracking didn't).
       linksRecorded: page.internalLinks ? true : undefined,
     };
@@ -771,6 +796,57 @@ export type LinkFamily = {
   orphans: { count: number; examples: string[] } | null;
 };
 
+/** One served page per template (not the homepage, not an empty shell, error or challenge), the largest templates first: the pages the AI crawler probe fetches. */
+export async function probePages(db: D1Like, analysisId: string, limit: number): Promise<string[]> {
+  const { results } = await db.prepare(
+    `SELECT route_family AS family, MIN(COALESCE(${crawlField("finalUrl")}, url)) AS url, COUNT(*) AS n FROM pages
+     WHERE analysis_id = ? AND ${SERVED} AND is_empty_shell = 0 AND NOT (${CHALLENGE}) AND route_family != 'home'
+     GROUP BY route_family ORDER BY n DESC, family LIMIT ?`,
+  ).bind(analysisId, limit).all<{ url: string }>();
+  return results.map((row) => String(row.url));
+}
+
+/**
+ * Internal-link problems in one crawl, from `page_links`: orphans (no page
+ * links in), pages with one link in, links to pages that fail, and pages more
+ * than LINK_DEPTH clicks from the homepage. All null until links are known for
+ * nearly the whole crawl, as for the link map's orphans.
+ */
+export async function linkGraphIssues(db: D1Like, siteId: string, analysisId: string, options: { maxLinkRows?: number } = {}): Promise<LinkGraphIssues> {
+  const none: LinkGraphIssues = { orphans: null, singleInbound: null, brokenLinks: null, depth: null };
+  if (!linksKnown(await linkCoverage(db, siteId, analysisId))) return none;
+  const links = Number((await db.prepare("SELECT COUNT(*) AS n FROM page_links WHERE site_id = ?").bind(siteId).first<{ n: number }>())?.n ?? 0);
+  const served = `p.analysis_id = ? AND p.crawl_state = 'complete' AND p.status < 400 AND ${PAGE_FAMILY} != 'home'`;
+  const listed = (where: string) => `SELECT COUNT(*) AS n, substr(group_concat(url, ' '), 1, 1200) AS urls FROM (SELECT p.url FROM pages p WHERE ${served} AND ${where} ORDER BY p.url)`;
+  // Failing pages first (few), then their links in through idx_page_links_target. Pages Eumon could not read
+  // (fetch failed, rate-limited, unavailable, or a bot challenge) are not counted as broken.
+  const failing = `FROM pages p JOIN page_links l ON l.site_id = ? AND l.target_path = ${URL_PATH("p.url")} AND l.source_url != p.url
+     WHERE p.analysis_id = ? AND p.crawl_state = 'complete' AND p.status >= 400 AND p.status NOT IN (429, 503) AND NOT (${CHALLENGE})`;
+  const max = options.maxLinkRows ?? 200_000;
+  const [orphans, single, broken, brokenTotals, deep] = await Promise.all([
+    db.prepare(listed(`NOT EXISTS (${LINKS_IN})`)).bind(analysisId, siteId).first<{ n: number; urls: string | null }>(),
+    db.prepare(listed(`(SELECT COUNT(*) FROM (${LINKS_IN})) = 1`)).bind(analysisId, siteId).first<{ n: number; urls: string | null }>(),
+    db.prepare(`SELECT l.target_path AS path, COALESCE(p.status, 0) AS status, COUNT(DISTINCT l.source_url) AS sources ${failing} GROUP BY l.target_path, p.status ORDER BY sources DESC, path LIMIT 20`)
+      .bind(siteId, analysisId).all<{ path: string; status: number; sources: number }>(),
+    db.prepare(`SELECT COUNT(*) AS links, COUNT(DISTINCT l.source_url) AS sources ${failing}`).bind(siteId, analysisId).first<{ links: number; sources: number }>(),
+    // Paths within LINK_DEPTH clicks of the homepage; a page with links in that is not among them is deep (one with none is an orphan).
+    // The edges CTE is materialised, so SQLite indexes it; the recursion stops at LINK_DEPTH.
+    // ponytail: one statement over the whole link table, capped at maxLinkRows; a BFS in its own step if a site ever passes the cap.
+    links > max ? Promise.resolve(null) : db.prepare(
+      `WITH RECURSIVE edges(s, t) AS MATERIALIZED (SELECT ${URL_PATH("source_url")}, target_path FROM page_links WHERE site_id = ?),
+       reach(path, depth) AS (SELECT '', 0 UNION SELECT e.t, r.depth + 1 FROM reach r JOIN edges e ON e.s = r.path WHERE r.depth < ${LINK_DEPTH})
+       ${listed(`${URL_PATH("p.url")} NOT IN (SELECT path FROM reach) AND EXISTS (${LINKS_IN})`)}`,
+    ).bind(siteId, analysisId, siteId).first<{ n: number; urls: string | null }>(),
+  ]);
+  const examples = (urls: string | null | undefined) => (urls ?? "").split(" ").filter(Boolean).slice(0, 8);
+  return {
+    orphans: { count: Number(orphans?.n ?? 0), examples: examples(orphans?.urls) },
+    singleInbound: { count: Number(single?.n ?? 0), examples: examples(single?.urls) },
+    brokenLinks: { links: Number(brokenTotals?.links ?? 0), sources: Number(brokenTotals?.sources ?? 0), targets: broken.results.map((row) => ({ path: String(row.path), status: Number(row.status), from: Number(row.sources) })) },
+    depth: deep ? { deep: Number(deep.n ?? 0), examples: examples(deep.urls) } : { deep: 0, examples: [], skipped: `The link map has more than ${max.toLocaleString("en")} rows; depth is not computed.` },
+  };
+}
+
 /** One page type of the latest crawl, opened: its links in and out by type, and its pages by links in. */
 export async function getLinkFamily(db: D1Like, siteId: string, family: string): Promise<LinkFamily | null> {
   const latest = await getPreviousCompletedAnalysis(db, siteId, "");
@@ -814,15 +890,45 @@ const CHALLENGE = `COALESCE(${crawlField("botChallenge")}, 0) = 1`;
 const DETAIL_PAGE = "route_family NOT IN ('home', 'page')";
 
 /** SQL conditions for each crawl issue, plus the stored value worth showing beside an example URL. */
-const CRAWL_ISSUES: Record<Exclude<CrawlIssue, "duplicateTitle" | "nearDuplicate">, { where: string; detail?: string }> = {
+const F = crawlField;
+/** A title's display width: CJK characters count twice (`titleWidth`, written when the title has any). */
+const TITLE_WIDTH = `COALESCE(${crawlField("titleWidth")}, LENGTH(TRIM(title)))`;
+/** No title, or one too short to say what the page is. */
+const WEAK_TITLE = `(title IS NULL OR ${TITLE_WIDTH} < 15)`;
+/*
+ * Conditions on fields the content signals always write (viewport, words, articleLike, author, landmarks,
+ * listsOrTables) guard the checks that would otherwise fire on rows from crawls before those fields existed.
+ */
+const CRAWL_ISSUES: Record<Exclude<CrawlIssue, "duplicateTitle" | "nearDuplicate" | "duplicateDescription">, { where: string; detail?: string }> = {
   softNotFound: { where: `${SERVED} AND ${crawlField("softNotFound")} = 1`, detail: "title" },
   robotsBlocked: { where: `crawl_state = 'blocked'` },
   noindex: { where: `${SERVED} AND ${crawlField("noindex")} = 1`, detail: crawlField("robots") },
   canonicalMismatch: { where: `${SERVED} AND ${crawlField("canonicalMismatch")} = 1`, detail: crawlField("canonical") },
+  // One hop only; chains and meta refreshes are their own checks.
   redirected: {
-    where: `${SERVED} AND ((${crawlField("finalUrl")} IS NOT NULL AND ${crawlField("finalUrl")} != url) OR ${crawlField("metaRefresh")} IS NOT NULL)`,
-    detail: `COALESCE(${crawlField("metaRefresh")}, ${crawlField("finalUrl")})`,
+    where: `${SERVED} AND ${crawlField("finalUrl")} IS NOT NULL AND ${crawlField("finalUrl")} != url AND COALESCE(${F("redirectHops")}, 1) < 2 AND ${F("metaRefresh")} IS NULL`,
+    detail: crawlField("finalUrl"),
   },
+  redirectChain: { where: `${SERVED} AND ${F("redirectHops")} >= 2`, detail: F("finalUrl") },
+  metaRefresh: { where: `${SERVED} AND ${F("metaRefresh")} IS NOT NULL`, detail: F("metaRefresh") },
+  mixedContent: { where: `${SERVED} AND ${F("mixedContent")} > 0`, detail: F("mixedContent") },
+  httpLinks: { where: `${SERVED} AND ${F("httpLinks")} > 0`, detail: F("httpLinks") },
+  titleLength: { where: `${SERVED} AND is_empty_shell = 0 AND ${F("words")} IS NOT NULL AND title IS NOT NULL AND (${TITLE_WIDTH} < ${TITLE_LENGTH.min} OR ${TITLE_WIDTH} > ${TITLE_LENGTH.max})`, detail: "title" },
+  descriptionLength: { where: `${SERVED} AND LENGTH(COALESCE(${F("description")}, '')) > ${DESCRIPTION_MAX}`, detail: `LENGTH(${F("description")})` },
+  h1EqualsTitle: { where: `${SERVED} AND ${F("h1")} IS NOT NULL AND LOWER(TRIM(${F("h1")})) = LOWER(TRIM(title))`, detail: "title" },
+  headingSkips: { where: `${SERVED} AND ${F("headingSkips")} = 1` },
+  langMissing: { where: `${SERVED} AND is_empty_shell = 0 AND ${F("viewport")} IS NOT NULL AND ${F("lang")} IS NULL` },
+  viewportMissing: { where: `${SERVED} AND is_empty_shell = 0 AND ${F("viewport")} = 0` },
+  imagesNoAlt: { where: `${SERVED} AND ${F("imagesNoAlt")} > 0`, detail: F("imagesNoAlt") },
+  thinContent: { where: `${SERVED} AND is_empty_shell = 0 AND ${DETAIL_PAGE} AND ${F("words")} IS NOT NULL AND ${F("words")} < ${THIN_WORDS} AND COALESCE(${F("softNotFound")}, 0) = 0`, detail: F("words") },
+  yearInSlug: { where: `${SERVED} AND ${F("articleLike")} = 1 AND url GLOB '*[-/]20[0-9][0-9]*'` },
+  snippetBlocked: { where: `${SERVED} AND ${F("snippetBlocked")} = 1 AND COALESCE(${F("noindex")}, 0) = 0`, detail: F("robots") },
+  stale: { where: `${SERVED} AND ${F("articleLike")} = 1 AND ${F("modified")} IS NOT NULL AND ${F("modified")} < date('now', '-${AI_FRESHNESS_DAYS} days')`, detail: F("modified") },
+  noDate: { where: `${SERVED} AND ${F("articleLike")} = 1 AND ${F("modified")} IS NULL` },
+  noAnswerStructure: { where: `${SERVED} AND is_empty_shell = 0 AND (${DETAIL_PAGE} OR ${F("articleLike")} = 1) AND ${F("words")} >= ${THIN_WORDS} AND COALESCE(${F("questionHeadings")}, 0) = 0 AND ${F("listsOrTables")} = 0 AND ${F("leadWords")} > ${LEAD_WORDS_MAX}` },
+  lowEvidence: { where: `${SERVED} AND ${F("articleLike")} = 1 AND ${F("words")} >= ${THIN_WORDS} AND COALESCE(${F("statistics")}, 0) = 0 AND COALESCE(${F("quotes")}, 0) = 0 AND COALESCE(${F("externalLinks")}, 0) = 0` },
+  noAuthor: { where: `${SERVED} AND ${F("articleLike")} = 1 AND ${F("author")} = 0` },
+  noLandmarks: { where: `${SERVED} AND is_empty_shell = 0 AND ${F("landmarks")} = 0` },
   missingH1: { where: `${SERVED} AND is_empty_shell = 0 AND ${crawlField("h1Count")} = 0` },
   multipleH1: { where: `${SERVED} AND is_empty_shell = 0 AND ${crawlField("h1Count")} > 1`, detail: crawlField("h1Count") },
   missingDescription: {
@@ -834,6 +940,35 @@ const CRAWL_ISSUES: Record<Exclude<CrawlIssue, "duplicateTitle" | "nearDuplicate
   botFallback: { where: `${crawlField("googlebotBlockedStatus")} IS NOT NULL`, detail: crawlField("googlebotBlockedStatus") },
   botChallenge: { where: `crawl_state = 'complete' AND ${CHALLENGE}`, detail: "status" },
 };
+
+/** Indexable pages: crawled, not noindex, not canonicalising elsewhere, not a single redirect. A redirect chain stays in, so its error counts. */
+const INDEXABLE = `crawl_state = 'complete' AND COALESCE(${F("noindex")}, 0) = 0 AND COALESCE(${F("canonicalMismatch")}, 0) = 0
+  AND (${F("finalUrl")} IS NULL OR ${F("finalUrl")} = url OR ${F("redirectHops")} >= 2)`;
+/** Error-class page checks per pillar; mirrors PAGE_ERROR_CHECKS in packages/core/src/checks/health.ts (its test keeps them equal). */
+const BASE_ERRORS = [
+  "status >= 400", // http.error
+  "is_empty_shell = 1", // render.empty_shell
+  CHALLENGE, // access.bot_challenge
+];
+const SEO_ERRORS = [
+  ...BASE_ERRORS,
+  CRAWL_ISSUES.softNotFound.where, // content.soft_404
+  CRAWL_ISSUES.mixedContent.where, // security.mixed_content
+  CRAWL_ISSUES.redirectChain.where, // http.redirect_chain
+  CRAWL_ISSUES.metaRefresh.where, // http.meta_refresh
+  WEAK_TITLE, // title.weak
+].map((condition) => `(${condition})`).join(" OR ");
+const AI_ERRORS = [
+  ...BASE_ERRORS,
+  CRAWL_ISSUES.snippetBlocked.where, // ai.snippet_blocked
+].map((condition) => `(${condition})`).join(" OR ");
+
+/** Descriptions shared by several indexable pages. */
+const DUPLICATE_DESCRIPTIONS = `SELECT ${F("description")} AS description, COUNT(*) AS n, substr(group_concat(url, ' '), 1, 1200) AS urls
+  FROM pages
+  WHERE analysis_id = ? AND ${SERVED} AND is_empty_shell = 0 AND LENGTH(TRIM(COALESCE(${F("description")}, ''))) >= 40
+    AND COALESCE(${F("noindex")}, 0) = 0 AND COALESCE(${F("canonicalMismatch")}, 0) = 0
+  GROUP BY description HAVING n > 1`;
 
 /** Titles shared by several indexable pages (pages that canonicalize elsewhere are expected to repeat). */
 const DUPLICATE_TITLES = `SELECT title, COUNT(*) AS n, substr(group_concat(url, ' '), 1, 1200) AS urls
@@ -856,7 +991,11 @@ export async function getCrawlCoverage(
       SUM(CASE WHEN crawl_state = 'pending' THEN 1 ELSE 0 END) AS pending_urls,
       SUM(CASE WHEN crawl_state = 'complete' AND is_empty_shell = 1 THEN 1 ELSE 0 END) AS empty_shell_urls,
       SUM(CASE WHEN crawl_state = 'complete' AND status >= 400 AND NOT (${CHALLENGE}) THEN 1 ELSE 0 END) AS http_error_urls,
-      SUM(CASE WHEN ${SERVED} AND (title IS NULL OR LENGTH(TRIM(title)) < 15) THEN 1 ELSE 0 END) AS missing_title_urls,
+      SUM(CASE WHEN ${SERVED} AND ${WEAK_TITLE} THEN 1 ELSE 0 END) AS missing_title_urls,
+      SUM(CASE WHEN ${INDEXABLE} THEN 1 ELSE 0 END) AS indexable,
+      SUM(CASE WHEN ${INDEXABLE} AND (${SEO_ERRORS}) THEN 1 ELSE 0 END) AS unhealthy_seo,
+      SUM(CASE WHEN ${INDEXABLE} AND (${AI_ERRORS}) THEN 1 ELSE 0 END) AS unhealthy_ai,
+      SUM(CASE WHEN crawl_state = 'complete' AND ${F("viewport")} IS NOT NULL THEN 1 ELSE 0 END) AS checked_rows,
       ${issueKeys.map((key) => `SUM(CASE WHEN ${CRAWL_ISSUES[key].where} THEN 1 ELSE 0 END) AS issue_${key}`).join(",\n      ")}
      FROM pages WHERE analysis_id = ?`,
   ).bind(analysisId).first<Record<string, number | null>>();
@@ -864,18 +1003,29 @@ export async function getCrawlCoverage(
   const issues: Partial<Record<CrawlIssue, number>> = {};
   for (const key of issueKeys) issues[key] = Number(row?.[`issue_${key}`] ?? 0);
 
+  // Eight examples per issue in one statement: one query per issue would pass the Free plan's 50 queries a request,
+  // and a UNION of one SELECT per issue passes D1's limit on compound SELECT terms. So each page is paired with the
+  // issue keys and kept where that issue's condition holds, then numbered per issue.
   const issueExamples: Partial<Record<CrawlIssue, CrawlIssueExample[]>> = {};
-  await Promise.all(issueKeys.filter((key) => issues[key]).map(async (key) => {
-    const { where, detail } = CRAWL_ISSUES[key];
+  const withExamples = issueKeys.filter((key) => issues[key]);
+  if (withExamples.length) {
+    const when = (pick: (key: (typeof withExamples)[number]) => string) => withExamples.map((key) => `WHEN '${key}' THEN (${pick(key)})`).join(" ");
     const { results } = await db.prepare(
-      `SELECT url, ${detail ?? "NULL"} AS detail FROM pages WHERE analysis_id = ? AND ${where} ORDER BY url LIMIT 8`,
-    ).bind(analysisId).all<{ url: string; detail: unknown }>();
-    issueExamples[key] = results.map((example) => (example.detail == null || example.detail === ""
-      ? { url: example.url }
-      : { url: example.url, detail: String(example.detail).slice(0, 300) }));
-  }));
+      `SELECT issue, url, detail FROM (
+         SELECT issue_keys.value AS issue, pages.url AS url, CASE issue_keys.value ${when((key) => CRAWL_ISSUES[key].detail ?? "NULL")} END AS detail,
+           ROW_NUMBER() OVER (PARTITION BY issue_keys.value ORDER BY pages.url) AS rn
+         FROM pages JOIN json_each(?2) AS issue_keys
+         WHERE pages.analysis_id = ?1 AND (CASE issue_keys.value ${when((key) => CRAWL_ISSUES[key].where)} ELSE 0 END))
+       WHERE rn <= 8 ORDER BY issue, url`,
+    ).bind(analysisId, JSON.stringify(withExamples)).all<{ issue: CrawlIssue; url: string; detail: unknown }>();
+    for (const example of results) {
+      (issueExamples[example.issue] ??= []).push(example.detail == null || example.detail === ""
+        ? { url: example.url }
+        : { url: example.url, detail: String(example.detail).slice(0, 300) });
+    }
+  }
 
-  const [duplicates, topDuplicates, families] = await Promise.all([
+  const [duplicates, topDuplicates, families, descriptions, site] = await Promise.all([
     db.prepare(`SELECT COUNT(*) AS groups, COALESCE(SUM(n), 0) AS urls FROM (${DUPLICATE_TITLES})`).bind(analysisId).first<{ groups: number; urls: number }>(),
     db.prepare(`${DUPLICATE_TITLES} ORDER BY n DESC, title LIMIT 8`).bind(analysisId).all<{ title: string; n: number; urls: string }>(),
     db.prepare(
@@ -889,8 +1039,12 @@ export async function getCrawlCoverage(
        FROM pages WHERE analysis_id = ?
        GROUP BY family ORDER BY urls DESC, family LIMIT 25`,
     ).bind(analysisId).all<Record<string, number | string>>(),
+    db.prepare(`${DUPLICATE_DESCRIPTIONS} ORDER BY n DESC, description LIMIT 20`).bind(analysisId).all<{ description: string; n: number; urls: string }>(),
+    db.prepare("SELECT site_id FROM analyses WHERE id = ?").bind(analysisId).first<{ site_id: string }>(),
   ]);
   issues.duplicateTitle = Number(duplicates?.urls ?? 0);
+  issues.duplicateDescription = descriptions.results.reduce((total, group) => total + Number(group.n), 0);
+  const linkGraph = site ? await linkGraphIssues(db, site.site_id, analysisId) : undefined;
 
   // Pages carrying the title the site gives a URL that cannot exist are soft 404s whatever their words: real pages only
   // (not the homepage, not empty shells), and only when the title is not the site's template (on more than a fifth of pages).
@@ -965,6 +1119,13 @@ export async function getCrawlCoverage(
     missingTitleUrls: Number(row?.missing_title_urls ?? 0),
     issues,
     issueExamples,
+    health: {
+      indexable: Number(row?.indexable ?? 0), unhealthySeo: Number(row?.unhealthy_seo ?? 0), unhealthyAi: Number(row?.unhealthy_ai ?? 0),
+      // Nine in ten crawled rows must carry the content signals: a re-run reuses unchanged rows from before them for up to 30 days.
+      checked: Number(row?.checked_rows ?? 0) > 0 && Number(row?.checked_rows ?? 0) >= Number(row?.completed_urls ?? 0) * 0.9,
+    },
+    duplicateDescriptionGroups: descriptions.results.map((group) => ({ description: String(group.description), count: Number(group.n), examples: String(group.urls).split(" ").slice(0, 8) })),
+    ...(linkGraph ? { linkGraph } : {}),
     duplicateTitleGroups: topDuplicates.results.map((group) => ({
       title: group.title,
       count: Number(group.n),
@@ -1411,3 +1572,4 @@ export async function getSiteLogToken(db: D1Like, siteId: string): Promise<strin
 export async function setSiteLogToken(db: D1Like, siteId: string, token: string): Promise<void> {
   await db.prepare("UPDATE sites SET log_token = ? WHERE id = ?").bind(token, siteId).run();
 }
+export * from "./fixes.js";

@@ -260,3 +260,11 @@ The demo site gains, through its generator and fake fetcher, one of each new fai
 ## 11. Budget and limits
 
 No new tables or migrations. Per-page fields add roughly 150 bytes to `result_json`. The coverage query stays one statement; the three link queries and the probe step are new; the analysis stays under 50 D1 queries per request and 50 subrequests per step. Reused crawl results from before this spec lack the new fields: the SQL conditions treat an absent field as "not checked" (`IS NOT NULL` guards, as `missingDescription` does with `h1Count`), the audit table marks those checks skipped with "run a full crawl once after deploying", and the user runs one full crawl.
+
+## After review (2026-10-10)
+
+- **Only true blockers zero a score.** `server.soft_404_probe`, `robots.foreign_sitemap` and `server.http_not_redirected` are warnings, not errors: none stops pages being indexed, and one leftover Sitemap line scoring 0 would contradict the Semrush calibration. The SEO score is zeroed by Googlebot blocked site-wide or a noindexed homepage; the AI score by every allowed search crawler being refused.
+- **The probe measures, it does not guess.** Each page is fetched first as a browser; a page that refuses the browser too says nothing about AI crawlers. A fetch that throws, or a 429, is not measured. Agents fetch the address the browser landed on, one at a time, in an order that rotates per page, within a budget of 40 subrequests counting redirects. The finding says the firewall refuses requests that *identify as* the crawler, since a verified-bot firewall may still admit the real one. HSTS and llms.txt are not reported when their fetch failed.
+- **A crawl counts as checked when nine in ten crawled rows carry the content signals**, because a re-run reuses unchanged rows for up to 30 days; below that the new checks are skipped and the scores are empty with "run a full crawl once after deploying". Link checks are skipped until links are recorded for the crawl.
+- **CJK text.** Words count two Han, kana or Hangul characters as one; titles are measured by width (CJK characters count twice, `titleWidth`) for the weak-title and title-length checks.
+- **Broken internal links** count only targets that answered an error Eumon could read: not failed fetches, 429, 503 or bot challenges.
